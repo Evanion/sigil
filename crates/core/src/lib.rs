@@ -1,9 +1,11 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 pub mod error;
+pub mod id;
 pub mod validate;
 
-pub use error::{ComponentId, CoreError, NodeId, PageId, TokenId};
+pub use error::CoreError;
+pub use id::{ComponentId, NodeId, PageId, TokenId};
 
 #[must_use]
 pub fn version() -> &'static str {
