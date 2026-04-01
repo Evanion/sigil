@@ -16,6 +16,9 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +38,9 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
       - name: Check
         run: cargo check --workspace
 
@@ -45,11 +51,22 @@ jobs:
         run: cargo fmt --check
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo nextest run --workspace --profile ci
+
+      - name: Report test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Rust Tests
+          path: target/nextest/ci/junit.xml
+          reporter: java-junit
 
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -75,7 +92,15 @@ jobs:
         run: cd frontend && pnpm format:check
 
       - name: Test
-        run: cd frontend && pnpm test
+        run: cd frontend && pnpm test -- --reporter=junit --outputFile=test-results/junit.xml
+
+      - name: Report test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Frontend Tests
+          path: frontend/test-results/junit.xml
+          reporter: java-junit
 
       - name: Build
         run: cd frontend && pnpm build
