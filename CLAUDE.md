@@ -127,6 +127,8 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Use `thiserror` for library errors, `anyhow` for application errors (server/cli only).
 - Prefer `impl` returns over `Box<dyn>` where possible.
 - Core crate: no `unwrap()` or `expect()` — return `Result` types.
+- Always run `cargo fmt` after any code change before committing. Formatting is checked in CI; unformatted code will fail the pipeline.
+- Avoid Rust reserved keywords as identifiers — check against both current and future editions (e.g., `gen` is reserved in Edition 2024). Use `generation`, `gen_value`, or similar alternatives.
 
 ### TypeScript
 
@@ -149,13 +151,31 @@ Keep descriptions concise and lowercase. Reference spec numbers when implementin
 
 ---
 
-## 7. Design File Format
+## 7. Pull Request Process
+
+Every PR MUST go through the full `/review` command after opening, including all 4 phases:
+
+1. **Review** — dispatch specialized agents (Architect, Security, BE, FE, etc.) based on changed files
+2. **Persist** — write all findings to the spec or a review file, commit them
+3. **Remediate** — fix all findings in severity order (Critical/High first), update finding status
+4. **Governance** — dispatch governance agent to check for patterns and propose rule updates
+
+A PR is not ready to merge until:
+- All 4 review phases have completed
+- All Critical and High findings are resolved
+- All Medium findings are resolved or explicitly deferred with rationale
+- Governance recommendations have been reviewed and applied (or rejected with rationale)
+- CI Gate passes
+
+---
+
+## 8. Design File Format
 
 Workfiles use `.sigil/` directory suffix. The core crate owns serialization logic — other crates must use core's API to read/write workfiles.
 
 ---
 
-## 8. Subagent Roles
+## 9. Subagent Roles
 
 When dispatching subagents for this project, use these specialized roles:
 
@@ -170,7 +190,7 @@ When dispatching subagents for this project, use these specialized roles:
 
 ---
 
-## 9. Spec Authoring Requirements
+## 10. Spec Authoring Requirements
 
 Every sub-spec MUST include the following sections before it is considered ready for review:
 
@@ -209,3 +229,43 @@ Every spec that introduces mutation operations must include a section titled **"
 - What happens on partial failure (rollback, cleanup)?
 - For compound/batch operations: is the batch atomic or are individual operations independent?
 - For history/undo: what are the eviction and capacity policies?
+
+### Recursion Inventory
+
+Every spec that introduces recursive data structures or recursive algorithms must include a section titled **"Recursion Safety"** that enumerates:
+- Every recursive function or traversal, with its maximum depth limit.
+- The named constant for each depth limit.
+- What error is returned when the depth limit is exceeded.
+- Whether an iterative alternative was considered and why recursion was chosen.
+
+---
+
+## 11. Defensive Coding Rules
+
+These rules address recurring bug patterns. They apply to ALL implementation work.
+
+### Constants Must Be Enforced
+
+Every validation constant (e.g., `MAX_FILE_SIZE`, `MAX_NESTING_DEPTH`, `MAX_NAME_LENGTH`) MUST have a corresponding enforcement point. A constant without enforcement is worse than no constant — it gives false confidence. When you define a limit:
+1. Add the enforcement check at every relevant boundary (constructor, deserialization, insertion).
+2. Add a test that verifies the limit is enforced (attempts to exceed it and expects an error).
+3. If a constant exists but is not enforced, treat it as a bug.
+
+### Recursive Functions Require Depth Guards
+
+Every recursive function MUST accept a depth parameter or use an explicit stack with a maximum depth limit. This applies to:
+- Tree traversal (e.g., `collect_subtree`, `is_ancestor`, `ancestors`)
+- JSON processing (e.g., `sort_json_keys`)
+- Any function that calls itself or walks a graph
+
+The depth limit must be a named constant, not a magic number.
+
+### Constructors Must Validate
+
+Every public constructor (`new`, `from_*`, `try_from_*`) must call all applicable validation functions. If `validate.rs` defines rules for a field, the constructor for any type containing that field must enforce those rules. "Validation exists but isn't called" is a bug.
+
+### Deserialization Boundaries Must Match Validation Rules
+
+When validation rules are added or changed in `validate.rs` (or equivalent), the deserialization entry points MUST be updated in the same commit to enforce the new rules. A checklist:
+- Every field validated in `validate.rs` must also be validated during deserialization.
+- When adding a new validation rule, search for all `deserialize_*` and `from_json` functions and update them.

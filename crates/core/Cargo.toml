@@ -6,7 +6,10 @@ edition.workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-uuid = { workspace = true }
+# IMPORTANT: Do NOT change to `uuid = { workspace = true }` — the workspace uuid
+# includes the `v4` feature which pulls in `getrandom`, breaking WASM compilation.
+# Core must use `default-features = false` with only `serde`.
+uuid = { version = "1.23.0", default-features = false, features = ["serde"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
