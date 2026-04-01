@@ -254,7 +254,8 @@ mod tests {
     fn test_find_page_by_id() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string())).expect("add page");
+        doc.add_page(Page::new(page_id, "Home".to_string()))
+            .expect("add page");
 
         let page = doc.page(page_id).expect("find page");
         assert_eq!(page.name, "Home");
@@ -272,7 +273,8 @@ mod tests {
     fn test_add_root_node_to_page() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string())).expect("add page");
+        doc.add_page(Page::new(page_id, "Home".to_string()))
+            .expect("add page");
 
         let node = Node::new(
             NodeId::new(0, 0),
@@ -293,7 +295,8 @@ mod tests {
     fn test_add_root_node_to_page_idempotent() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string())).expect("add page");
+        doc.add_page(Page::new(page_id, "Home".to_string()))
+            .expect("add page");
 
         let node = Node::new(
             NodeId::new(0, 0),
@@ -332,7 +335,8 @@ mod tests {
     fn test_add_root_node_nonexistent_node() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string())).expect("add page");
+        doc.add_page(Page::new(page_id, "Home".to_string()))
+            .expect("add page");
         let fake_node = NodeId::new(99, 0);
         let result = doc.add_root_node_to_page(page_id, fake_node);
         assert!(result.is_err());

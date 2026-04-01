@@ -145,12 +145,14 @@ impl Default for TextStyle {
             line_height: StyleValue::Literal { value: 1.5 },
             letter_spacing: StyleValue::Literal { value: 0.0 },
             text_align: TextAlign::Left,
-            text_color: StyleValue::Literal { value: Color::Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            } },
+            text_color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+            },
         }
     }
 }
@@ -332,12 +334,14 @@ pub struct Stroke {
 impl Default for Stroke {
     fn default() -> Self {
         Self {
-            color: StyleValue::Literal { value: Color::Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            } },
+            color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+            },
             width: StyleValue::Literal { value: 1.0 },
             alignment: StrokeAlignment::Center,
             cap: StrokeCap::Butt,
@@ -563,8 +567,8 @@ mod tests {
     fn test_new_node_has_defaults() {
         let id = NodeId::new(0, 0);
         let uuid = Uuid::nil();
-        let node = Node::new(id, uuid, NodeKind::Group, "Group 1".to_string())
-            .expect("create test node");
+        let node =
+            Node::new(id, uuid, NodeKind::Group, "Group 1".to_string()).expect("create test node");
         assert_eq!(node.id, id);
         assert_eq!(node.uuid, uuid);
         assert_eq!(node.name, "Group 1");
@@ -584,7 +588,7 @@ mod tests {
             NodeKind::Frame { layout: None },
             "Frame 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Frame { layout } => assert!(layout.is_none()),
             other => panic!("expected Frame, got {other:?}"),
@@ -603,7 +607,7 @@ mod tests {
             },
             "Rect 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Rectangle { corner_radii } => {
                 assert_eq!(*corner_radii, [4.0, 4.0, 4.0, 4.0]);
@@ -625,7 +629,7 @@ mod tests {
             },
             "Ellipse 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Ellipse { arc_start, arc_end } => {
                 assert!((arc_start - 0.0).abs() < f64::EPSILON);
@@ -648,7 +652,7 @@ mod tests {
             },
             "Text 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Text { content, .. } => assert_eq!(content, "Hello"),
             other => panic!("expected Text, got {other:?}"),
@@ -667,7 +671,7 @@ mod tests {
             },
             "Image 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Image { asset_ref } => assert_eq!(asset_ref, "images/logo.png"),
             other => panic!("expected Image, got {other:?}"),
@@ -686,7 +690,7 @@ mod tests {
             },
             "Path 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::Path { path_data } => {
                 assert!(path_data.subpaths.is_empty());
@@ -710,7 +714,7 @@ mod tests {
             },
             "Instance 1".to_string(),
         )
-            .expect("create test node");
+        .expect("create test node");
         match &node.kind {
             NodeKind::ComponentInstance {
                 component_id: cid,
@@ -835,7 +839,9 @@ mod tests {
 
     #[test]
     fn test_style_value_token_ref() {
-        let sv: StyleValue<f64> = StyleValue::TokenRef { name: "opacity.primary".to_string() };
+        let sv: StyleValue<f64> = StyleValue::TokenRef {
+            name: "opacity.primary".to_string(),
+        };
         match sv {
             StyleValue::TokenRef { name } => assert_eq!(name, "opacity.primary"),
             StyleValue::Literal { .. } => panic!("expected TokenRef"),
@@ -853,23 +859,27 @@ mod tests {
     #[test]
     fn test_fill_solid() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal { value: Color::Srgb {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            } },
+            color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 1.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+            },
         };
         match &fill {
             Fill::Solid { color } => {
                 assert_eq!(
                     *color,
-                    StyleValue::Literal { value: Color::Srgb {
-                        r: 1.0,
-                        g: 0.0,
-                        b: 0.0,
-                        a: 1.0
-                    } }
+                    StyleValue::Literal {
+                        value: Color::Srgb {
+                            r: 1.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0
+                        }
+                    }
                 );
             }
             other => panic!("expected Solid, got {other:?}"),
@@ -879,13 +889,17 @@ mod tests {
     #[test]
     fn test_fill_solid_with_token_ref() {
         let fill = Fill::Solid {
-            color: StyleValue::TokenRef { name: "color.primary.500".to_string() },
+            color: StyleValue::TokenRef {
+                name: "color.primary.500".to_string(),
+            },
         };
         match &fill {
             Fill::Solid { color } => {
                 assert_eq!(
                     *color,
-                    StyleValue::TokenRef { name: "color.primary.500".to_string() }
+                    StyleValue::TokenRef {
+                        name: "color.primary.500".to_string()
+                    }
                 );
             }
             other => panic!("expected Solid, got {other:?}"),
@@ -926,12 +940,14 @@ mod tests {
     #[test]
     fn test_effect_drop_shadow() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal { value: Color::Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.25,
-            } },
+            color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.25,
+                },
+            },
             offset: Point::new(0.0, 4.0),
             blur: StyleValue::Literal { value: 8.0 },
             spread: StyleValue::Literal { value: 0.0 },
@@ -960,11 +976,18 @@ mod tests {
     #[test]
     fn test_effect_background_blur() {
         let effect = Effect::BackgroundBlur {
-            radius: StyleValue::TokenRef { name: "blur.background".to_string() },
+            radius: StyleValue::TokenRef {
+                name: "blur.background".to_string(),
+            },
         };
         match &effect {
             Effect::BackgroundBlur { radius } => {
-                assert_eq!(*radius, StyleValue::TokenRef { name: "blur.background".to_string() });
+                assert_eq!(
+                    *radius,
+                    StyleValue::TokenRef {
+                        name: "blur.background".to_string()
+                    }
+                );
             }
             other => panic!("expected BackgroundBlur, got {other:?}"),
         }
@@ -1078,12 +1101,14 @@ mod tests {
     #[test]
     fn test_fill_solid_serde_round_trip() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal { value: Color::Srgb {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            } },
+            color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 1.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+            },
         };
         let json = serde_json::to_string(&fill).expect("serialize");
         let deserialized: Fill = serde_json::from_str(&json).expect("deserialize");
@@ -1093,12 +1118,14 @@ mod tests {
     #[test]
     fn test_effect_serde_round_trip() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal { value: Color::Srgb {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.5,
-            } },
+            color: StyleValue::Literal {
+                value: Color::Srgb {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 0.5,
+                },
+            },
             offset: Point::new(2.0, 4.0),
             blur: StyleValue::Literal { value: 8.0 },
             spread: StyleValue::Literal { value: 0.0 },
@@ -1118,7 +1145,9 @@ mod tests {
 
     #[test]
     fn test_style_value_serde_token_ref_round_trip() {
-        let sv: StyleValue<f64> = StyleValue::TokenRef { name: "opacity.hover".to_string() };
+        let sv: StyleValue<f64> = StyleValue::TokenRef {
+            name: "opacity.hover".to_string(),
+        };
         let json = serde_json::to_string(&sv).expect("serialize");
         let deserialized: StyleValue<f64> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(sv, deserialized);
@@ -1146,12 +1175,14 @@ mod tests {
             },
             style: Style {
                 fills: vec![Fill::Solid {
-                    color: StyleValue::Literal { value: Color::Srgb {
-                        r: 1.0,
-                        g: 1.0,
-                        b: 1.0,
-                        a: 1.0,
-                    } },
+                    color: StyleValue::Literal {
+                        value: Color::Srgb {
+                            r: 1.0,
+                            g: 1.0,
+                            b: 1.0,
+                            a: 1.0,
+                        },
+                    },
                 }],
                 strokes: vec![],
                 opacity: StyleValue::Literal { value: 0.9 },

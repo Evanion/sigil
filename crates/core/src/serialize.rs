@@ -77,9 +77,7 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| {
-            CoreError::SerializationError(
-                "missing or invalid 'schema_version' field".to_string(),
-            )
+            CoreError::SerializationError("missing or invalid 'schema_version' field".to_string())
         })?;
     let version = u32::try_from(version).unwrap_or(u32::MAX);
     if version > CURRENT_SCHEMA_VERSION {
@@ -247,9 +245,9 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 /// Validates a deserialized page against collection size limits.
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
     use crate::validate::{
-        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
-        MAX_FONT_FAMILY_LEN, MAX_GRADIENT_STOPS, MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN,
-        validate_asset_ref, validate_collection_size, validate_node_name,
+        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
+        MAX_GRADIENT_STOPS, MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN, validate_asset_ref,
+        validate_collection_size, validate_node_name,
     };
 
     // Validate page name
@@ -274,7 +272,9 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         validate_gradient_stops_in_value(&node.style, MAX_GRADIENT_STOPS)?;
 
         // Validate font_family length in text_style
-        if let Some(font_family) = node.kind.get("text_style")
+        if let Some(font_family) = node
+            .kind
+            .get("text_style")
             .and_then(|ts| ts.get("font_family"))
             .and_then(|v| v.as_str())
             && font_family.len() > MAX_FONT_FAMILY_LEN
