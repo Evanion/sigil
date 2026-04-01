@@ -1,5 +1,9 @@
 #![warn(clippy::all, clippy::pedantic)]
 
+pub mod error;
+
+pub use error::{ComponentId, CoreError, NodeId, PageId, TokenId};
+
 #[must_use]
 pub fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
