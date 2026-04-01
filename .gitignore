@@ -1,2 +1,23 @@
 # Worktrees
 .worktrees/
+
+# Rust
+target/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
