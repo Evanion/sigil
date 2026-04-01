@@ -72,27 +72,29 @@ impl Arena {
             return Err(CoreError::DuplicateUuid(node.uuid));
         }
 
+        let uuid = node.uuid;
+
         let id = if let Some(index) = self.free_list.pop() {
             let idx = index as usize;
             self.generation[idx] += 1;
             let generation = self.generation[idx];
             let id = NodeId::new(index, generation);
             node.id = id;
-            self.nodes[idx] = Some(node.clone());
-            self.uuids[idx] = Some(node.uuid);
+            self.uuids[idx] = Some(uuid);
+            self.nodes[idx] = Some(node);
             id
         } else {
             let index = u32::try_from(self.nodes.len())
                 .map_err(|_| CoreError::CapacityExceeded(self.max_nodes))?;
             let id = NodeId::new(index, 0);
             node.id = id;
-            self.nodes.push(Some(node.clone()));
-            self.uuids.push(Some(node.uuid));
+            self.uuids.push(Some(uuid));
+            self.nodes.push(Some(node));
             self.generation.push(0);
             id
         };
 
-        self.uuid_to_id.insert(node.uuid, id);
+        self.uuid_to_id.insert(uuid, id);
         Ok(id)
     }
 

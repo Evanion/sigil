@@ -40,10 +40,17 @@ pub enum FillRule {
     NonZero,
 }
 
-/// Stub for auto-layout configuration.
-/// Plan 01b will replace this with a full implementation.
+/// Layout mode for a frame. Currently only supports flex layout;
+/// additional modes (grid, absolute) may be added in the future.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct AutoLayout {
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum LayoutMode {
+    Flex(FlexLayout),
+}
+
+/// Flex layout configuration for frame children.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FlexLayout {
     pub direction: LayoutDirection,
     pub gap: f64,
     pub padding: Padding,
@@ -52,7 +59,7 @@ pub struct AutoLayout {
     pub wrap: bool,
 }
 
-impl Default for AutoLayout {
+impl Default for FlexLayout {
     fn default() -> Self {
         Self {
             direction: LayoutDirection::Row,
@@ -467,7 +474,7 @@ impl Default for Constraints {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeKind {
     Frame {
-        auto_layout: Option<AutoLayout>,
+        layout: Option<LayoutMode>,
     },
     Rectangle {
         corner_radii: [f64; 4],
@@ -574,12 +581,12 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Frame { auto_layout: None },
+            NodeKind::Frame { layout: None },
             "Frame 1".to_string(),
         )
             .expect("create test node");
         match &node.kind {
-            NodeKind::Frame { auto_layout } => assert!(auto_layout.is_none()),
+            NodeKind::Frame { layout } => assert!(layout.is_none()),
             other => panic!("expected Frame, got {other:?}"),
         }
     }
@@ -1025,7 +1032,7 @@ mod tests {
 
     #[test]
     fn test_node_kind_frame_serde_round_trip() {
-        let kind = NodeKind::Frame { auto_layout: None };
+        let kind = NodeKind::Frame { layout: None };
         let json = serde_json::to_string(&kind).expect("serialize");
         let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(kind, deserialized);
@@ -1124,7 +1131,7 @@ mod tests {
         let node = Node {
             id,
             uuid,
-            kind: NodeKind::Frame { auto_layout: None },
+            kind: NodeKind::Frame { layout: None },
             name: "Test Frame".to_string(),
             parent: None,
             children: vec![NodeId::new(6, 12)],
@@ -1164,8 +1171,8 @@ mod tests {
     }
 
     #[test]
-    fn test_auto_layout_default() {
-        let al = AutoLayout::default();
+    fn test_layout_default() {
+        let al = FlexLayout::default();
         assert_eq!(al.direction, LayoutDirection::Row);
         assert!((al.gap - 0.0).abs() < f64::EPSILON);
         assert!(!al.wrap);

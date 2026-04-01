@@ -49,6 +49,15 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 /// Maximum alias chain depth for token resolution.
 pub const MAX_ALIAS_CHAIN_DEPTH: usize = 16;
 
+/// Maximum gradient stops per gradient definition.
+pub const MAX_GRADIENT_STOPS: usize = 256;
+
+/// Maximum length of a font family name.
+pub const MAX_FONT_FAMILY_LEN: usize = 256;
+
+/// Maximum pages per document.
+pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
+
 /// Default maximum history size (undo/redo).
 pub const DEFAULT_MAX_HISTORY: usize = 500;
 

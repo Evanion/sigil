@@ -73,17 +73,20 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
     let raw: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| CoreError::SerializationError(format!("invalid JSON: {e}")))?;
 
-    if let Some(version) = raw
+    let version = raw
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
-    {
-        let version = u32::try_from(version).unwrap_or(u32::MAX);
-        if version > CURRENT_SCHEMA_VERSION {
-            return Err(CoreError::UnsupportedSchemaVersion(
-                version,
-                CURRENT_SCHEMA_VERSION,
-            ));
-        }
+        .ok_or_else(|| {
+            CoreError::SerializationError(
+                "missing or invalid 'schema_version' field".to_string(),
+            )
+        })?;
+    let version = u32::try_from(version).unwrap_or(u32::MAX);
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(CoreError::UnsupportedSchemaVersion(
+            version,
+            CURRENT_SCHEMA_VERSION,
+        ));
     }
 
     let page: SerializedPage = serde_json::from_value(raw)
@@ -245,7 +248,7 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
     use crate::validate::{
         MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
-        MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN,
+        MAX_FONT_FAMILY_LEN, MAX_GRADIENT_STOPS, MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN,
         validate_asset_ref, validate_collection_size, validate_node_name,
     };
 
@@ -265,6 +268,21 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         }
         if let Some(effects) = node.style.get("effects").and_then(|v| v.as_array()) {
             validate_collection_size("effects", effects.len(), MAX_EFFECTS_PER_STYLE)?;
+        }
+
+        // Validate gradient stops counts in fills
+        validate_gradient_stops_in_value(&node.style, MAX_GRADIENT_STOPS)?;
+
+        // Validate font_family length in text_style
+        if let Some(font_family) = node.kind.get("text_style")
+            .and_then(|ts| ts.get("font_family"))
+            .and_then(|v| v.as_str())
+            && font_family.len() > MAX_FONT_FAMILY_LEN
+        {
+            return Err(CoreError::ValidationError(format!(
+                "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+                font_family.len()
+            )));
         }
 
         // Validate text content length
@@ -324,6 +342,39 @@ fn validate_token_refs_in_value(value: &serde_json::Value) -> Result<(), CoreErr
     Ok(())
 }
 
+/// Walks a `serde_json::Value` looking for gradient `stops` arrays and validates
+/// their length against the given maximum.
+fn validate_gradient_stops_in_value(
+    value: &serde_json::Value,
+    max_stops: usize,
+) -> Result<(), CoreError> {
+    use crate::validate::validate_collection_size;
+
+    let mut stack = vec![value];
+
+    while let Some(v) = stack.pop() {
+        match v {
+            serde_json::Value::Object(map) => {
+                // Check if this object has a "stops" array (gradient definition)
+                if let Some(serde_json::Value::Array(stops)) = map.get("stops") {
+                    validate_collection_size("gradient stops", stops.len(), max_stops)?;
+                }
+                for child in map.values() {
+                    stack.push(child);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for child in arr {
+                    stack.push(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
 /// Collects a node and all its descendants into the output vec (depth-first pre-order).
 ///
 /// Uses an iterative approach with an explicit stack to prevent stack overflow
@@ -364,7 +415,7 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             uuid,
-            NodeKind::Frame { auto_layout: None },
+            NodeKind::Frame { layout: None },
             name.to_string(),
         )
         .expect("create test node");
