@@ -1,10 +1,12 @@
 #![warn(clippy::all, clippy::pedantic)]
 
+pub mod arena;
 pub mod error;
 pub mod id;
 pub mod node;
 pub mod validate;
 
+pub use arena::Arena;
 pub use error::CoreError;
 pub use id::{ComponentId, NodeId, PageId, TokenId};
 pub use node::{
