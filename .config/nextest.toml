@@ -1,0 +1,3 @@
+[profile.ci]
+# Output JUnit XML for CI test reporting
+junit.path = "junit.xml"

@@ -167,3 +167,45 @@ When dispatching subagents for this project, use these specialized roles:
 - **UX** — design and usability review
 - **Architect** — system design, cross-cutting concerns
 - **Governance** — reviews findings, proposes updates to rules/conventions
+
+---
+
+## 9. Spec Authoring Requirements
+
+Every sub-spec MUST include the following sections before it is considered ready for review:
+
+### WASM Compatibility Checklist (for core crate specs)
+
+Any spec that adds types, traits, or dependencies to `crates/core/` must include a section titled **"WASM Compatibility"** that addresses:
+- Every new external dependency: does it compile to `wasm32-unknown-unknown`? Link to evidence.
+- Every trait bound: no `Send`, `Sync`, or `'static` bounds unless justified with a WASM workaround.
+- Every source of randomness or system calls: must use a WASM-safe alternative.
+- If compatibility is unknown for a dependency, the spec must flag it as a risk with a mitigation plan.
+
+### Input Validation Inventory
+
+Every spec that introduces a new data type, deserialization boundary, or user-facing parameter must include a section titled **"Input Validation"** that enumerates:
+- Maximum sizes / capacity limits for collections (arenas, vectors, maps).
+- Depth limits for nested or recursive structures.
+- String validation rules (allowed characters, max length) for all name/identifier fields.
+- Path validation rules for any field that references files or assets.
+- Cycle detection requirements for any graph or reference structure.
+- Deserialization safety limits (max document size, max nesting depth).
+
+If a data type has no validation requirements, explicitly state "No validation needed" with a justification.
+
+### PDR Cross-Reference
+
+Every sub-spec must include a section titled **"PDR Traceability"** containing:
+- A list of PDR features this spec implements.
+- A list of PDR features this spec explicitly defers (with rationale).
+- If the PDR mentions a capability in MVP scope that this spec does not address, the spec must either implement it or explain which other spec owns it.
+
+### Atomicity and Consistency
+
+Every spec that introduces mutation operations must include a section titled **"Consistency Guarantees"** that addresses:
+- Which operations must be atomic (all-or-nothing)?
+- What invariants must hold before and after each operation?
+- What happens on partial failure (rollback, cleanup)?
+- For compound/batch operations: is the batch atomic or are individual operations independent?
+- For history/undo: what are the eviction and capacity policies?

@@ -16,6 +16,9 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -35,6 +38,12 @@ jobs:
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Check
         run: cargo check --workspace
 
@@ -44,12 +53,31 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      - name: Test
-        run: cargo test --workspace
+      - name: Test with coverage
+        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov-rust.info
+
+      - name: Report test results
+        uses: dorny/test-reporter@v1
+        if: always() && hashFiles('target/nextest/ci/junit.xml') != ''
+        with:
+          name: Rust Tests
+          path: target/nextest/ci/junit.xml
+          reporter: java-junit
+
+      - name: Upload Rust coverage
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov-rust.info
+          flags: rust
+          fail_ci_if_error: false
 
   frontend:
     name: Frontend
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
 
@@ -74,8 +102,26 @@ jobs:
       - name: Format check
         run: cd frontend && pnpm format:check
 
-      - name: Test
-        run: cd frontend && pnpm test
+      - name: Test with coverage
+        run: cd frontend && pnpm test -- --reporter=default --reporter=junit --outputFile=test-results/junit.xml --coverage --coverage.reporter=lcov --coverage.reportsDirectory=coverage
+        continue-on-error: false
+
+      - name: Report test results
+        uses: dorny/test-reporter@v1
+        if: always() && hashFiles('frontend/test-results/junit.xml') != ''
+        with:
+          name: Frontend Tests
+          path: frontend/test-results/junit.xml
+          reporter: java-junit
+
+      - name: Upload Frontend coverage
+        uses: codecov/codecov-action@v5
+        if: hashFiles('frontend/coverage/lcov.info') != ''
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
 
       - name: Build
         run: cd frontend && pnpm build
@@ -89,6 +135,9 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up QEMU (for multi-arch builds)
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -106,15 +155,15 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=dev-
+            type=raw,value=dev,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
