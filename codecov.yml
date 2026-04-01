@@ -1,0 +1,50 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    # Overall project coverage — ratchet (never decrease)
+    project:
+      default:
+        target: auto    # "auto" = compare against base commit, fail if coverage drops
+        threshold: 1%   # Allow up to 1% fluctuation from rounding
+
+    # Per-flag thresholds
+    rust:
+      target: auto
+      flags:
+        - rust
+    frontend:
+      target: auto
+      flags:
+        - frontend
+
+    # Changed code must have >= 80% coverage
+    patch:
+      default:
+        target: 80%
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true   # Only comment on PRs that change covered code
+
+flags:
+  rust:
+    paths:
+      - crates/
+      - cli/
+    carryforward: true
+  frontend:
+    paths:
+      - frontend/src/
+    carryforward: true
+
+ignore:
+  - "docs/**"
+  - "bindings/**"
+  - "*.md"
+  - ".github/**"
+  - ".devcontainer/**"
+  - ".claude/**"
+  - ".agents/**"

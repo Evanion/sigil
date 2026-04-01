@@ -41,6 +41,9 @@ jobs:
       - name: Install nextest
         uses: taiki-e/install-action@nextest
 
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
       - name: Check
         run: cargo check --workspace
 
@@ -50,8 +53,8 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
-      - name: Test
-        run: cargo nextest run --workspace --profile ci
+      - name: Test with coverage
+        run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov-rust.info
 
       - name: Report test results
         uses: dorny/test-reporter@v1
@@ -60,6 +63,13 @@ jobs:
           name: Rust Tests
           path: target/nextest/ci/junit.xml
           reporter: java-junit
+
+      - name: Upload Rust coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: lcov-rust.info
+          flags: rust
+          fail_ci_if_error: false
 
   frontend:
     name: Frontend
@@ -91,8 +101,8 @@ jobs:
       - name: Format check
         run: cd frontend && pnpm format:check
 
-      - name: Test
-        run: cd frontend && pnpm test -- --reporter=junit --outputFile=test-results/junit.xml
+      - name: Test with coverage
+        run: cd frontend && pnpm test -- --reporter=junit --outputFile=test-results/junit.xml --coverage --coverage.reporter=lcov --coverage.reportsDirectory=coverage
 
       - name: Report test results
         uses: dorny/test-reporter@v1
@@ -101,6 +111,13 @@ jobs:
           name: Frontend Tests
           path: frontend/test-results/junit.xml
           reporter: java-junit
+
+      - name: Upload Frontend coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: frontend/coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
 
       - name: Build
         run: cd frontend && pnpm build
