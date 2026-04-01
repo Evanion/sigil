@@ -402,12 +402,18 @@ mod tests {
 
     #[test]
     fn test_validate_collection_size_at_limit() {
-        assert!(validate_collection_size("children", MAX_CHILDREN_PER_NODE, MAX_CHILDREN_PER_NODE).is_ok());
+        assert!(
+            validate_collection_size("children", MAX_CHILDREN_PER_NODE, MAX_CHILDREN_PER_NODE)
+                .is_ok()
+        );
     }
 
     #[test]
     fn test_validate_collection_size_exceeds_limit() {
-        assert!(validate_collection_size("children", MAX_CHILDREN_PER_NODE + 1, MAX_CHILDREN_PER_NODE).is_err());
+        assert!(
+            validate_collection_size("children", MAX_CHILDREN_PER_NODE + 1, MAX_CHILDREN_PER_NODE)
+                .is_err()
+        );
     }
 
     #[test]

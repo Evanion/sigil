@@ -44,13 +44,11 @@ pub struct SerializedNode {
 pub fn serialize_page(page: &SerializedPage) -> Result<String, CoreError> {
     // serde_json's to_string_pretty doesn't sort keys by default.
     // We serialize to a Value first, then output with sorted keys.
-    let value = serde_json::to_value(page).map_err(|e| {
-        CoreError::SerializationError(format!("failed to serialize page: {e}"))
-    })?;
+    let value = serde_json::to_value(page)
+        .map_err(|e| CoreError::SerializationError(format!("failed to serialize page: {e}")))?;
     let sorted = sort_json_keys(&value);
-    serde_json::to_string_pretty(&sorted).map_err(|e| {
-        CoreError::SerializationError(format!("failed to write JSON: {e}"))
-    })
+    serde_json::to_string_pretty(&sorted)
+        .map_err(|e| CoreError::SerializationError(format!("failed to write JSON: {e}")))
 }
 
 /// Deserializes a page from JSON, validating the schema version.
@@ -60,11 +58,13 @@ pub fn serialize_page(page: &SerializedPage) -> Result<String, CoreError> {
 /// - `CoreError::SerializationError` if the JSON is malformed.
 pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
     // Check schema version first (partial parse)
-    let raw: serde_json::Value = serde_json::from_str(json).map_err(|e| {
-        CoreError::SerializationError(format!("invalid JSON: {e}"))
-    })?;
+    let raw: serde_json::Value = serde_json::from_str(json)
+        .map_err(|e| CoreError::SerializationError(format!("invalid JSON: {e}")))?;
 
-    if let Some(version) = raw.get("schema_version").and_then(serde_json::Value::as_u64) {
+    if let Some(version) = raw
+        .get("schema_version")
+        .and_then(serde_json::Value::as_u64)
+    {
         let version = u32::try_from(version).unwrap_or(u32::MAX);
         if version > CURRENT_SCHEMA_VERSION {
             return Err(CoreError::UnsupportedSchemaVersion(
@@ -74,9 +74,8 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         }
     }
 
-    let page: SerializedPage = serde_json::from_value(raw).map_err(|e| {
-        CoreError::SerializationError(format!("failed to deserialize page: {e}"))
-    })?;
+    let page: SerializedPage = serde_json::from_value(raw)
+        .map_err(|e| CoreError::SerializationError(format!("failed to deserialize page: {e}")))?;
 
     // Validate collection sizes
     validate_deserialized_page(&page)?;
@@ -188,9 +187,7 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 
 /// Validates a deserialized page against collection size limits.
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
-    use crate::validate::{
-        validate_collection_size, validate_node_name, MAX_CHILDREN_PER_NODE,
-    };
+    use crate::validate::{MAX_CHILDREN_PER_NODE, validate_collection_size, validate_node_name};
 
     for node in &page.nodes {
         validate_node_name(&node.name)?;
@@ -284,11 +281,16 @@ mod tests {
         let id_pos = json.find("\"id\"").expect("id field");
         let name_pos = json.find("\"name\"").expect("name field");
         let nodes_pos = json.find("\"nodes\"").expect("nodes field");
-        let schema_pos = json.find("\"schema_version\"").expect("schema_version field");
+        let schema_pos = json
+            .find("\"schema_version\"")
+            .expect("schema_version field");
 
         assert!(id_pos < name_pos, "id should come before name");
         assert!(name_pos < nodes_pos, "name should come before nodes");
-        assert!(nodes_pos < schema_pos, "nodes should come before schema_version");
+        assert!(
+            nodes_pos < schema_pos,
+            "nodes should come before schema_version"
+        );
     }
 
     #[test]
@@ -392,7 +394,9 @@ mod tests {
             let node = Node::new(
                 NodeId::new(0, 0),
                 child_uuid,
-                NodeKind::Rectangle { corner_radii: [8.0, 8.0, 8.0, 8.0] },
+                NodeKind::Rectangle {
+                    corner_radii: [8.0, 8.0, 8.0, 8.0],
+                },
                 "Rounded Rect".to_string(),
             );
             arena.insert(node).expect("insert")

@@ -14,11 +14,7 @@ use crate::validate::MAX_CHILDREN_PER_NODE;
 /// - `CoreError::CycleDetected` if `parent_id` is a descendant of `child_id`.
 /// - `CoreError::ValidationError` if the parent would exceed max children.
 /// - `CoreError::NodeNotFound` / `CoreError::StaleNodeId` for invalid IDs.
-pub fn add_child(
-    arena: &mut Arena,
-    parent_id: NodeId,
-    child_id: NodeId,
-) -> Result<(), CoreError> {
+pub fn add_child(arena: &mut Arena, parent_id: NodeId, child_id: NodeId) -> Result<(), CoreError> {
     // Validate both nodes exist
     arena.get(parent_id)?;
     arena.get(child_id)?;
@@ -156,11 +152,7 @@ pub fn rearrange(
 ///
 /// # Errors
 /// - `CoreError::NodeNotFound` / `CoreError::StaleNodeId` for invalid IDs.
-pub fn is_ancestor(
-    arena: &Arena,
-    ancestor_id: NodeId,
-    node_id: NodeId,
-) -> Result<bool, CoreError> {
+pub fn is_ancestor(arena: &Arena, ancestor_id: NodeId, node_id: NodeId) -> Result<bool, CoreError> {
     let mut current = arena.get(node_id)?.parent;
     while let Some(pid) = current {
         if pid == ancestor_id {

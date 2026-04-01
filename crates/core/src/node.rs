@@ -197,11 +197,31 @@ impl<T: Default> Default for StyleValue<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "space", rename_all = "snake_case")]
 pub enum Color {
-    Srgb { r: f64, g: f64, b: f64, a: f64 },
+    Srgb {
+        r: f64,
+        g: f64,
+        b: f64,
+        a: f64,
+    },
     #[serde(rename = "display_p3")]
-    DisplayP3 { r: f64, g: f64, b: f64, a: f64 },
-    Oklch { l: f64, c: f64, h: f64, a: f64 },
-    Oklab { l: f64, a: f64, b: f64, alpha: f64 },
+    DisplayP3 {
+        r: f64,
+        g: f64,
+        b: f64,
+        a: f64,
+    },
+    Oklch {
+        l: f64,
+        c: f64,
+        h: f64,
+        a: f64,
+    },
+    Oklab {
+        l: f64,
+        a: f64,
+        b: f64,
+        alpha: f64,
+    },
 }
 
 impl Default for Color {
@@ -244,10 +264,19 @@ pub enum ScaleMode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Fill {
-    Solid { color: StyleValue<Color> },
-    LinearGradient { gradient: GradientDef },
-    RadialGradient { gradient: GradientDef },
-    Image { asset_ref: String, scale_mode: ScaleMode },
+    Solid {
+        color: StyleValue<Color>,
+    },
+    LinearGradient {
+        gradient: GradientDef,
+    },
+    RadialGradient {
+        gradient: GradientDef,
+    },
+    Image {
+        asset_ref: String,
+        scale_mode: ScaleMode,
+    },
 }
 
 /// Stroke alignment relative to the path.
@@ -542,7 +571,9 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Rectangle { corner_radii: [4.0, 4.0, 4.0, 4.0] },
+            NodeKind::Rectangle {
+                corner_radii: [4.0, 4.0, 4.0, 4.0],
+            },
             "Rect 1".to_string(),
         );
         match &node.kind {
@@ -560,7 +591,10 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Ellipse { arc_start: 0.0, arc_end: 360.0 },
+            NodeKind::Ellipse {
+                arc_start: 0.0,
+                arc_end: 360.0,
+            },
             "Ellipse 1".to_string(),
         );
         match &node.kind {
@@ -598,7 +632,9 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Image { asset_ref: "images/logo.png".to_string() },
+            NodeKind::Image {
+                asset_ref: "images/logo.png".to_string(),
+            },
             "Image 1".to_string(),
         );
         match &node.kind {
@@ -614,7 +650,9 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Path { path_data: PathData::default() },
+            NodeKind::Path {
+                path_data: PathData::default(),
+            },
             "Path 1".to_string(),
         );
         match &node.kind {
@@ -641,7 +679,10 @@ mod tests {
             "Instance 1".to_string(),
         );
         match &node.kind {
-            NodeKind::ComponentInstance { component_id: cid, overrides } => {
+            NodeKind::ComponentInstance {
+                component_id: cid,
+                overrides,
+            } => {
                 assert_eq!(*cid, component_id);
                 assert!(overrides.entries.is_empty());
             }
@@ -693,7 +734,12 @@ mod tests {
 
     #[test]
     fn test_color_display_p3() {
-        let c = Color::DisplayP3 { r: 1.0, g: 0.0, b: 0.5, a: 0.8 };
+        let c = Color::DisplayP3 {
+            r: 1.0,
+            g: 0.0,
+            b: 0.5,
+            a: 0.8,
+        };
         match c {
             Color::DisplayP3 { r, g, b, a } => {
                 assert!((r - 1.0).abs() < f64::EPSILON);
@@ -707,7 +753,12 @@ mod tests {
 
     #[test]
     fn test_color_oklch() {
-        let c = Color::Oklch { l: 0.7, c: 0.15, h: 180.0, a: 1.0 };
+        let c = Color::Oklch {
+            l: 0.7,
+            c: 0.15,
+            h: 180.0,
+            a: 1.0,
+        };
         match c {
             Color::Oklch { l, c, h, a } => {
                 assert!((l - 0.7).abs() < f64::EPSILON);
@@ -721,7 +772,12 @@ mod tests {
 
     #[test]
     fn test_color_oklab() {
-        let c = Color::Oklab { l: 0.5, a: -0.1, b: 0.2, alpha: 1.0 };
+        let c = Color::Oklab {
+            l: 0.5,
+            a: -0.1,
+            b: 0.2,
+            alpha: 1.0,
+        };
         match c {
             Color::Oklab { l, a, b, alpha } => {
                 assert!((l - 0.5).abs() < f64::EPSILON);
@@ -764,13 +820,23 @@ mod tests {
     #[test]
     fn test_fill_solid() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal(Color::Srgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }),
+            color: StyleValue::Literal(Color::Srgb {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            }),
         };
         match &fill {
             Fill::Solid { color } => {
                 assert_eq!(
                     *color,
-                    StyleValue::Literal(Color::Srgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 })
+                    StyleValue::Literal(Color::Srgb {
+                        r: 1.0,
+                        g: 0.0,
+                        b: 0.0,
+                        a: 1.0
+                    })
                 );
             }
             other => panic!("expected Solid, got {other:?}"),
@@ -784,7 +850,10 @@ mod tests {
         };
         match &fill {
             Fill::Solid { color } => {
-                assert_eq!(*color, StyleValue::TokenRef("color.primary.500".to_string()));
+                assert_eq!(
+                    *color,
+                    StyleValue::TokenRef("color.primary.500".to_string())
+                );
             }
             other => panic!("expected Solid, got {other:?}"),
         }
@@ -797,7 +866,10 @@ mod tests {
             scale_mode: ScaleMode::Fill,
         };
         match &fill {
-            Fill::Image { asset_ref, scale_mode } => {
+            Fill::Image {
+                asset_ref,
+                scale_mode,
+            } => {
                 assert_eq!(asset_ref, "images/bg.png");
                 assert_eq!(*scale_mode, ScaleMode::Fill);
             }
@@ -821,7 +893,12 @@ mod tests {
     #[test]
     fn test_effect_drop_shadow() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal(Color::Srgb { r: 0.0, g: 0.0, b: 0.0, a: 0.25 }),
+            color: StyleValue::Literal(Color::Srgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.25,
+            }),
             offset: Point::new(0.0, 4.0),
             blur: StyleValue::Literal(8.0),
             spread: StyleValue::Literal(0.0),
@@ -896,7 +973,12 @@ mod tests {
 
     #[test]
     fn test_color_srgb_serde_round_trip() {
-        let c = Color::Srgb { r: 0.5, g: 0.6, b: 0.7, a: 0.8 };
+        let c = Color::Srgb {
+            r: 0.5,
+            g: 0.6,
+            b: 0.7,
+            a: 0.8,
+        };
         let json = serde_json::to_string(&c).expect("serialize");
         let deserialized: Color = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, deserialized);
@@ -904,7 +986,12 @@ mod tests {
 
     #[test]
     fn test_color_display_p3_serde_round_trip() {
-        let c = Color::DisplayP3 { r: 1.0, g: 0.0, b: 0.5, a: 1.0 };
+        let c = Color::DisplayP3 {
+            r: 1.0,
+            g: 0.0,
+            b: 0.5,
+            a: 1.0,
+        };
         let json = serde_json::to_string(&c).expect("serialize");
         let deserialized: Color = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, deserialized);
@@ -920,7 +1007,9 @@ mod tests {
 
     #[test]
     fn test_node_kind_rectangle_serde_round_trip() {
-        let kind = NodeKind::Rectangle { corner_radii: [1.0, 2.0, 3.0, 4.0] };
+        let kind = NodeKind::Rectangle {
+            corner_radii: [1.0, 2.0, 3.0, 4.0],
+        };
         let json = serde_json::to_string(&kind).expect("serialize");
         let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(kind, deserialized);
@@ -956,7 +1045,12 @@ mod tests {
     #[test]
     fn test_fill_solid_serde_round_trip() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal(Color::Srgb { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }),
+            color: StyleValue::Literal(Color::Srgb {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            }),
         };
         let json = serde_json::to_string(&fill).expect("serialize");
         let deserialized: Fill = serde_json::from_str(&json).expect("deserialize");
@@ -966,7 +1060,12 @@ mod tests {
     #[test]
     fn test_effect_serde_round_trip() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal(Color::Srgb { r: 0.0, g: 0.0, b: 0.0, a: 0.5 }),
+            color: StyleValue::Literal(Color::Srgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.5,
+            }),
             offset: Point::new(2.0, 4.0),
             blur: StyleValue::Literal(8.0),
             spread: StyleValue::Literal(0.0),
@@ -1014,7 +1113,12 @@ mod tests {
             },
             style: Style {
                 fills: vec![Fill::Solid {
-                    color: StyleValue::Literal(Color::Srgb { r: 1.0, g: 1.0, b: 1.0, a: 1.0 }),
+                    color: StyleValue::Literal(Color::Srgb {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    }),
                 }],
                 strokes: vec![],
                 opacity: StyleValue::Literal(0.9),

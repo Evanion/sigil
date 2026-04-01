@@ -269,7 +269,8 @@ mod tests {
             "Frame 1".to_string(),
         );
         let node_id = doc.arena.insert(node).expect("insert");
-        doc.add_root_node_to_page(page_id, node_id).expect("add_root");
+        doc.add_root_node_to_page(page_id, node_id)
+            .expect("add_root");
 
         let page = doc.page(page_id).expect("find page");
         assert_eq!(page.root_nodes, vec![node_id]);
@@ -288,8 +289,10 @@ mod tests {
             "Group".to_string(),
         );
         let node_id = doc.arena.insert(node).expect("insert");
-        doc.add_root_node_to_page(page_id, node_id).expect("add_root");
-        doc.add_root_node_to_page(page_id, node_id).expect("add_root again");
+        doc.add_root_node_to_page(page_id, node_id)
+            .expect("add_root");
+        doc.add_root_node_to_page(page_id, node_id)
+            .expect("add_root again");
 
         let page = doc.page(page_id).expect("find page");
         assert_eq!(page.root_nodes.len(), 1);

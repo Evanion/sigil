@@ -81,9 +81,8 @@ impl Arena {
             self.uuids[idx] = Some(node.uuid);
             id
         } else {
-            let index = u32::try_from(self.nodes.len()).map_err(|_| {
-                CoreError::CapacityExceeded(self.max_nodes)
-            })?;
+            let index = u32::try_from(self.nodes.len())
+                .map_err(|_| CoreError::CapacityExceeded(self.max_nodes))?;
             let id = NodeId::new(index, 0);
             node.id = id;
             self.nodes.push(Some(node.clone()));
@@ -106,9 +105,7 @@ impl Arena {
     pub fn remove(&mut self, id: NodeId) -> Result<Node, CoreError> {
         self.validate_id(id)?;
         let idx = id.index() as usize;
-        let node = self.nodes[idx]
-            .take()
-            .ok_or(CoreError::NodeNotFound(id))?;
+        let node = self.nodes[idx].take().ok_or(CoreError::NodeNotFound(id))?;
         let uuid = self.uuids[idx].take();
         if let Some(uuid) = uuid {
             self.uuid_to_id.remove(&uuid);
@@ -383,11 +380,13 @@ mod tests {
         let id = arena.insert(make_node(uuid, "Root")).expect("insert");
 
         let mut counter: u8 = 1;
-        let clones = arena.clone_subtree(id, &mut || {
-            let bytes = [counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            counter += 1;
-            Uuid::from_bytes(bytes)
-        }).expect("clone");
+        let clones = arena
+            .clone_subtree(id, &mut || {
+                let bytes = [counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                counter += 1;
+                Uuid::from_bytes(bytes)
+            })
+            .expect("clone");
 
         assert_eq!(clones.len(), 1);
         assert_ne!(clones[0].uuid, uuid); // fresh UUID
@@ -404,8 +403,12 @@ mod tests {
         let uuid_child2 = Uuid::from_bytes([2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
         let root_id = arena.insert(make_node(uuid_root, "Root")).expect("insert");
-        let child1_id = arena.insert(make_node(uuid_child1, "Child1")).expect("insert");
-        let child2_id = arena.insert(make_node(uuid_child2, "Child2")).expect("insert");
+        let child1_id = arena
+            .insert(make_node(uuid_child1, "Child1"))
+            .expect("insert");
+        let child2_id = arena
+            .insert(make_node(uuid_child2, "Child2"))
+            .expect("insert");
 
         // Manually set up parent/child (normally tree.rs does this)
         arena.get_mut(root_id).expect("get_mut").children = vec![child1_id, child2_id];
@@ -413,11 +416,13 @@ mod tests {
         arena.get_mut(child2_id).expect("get_mut").parent = Some(root_id);
 
         let mut counter: u8 = 10;
-        let clones = arena.clone_subtree(root_id, &mut || {
-            let bytes = [counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-            counter += 1;
-            Uuid::from_bytes(bytes)
-        }).expect("clone");
+        let clones = arena
+            .clone_subtree(root_id, &mut || {
+                let bytes = [counter, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+                counter += 1;
+                Uuid::from_bytes(bytes)
+            })
+            .expect("clone");
 
         assert_eq!(clones.len(), 3);
         // All should have fresh UUIDs and no parent/children
@@ -462,7 +467,9 @@ mod tests {
         for i in 0..10u8 {
             let uuid = Uuid::from_bytes([i, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
             uuids_used.push(uuid);
-            arena.insert(make_node(uuid, &format!("Node {i}"))).expect("insert");
+            arena
+                .insert(make_node(uuid, &format!("Node {i}")))
+                .expect("insert");
         }
         assert_eq!(arena.len(), 10);
 
@@ -476,7 +483,9 @@ mod tests {
         // Reinsert — should reuse slots
         for i in 0..10u8 {
             let uuid = Uuid::from_bytes([i + 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-            let id = arena.insert(make_node(uuid, &format!("New {i}"))).expect("insert");
+            let id = arena
+                .insert(make_node(uuid, &format!("New {i}")))
+                .expect("insert");
             assert_eq!(id.generation(), 1); // all reused, generation bumped once
         }
         assert_eq!(arena.len(), 10);
