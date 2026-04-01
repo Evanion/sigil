@@ -1,6 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 pub mod error;
+pub mod validate;
 
 pub use error::{ComponentId, CoreError, NodeId, PageId, TokenId};
 
