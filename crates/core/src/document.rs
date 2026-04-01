@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::arena::Arena;
-use crate::error::{ComponentId, CoreError, NodeId, PageId};
+use crate::error::CoreError;
+use crate::id::{ComponentId, NodeId, PageId};
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
 /// Metadata about the document.

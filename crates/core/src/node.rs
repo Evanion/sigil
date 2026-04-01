@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::error::{ComponentId, NodeId};
+use crate::id::{ComponentId, NodeId};
 
 // ── Forward declarations / stubs for Plan 01c types ────────────────────
 
@@ -133,17 +133,17 @@ impl Default for TextStyle {
     fn default() -> Self {
         Self {
             font_family: "Inter".to_string(),
-            font_size: StyleValue::Literal(16.0),
+            font_size: StyleValue::Literal { value: 16.0 },
             font_weight: 400,
-            line_height: StyleValue::Literal(1.5),
-            letter_spacing: StyleValue::Literal(0.0),
+            line_height: StyleValue::Literal { value: 1.5 },
+            letter_spacing: StyleValue::Literal { value: 0.0 },
             text_align: TextAlign::Left,
-            text_color: StyleValue::Literal(Color::Srgb {
+            text_color: StyleValue::Literal { value: Color::Srgb {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
                 a: 1.0,
-            }),
+            } },
         }
     }
 }
@@ -180,16 +180,22 @@ impl Point {
 }
 
 /// A style value that can be either a literal or a token reference.
+///
+/// Serializes as `{"type":"literal","value":...}` or `{"type":"token_ref","name":"..."}`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(tag = "type")]
 pub enum StyleValue<T> {
-    Literal(T),
-    TokenRef(String),
+    #[serde(rename = "literal")]
+    Literal { value: T },
+    #[serde(rename = "token_ref")]
+    TokenRef { name: String },
 }
 
 impl<T: Default> Default for StyleValue<T> {
     fn default() -> Self {
-        Self::Literal(T::default())
+        Self::Literal {
+            value: T::default(),
+        }
     }
 }
 
@@ -319,13 +325,13 @@ pub struct Stroke {
 impl Default for Stroke {
     fn default() -> Self {
         Self {
-            color: StyleValue::Literal(Color::Srgb {
+            color: StyleValue::Literal { value: Color::Srgb {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
                 a: 1.0,
-            }),
-            width: StyleValue::Literal(1.0),
+            } },
+            width: StyleValue::Literal { value: 1.0 },
             alignment: StrokeAlignment::Center,
             cap: StrokeCap::Butt,
             join: StrokeJoin::Miter,
@@ -395,7 +401,7 @@ impl Default for Style {
         Self {
             fills: Vec::new(),
             strokes: Vec::new(),
-            opacity: StyleValue::Literal(1.0),
+            opacity: StyleValue::Literal { value: 1.0 },
             blend_mode: BlendMode::Normal,
             effects: Vec::new(),
         }
@@ -711,7 +717,7 @@ mod tests {
         let s = Style::default();
         assert!(s.fills.is_empty());
         assert!(s.strokes.is_empty());
-        assert_eq!(s.opacity, StyleValue::Literal(1.0));
+        assert_eq!(s.opacity, StyleValue::Literal { value: 1.0 });
         assert_eq!(s.blend_mode, BlendMode::Normal);
         assert!(s.effects.is_empty());
     }
@@ -793,26 +799,26 @@ mod tests {
 
     #[test]
     fn test_style_value_literal() {
-        let sv: StyleValue<f64> = StyleValue::Literal(0.5);
+        let sv: StyleValue<f64> = StyleValue::Literal { value: 0.5 };
         match sv {
-            StyleValue::Literal(v) => assert!((v - 0.5).abs() < f64::EPSILON),
-            StyleValue::TokenRef(_) => panic!("expected Literal"),
+            StyleValue::Literal { value: v } => assert!((v - 0.5).abs() < f64::EPSILON),
+            StyleValue::TokenRef { .. } => panic!("expected Literal"),
         }
     }
 
     #[test]
     fn test_style_value_token_ref() {
-        let sv: StyleValue<f64> = StyleValue::TokenRef("opacity.primary".to_string());
+        let sv: StyleValue<f64> = StyleValue::TokenRef { name: "opacity.primary".to_string() };
         match sv {
-            StyleValue::TokenRef(name) => assert_eq!(name, "opacity.primary"),
-            StyleValue::Literal(_) => panic!("expected TokenRef"),
+            StyleValue::TokenRef { name } => assert_eq!(name, "opacity.primary"),
+            StyleValue::Literal { .. } => panic!("expected TokenRef"),
         }
     }
 
     #[test]
     fn test_style_value_default() {
         let sv: StyleValue<f64> = StyleValue::default();
-        assert_eq!(sv, StyleValue::Literal(0.0));
+        assert_eq!(sv, StyleValue::Literal { value: 0.0 });
     }
 
     // ── Fill ───────────────────────────────────────────────────────────
@@ -820,23 +826,23 @@ mod tests {
     #[test]
     fn test_fill_solid() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal(Color::Srgb {
+            color: StyleValue::Literal { value: Color::Srgb {
                 r: 1.0,
                 g: 0.0,
                 b: 0.0,
                 a: 1.0,
-            }),
+            } },
         };
         match &fill {
             Fill::Solid { color } => {
                 assert_eq!(
                     *color,
-                    StyleValue::Literal(Color::Srgb {
+                    StyleValue::Literal { value: Color::Srgb {
                         r: 1.0,
                         g: 0.0,
                         b: 0.0,
                         a: 1.0
-                    })
+                    } }
                 );
             }
             other => panic!("expected Solid, got {other:?}"),
@@ -846,13 +852,13 @@ mod tests {
     #[test]
     fn test_fill_solid_with_token_ref() {
         let fill = Fill::Solid {
-            color: StyleValue::TokenRef("color.primary.500".to_string()),
+            color: StyleValue::TokenRef { name: "color.primary.500".to_string() },
         };
         match &fill {
             Fill::Solid { color } => {
                 assert_eq!(
                     *color,
-                    StyleValue::TokenRef("color.primary.500".to_string())
+                    StyleValue::TokenRef { name: "color.primary.500".to_string() }
                 );
             }
             other => panic!("expected Solid, got {other:?}"),
@@ -885,7 +891,7 @@ mod tests {
         assert_eq!(s.alignment, StrokeAlignment::Center);
         assert_eq!(s.cap, StrokeCap::Butt);
         assert_eq!(s.join, StrokeJoin::Miter);
-        assert_eq!(s.width, StyleValue::Literal(1.0));
+        assert_eq!(s.width, StyleValue::Literal { value: 1.0 });
     }
 
     // ── Effect ─────────────────────────────────────────────────────────
@@ -893,15 +899,15 @@ mod tests {
     #[test]
     fn test_effect_drop_shadow() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal(Color::Srgb {
+            color: StyleValue::Literal { value: Color::Srgb {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
                 a: 0.25,
-            }),
+            } },
             offset: Point::new(0.0, 4.0),
-            blur: StyleValue::Literal(8.0),
-            spread: StyleValue::Literal(0.0),
+            blur: StyleValue::Literal { value: 8.0 },
+            spread: StyleValue::Literal { value: 0.0 },
         };
         match &effect {
             Effect::DropShadow { offset, .. } => {
@@ -914,11 +920,11 @@ mod tests {
     #[test]
     fn test_effect_layer_blur() {
         let effect = Effect::LayerBlur {
-            radius: StyleValue::Literal(10.0),
+            radius: StyleValue::Literal { value: 10.0 },
         };
         match &effect {
             Effect::LayerBlur { radius } => {
-                assert_eq!(*radius, StyleValue::Literal(10.0));
+                assert_eq!(*radius, StyleValue::Literal { value: 10.0 });
             }
             other => panic!("expected LayerBlur, got {other:?}"),
         }
@@ -927,11 +933,11 @@ mod tests {
     #[test]
     fn test_effect_background_blur() {
         let effect = Effect::BackgroundBlur {
-            radius: StyleValue::TokenRef("blur.background".to_string()),
+            radius: StyleValue::TokenRef { name: "blur.background".to_string() },
         };
         match &effect {
             Effect::BackgroundBlur { radius } => {
-                assert_eq!(*radius, StyleValue::TokenRef("blur.background".to_string()));
+                assert_eq!(*radius, StyleValue::TokenRef { name: "blur.background".to_string() });
             }
             other => panic!("expected BackgroundBlur, got {other:?}"),
         }
@@ -1045,12 +1051,12 @@ mod tests {
     #[test]
     fn test_fill_solid_serde_round_trip() {
         let fill = Fill::Solid {
-            color: StyleValue::Literal(Color::Srgb {
+            color: StyleValue::Literal { value: Color::Srgb {
                 r: 1.0,
                 g: 0.0,
                 b: 0.0,
                 a: 1.0,
-            }),
+            } },
         };
         let json = serde_json::to_string(&fill).expect("serialize");
         let deserialized: Fill = serde_json::from_str(&json).expect("deserialize");
@@ -1060,15 +1066,15 @@ mod tests {
     #[test]
     fn test_effect_serde_round_trip() {
         let effect = Effect::DropShadow {
-            color: StyleValue::Literal(Color::Srgb {
+            color: StyleValue::Literal { value: Color::Srgb {
                 r: 0.0,
                 g: 0.0,
                 b: 0.0,
                 a: 0.5,
-            }),
+            } },
             offset: Point::new(2.0, 4.0),
-            blur: StyleValue::Literal(8.0),
-            spread: StyleValue::Literal(0.0),
+            blur: StyleValue::Literal { value: 8.0 },
+            spread: StyleValue::Literal { value: 0.0 },
         };
         let json = serde_json::to_string(&effect).expect("serialize");
         let deserialized: Effect = serde_json::from_str(&json).expect("deserialize");
@@ -1077,7 +1083,7 @@ mod tests {
 
     #[test]
     fn test_style_value_serde_literal_round_trip() {
-        let sv: StyleValue<f64> = StyleValue::Literal(0.75);
+        let sv: StyleValue<f64> = StyleValue::Literal { value: 0.75 };
         let json = serde_json::to_string(&sv).expect("serialize");
         let deserialized: StyleValue<f64> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(sv, deserialized);
@@ -1085,7 +1091,7 @@ mod tests {
 
     #[test]
     fn test_style_value_serde_token_ref_round_trip() {
-        let sv: StyleValue<f64> = StyleValue::TokenRef("opacity.hover".to_string());
+        let sv: StyleValue<f64> = StyleValue::TokenRef { name: "opacity.hover".to_string() };
         let json = serde_json::to_string(&sv).expect("serialize");
         let deserialized: StyleValue<f64> = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(sv, deserialized);
@@ -1113,15 +1119,15 @@ mod tests {
             },
             style: Style {
                 fills: vec![Fill::Solid {
-                    color: StyleValue::Literal(Color::Srgb {
+                    color: StyleValue::Literal { value: Color::Srgb {
                         r: 1.0,
                         g: 1.0,
                         b: 1.0,
                         a: 1.0,
-                    }),
+                    } },
                 }],
                 strokes: vec![],
-                opacity: StyleValue::Literal(0.9),
+                opacity: StyleValue::Literal { value: 0.9 },
                 blend_mode: BlendMode::Normal,
                 effects: vec![],
             },

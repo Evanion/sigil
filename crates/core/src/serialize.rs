@@ -3,7 +3,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::error::{CoreError, NodeId};
+use crate::error::CoreError;
+use crate::id::NodeId;
 use crate::node::Node;
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
@@ -57,6 +58,17 @@ pub fn serialize_page(page: &SerializedPage) -> Result<String, CoreError> {
 /// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
 /// - `CoreError::SerializationError` if the JSON is malformed.
 pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
+    if json.len() > crate::validate::MAX_FILE_SIZE {
+        return Err(CoreError::InputTooLarge(format!(
+            "file size {} bytes exceeds maximum of {} bytes",
+            json.len(),
+            crate::validate::MAX_FILE_SIZE
+        )));
+    }
+
+    // NOTE: serde_json enforces a default recursion limit of 128, matching MAX_JSON_NESTING_DEPTH.
+    // If serde_json changes this default, we must add explicit depth checking.
+
     // Check schema version first (partial parse)
     let raw: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| CoreError::SerializationError(format!("invalid JSON: {e}")))?;
@@ -218,7 +230,7 @@ mod tests {
     use super::*;
     use crate::arena::Arena;
     use crate::document::Page;
-    use crate::error::PageId;
+    use crate::id::PageId;
     use crate::node::{Node, NodeKind};
 
     fn make_uuid(n: u8) -> Uuid {

@@ -1,7 +1,8 @@
 // crates/core/src/tree.rs
 
 use crate::arena::Arena;
-use crate::error::{CoreError, NodeId};
+use crate::error::CoreError;
+use crate::id::NodeId;
 use crate::validate::MAX_CHILDREN_PER_NODE;
 
 /// Adds `child_id` as the last child of `parent_id`.

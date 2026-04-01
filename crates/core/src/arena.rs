@@ -3,7 +3,8 @@
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::error::{CoreError, NodeId};
+use crate::error::CoreError;
+use crate::id::NodeId;
 use crate::node::Node;
 use crate::validate::DEFAULT_MAX_NODES;
 
@@ -138,13 +139,10 @@ impl Arena {
 
     /// Looks up a `NodeId` by UUID.
     ///
-    /// # Errors
-    /// Returns `CoreError::NodeNotFound` with a sentinel `NodeId` if the UUID is not found.
-    pub fn id_by_uuid(&self, uuid: &Uuid) -> Result<NodeId, CoreError> {
-        self.uuid_to_id
-            .get(uuid)
-            .copied()
-            .ok_or_else(|| CoreError::NodeNotFound(NodeId::new(u32::MAX, 0)))
+    /// Returns `None` if the UUID is not found. Callers decide how to handle the absence.
+    #[must_use]
+    pub fn id_by_uuid(&self, uuid: &Uuid) -> Option<NodeId> {
+        self.uuid_to_id.get(uuid).copied()
     }
 
     /// Returns the UUID for a given `NodeId`.
@@ -347,7 +345,7 @@ mod tests {
         let arena = Arena::new(100);
         let uuid = Uuid::nil();
         let result = arena.id_by_uuid(&uuid);
-        assert!(result.is_err());
+        assert!(result.is_none());
     }
 
     #[test]

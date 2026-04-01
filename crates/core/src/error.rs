@@ -1,73 +1,6 @@
-use std::fmt;
 use uuid::Uuid;
 
-/// Generational arena index for internal node references.
-/// Defined here to break circular dependency — `id.rs` will re-export and extend.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct NodeId {
-    pub(crate) index: u32,
-    pub(crate) generation: u64,
-}
-
-impl fmt::Debug for NodeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "NodeId({}:gen{})", self.index, self.generation)
-    }
-}
-
-impl fmt::Display for NodeId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "NodeId({}:gen{})", self.index, self.generation)
-    }
-}
-
-/// Unique identifier for a component definition.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ComponentId(pub(crate) Uuid);
-
-impl fmt::Debug for ComponentId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ComponentId({})", self.0)
-    }
-}
-
-impl fmt::Display for ComponentId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Unique identifier for a design token.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TokenId(pub(crate) Uuid);
-
-impl fmt::Debug for TokenId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "TokenId({})", self.0)
-    }
-}
-
-impl fmt::Display for TokenId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-/// Unique identifier for a page.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct PageId(pub(crate) Uuid);
-
-impl fmt::Debug for PageId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "PageId({})", self.0)
-    }
-}
-
-impl fmt::Display for PageId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use crate::id::{ComponentId, NodeId, PageId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CoreError {
@@ -239,26 +172,5 @@ mod tests {
         };
         let b = a;
         assert_eq!(a, b); // a is still usable — Copy
-    }
-
-    #[test]
-    fn test_component_id_debug() {
-        let id = ComponentId(Uuid::nil());
-        let debug = format!("{id:?}");
-        assert!(debug.contains("ComponentId"), "expected wrapper: {debug}");
-    }
-
-    #[test]
-    fn test_token_id_display() {
-        let id = TokenId(Uuid::nil());
-        let display = format!("{id}");
-        assert!(display.contains("00000000"), "expected uuid: {display}");
-    }
-
-    #[test]
-    fn test_page_id_debug() {
-        let id = PageId(Uuid::nil());
-        let debug = format!("{id:?}");
-        assert!(debug.contains("PageId"), "expected wrapper: {debug}");
     }
 }
