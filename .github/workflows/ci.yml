@@ -21,7 +21,8 @@ jobs:
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dorny/paths-filter@v4
+
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
         id: filter
         with:
           filters: |
@@ -31,6 +32,7 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
+              - '.cargo/**'
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
@@ -111,12 +113,12 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: latest
+          version: 10
 
       - name: Install Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 'lts/*'
+          node-version-file: '.node-version'
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 

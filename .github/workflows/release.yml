@@ -94,7 +94,6 @@ jobs:
           tags: ${{ needs.validate.outputs.docker_tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          provenance: true
           sbom: true
           build-args: |
             VERSION=${{ needs.validate.outputs.full_version }}
