@@ -109,10 +109,9 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=dev-
+            type=raw,value=dev,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v6
