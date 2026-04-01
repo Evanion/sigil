@@ -904,24 +904,26 @@ agent-designer/
 └── .devcontainer/     # Dev container configuration
 ```
 
-## Build Commands
+## Running Commands
+
+All build/test/lint commands run inside the dev container. Use `./dev.sh` as a prefix when running from the host — it routes commands into the container automatically. If you're already inside the container, commands run directly.
 
 ### Rust
-- Build: `cargo build --workspace`
-- Test: `cargo test --workspace`
-- Lint: `cargo clippy --workspace -- -D warnings`
-- Format: `cargo fmt` (check: `cargo fmt --check`)
-- Run server: `cargo run --bin agent-designer-server`
+- Build: `./dev.sh cargo build --workspace`
+- Test: `./dev.sh cargo test --workspace`
+- Lint: `./dev.sh cargo clippy --workspace -- -D warnings`
+- Format: `./dev.sh cargo fmt` (check: `./dev.sh cargo fmt --check`)
+- Run server: `./dev.sh cargo run --bin agent-designer-server`
 
 ### Frontend
-- Install: `cd frontend && pnpm install`
-- Dev: `cd frontend && pnpm dev`
-- Build: `cd frontend && pnpm build`
-- Test: `cd frontend && pnpm test`
-- Lint: `cd frontend && pnpm lint`
-- Format: `cd frontend && pnpm format` (check: `pnpm format:check`)
+- Install: `./dev.sh pnpm --prefix frontend install`
+- Dev: `./dev.sh pnpm --prefix frontend dev`
+- Build: `./dev.sh pnpm --prefix frontend build`
+- Test: `./dev.sh pnpm --prefix frontend test`
+- Lint: `./dev.sh pnpm --prefix frontend lint`
+- Format: `./dev.sh pnpm --prefix frontend format` (check: `format:check`)
 
-### Docker
+### Docker (production image)
 - Build: `docker build -t agent-designer:dev .`
 - Run: `docker run --rm -p 4680:4680 -v $(pwd):/workspace agent-designer:dev`
 
@@ -1047,7 +1049,7 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 1. Read `CLAUDE.md` for project conventions
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Read the implementation plan task you've been assigned
-4. Run `cd frontend && pnpm test` to verify the test suite passes before making changes
+4. Run `./dev.sh pnpm --prefix frontend test` to verify the test suite passes before making changes
 ```
 
 - [ ] **Step 2: Create `.claude/agents/be.md`**
@@ -1085,7 +1087,7 @@ You work in `crates/core/`, `crates/server/`, `crates/mcp/`, and `cli/`. You do 
 1. Read `CLAUDE.md` for project conventions
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Read the implementation plan task you've been assigned
-4. Run `cargo test --workspace` to verify tests pass before making changes
+4. Run `./dev.sh cargo test --workspace` to verify tests pass before making changes
 ```
 
 - [ ] **Step 3: Create `.claude/agents/devops.md`**
@@ -1123,6 +1125,7 @@ You work on `Dockerfile`, `.dockerignore`, `.devcontainer/`, `.github/workflows/
 1. Read `CLAUDE.md` for project conventions
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Verify `docker build .` works before making changes
+4. Use `./dev.sh` prefix for all commands — it routes to the dev container from the host
 ```
 
 - [ ] **Step 4: Create `.claude/agents/security.md`**
@@ -1411,7 +1414,67 @@ git commit -m "chore: add /review and /implement custom slash commands"
 
 ---
 
-### Task 10: Verify Everything End-to-End
+### Task 10: Dev Container Command Bridge (`dev.sh`)
+
+**Files:**
+- Create: `dev.sh`
+
+- [ ] **Step 1: Create `dev.sh`**
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# dev.sh — Run commands inside the dev container from the host.
+# If already inside the container, runs commands directly.
+# Usage: ./dev.sh cargo test --workspace
+#        ./dev.sh pnpm --prefix frontend build
+
+CONTAINER_NAME="agent-designer-dev"
+
+# Detect if we're inside the dev container
+if [ -f /.dockerenv ] || grep -q "docker\|containerd" /proc/1/cgroup 2>/dev/null; then
+    # Inside container — run directly
+    exec "$@"
+fi
+
+# Outside container — check if dev container is running
+if ! docker ps --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+    echo "Error: Dev container '${CONTAINER_NAME}' is not running." >&2
+    echo "Start it with: devcontainer up --workspace-folder ." >&2
+    echo "Or:            docker compose -f .devcontainer/docker-compose.yml up -d" >&2
+    exit 1
+fi
+
+# Get the workspace path inside the container
+WORKSPACE_DIR="/workspaces/agent-designer"
+
+# Execute command inside the running container
+exec docker exec -w "${WORKSPACE_DIR}" -it "${CONTAINER_NAME}" "$@"
+```
+
+- [ ] **Step 2: Make executable**
+
+Run: `chmod +x dev.sh`
+
+- [ ] **Step 3: Verify detection logic**
+
+Run (on host, no container running):
+```bash
+./dev.sh echo "hello"
+```
+Expected: error message about container not running
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add dev.sh
+git commit -m "chore: add dev.sh command bridge for host-to-container execution"
+```
+
+---
+
+### Task 11: Verify Everything End-to-End
 
 - [ ] **Step 1: Clean build from scratch**
 
