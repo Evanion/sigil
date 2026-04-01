@@ -57,6 +57,26 @@ For every operation that modifies multiple entities:
 - What happens on partial failure? Is there rollback?
 - Can an interrupted compound operation leave the system in an inconsistent state?
 
+### Constant-Enforcement Verification
+For every validation constant defined in the codebase (MAX_*, MIN_*, LIMIT_*):
+1. Trace every code path where the constant is relevant.
+2. Verify the constant is actually checked on that path — not merely defined.
+3. If a constant is defined but never enforced, report as High — unenforced limits create false confidence and will be missed in future audits.
+
+### Recursion Depth Audit
+For every recursive function or tree/graph traversal:
+1. Verify there is an explicit depth limit or iteration bound.
+2. Verify the depth limit uses a named constant, not a magic number.
+3. Verify there is a test that triggers the depth guard.
+4. If a function recurses without a depth guard, report as High — unbounded recursion enables stack exhaustion DoS.
+
+### Deserialization-Validation Consistency
+For every deserialization entry point:
+1. List all fields being deserialized.
+2. Cross-reference against `validate.rs` (or equivalent validation module).
+3. For each field that has a validation rule, verify the deserialization path calls it.
+4. If validation exists but the deserialization path skips it, report as High — this is a bypass of intended security controls.
+
 ## Output Format
 
 For each finding, report:
