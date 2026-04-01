@@ -12,6 +12,7 @@ These principles are the governing rules of this project. They explain the _why_
 - No `unwrap()` or `expect()` in the core crate — always return `Result`.
 - Clippy pedantic is enabled — treat warnings as errors.
 - Prefer small, focused files with clear interfaces over large files that do too much.
+- CI builds must be fully reproducible — pin all tool versions to exact, immutable references (commit SHAs for Actions, version files for toolchains). No `latest` tags.
 
 ### Testing Standards
 
