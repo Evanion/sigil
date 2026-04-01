@@ -4,6 +4,7 @@ pub mod arena;
 pub mod error;
 pub mod id;
 pub mod node;
+pub mod tree;
 pub mod validate;
 
 pub use arena::Arena;
