@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+.git/
+.devcontainer/
+docs/
+*.md
+.env
+.env.local
+.worktrees/
+.agents/
