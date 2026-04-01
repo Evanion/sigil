@@ -7,13 +7,28 @@ RUN pnpm install --frozen-lockfile
 COPY frontend/ .
 RUN pnpm build
 
-# Stage 2: Build Rust
-FROM rust:1.94.1-bookworm AS rust-builder
+# Stage 2: Prepare Rust dependency recipe
+FROM rust:1.94.1-bookworm AS chef
+RUN cargo install cargo-chef
 WORKDIR /app
-COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+
+# Stage 2a: Analyze dependencies
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY cli/ cli/
-# Build dependencies first for caching
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 2b: Build dependencies (cached unless Cargo.toml/Cargo.lock change)
+FROM chef AS rust-deps
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 2c: Build application (only recompiles project code on source changes)
+FROM rust-deps AS rust-builder
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+COPY cli/ cli/
 RUN cargo build --release --bin agent-designer-server
 
 # Stage 3: Runtime
