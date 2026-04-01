@@ -5,10 +5,15 @@ pub mod document;
 pub mod error;
 pub mod id;
 pub mod node;
+pub mod serialize;
 pub mod tree;
 pub mod validate;
 
 pub use arena::Arena;
+pub use serialize::{
+    SerializedNode, SerializedPage, deserialize_page, nodes_to_serialized, page_to_serialized,
+    serialize_page,
+};
 pub use document::{
     ComponentDef, Document, DocumentMetadata, History, LayoutEngine, Page, TokenContext,
     Transition,
