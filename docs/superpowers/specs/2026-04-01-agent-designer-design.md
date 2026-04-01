@@ -323,11 +323,13 @@ The core engine and server are stateless regarding git from day one — they rea
 
 - Core engine: document model, node tree, operations, undo/redo, constraint/layout engine
 - Pen tool + all vector primitives (frame, rect, ellipse, path, text, image, group)
-- Auto-layout (flex-based) + pinning constraints
-- Components: create, instantiate, override properties
+- Layout: Flexbox auto-layout + CSS Grid + pinning constraints
+- Components: create, instantiate, override properties, **variants**, component properties
 - Design tokens: create, edit, inheritance, promote/demote
 - Click-through prototyping (link frames with transitions)
 - Web editor with all panels (toolbar, layers, properties, components, tokens, pages, prototype, assets)
+- **Inspect mode** for developer handoff (CSS output, spacing measurements, token references)
+- **Responsive breakpoints** with per-breakpoint layout overrides
 - MCP server: full CRUD on documents, nodes, components, tokens; snapshot tool
 - File format: JSON-based, git-diffable, hierarchical workfile inheritance
 - CLI tool for token export
@@ -346,3 +348,8 @@ The core engine and server are stateless regarding git from day one — they rea
 - WASM migration (Approach C)
 - WebGL canvas renderer
 - Bundler plugins (Vite, Webpack, etc.)
+- AI image generation
+- Illustration tools (brushes, text on path, pattern fills)
+- Publish as website
+- Live data connectors
+- Framework detection and token import (auto-detect Tailwind, MUI, Foundation, UIKit, Flutter from workspace dependencies and offer to import their default token sets)
