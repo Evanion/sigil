@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "skills": {
+    "create-mcp-app": {
+      "source": "modelcontextprotocol/ext-apps",
+      "sourceType": "github",
+      "computedHash": "39f1ce1c5d4c43b8281e7e51332f9a05f4b689ddd9bf426b4833fb671237f757"
+    },
+    "docker": {
+      "source": "fellipeutaka/leon",
+      "sourceType": "github",
+      "computedHash": "c7c98ee7c4215dcfebe074b529148bfbb9d5e679a6d6e4f3da8614dfdcfb26af"
+    },
+    "github-actions": {
+      "source": "bobmatnyc/claude-mpm-skills",
+      "sourceType": "github",
+      "computedHash": "6f6ace43488e5476241409aeb7636cd926222b146be4255752aded52ce0bc8c6"
+    },
+    "mcp-ops": {
+      "source": "0xdarkmatter/claude-mods",
+      "sourceType": "github",
+      "computedHash": "6777b5f2eb795ec433d1367ab5e71ef1b54e9efeb0d74ec19c4c845810fc99c0"
+    },
+    "rust-pro": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "efe90b6c467a058dc53de4bb4238a56228f6f3a4098ffec8128120750018cd0f"
+    },
+    "vite": {
+      "source": "antfu/skills",
+      "sourceType": "github",
+      "computedHash": "867ff66238f3152e9c494339ad08dc432dd0df5bcf5cc7a00b61a72b580eb908"
+    },
+    "websocket-engineer": {
+      "source": "jeffallan/claude-skills",
+      "sourceType": "github",
+      "computedHash": "a498a3fb8345b1edff9634de603ccc33aa58f98374870d8504b672384a28513d"
+    }
+  }
+}
