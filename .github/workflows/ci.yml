@@ -58,7 +58,7 @@ jobs:
 
       - name: Report test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && hashFiles('target/nextest/ci/junit.xml') != ''
         with:
           name: Rust Tests
           path: target/nextest/ci/junit.xml
@@ -103,11 +103,12 @@ jobs:
         run: cd frontend && pnpm format:check
 
       - name: Test with coverage
-        run: cd frontend && pnpm test -- --reporter=junit --outputFile=test-results/junit.xml --coverage --coverage.reporter=lcov --coverage.reportsDirectory=coverage
+        run: cd frontend && pnpm test -- --reporter=default --reporter=junit --outputFile=test-results/junit.xml --coverage --coverage.reporter=lcov --coverage.reportsDirectory=coverage
+        continue-on-error: false
 
       - name: Report test results
         uses: dorny/test-reporter@v1
-        if: always()
+        if: always() && hashFiles('frontend/test-results/junit.xml') != ''
         with:
           name: Frontend Tests
           path: frontend/test-results/junit.xml
@@ -115,6 +116,7 @@ jobs:
 
       - name: Upload Frontend coverage
         uses: codecov/codecov-action@v5
+        if: hashFiles('frontend/coverage/lcov.info') != ''
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: frontend/coverage/lcov.info
