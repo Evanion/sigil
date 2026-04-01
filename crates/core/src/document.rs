@@ -268,7 +268,8 @@ mod tests {
             make_uuid(10),
             NodeKind::Frame { auto_layout: None },
             "Frame 1".to_string(),
-        );
+        )
+        .expect("create test node");
         let node_id = doc.arena.insert(node).expect("insert");
         doc.add_root_node_to_page(page_id, node_id)
             .expect("add_root");
@@ -288,7 +289,8 @@ mod tests {
             make_uuid(10),
             NodeKind::Group,
             "Group".to_string(),
-        );
+        )
+        .expect("create test node");
         let node_id = doc.arena.insert(node).expect("insert");
         doc.add_root_node_to_page(page_id, node_id)
             .expect("add_root");
@@ -307,7 +309,8 @@ mod tests {
             make_uuid(10),
             NodeKind::Group,
             "Group".to_string(),
-        );
+        )
+        .expect("create test node");
         let node_id = doc.arena.insert(node).expect("insert");
         let fake_page = PageId::new(make_uuid(99));
         let result = doc.add_root_node_to_page(fake_page, node_id);

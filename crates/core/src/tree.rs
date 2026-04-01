@@ -155,7 +155,12 @@ pub fn rearrange(
 /// - `CoreError::NodeNotFound` / `CoreError::StaleNodeId` for invalid IDs.
 pub fn is_ancestor(arena: &Arena, ancestor_id: NodeId, node_id: NodeId) -> Result<bool, CoreError> {
     let mut current = arena.get(node_id)?.parent;
+    let mut steps = 0;
     while let Some(pid) = current {
+        steps += 1;
+        if steps > arena.len() {
+            return Err(CoreError::CycleDetected(ancestor_id, node_id));
+        }
         if pid == ancestor_id {
             return Ok(true);
         }
@@ -171,7 +176,12 @@ pub fn is_ancestor(arena: &Arena, ancestor_id: NodeId, node_id: NodeId) -> Resul
 pub fn ancestors(arena: &Arena, node_id: NodeId) -> Result<Vec<NodeId>, CoreError> {
     let mut path = vec![node_id];
     let mut current = arena.get(node_id)?.parent;
+    let mut steps = 0;
     while let Some(pid) = current {
+        steps += 1;
+        if steps > arena.len() {
+            return Err(CoreError::CycleDetected(node_id, node_id));
+        }
         path.push(pid);
         current = arena.get(pid)?.parent;
     }
@@ -210,7 +220,8 @@ mod tests {
     }
 
     fn insert_group(arena: &mut Arena, uuid: Uuid, name: &str) -> NodeId {
-        let node = Node::new(NodeId::new(0, 0), uuid, NodeKind::Group, name.to_string());
+        let node = Node::new(NodeId::new(0, 0), uuid, NodeKind::Group, name.to_string())
+            .expect("create test node");
         arena.insert(node).expect("insert")
     }
 

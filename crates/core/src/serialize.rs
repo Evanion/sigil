@@ -176,50 +176,173 @@ pub fn page_to_serialized(
     })
 }
 
-/// Recursively sorts all JSON object keys for deterministic output.
+/// Sorts all JSON object keys for deterministic output.
+///
+/// Uses an iterative approach with an explicit stack to prevent stack overflow
+/// on deeply nested structures.
 fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            let mut sorted: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort();
-            for key in keys {
-                if let Some(v) = map.get(key) {
-                    sorted.insert(key.clone(), sort_json_keys(v));
-                }
-            }
-            serde_json::Value::Object(sorted)
-        }
-        serde_json::Value::Array(arr) => {
-            serde_json::Value::Array(arr.iter().map(sort_json_keys).collect())
-        }
-        other => other.clone(),
+    enum Work {
+        /// A value that needs to be sorted (input).
+        Process(serde_json::Value),
+        /// Marker: assemble an object from sorted keys (keys stored inline).
+        AssembleObject(Vec<String>),
+        /// Marker: assemble an array with N elements.
+        AssembleArray(usize),
     }
+
+    let mut work_stack: Vec<Work> = vec![Work::Process(value.clone())];
+    let mut result_stack: Vec<serde_json::Value> = Vec::new();
+
+    while let Some(item) = work_stack.pop() {
+        match item {
+            Work::Process(v) => match v {
+                serde_json::Value::Object(map) => {
+                    let mut keys: Vec<String> = map.keys().cloned().collect();
+                    keys.sort();
+                    // Push assembly marker with sorted keys
+                    let sorted_keys = keys.clone();
+                    work_stack.push(Work::AssembleObject(sorted_keys));
+                    // Push children in reverse sorted order so first key is processed first
+                    // and lands at the bottom of the result_stack segment
+                    for key in keys.into_iter().rev() {
+                        if let Some(child) = map.get(&key) {
+                            work_stack.push(Work::Process(child.clone()));
+                        }
+                    }
+                }
+                serde_json::Value::Array(arr) => {
+                    let len = arr.len();
+                    work_stack.push(Work::AssembleArray(len));
+                    // Push in reverse order so first element is processed first
+                    for child in arr.into_iter().rev() {
+                        work_stack.push(Work::Process(child));
+                    }
+                }
+                other => result_stack.push(other),
+            },
+            Work::AssembleObject(keys) => {
+                let len = keys.len();
+                let start = result_stack.len() - len;
+                let values: Vec<serde_json::Value> = result_stack.drain(start..).collect();
+                let mut map = serde_json::Map::with_capacity(len);
+                for (key, val) in keys.into_iter().zip(values) {
+                    map.insert(key, val);
+                }
+                result_stack.push(serde_json::Value::Object(map));
+            }
+            Work::AssembleArray(len) => {
+                let start = result_stack.len() - len;
+                let elements: Vec<serde_json::Value> = result_stack.drain(start..).collect();
+                result_stack.push(serde_json::Value::Array(elements));
+            }
+        }
+    }
+
+    result_stack.pop().unwrap_or(serde_json::Value::Null)
 }
 
 /// Validates a deserialized page against collection size limits.
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
-    use crate::validate::{MAX_CHILDREN_PER_NODE, validate_collection_size, validate_node_name};
+    use crate::validate::{
+        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
+        MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN,
+        validate_asset_ref, validate_collection_size, validate_node_name,
+    };
+
+    // Validate page name
+    validate_node_name(&page.name)?;
 
     for node in &page.nodes {
         validate_node_name(&node.name)?;
         validate_collection_size("children", node.children.len(), MAX_CHILDREN_PER_NODE)?;
+
+        // Validate style collection sizes
+        if let Some(fills) = node.style.get("fills").and_then(|v| v.as_array()) {
+            validate_collection_size("fills", fills.len(), MAX_FILLS_PER_STYLE)?;
+        }
+        if let Some(strokes) = node.style.get("strokes").and_then(|v| v.as_array()) {
+            validate_collection_size("strokes", strokes.len(), MAX_STROKES_PER_STYLE)?;
+        }
+        if let Some(effects) = node.style.get("effects").and_then(|v| v.as_array()) {
+            validate_collection_size("effects", effects.len(), MAX_EFFECTS_PER_STYLE)?;
+        }
+
+        // Validate text content length
+        if let Some(content) = node.kind.get("content").and_then(|v| v.as_str())
+            && content.len() > MAX_TEXT_CONTENT_LEN
+        {
+            return Err(CoreError::InputTooLarge(format!(
+                "text content exceeds max length of {MAX_TEXT_CONTENT_LEN} (got {})",
+                content.len()
+            )));
+        }
+
+        // Validate asset_ref for Image nodes
+        if let Some(asset_ref) = node.kind.get("asset_ref").and_then(|v| v.as_str()) {
+            validate_asset_ref(asset_ref)?;
+        }
+
+        // Validate token ref names in style values
+        validate_token_refs_in_value(&node.style)?;
+        validate_token_refs_in_value(&node.kind)?;
     }
 
     Ok(())
 }
 
-/// Collects a node and all its descendants into the output vec.
+/// Walks a `serde_json::Value` looking for `{"type":"token_ref","name":"..."}` objects
+/// and validates each token name.
+fn validate_token_refs_in_value(value: &serde_json::Value) -> Result<(), CoreError> {
+    use crate::validate::validate_token_name;
+
+    let mut stack = vec![value];
+
+    while let Some(v) = stack.pop() {
+        match v {
+            serde_json::Value::Object(map) => {
+                // Check if this is a token_ref object
+                if let Some(serde_json::Value::String(t)) = map.get("type")
+                    && t == "token_ref"
+                    && let Some(serde_json::Value::String(name)) = map.get("name")
+                {
+                    validate_token_name(name)?;
+                }
+                // Continue walking children
+                for child in map.values() {
+                    stack.push(child);
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for child in arr {
+                    stack.push(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+/// Collects a node and all its descendants into the output vec (depth-first pre-order).
+///
+/// Uses an iterative approach with an explicit stack to prevent stack overflow
+/// on deeply nested trees.
 fn collect_subtree(
     arena: &crate::arena::Arena,
     root_id: NodeId,
     output: &mut Vec<Node>,
 ) -> Result<(), CoreError> {
-    let node = arena.get(root_id)?;
-    output.push(node.clone());
+    let mut stack = vec![root_id];
 
-    for child_id in node.children.clone() {
-        collect_subtree(arena, child_id, output)?;
+    while let Some(current_id) = stack.pop() {
+        let node = arena.get(current_id)?;
+        output.push(node.clone());
+
+        // Push children in reverse so they come out in order
+        for child_id in node.children.iter().rev() {
+            stack.push(*child_id);
+        }
     }
 
     Ok(())
@@ -243,7 +366,8 @@ mod tests {
             uuid,
             NodeKind::Frame { auto_layout: None },
             name.to_string(),
-        );
+        )
+        .expect("create test node");
         arena.insert(node).expect("insert")
     }
 
@@ -410,7 +534,8 @@ mod tests {
                     corner_radii: [8.0, 8.0, 8.0, 8.0],
                 },
                 "Rounded Rect".to_string(),
-            );
+            )
+            .expect("create test node");
             arena.insert(node).expect("insert")
         };
 

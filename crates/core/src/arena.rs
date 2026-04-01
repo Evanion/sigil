@@ -225,6 +225,7 @@ mod tests {
             NodeKind::Group,
             name.to_string(),
         )
+        .expect("create test node")
     }
 
     #[test]

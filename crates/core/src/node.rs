@@ -513,12 +513,24 @@ impl Node {
     /// Creates a new node with the given id, uuid, kind, and name.
     /// All other fields are set to defaults.
     ///
-    /// # Note
-    /// The `name` is NOT validated here — callers must validate before creating nodes.
-    /// This keeps the constructor infallible for internal use (e.g., deserialization).
-    #[must_use]
-    pub fn new(id: NodeId, uuid: Uuid, kind: NodeKind, name: String) -> Self {
-        Self {
+    /// Validates the node name and, for Image nodes, the `asset_ref`.
+    ///
+    /// # Errors
+    /// - `CoreError::ValidationError` if the name is invalid.
+    /// - `CoreError::ValidationError` if an Image node has an invalid `asset_ref`.
+    pub fn new(
+        id: NodeId,
+        uuid: Uuid,
+        kind: NodeKind,
+        name: String,
+    ) -> Result<Self, crate::error::CoreError> {
+        crate::validate::validate_node_name(&name)?;
+
+        if let NodeKind::Image { ref asset_ref } = kind {
+            crate::validate::validate_asset_ref(asset_ref)?;
+        }
+
+        Ok(Self {
             id,
             uuid,
             kind,
@@ -530,7 +542,7 @@ impl Node {
             constraints: Constraints::default(),
             visible: true,
             locked: false,
-        }
+        })
     }
 }
 
@@ -544,7 +556,8 @@ mod tests {
     fn test_new_node_has_defaults() {
         let id = NodeId::new(0, 0);
         let uuid = Uuid::nil();
-        let node = Node::new(id, uuid, NodeKind::Group, "Group 1".to_string());
+        let node = Node::new(id, uuid, NodeKind::Group, "Group 1".to_string())
+            .expect("create test node");
         assert_eq!(node.id, id);
         assert_eq!(node.uuid, uuid);
         assert_eq!(node.name, "Group 1");
@@ -563,7 +576,8 @@ mod tests {
             uuid,
             NodeKind::Frame { auto_layout: None },
             "Frame 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Frame { auto_layout } => assert!(auto_layout.is_none()),
             other => panic!("expected Frame, got {other:?}"),
@@ -581,7 +595,8 @@ mod tests {
                 corner_radii: [4.0, 4.0, 4.0, 4.0],
             },
             "Rect 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Rectangle { corner_radii } => {
                 assert_eq!(*corner_radii, [4.0, 4.0, 4.0, 4.0]);
@@ -602,7 +617,8 @@ mod tests {
                 arc_end: 360.0,
             },
             "Ellipse 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Ellipse { arc_start, arc_end } => {
                 assert!((arc_start - 0.0).abs() < f64::EPSILON);
@@ -624,7 +640,8 @@ mod tests {
                 text_style: TextStyle::default(),
             },
             "Text 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Text { content, .. } => assert_eq!(content, "Hello"),
             other => panic!("expected Text, got {other:?}"),
@@ -642,7 +659,8 @@ mod tests {
                 asset_ref: "images/logo.png".to_string(),
             },
             "Image 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Image { asset_ref } => assert_eq!(asset_ref, "images/logo.png"),
             other => panic!("expected Image, got {other:?}"),
@@ -660,7 +678,8 @@ mod tests {
                 path_data: PathData::default(),
             },
             "Path 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::Path { path_data } => {
                 assert!(path_data.subpaths.is_empty());
@@ -683,7 +702,8 @@ mod tests {
                 overrides: OverrideMap::default(),
             },
             "Instance 1".to_string(),
-        );
+        )
+            .expect("create test node");
         match &node.kind {
             NodeKind::ComponentInstance {
                 component_id: cid,
