@@ -126,9 +126,11 @@ jobs:
       - name: Build
         run: cd frontend && pnpm build
 
+  # Docker only builds and pushes on merge to main — not on PRs
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [rust, frontend]
     permissions:
       contents: read
@@ -155,16 +157,15 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=ref,event=pr
             type=sha,prefix=dev-
-            type=raw,value=dev,enable={{is_default_branch}}
+            type=raw,value=dev
 
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
