@@ -352,3 +352,4 @@ The core engine and server are stateless regarding git from day one — they rea
 - Illustration tools (brushes, text on path, pattern fills)
 - Publish as website
 - Live data connectors
+- Framework detection and token import (auto-detect Tailwind, MUI, Foundation, UIKit, Flutter from workspace dependencies and offer to import their default token sets)
