@@ -88,7 +88,7 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 9 (Spec Authoring Requirements)
+1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
 2. Read the relevant spec to understand intended behavior
 3. Focus on high-confidence findings — do not report speculative or low-probability issues
 4. For every new data type in the spec, ask: "What happens if this is maxed out, empty, cyclic, or malformed?"

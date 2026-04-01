@@ -151,13 +151,31 @@ Keep descriptions concise and lowercase. Reference spec numbers when implementin
 
 ---
 
-## 7. Design File Format
+## 7. Pull Request Process
+
+Every PR MUST go through the full `/review` command after opening, including all 4 phases:
+
+1. **Review** — dispatch specialized agents (Architect, Security, BE, FE, etc.) based on changed files
+2. **Persist** — write all findings to the spec or a review file, commit them
+3. **Remediate** — fix all findings in severity order (Critical/High first), update finding status
+4. **Governance** — dispatch governance agent to check for patterns and propose rule updates
+
+A PR is not ready to merge until:
+- All 4 review phases have completed
+- All Critical and High findings are resolved
+- All Medium findings are resolved or explicitly deferred with rationale
+- Governance recommendations have been reviewed and applied (or rejected with rationale)
+- CI Gate passes
+
+---
+
+## 8. Design File Format
 
 Workfiles use `.sigil/` directory suffix. The core crate owns serialization logic — other crates must use core's API to read/write workfiles.
 
 ---
 
-## 8. Subagent Roles
+## 9. Subagent Roles
 
 When dispatching subagents for this project, use these specialized roles:
 
@@ -172,7 +190,7 @@ When dispatching subagents for this project, use these specialized roles:
 
 ---
 
-## 9. Spec Authoring Requirements
+## 10. Spec Authoring Requirements
 
 Every sub-spec MUST include the following sections before it is considered ready for review:
 
@@ -222,7 +240,7 @@ Every spec that introduces recursive data structures or recursive algorithms mus
 
 ---
 
-## 10. Defensive Coding Rules
+## 11. Defensive Coding Rules
 
 These rules address recurring bug patterns. They apply to ALL implementation work.
 

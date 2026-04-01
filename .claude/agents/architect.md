@@ -53,7 +53,7 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 9 (Spec Authoring Requirements)
+1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
 2. Read the PDR (`docs/superpowers/specs/2026-04-01-agent-designer-design.md`) for MVP scope
 3. Read the relevant sub-specs — architecture decisions are documented there
 4. Read the core crate's public API surface before reviewing consuming crates

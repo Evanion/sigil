@@ -97,7 +97,7 @@ This project uses Rust Edition 2024. Be aware of:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 9 (Spec Authoring Requirements)
+1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Read the implementation plan task you've been assigned
 4. Run `./dev.sh cargo test --workspace` to verify tests pass before making changes
