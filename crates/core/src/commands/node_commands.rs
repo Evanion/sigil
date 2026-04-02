@@ -243,6 +243,7 @@ impl Command for SetTextContent {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_text_content(&self.old_content)?;
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
             NodeKind::Text { content, .. } => {

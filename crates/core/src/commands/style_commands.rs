@@ -47,6 +47,7 @@ impl Command for SetTransform {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_transform(&self.old_transform)?;
         doc.arena.get_mut(self.node_id)?.transform = self.old_transform;
         Ok(vec![])
     }
@@ -163,6 +164,13 @@ impl Command for SetOpacity {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        if let StyleValue::Literal { value } = &self.old_opacity
+            && (!value.is_finite() || *value < 0.0 || *value > 1.0)
+        {
+            return Err(CoreError::ValidationError(format!(
+                "opacity must be in [0.0, 1.0], got {value}"
+            )));
+        }
         doc.arena.get_mut(self.node_id)?.style.opacity = self.old_opacity.clone();
         Ok(vec![])
     }
