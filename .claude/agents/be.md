@@ -107,6 +107,7 @@ This project uses Rust Edition 2024. Be aware of:
 - Never serialize arena-local IDs (`NodeId`) — use UUIDs in all persisted formats.
 - Cross-field invariant validation: when two fields must be consistent, validate the relationship in the constructor.
 - Depth guard comparisons: use `>=` (not `>`) against the limit constant.
+- Named collections must reject duplicate names/identifiers at the insertion point — do not rely on HashMap deduplication silently.
 
 ## Before You Start
 

@@ -83,6 +83,7 @@ For every deserialization entry point:
 - For every `f32`/`f64` field in a deserialized type, verify NaN/infinity rejection exists at the deserialization boundary.
 - For every `#[derive(Deserialize)]` in `crates/core/`, verify the type has no validating constructor. If it does, the derive must be replaced with a custom impl.
 - For every `MAX_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.
+- For every custom `Deserialize` that collects into a map, verify duplicate keys are rejected (serde default is silent last-writer-wins).
 
 ## Output Format
 
