@@ -18,16 +18,19 @@ Determine review mode from `$ARGUMENTS`:
 3. Read the full system prompt from each applicable agent file (`Read .claude/agents/<name>.md`), strip the YAML frontmatter (lines between `---` delimiters), and use the body as the agent's system prompt
 4. Launch all applicable reviewer agents **in parallel**, passing: (a) the full diff, (b) the changed file list, (c) the agent's system prompt body from the `.md` file
 
-   **Always launch for `crates/**` changes:**
+   **Always launch (minimum 6 reviewers for any code change):**
    - **Architect** — `.claude/agents/architect.md` — subagent_type: `Architect` — Architectural boundaries, interface design, WASM compatibility
    - **Security** — `.claude/agents/security.md` — subagent_type: `Security Reviewer` — Input validation, resource limits, deserialization safety
-   - **BE** — `.claude/agents/be.md` — subagent_type: `Backend Engineer` — Rust code quality, error handling, test coverage, logic bugs
+   - **BE** — `.claude/agents/be.md` — subagent_type: `Backend Engineer` — Rust code quality, error handling, test coverage
+   - **Logic** — `.claude/agents/be.md` — subagent_type: `Backend Engineer` — Dedicated logic reviewer. Prompt MUST include: "Focus ONLY on logic errors and correctness bugs. Trace through execution paths step by step. Do NOT report code quality, style, or architecture issues — other reviewers handle those."
+   - **Compliance** — `.claude/agents/compliance.md` — subagent_type: `Backend Engineer` — CLAUDE.md rule compliance check. Pass the diff and instruct to check ALL sections of CLAUDE.md.
+   - **Data Scientist** — `.claude/agents/data-scientist.md` — subagent_type: `Backend Engineer` — Data modeling, collection sizing, performance characteristics, serialization efficiency
 
    **Conditionally launch (check changed file paths):**
    - **FE** — `.claude/agents/fe.md` — subagent_type: `Frontend Engineer` — if any file in `frontend/**`
    - **A11y** — `.claude/agents/a11y.md` — subagent_type: `Accessibility Reviewer` — if any file in `frontend/**`
    - **UX** — `.claude/agents/ux.md` — subagent_type: `UX Reviewer` — if any file in `frontend/**`
-   - **DevOps** — `.claude/agents/devops.md` — subagent_type: `DevOps Engineer` — if any file in `Dockerfile`, `.github/**`, `.devcontainer/**`
+   - **DevOps** — `.claude/agents/devops.md` — subagent_type: `DevOps Engineer` — if any file in `Dockerfile`, `.github/**`, `.devcontainer/**`, OR any file in `crates/server/**` (server config, ports, binding addresses are DevOps concerns)
 
 5. Collect all findings from dispatched agents
 6. Present a unified review summary grouped by severity (Critical > High > Major > Medium > Minor > Low > Info)

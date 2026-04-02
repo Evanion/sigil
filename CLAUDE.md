@@ -113,6 +113,21 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - All document mutations go through the core engine.
 - Never mutate document state directly — always through core operations.
 
+#### Network Security Defaults
+
+- CORS must use an explicit allowlist of origins — never `*` or a permissive default. In development, allow `localhost` origins only; gate permissive mode behind an env var.
+- WebSocket upgrade handlers must validate the `Origin` header against the CORS allowlist before accepting the connection.
+- WebSocket connections must enforce a maximum message size (define as a named constant). Reject oversized frames before buffering.
+
+#### Broadcast Semantics
+
+- WebSocket broadcasts must exclude the originating client. The originator already applied the mutation locally; echoing it causes duplicate application.
+- All state-mutating operations (execute, undo, redo) must broadcast to non-originating clients. If execute broadcasts, undo and redo must also broadcast — asymmetric broadcasting desynchronizes clients.
+
+#### Graceful Shutdown
+
+- The server must handle SIGTERM/SIGINT: stop accepting new connections, drain existing WebSocket connections, shut down within a bounded timeout. Required for container orchestration. The drain timeout must be a named constant.
+
 ### `agent-designer-mcp`
 
 - Owns the MCP tool/resource definitions.
@@ -132,6 +147,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Always run `cargo fmt` after any code change before committing. Formatting is checked in CI; unformatted code will fail the pipeline.
 - Avoid Rust reserved keywords as identifiers — check against both current and future editions (e.g., `gen` is reserved in Edition 2024). Use `generation`, `gen_value`, or similar alternatives.
 - Define all validation limit constants (`MAX_*`, `LIMIT_*`, `MIN_*`) in `validate.rs`, not scattered across type definition files. Co-locating limits makes audit and enforcement traceable.
+- Every `unsafe impl Send` or `unsafe impl Sync` must include a `// SAFETY:` comment explaining why the implementation is sound, naming the specific invariant. Apply unsafe impls to the narrowest possible type (a newtype wrapper, not the enclosing struct). Blanket unsafe Send/Sync on types containing non-Send/Sync fields is a bug.
 
 ### TypeScript
 
