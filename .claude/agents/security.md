@@ -85,6 +85,14 @@ For every deserialization entry point:
 - For every `MAX_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.
 - For every custom `Deserialize` that collects into a map, verify duplicate keys are rejected (serde default is silent last-writer-wins).
 
+## Network Security Defaults
+
+For every HTTP or WebSocket endpoint:
+1. Verify CORS uses an explicit origin allowlist — `*` or absent origin checks are High.
+2. Verify WebSocket upgrade validates the Origin header — missing validation is High.
+3. Verify WebSocket message size limits are configured — unbounded messages enable memory exhaustion.
+4. Verify the server has graceful shutdown handling (SIGTERM, drain connections).
+
 ## Output Format
 
 For each finding, report:

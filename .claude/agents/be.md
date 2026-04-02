@@ -109,6 +109,7 @@ This project uses Rust Edition 2024. Be aware of:
 - Depth guard comparisons: use `>=` (not `>`) against the limit constant.
 - Named collections must reject duplicate names/identifiers at the insertion point — do not rely on HashMap deduplication silently.
 - Every command must have an integration test through `Document::execute` -> `undo` -> `redo`, not just direct `apply`/`undo` calls on the command struct.
+- Never write blanket `unsafe impl Send/Sync` on wrapper types. Wrap the non-Send inner type in a newtype with a SAFETY comment. Add compile-time assertions that verify the invariant.
 
 ## Before You Start
 
