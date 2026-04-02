@@ -167,10 +167,37 @@ impl Document {
     /// Adds a component definition to the document.
     ///
     /// # Errors
+    /// Returns `CoreError::ValidationError` if a component with the same ID already exists
+    /// or the document already has the maximum number of components.
+    pub fn add_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
+        if self.components.contains_key(&def.id()) {
+            return Err(CoreError::ValidationError(format!(
+                "component with id {:?} already exists",
+                def.id()
+            )));
+        }
+        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(format!(
+                "document already has {} components (maximum {})",
+                self.components.len(),
+                crate::validate::MAX_COMPONENTS_PER_DOCUMENT
+            )));
+        }
+        self.components.insert(def.id(), def);
+        Ok(())
+    }
+
+    /// Restores a component definition (for undo paths).
+    ///
+    /// Skips the duplicate ID check but keeps the capacity check.
+    ///
+    /// # Errors
     /// Returns `CoreError::ValidationError` if the document already has the maximum
     /// number of components.
-    pub fn add_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
-        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT {
+    pub fn restore_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
+        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT
+            && !self.components.contains_key(&def.id())
+        {
             return Err(CoreError::ValidationError(format!(
                 "document already has {} components (maximum {})",
                 self.components.len(),
@@ -184,14 +211,45 @@ impl Document {
     /// Adds a transition to the document.
     ///
     /// # Errors
-    /// Returns `CoreError::ValidationError` if the transition is invalid or the document
-    /// is at capacity.
+    /// Returns `CoreError::ValidationError` if the transition is invalid, a transition
+    /// with the same ID already exists, or the document is at capacity.
     pub fn add_transition(
         &mut self,
         transition: crate::prototype::Transition,
     ) -> Result<(), CoreError> {
         crate::prototype::validate_transition(&transition)?;
+        if self.transitions.iter().any(|t| t.id == transition.id) {
+            return Err(CoreError::ValidationError(format!(
+                "transition with id {} already exists",
+                transition.id
+            )));
+        }
         if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(format!(
+                "document already has {} transitions (maximum {})",
+                self.transitions.len(),
+                crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
+            )));
+        }
+        self.transitions.push(transition);
+        Ok(())
+    }
+
+    /// Restores a transition (for undo paths).
+    ///
+    /// Validates the transition and checks capacity, but skips the duplicate ID check.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the transition is invalid or the document
+    /// is at capacity.
+    pub fn restore_transition(
+        &mut self,
+        transition: crate::prototype::Transition,
+    ) -> Result<(), CoreError> {
+        crate::prototype::validate_transition(&transition)?;
+        if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
+            && !self.transitions.iter().any(|t| t.id == transition.id)
+        {
             return Err(CoreError::ValidationError(format!(
                 "document already has {} transitions (maximum {})",
                 self.transitions.len(),
@@ -867,6 +925,26 @@ mod tests {
         assert!(doc.add_transition(overflow).is_err());
     }
 
+    #[test]
+    fn test_add_transition_duplicate_id_rejected() {
+        use crate::prototype::{TransitionAnimation, TransitionTrigger};
+
+        let mut doc = Document::new("Test".to_string());
+        let t = Transition {
+            id: make_uuid(1),
+            source_node: NodeId::new(0, 0),
+            target_page: PageId::new(make_uuid(10)),
+            target_node: None,
+            trigger: TransitionTrigger::OnClick,
+            animation: TransitionAnimation::Instant,
+        };
+        doc.add_transition(t.clone()).expect("add first");
+        let result = doc.add_transition(t);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(msg)) if msg.contains("already exists"))
+        );
+    }
+
     // ── RF-006: add_component ─────────────────────────────────────────
 
     #[test]
@@ -885,6 +963,27 @@ mod tests {
         .expect("valid");
         doc.add_component(def).expect("add component");
         assert_eq!(doc.components.len(), 1);
+    }
+
+    #[test]
+    fn test_add_component_duplicate_id_rejected() {
+        use crate::component::ComponentDef;
+        use crate::id::ComponentId;
+
+        let mut doc = Document::new("Test".to_string());
+        let def = ComponentDef::new(
+            ComponentId::new(make_uuid(1)),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+        doc.add_component(def.clone()).expect("add first");
+        let result = doc.add_component(def);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(msg)) if msg.contains("already exists"))
+        );
     }
 
     #[test]

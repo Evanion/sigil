@@ -25,12 +25,8 @@ impl Command for AddTransition {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.remove_transition(self.transition.id).ok_or_else(|| {
-            CoreError::ValidationError(format!(
-                "cannot undo AddTransition: transition {} not found",
-                self.transition.id
-            ))
-        })?;
+        doc.remove_transition(self.transition.id)
+            .ok_or(CoreError::TransitionNotFound(self.transition.id))?;
         Ok(vec![])
     }
 
@@ -50,14 +46,13 @@ pub struct RemoveTransition {
 
 impl Command for RemoveTransition {
     fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.remove_transition(self.transition_id).ok_or_else(|| {
-            CoreError::ValidationError(format!("transition {} not found", self.transition_id))
-        })?;
+        doc.remove_transition(self.transition_id)
+            .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
         Ok(vec![])
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.add_transition(self.snapshot.clone())?;
+        doc.restore_transition(self.snapshot.clone())?;
         Ok(vec![])
     }
 
@@ -79,30 +74,37 @@ pub struct UpdateTransition {
 
 impl Command for UpdateTransition {
     fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        if self.new_transition.id != self.transition_id
+            || self.old_transition.id != self.transition_id
+        {
+            return Err(CoreError::ValidationError(
+                "UpdateTransition: transition_id must match new and old transition IDs".to_string(),
+            ));
+        }
         crate::prototype::validate_transition(&self.new_transition)?;
         let pos = doc
             .transitions
             .iter()
             .position(|t| t.id == self.transition_id)
-            .ok_or_else(|| {
-                CoreError::ValidationError(format!("transition {} not found", self.transition_id))
-            })?;
+            .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
         doc.transitions[pos] = self.new_transition.clone();
         Ok(vec![])
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        if self.new_transition.id != self.transition_id
+            || self.old_transition.id != self.transition_id
+        {
+            return Err(CoreError::ValidationError(
+                "UpdateTransition: transition_id must match new and old transition IDs".to_string(),
+            ));
+        }
         crate::prototype::validate_transition(&self.old_transition)?;
         let pos = doc
             .transitions
             .iter()
             .position(|t| t.id == self.transition_id)
-            .ok_or_else(|| {
-                CoreError::ValidationError(format!(
-                    "transition {} not found for undo",
-                    self.transition_id
-                ))
-            })?;
+            .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
         doc.transitions[pos] = self.old_transition.clone();
         Ok(vec![])
     }
@@ -192,6 +194,37 @@ mod tests {
         t.trigger = TransitionTrigger::AfterDelay { seconds: -1.0 };
         let cmd = AddTransition { transition: t };
         assert!(cmd.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_update_transition_id_mismatch_rejected() {
+        let mut doc = Document::new("Test".to_string());
+        let old = make_transition(1);
+        doc.add_transition(old.clone()).expect("add");
+
+        let mut new = old.clone();
+        new.id = make_uuid(2); // ID mismatch
+
+        let cmd = UpdateTransition {
+            transition_id: make_uuid(1),
+            new_transition: new,
+            old_transition: old,
+        };
+        let result = cmd.apply(&mut doc);
+        assert!(matches!(result, Err(CoreError::ValidationError(_))));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_transition_returns_transition_not_found() {
+        let mut doc = Document::new("Test".to_string());
+        let cmd = RemoveTransition {
+            transition_id: make_uuid(99),
+            snapshot: make_transition(99),
+        };
+        assert!(matches!(
+            cmd.apply(&mut doc),
+            Err(CoreError::TransitionNotFound(_))
+        ));
     }
 
     #[test]

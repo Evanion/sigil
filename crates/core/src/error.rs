@@ -52,6 +52,9 @@ pub enum CoreError {
     #[error("duplicate uuid: {0}")]
     DuplicateUuid(Uuid),
 
+    #[error("transition not found: {0}")]
+    TransitionNotFound(Uuid),
+
     #[error("page not found: {0:?}")]
     PageNotFound(PageId),
 
@@ -143,6 +146,17 @@ mod tests {
         let err = CoreError::DuplicateUuid(uuid);
         let msg = format!("{err}");
         assert!(msg.contains("duplicate uuid"), "expected prefix: {msg}");
+    }
+
+    #[test]
+    fn test_transition_not_found_displays_uuid() {
+        let uuid = Uuid::nil();
+        let err = CoreError::TransitionNotFound(uuid);
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("transition not found"),
+            "expected prefix: {msg}"
+        );
     }
 
     #[test]

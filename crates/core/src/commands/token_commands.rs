@@ -82,6 +82,9 @@ impl Command for UpdateToken {
                 self.old_token.name()
             )));
         }
+        if doc.token_context.get(self.old_token.name()).is_none() {
+            return Err(CoreError::TokenNotFound(self.old_token.name().to_string()));
+        }
         // Token::new already validated the new token at construction time.
         // Re-insert replaces the existing entry.
         doc.token_context.insert(self.new_token.clone())?;
@@ -189,6 +192,27 @@ mod tests {
         cmd.undo(&mut doc).expect("undo");
         let resolved = doc.token_context.get("color.primary").expect("get");
         assert!(matches!(resolved.value(), TokenValue::Color { .. }));
+    }
+
+    #[test]
+    fn test_update_token_nonexistent_returns_token_not_found() {
+        let mut doc = Document::new("Test".to_string());
+        let old = make_color_token("color.primary");
+        let new = Token::new(
+            TokenId::new(make_uuid(1)),
+            "color.primary".to_string(),
+            TokenValue::Number { value: 42.0 },
+            TokenType::Number,
+            None,
+        )
+        .expect("valid");
+
+        let cmd = UpdateToken {
+            new_token: new,
+            old_token: old,
+        };
+        let result = cmd.apply(&mut doc);
+        assert!(matches!(result, Err(CoreError::TokenNotFound(_))));
     }
 
     #[test]

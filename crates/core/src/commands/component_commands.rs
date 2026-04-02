@@ -53,7 +53,7 @@ impl Command for RemoveComponent {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.add_component(self.snapshot.clone())?;
+        doc.restore_component(self.snapshot.clone())?;
         Ok(vec![])
     }
 
@@ -101,7 +101,11 @@ impl Command for SetOverride {
                     overrides.set(self.key.clone(), val.clone(), *src)?;
                 }
                 None => {
-                    overrides.remove(&self.key);
+                    overrides.remove(&self.key).ok_or_else(|| {
+                        CoreError::ValidationError(
+                            "SetOverride undo: override not found for removal".to_string(),
+                        )
+                    })?;
                 }
             },
             _ => {
