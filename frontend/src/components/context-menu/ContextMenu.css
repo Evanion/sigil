@@ -1,0 +1,48 @@
+/* ContextMenu trigger area — transparent wrapper */
+.sigil-context-menu__trigger {
+  display: contents;
+}
+
+/* ContextMenu content panel */
+.sigil-context-menu {
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-3);
+  padding: var(--size-1) 0;
+  z-index: 50;
+  min-width: 180px;
+}
+
+/* Menu item */
+.sigil-context-menu__item {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--size-1) var(--size-3);
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  cursor: pointer;
+  outline: none;
+}
+
+/* Item hover / highlighted state */
+.sigil-context-menu__item[data-highlighted] {
+  background: var(--surface-4);
+}
+
+/* Item disabled state */
+.sigil-context-menu__item[data-disabled] {
+  color: var(--text-3);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Keyboard shortcut hint */
+.sigil-context-menu__shortcut {
+  color: var(--text-3);
+  font-size: var(--font-size-00);
+  margin-left: auto;
+  padding-left: var(--size-4);
+}
