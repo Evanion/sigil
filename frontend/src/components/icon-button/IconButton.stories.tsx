@@ -1,12 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
-import {
-  MousePointer,
-  Square,
-  Circle,
-  Frame,
-  Type,
-  Pen,
-} from "lucide-solid";
+import { MousePointer, Square, Circle, Frame, Type, Pen } from "lucide-solid";
 import { IconButton } from "./IconButton";
 
 const meta: Meta<typeof IconButton> = {

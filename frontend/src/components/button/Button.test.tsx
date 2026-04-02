@@ -79,9 +79,7 @@ describe("Button", () => {
   });
 
   it("should forward aria-label to the underlying element", () => {
-    render(() => (
-      <Button aria-label="Close dialog">X</Button>
-    ));
+    render(() => <Button aria-label="Close dialog">X</Button>);
     const btn = screen.getByLabelText("Close dialog");
     expect(btn).toBeTruthy();
   });

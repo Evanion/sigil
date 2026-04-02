@@ -5,13 +5,7 @@
  */
 
 import { describe, it, expect, afterEach } from "vitest";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  cleanup,
-} from "@solidjs/testing-library";
+import { render, screen, fireEvent, waitFor, cleanup } from "@solidjs/testing-library";
 import { Tooltip } from "./Tooltip";
 
 afterEach(() => {

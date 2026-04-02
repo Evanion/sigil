@@ -9,7 +9,10 @@
   font-size: var(--font-size-0);
   font-weight: var(--font-weight-5);
   cursor: pointer;
-  transition: background-color 150ms, border-color 150ms, color 150ms;
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    color 150ms;
   white-space: nowrap;
   user-select: none;
 }

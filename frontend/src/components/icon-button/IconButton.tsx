@@ -18,13 +18,7 @@ export interface IconButtonProps {
 }
 
 export function IconButton(props: IconButtonProps) {
-  const [local, others] = splitProps(props, [
-    "icon",
-    "active",
-    "disabled",
-    "onClick",
-    "class",
-  ]);
+  const [local, others] = splitProps(props, ["icon", "active", "disabled", "onClick", "class"]);
 
   const className = () => {
     const classes = ["sigil-icon-button"];

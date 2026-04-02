@@ -24,9 +24,7 @@ export function Tooltip(props: TooltipProps) {
       openDelay={props.openDelay ?? 300}
       closeDelay={props.closeDelay ?? 0}
     >
-      <KobalteTooltip.Trigger as="span">
-        {props.children}
-      </KobalteTooltip.Trigger>
+      <KobalteTooltip.Trigger as="span">{props.children}</KobalteTooltip.Trigger>
       <KobalteTooltip.Portal>
         <KobalteTooltip.Content class="sigil-tooltip">
           <KobalteTooltip.Arrow class="sigil-tooltip__arrow" />
