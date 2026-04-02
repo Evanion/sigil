@@ -62,6 +62,9 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
             get(routes::document::get_document_full),
         )
         .route("/ws", get(routes::ws::ws_handler))
+        // TODO(RF-011): GraphQLSubscription/GraphQLWebSocket does not expose
+        // max-message-size config easily. When switching to `GraphQLWebSocket`
+        // directly (see RF-002), configure the WS message size limit there.
         .route("/graphql/ws", get(graphql_ws_handler));
 
     // RF-004: Only expose GraphiQL IDE in development mode.

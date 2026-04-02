@@ -27,7 +27,7 @@ use agent_designer_core::{NodeId, NodeKind, PageId};
 use crate::state::{AppState, BroadcastEnvelope, BroadcastPayload};
 
 use super::types::{
-    node_to_gql, CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult,
+    CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult, node_to_gql,
 };
 
 /// Dedicated sender ID for mutations originating from GraphQL.

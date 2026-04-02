@@ -1,4 +1,4 @@
-use async_graphql::{Context, Subscription};
+use async_graphql::{Context, Result, Subscription};
 use futures_util::Stream;
 
 use crate::state::AppState;
@@ -8,16 +8,26 @@ use super::types::DocumentEvent;
 pub struct SubscriptionRoot;
 
 #[Subscription]
+#[allow(clippy::unused_async)]
 impl SubscriptionRoot {
     /// Stream of document change events.
     ///
     /// Yields a [`DocumentEvent`] every time a mutation modifies the document.
     /// Clients that fall behind (lagged receivers) log a warning and continue
     /// receiving from the latest message rather than disconnecting.
-    async fn document_changed(&self, ctx: &Context<'_>) -> impl Stream<Item = DocumentEvent> {
-        let state = ctx.data_unchecked::<AppState>();
+    ///
+    /// RF-011: The `GraphQLSubscription` service from async-graphql-axum does
+    /// not expose message size configuration easily. If RF-002's fix switches
+    /// to `GraphQLWebSocket` directly, message size can be configured there.
+    // TODO(RF-011): configure max WS message size when switching to GraphQLWebSocket
+    async fn document_changed(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = DocumentEvent>> {
+        // RF-013: use fallible `data()` instead of `data_unchecked()`
+        let state = ctx.data::<AppState>()?;
         let mut rx = state.graphql_tx.subscribe();
-        async_stream::stream! {
+        Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
                     Ok(event) => yield event,
@@ -27,7 +37,7 @@ impl SubscriptionRoot {
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
-        }
+        })
     }
 }
 
@@ -55,12 +65,13 @@ mod tests {
         assert_eq!(received.event_type, DocumentEventType::NodeCreated);
         assert_eq!(received.uuid.as_deref(), Some("abc-123"));
         assert!(received.data.is_none());
+        assert!(received.sender_id.is_none());
     }
 
     #[tokio::test]
     async fn test_publish_event_without_listeners_does_not_panic() {
         let state = AppState::new();
-        // No subscribers — publish_event should not panic.
+        // No subscribers -- publish_event should not panic.
         let event = DocumentEvent {
             event_type: DocumentEventType::NodeDeleted,
             uuid: Some("def-456".to_string()),
@@ -114,11 +125,11 @@ mod tests {
             DocumentEventType::NodeCreated,
         ];
 
-        for event_type in &event_types {
+        for et in &event_types {
             publish_event(
                 &state,
                 DocumentEvent {
-                    event_type: *event_type,
+                    event_type: *et,
                     uuid: None,
                     data: None,
                     sender_id: None,
@@ -126,9 +137,9 @@ mod tests {
             );
         }
 
-        for event_type in &event_types {
+        for et in &event_types {
             let received = rx.recv().await.expect("should receive event");
-            assert_eq!(received.event_type, *event_type);
+            assert_eq!(received.event_type, *et);
         }
     }
 
@@ -140,13 +151,13 @@ mod tests {
             data: Some(async_graphql::Json(
                 serde_json::json!({"can_undo": true, "can_redo": false}),
             )),
-            sender_id: Some(42),
+            sender_id: None,
         };
 
         let cloned = event.clone();
         assert_eq!(cloned.event_type, DocumentEventType::UndoRedo);
         assert!(cloned.uuid.is_none());
         assert!(cloned.data.is_some());
-        assert_eq!(cloned.sender_id, Some(42));
+        assert!(cloned.sender_id.is_none());
     }
 }

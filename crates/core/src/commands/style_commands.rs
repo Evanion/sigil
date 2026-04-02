@@ -11,7 +11,13 @@ use crate::id::NodeId;
 use crate::node::{BlendMode, Constraints, Effect, Fill, Stroke, StyleValue, Transform};
 use crate::validate::{MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE};
 
-fn validate_transform(t: &Transform) -> Result<(), CoreError> {
+/// Validates that all transform fields are finite and dimensions are non-negative.
+///
+/// # Errors
+///
+/// Returns [`CoreError::ValidationError`] if any field is NaN/infinity or if
+/// width/height is negative.
+pub fn validate_transform(t: &Transform) -> Result<(), CoreError> {
     let fields = [
         t.x, t.y, t.width, t.height, t.rotation, t.scale_x, t.scale_y,
     ];
