@@ -1,67 +1,97 @@
 # Code Review
 
-Dispatch specialized review agents against changes, persist findings, remediate issues, and update governance.
+Run a comprehensive multi-agent code review on the current branch, a specific PR, or a spec directory.
+
+## Mode Detection
+
+Determine review mode from `$ARGUMENTS`:
+
+- **PR number** (e.g. `123`) → Code review mode: `gh pr view 123` + `gh pr diff 123`
+- **Directory path** (e.g. `docs/superpowers/specs/`) → Spec review mode: read all `.md` files in that directory
+- **No args, not on main** → Code review mode: `git diff main...HEAD` + `git log main...HEAD --oneline`
+- **No args, on main** → `gh pr list` and prompt user to pick
 
 ## Phase 1: Review
 
-1. Identify what's being reviewed:
-   - If `$ARGUMENTS` is a file/directory path, review that specific artifact
-   - If `$ARGUMENTS` is a PR number, run `gh pr diff <number>`
-   - If no arguments, run `git diff main...HEAD --stat` to identify changed areas
-2. Based on what changed, dispatch the appropriate review agents **in parallel**:
+1. Obtain the diff (from `gh pr diff <number>` or `git diff main...HEAD`)
+2. Extract the list of changed files from the diff
+3. Read the full system prompt from each applicable agent file (`Read .claude/agents/<name>.md`), strip the YAML frontmatter (lines between `---` delimiters), and use the body as the agent's system prompt
+4. Launch all applicable reviewer agents **in parallel**, passing: (a) the full diff, (b) the changed file list, (c) the agent's system prompt body from the `.md` file
 
-| Files Changed | Agent | Focus |
-|---|---|---|
-| `crates/**` | `.claude/agents/architect.md` | Architectural boundaries, interface design, WASM compatibility |
-| `crates/**` | `.claude/agents/security.md` | Security review, input validation, resource limits |
-| `crates/**` | `.claude/agents/be.md` | Rust code quality, error handling, test coverage |
-| `frontend/**` | `.claude/agents/fe.md` | TypeScript quality, component design, test coverage |
-| `frontend/**` | `.claude/agents/a11y.md` | Accessibility, WCAG 2.2 AA compliance |
-| `frontend/**` | `.claude/agents/ux.md` | UX consistency, interaction patterns |
-| `Dockerfile`, `.github/**`, `.devcontainer/**` | `.claude/agents/devops.md` | Infrastructure, container security, CI |
-| `docs/superpowers/specs/**` | `.claude/agents/architect.md` + `.claude/agents/security.md` | Spec completeness, gaps, security concerns |
+   **Always launch for `crates/**` changes:**
+   - **Architect** — `.claude/agents/architect.md` — subagent_type: `Architect` — Architectural boundaries, interface design, WASM compatibility
+   - **Security** — `.claude/agents/security.md` — subagent_type: `Security Reviewer` — Input validation, resource limits, deserialization safety
+   - **BE** — `.claude/agents/be.md` — subagent_type: `Backend Engineer` — Rust code quality, error handling, test coverage, logic bugs
 
-3. Collect all findings from dispatched agents
-4. Present a unified review summary grouped by severity (Critical > High > Major > Medium > Minor > Low > Info)
-5. If any Critical or High findings exist, flag them clearly and halt until addressed
+   **Conditionally launch (check changed file paths):**
+   - **FE** — `.claude/agents/fe.md` — subagent_type: `Frontend Engineer` — if any file in `frontend/**`
+   - **A11y** — `.claude/agents/a11y.md` — subagent_type: `Accessibility Reviewer` — if any file in `frontend/**`
+   - **UX** — `.claude/agents/ux.md` — subagent_type: `UX Reviewer` — if any file in `frontend/**`
+   - **DevOps** — `.claude/agents/devops.md` — subagent_type: `DevOps Engineer` — if any file in `Dockerfile`, `.github/**`, `.devcontainer/**`
 
-## Phase 2: Persist
+5. Collect all findings from dispatched agents
+6. Present a unified review summary grouped by severity (Critical > High > Major > Medium > Minor > Low > Info)
+7. If any Critical or High findings exist, flag them clearly and halt until addressed
 
-Findings must be persisted before remediation begins — they are the source of truth for what needs fixing.
+## Spec Review Mode
 
-1. For **spec reviews**: append a `## Review Findings` section to the spec file with all findings, including:
-   - Finding ID (sequential: RF-001, RF-002, ...)
-   - Source agent (Architect, Security, etc.)
-   - Severity
-   - Issue description
-   - Recommended fix
-   - Status: `open` | `resolved` | `wont-fix` (with rationale)
-2. For **code reviews**: create or append to a review comment on the PR, or if no PR, write findings to a `docs/superpowers/reviews/YYYY-MM-DD-<topic>.md` file
-3. Commit the persisted findings
+When the argument is a spec directory:
+1. Read all `.md` files in the specified directory
+2. Launch **all** reviewer agents in parallel (no conditional filtering — specs touch all domains)
+3. Add to each agent's prompt: "You are reviewing specification documents (not code). Apply your checklist to what will be built — flag requirements that would lead to violations if implemented as written, missing constraints, and underspecified requirements."
+
+## Phase 1 Output Format
+
+Present findings in a unified table grouped by severity, with deduplication across agents. Each finding must include:
+- Finding ID (RF-001, RF-002, ...)
+- Source agent(s)
+- Severity (Critical, High, Major, Medium, Minor, Low, Info)
+- Description with file location
+- Recommended fix
+
+## Phase 2: Persist Findings
+
+After presenting the review, **always** persist findings before remediation:
+
+1. For **spec reviews**: append a `## Review Findings` section to the spec file
+2. For **code reviews**: write to `docs/superpowers/reviews/YYYY-MM-DD-<topic>.md`
+3. Every finding includes: ID, source, severity, description, recommended fix, status (`open`)
+4. Commit: `docs: persist review findings for <branch/PR>`
+5. Tell the user: "Findings persisted. Ready to remediate?"
 
 ## Phase 3: Remediate
 
-Address each finding in severity order:
+If the user confirms:
 
-1. **Critical/High** — must be fixed immediately. Apply the recommended fix or propose an alternative.
-2. **Major/Medium** — should be fixed. Apply fixes, or if deferring, document the rationale and mark as `wont-fix` with justification.
-3. **Minor/Low/Info** — fix if straightforward, otherwise note for future work.
-
-For each finding:
-- Apply the fix
-- Update the finding status to `resolved` with a brief note of what was done
-- Commit the fix referencing the finding ID: `fix: address RF-003 — add arena capacity limit`
+1. Work through every issue in severity order (Critical → Low)
+2. For each issue:
+   - Apply the fix
+   - Update finding status to `resolved` with what was done
+   - For out-of-scope items: mark `wont-fix` with rationale
+3. After all fixes, run the full quality gate:
+   ```bash
+   cargo test --workspace
+   cargo clippy --workspace -- -D warnings
+   cargo fmt --check
+   ```
+4. Commit fixes referencing finding IDs
+5. Update and commit the findings file
 
 ## Phase 4: Governance
 
-1. Dispatch `.claude/agents/governance.md` with all findings (especially patterns — recurring issues)
-2. Governance agent reviews and proposes updates to:
-   - `CLAUDE.md` — new conventions or rules to prevent similar issues
-   - `.claude/agents/*.md` — refined agent prompts to catch these issues earlier
-   - CI checks — automated enforcement where possible
-3. Present governance recommendations for approval before applying
-4. If approved, apply changes and commit
+After remediation, **always** run governance:
 
-## Arguments
+1. Launch the **Governance Updater** agent (`.claude/agents/governance.md`, subagent_type: `Governance Updater`), passing:
+   - The full review findings (from the persisted file)
+   - The remediation summary (what was fixed, what patterns emerged)
+2. Present governance proposals to the user
+3. If approved, apply and commit
 
-- `$ARGUMENTS` — optional: file/directory path, PR number, or specific review scope
+## Notes
+
+- Each reviewer only reports issues with confidence ≥ 80 — no nitpicks
+- Pre-existing issues on lines not in the diff should be noted but not counted as blocking
+- Deduplicate overlapping findings across agents before presenting
+- Always use the project-specific `subagent_type` values listed above — NEVER use generic agent types like `feature-dev:code-reviewer`
+
+$ARGUMENTS

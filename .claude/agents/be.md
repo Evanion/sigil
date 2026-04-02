@@ -105,6 +105,8 @@ This project uses Rust Edition 2024. Be aware of:
 - Never `#[derive(Deserialize)]` on types with validating constructors — implement `Deserialize` manually through the constructor. Fields must be private.
 - Every `MAX_*`/`LIMIT_*` constant must have a `test_<constant>_enforced` test.
 - Never serialize arena-local IDs (`NodeId`) — use UUIDs in all persisted formats.
+- Cross-field invariant validation: when two fields must be consistent, validate the relationship in the constructor.
+- Depth guard comparisons: use `>=` (not `>`) against the limit constant.
 
 ## Before You Start
 
