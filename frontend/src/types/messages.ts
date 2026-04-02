@@ -8,6 +8,7 @@
  */
 
 import type { BroadcastCommand, SerializableCommand } from "./commands";
+import type { NodeId, NodeKind, Transform } from "./document";
 
 // ── ClientMessage (client -> server) ──────────────────────────────────
 
@@ -24,7 +25,20 @@ export interface ClientMessageRedo {
   readonly type: "redo";
 }
 
-export type ClientMessage = ClientMessageCommand | ClientMessageUndo | ClientMessageRedo;
+export interface ClientMessageCreateNodeRequest {
+  readonly type: "create_node_request";
+  readonly uuid: string;
+  readonly kind: NodeKind;
+  readonly name: string;
+  readonly page_id: string | null;
+  readonly transform: Transform;
+}
+
+export type ClientMessage =
+  | ClientMessageCommand
+  | ClientMessageUndo
+  | ClientMessageRedo
+  | ClientMessageCreateNodeRequest;
 
 // ── ServerMessage (server -> client) ──────────────────────────────────
 
@@ -50,11 +64,18 @@ export interface ServerMessageDocumentChanged {
   readonly can_redo: boolean;
 }
 
+export interface ServerMessageNodeCreated {
+  readonly type: "node_created";
+  readonly uuid: string;
+  readonly node_id: NodeId;
+}
+
 export type ServerMessage =
   | ServerMessageBroadcast
   | ServerMessageError
   | ServerMessageUndoRedo
-  | ServerMessageDocumentChanged;
+  | ServerMessageDocumentChanged
+  | ServerMessageNodeCreated;
 
 // ── Helper constructors ───────────────────────────────────────────────
 
@@ -71,4 +92,15 @@ export function undoMessage(): ClientMessage {
 /** Create a redo message. */
 export function redoMessage(): ClientMessage {
   return { type: "redo" };
+}
+
+/** Create a create_node_request message. */
+export function createNodeRequestMessage(
+  uuid: string,
+  kind: NodeKind,
+  name: string,
+  pageId: string | null,
+  transform: Transform,
+): ClientMessage {
+  return { type: "create_node_request", uuid, kind, name, page_id: pageId, transform };
 }

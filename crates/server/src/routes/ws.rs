@@ -15,7 +15,10 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
+use agent_designer_core::command::CompoundCommand;
 use agent_designer_core::wire::{BroadcastCommand, SerializableCommand};
+use agent_designer_core::{NodeId, NodeKind, PageId, Transform};
+use uuid::Uuid;
 
 use crate::dispatch;
 use crate::state::{AppState, BroadcastEnvelope, BroadcastPayload, MAX_WS_MESSAGE_SIZE};
@@ -30,6 +33,18 @@ pub enum ClientMessage {
     Undo,
     /// Request redo of the last undone command.
     Redo,
+    /// Client requests node creation. The server assigns the `NodeId`.
+    ///
+    /// The client provides a UUID, kind, name, optional page, and transform
+    /// as JSON values. The server deserializes them, creates the node via
+    /// `Document::execute`, and returns the assigned `NodeId`.
+    CreateNodeRequest {
+        uuid: Uuid,
+        kind: serde_json::Value,
+        name: String,
+        page_id: Option<Uuid>,
+        transform: serde_json::Value,
+    },
 }
 
 /// Messages sent from the server to connected clients over WebSocket.
@@ -45,6 +60,9 @@ pub enum ServerMessage {
     /// The document state changed (e.g. via another client's undo/redo).
     /// Receiving clients should update their undo/redo UI state.
     DocumentChanged { can_undo: bool, can_redo: bool },
+    /// A node was created in response to a `CreateNodeRequest`.
+    /// Sent only to the originating client with the server-assigned `NodeId`.
+    NodeCreated { uuid: Uuid, node_id: NodeId },
 }
 
 /// Returns `true` if the given origin is acceptable for WebSocket connections.
@@ -303,7 +321,7 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                 Err(e) => {
                     tracing::warn!("undo failed: {e}");
                     Some(ServerMessage::Error {
-                        message: format!("undo failed: {e}"),
+                        message: "undo failed".to_string(),
                     })
                 }
             }
@@ -341,10 +359,146 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                 Err(e) => {
                     tracing::warn!("redo failed: {e}");
                     Some(ServerMessage::Error {
-                        message: format!("redo failed: {e}"),
+                        message: "redo failed".to_string(),
                     })
                 }
             }
         }
+        ClientMessage::CreateNodeRequest {
+            uuid,
+            kind,
+            name,
+            page_id,
+            transform,
+        } => Some(process_create_node_request(
+            state, client_id, uuid, kind, name, page_id, transform,
+        )),
     }
+}
+
+/// Handles a `CreateNodeRequest`: deserializes kind/transform, creates the node
+/// and sets its transform atomically via a `CompoundCommand`, broadcasts to
+/// other clients, and returns `NodeCreated` to the originator.
+///
+/// RF-003/RF-004/RF-006: The `CreateNode` and `SetTransform` commands are wrapped
+/// in a `CompoundCommand` so they execute as a single atomic unit with one undo
+/// entry. If `SetTransform` fails, `CreateNode` is rolled back automatically.
+fn process_create_node_request(
+    state: &AppState,
+    client_id: u64,
+    uuid: Uuid,
+    kind_value: serde_json::Value,
+    name: String,
+    page_id: Option<Uuid>,
+    transform_value: serde_json::Value,
+) -> ServerMessage {
+    // RF-007: Deserialize kind from JSON. Log detail, return generic message.
+    let kind: NodeKind = match serde_json::from_value(kind_value) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!("invalid node kind in create_node_request: {e}");
+            return ServerMessage::Error {
+                message: "invalid node kind".to_string(),
+            };
+        }
+    };
+
+    // RF-007: Deserialize transform from JSON. Log detail, return generic message.
+    let transform: Transform = match serde_json::from_value(transform_value) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("invalid transform in create_node_request: {e}");
+            return ServerMessage::Error {
+                message: "invalid transform".to_string(),
+            };
+        }
+    };
+
+    let page_id_typed = page_id.map(PageId::new);
+
+    let mut doc_guard = acquire_document_lock(state);
+
+    // Peek at the NodeId that the arena will assign, so we can build the
+    // SetTransform command before executing CreateNode.
+    let predicted_id = match doc_guard.arena.peek_next_id() {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::warn!("arena capacity exceeded: {e}");
+            return ServerMessage::Error {
+                message: "node creation failed: capacity exceeded".to_string(),
+            };
+        }
+    };
+
+    // Build the CreateNode command. The placeholder NodeId(0,0) is overwritten
+    // by the arena on insert.
+    let create_cmd = agent_designer_core::commands::node_commands::CreateNode {
+        node_id: NodeId::new(0, 0),
+        uuid,
+        kind: kind.clone(),
+        name: name.clone(),
+        page_id: page_id_typed,
+    };
+
+    // Build the SetTransform command using the predicted NodeId and the
+    // known default transform (what a freshly created node has).
+    let set_transform_cmd = agent_designer_core::commands::style_commands::SetTransform {
+        node_id: predicted_id,
+        new_transform: transform,
+        old_transform: Transform::default(),
+    };
+
+    // RF-003/RF-004/RF-006: Wrap both commands in a CompoundCommand for
+    // atomic execution with a single undo entry and automatic rollback.
+    let compound = match CompoundCommand::new(
+        vec![Box::new(create_cmd), Box::new(set_transform_cmd)],
+        "Create node".to_string(),
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("failed to build compound command: {e}");
+            return ServerMessage::Error {
+                message: "internal error: failed to build compound command".to_string(),
+            };
+        }
+    };
+
+    if let Err(e) = doc_guard.execute(Box::new(compound)) {
+        tracing::warn!("atomic create_node_request failed: {e}");
+        return ServerMessage::Error {
+            message: "node creation failed".to_string(),
+        };
+    }
+
+    // Look up the server-assigned NodeId after the compound succeeds.
+    let Some(node_id) = doc_guard.arena.id_by_uuid(&uuid) else {
+        tracing::error!("node created but UUID not found in arena -- this is a bug");
+        return ServerMessage::Error {
+            message: "internal error: node not found after creation".to_string(),
+        };
+    };
+
+    drop(doc_guard); // Release lock before broadcast
+    state.signal_dirty();
+
+    // RF-006: Broadcast includes the transform so other clients get full state.
+    let broadcast = BroadcastCommand::NodeCreatedWithTransform {
+        uuid,
+        kind,
+        name,
+        page_id: page_id_typed,
+        transform,
+    };
+    if state
+        .broadcast_tx
+        .send(BroadcastEnvelope {
+            sender_id: client_id,
+            payload: BroadcastPayload::Command(Box::new(broadcast)),
+        })
+        .is_err()
+    {
+        tracing::debug!("no broadcast receivers connected");
+    }
+
+    ServerMessage::NodeCreated { uuid, node_id }
 }

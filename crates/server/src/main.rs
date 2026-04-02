@@ -38,7 +38,15 @@ async fn main() -> anyhow::Result<()> {
         AppState::new_with_document_and_workfile(doc, workfile_path)
     } else {
         tracing::info!("no WORKFILE configured — running in-memory mode");
-        AppState::new()
+        // Create a default page so there's something to draw on
+        let state = AppState::new();
+        {
+            let mut doc = state.document.lock().expect("lock for default page");
+            let page_id = agent_designer_core::PageId::new(uuid::Uuid::new_v4());
+            let page = agent_designer_core::Page::new(page_id, "Page 1".to_string());
+            doc.add_page(page).expect("add default page");
+        }
+        state
     };
 
     // Take the persistence handle and dirty_tx before moving state into the app.

@@ -186,6 +186,15 @@ pub enum BroadcastCommand {
         name: String,
         page_id: Option<PageId>,
     },
+    /// A node was created with an initial transform (atomic compound operation).
+    /// Clients receiving this should create the node AND apply the transform.
+    NodeCreatedWithTransform {
+        uuid: Uuid,
+        kind: NodeKind,
+        name: String,
+        page_id: Option<PageId>,
+        transform: Transform,
+    },
     DeleteNode {
         node_id: NodeId,
     },

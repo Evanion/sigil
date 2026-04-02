@@ -47,6 +47,10 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
     let app = Router::new()
         .route("/health", get(routes::health::health))
         .route("/api/document", get(routes::document::get_document_info))
+        .route(
+            "/api/document/full",
+            get(routes::document::get_document_full),
+        )
         .route("/ws", get(routes::ws::ws_handler))
         .layer(cors)
         .with_state(state);

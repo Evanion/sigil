@@ -7,10 +7,28 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mountAppShell } from "../app-shell";
 import type { DocumentStore } from "../../store/document-store";
+import type { Subscriber } from "../../store/document-store";
 
 /** Minimal mock store that satisfies the DocumentStore interface. */
-function createMockStore(overrides?: Partial<DocumentStore>): DocumentStore {
-  return {
+function createMockStore(overrides?: Partial<DocumentStore>): DocumentStore & {
+  /** Trigger all registered subscribers (simulates a state change). */
+  triggerSubscribers: () => void;
+  /** Spy for getSelectedNodeId that can be updated. */
+  selectedNodeIdValue: string | null;
+} {
+  const subscribers = new Set<Subscriber>();
+  const selectedNodeIdValue: string | null = null;
+
+  const store: DocumentStore & {
+    triggerSubscribers: () => void;
+    selectedNodeIdValue: string | null;
+  } = {
+    selectedNodeIdValue,
+    triggerSubscribers: () => {
+      for (const fn of subscribers) {
+        fn();
+      }
+    },
     getInfo: vi.fn().mockReturnValue(null),
     getAllNodes: vi.fn().mockReturnValue(new Map()),
     getNodeByUuid: vi.fn().mockReturnValue(undefined),
@@ -21,11 +39,22 @@ function createMockStore(overrides?: Partial<DocumentStore>): DocumentStore {
     sendCommand: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
-    subscribe: vi.fn().mockReturnValue(vi.fn()),
+    getSelectedNodeId: vi.fn().mockImplementation(() => store.selectedNodeIdValue),
+    select: vi.fn(),
+    getActivePage: vi.fn().mockReturnValue(undefined),
+    createNode: vi.fn().mockReturnValue("mock-uuid"),
+    subscribe: vi.fn().mockImplementation((fn: Subscriber) => {
+      subscribers.add(fn);
+      return () => {
+        subscribers.delete(fn);
+      };
+    }),
     loadInitialState: vi.fn().mockResolvedValue(undefined),
     destroy: vi.fn(),
     ...overrides,
   };
+
+  return store;
 }
 
 /**
@@ -55,7 +84,7 @@ function setupDomStubs(): void {
 describe("app-shell accessibility", () => {
   let root: HTMLElement;
   let cleanup: () => void;
-  let store: DocumentStore;
+  let store: ReturnType<typeof createMockStore>;
 
   beforeEach(() => {
     setupDomStubs();
@@ -153,6 +182,36 @@ describe("app-shell accessibility", () => {
     });
   });
 
+  // ── RF-011: aria-pressed on tool buttons ──────────────────────────
+
+  describe("RF-011: aria-pressed on tool buttons", () => {
+    it("should set aria-pressed=true on the active tool button", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      // Default is select (first button)
+      expect(buttons?.[0]?.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("should set aria-pressed=false on inactive tool buttons", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      for (let i = 1; i < (buttons?.length ?? 0); i++) {
+        expect(buttons?.[i]?.getAttribute("aria-pressed")).toBe("false");
+      }
+    });
+
+    it("should update aria-pressed when tool changes", () => {
+      // Switch to rectangle tool
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      // V=false, F=false, R=true, O=false
+      expect(buttons?.[0]?.getAttribute("aria-pressed")).toBe("false");
+      expect(buttons?.[2]?.getAttribute("aria-pressed")).toBe("true");
+    });
+  });
+
   // ── RF-011: semantic heading elements ─────────────────────────────
 
   describe("RF-011: semantic heading elements", () => {
@@ -171,6 +230,153 @@ describe("app-shell accessibility", () => {
       const headings = root.querySelectorAll("h2.panel__heading");
       const texts = Array.from(headings).map((h) => h.textContent);
       expect(texts).toContain("PROPERTIES");
+    });
+  });
+
+  // ── RF-012: roving tabindex on toolbar buttons ────────────────────
+
+  describe("RF-012: roving tabindex on toolbar buttons", () => {
+    it("should set tabindex=0 on the active tool button and tabindex=-1 on others", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      // Default active = select (first button)
+      expect(buttons?.[0]?.getAttribute("tabindex")).toBe("0");
+      expect(buttons?.[1]?.getAttribute("tabindex")).toBe("-1");
+      expect(buttons?.[2]?.getAttribute("tabindex")).toBe("-1");
+      expect(buttons?.[3]?.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("should update roving tabindex when tool changes", () => {
+      // Switch to rectangle tool (index 2)
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      expect(buttons?.[0]?.getAttribute("tabindex")).toBe("-1");
+      expect(buttons?.[2]?.getAttribute("tabindex")).toBe("0");
+    });
+
+    it("should move focus with ArrowDown within toolbar", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      if (!buttons || buttons.length === 0) return;
+
+      // Focus the first button
+      (buttons[0] as HTMLElement).focus();
+
+      // Dispatch ArrowDown on the toolbar
+      const event = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+      toolbar?.dispatchEvent(event);
+
+      // The second button should now have tabindex=0
+      expect(buttons[1]?.getAttribute("tabindex")).toBe("0");
+      expect(buttons[0]?.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("should move focus with ArrowUp within toolbar", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      if (!buttons || buttons.length === 0) return;
+
+      // Focus the second button first
+      (buttons[0] as HTMLElement).focus();
+      // Move to second
+      toolbar?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+      // Now move up
+      toolbar?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+
+      expect(buttons[0]?.getAttribute("tabindex")).toBe("0");
+      expect(buttons[1]?.getAttribute("tabindex")).toBe("-1");
+    });
+
+    it("should wrap around when pressing ArrowDown on last button", () => {
+      const toolbar = root.querySelector(".toolbar");
+      const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
+      if (!buttons || buttons.length === 0) return;
+
+      // Focus the last button
+      const lastIndex = buttons.length - 1;
+      (buttons[lastIndex] as HTMLElement).focus();
+      // Set tabindex correctly for the focused button
+      (buttons[lastIndex] as HTMLElement).setAttribute("tabindex", "0");
+
+      toolbar?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+
+      expect(buttons[0]?.getAttribute("tabindex")).toBe("0");
+    });
+  });
+
+  // ── RF-013: aria-live announcements ──────────────────────────────
+
+  describe("RF-013: aria-live announcements", () => {
+    it("should have a visually-hidden aria-live region", () => {
+      const liveRegion = root.querySelector("[aria-live='polite']");
+      expect(liveRegion).not.toBeNull();
+      expect(liveRegion?.className).toContain("sr-only");
+    });
+
+    it("should announce initial tool on mount", () => {
+      const liveRegion = root.querySelector("[aria-live='polite']");
+      expect(liveRegion?.textContent).toBe("Select tool active");
+    });
+
+    it("should announce tool change when switching tools", () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+
+      const liveRegion = root.querySelector("[aria-live='polite']");
+      expect(liveRegion?.textContent).toBe("Rectangle tool active");
+    });
+
+    it("should announce selection change when a node is selected", () => {
+      // Mock getNodeByUuid to return a node
+      const mockNode = {
+        id: { index: 1, generation: 0 },
+        uuid: "node-1",
+        kind: {
+          type: "rectangle" as const,
+          corner_radii: [0, 0, 0, 0] as [number, number, number, number],
+        },
+        name: "Rectangle 1",
+        parent: null,
+        children: [],
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal" as const, value: 1 },
+          blend_mode: "normal" as const,
+          effects: [],
+        },
+        constraints: { horizontal: "start" as const, vertical: "start" as const },
+        grid_placement: null,
+        visible: true,
+        locked: false,
+      };
+      (store.getNodeByUuid as ReturnType<typeof vi.fn>).mockReturnValue(mockNode);
+
+      // Simulate selection change
+      store.selectedNodeIdValue = "node-1";
+      store.triggerSubscribers();
+
+      const liveRegion = root.querySelector("[aria-live='polite']");
+      expect(liveRegion?.textContent).toBe("Rectangle 1 selected");
+    });
+
+    it("should announce when selection is cleared", () => {
+      // First select something
+      store.selectedNodeIdValue = "node-1";
+      (store.getNodeByUuid as ReturnType<typeof vi.fn>).mockReturnValue({
+        name: "Rect",
+      });
+      store.triggerSubscribers();
+
+      // Then clear
+      store.selectedNodeIdValue = null;
+      store.triggerSubscribers();
+
+      const liveRegion = root.querySelector("[aria-live='polite']");
+      expect(liveRegion?.textContent).toBe("Selection cleared");
     });
   });
 

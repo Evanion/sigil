@@ -4,6 +4,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
+use agent_designer_core::serialize::page_to_serialized;
+
 use crate::state::AppState;
 
 #[derive(Serialize)]
@@ -13,6 +15,22 @@ pub struct DocumentInfo {
     pub node_count: usize,
     pub can_undo: bool,
     pub can_redo: bool,
+}
+
+/// A page entry in the full document response.
+#[derive(Serialize)]
+pub struct FullPageEntry {
+    pub id: String,
+    pub name: String,
+    pub nodes: Vec<agent_designer_core::SerializedNode>,
+    pub transitions: Vec<agent_designer_core::SerializedTransition>,
+}
+
+/// Response shape for `GET /api/document/full`.
+#[derive(Serialize)]
+pub struct FullDocumentResponse {
+    pub info: DocumentInfo,
+    pub pages: Vec<FullPageEntry>,
 }
 
 /// Returns basic info about the current document.
@@ -36,4 +54,57 @@ pub async fn get_document_info(State(state): State<AppState>) -> Response {
     };
     drop(doc_guard);
     (StatusCode::OK, Json(info)).into_response()
+}
+
+/// Returns the full document state: info + all pages with serialized nodes
+/// and transitions.
+///
+/// RF-008: Clones all needed data under the lock, releases it, THEN serializes
+/// to JSON. This minimizes lock hold time and prevents serialization from
+/// blocking other clients.
+pub async fn get_document_full(State(state): State<AppState>) -> Response {
+    let (info, pages) = {
+        let doc_guard = match state.document.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("document mutex poisoned in get_document_full, recovering");
+                poisoned.into_inner()
+            }
+        };
+
+        let info = DocumentInfo {
+            name: doc_guard.metadata.name.clone(),
+            page_count: doc_guard.pages.len(),
+            node_count: doc_guard.arena.len(),
+            can_undo: doc_guard.can_undo(),
+            can_redo: doc_guard.can_redo(),
+        };
+
+        let mut pages = Vec::with_capacity(doc_guard.pages.len());
+        for page in &doc_guard.pages {
+            match page_to_serialized(page, &doc_guard.arena, &doc_guard.transitions) {
+                Ok(serialized) => {
+                    pages.push(FullPageEntry {
+                        id: serialized.id.to_string(),
+                        name: serialized.name,
+                        nodes: serialized.nodes,
+                        transitions: serialized.transitions,
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("failed to serialize page: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "serialization failed" })),
+                    )
+                        .into_response();
+                }
+            }
+        }
+
+        (info, pages)
+    }; // lock released here
+
+    // Serialize to JSON response outside the lock.
+    (StatusCode::OK, Json(FullDocumentResponse { info, pages })).into_response()
 }
