@@ -33,7 +33,7 @@ use agent_designer_core::{
 /// Returns an error if the command cannot be converted. Currently all variants
 /// are infallible, but the signature returns `Result` for forward-compatibility
 /// with variants that may require server-side enrichment (e.g., UUID generation).
-#[allow(clippy::too_many_lines, clippy::unnecessary_wraps)]
+#[allow(dead_code, clippy::too_many_lines, clippy::unnecessary_wraps)]
 pub fn dispatch(cmd: SerializableCommand) -> anyhow::Result<Box<dyn Command>> {
     let command: Box<dyn Command> = match cmd {
         // ── Node commands ────────────────────────────────────────────
