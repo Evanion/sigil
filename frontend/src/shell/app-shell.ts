@@ -574,10 +574,7 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
       // Tool switching shortcuts — only when no modifier keys are held
       // and the event target is not an input or textarea
       const target = e.target;
-      if (
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement
-      ) {
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
 

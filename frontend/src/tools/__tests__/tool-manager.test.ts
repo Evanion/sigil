@@ -1,10 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import {
-  createToolManager,
-  type Tool,
-  type ToolEvent,
-  type ToolType,
-} from "../tool-manager";
+import { createToolManager, type Tool, type ToolEvent, type ToolType } from "../tool-manager";
 
 /** Helper to create a minimal ToolEvent. */
 function makeEvent(overrides?: Partial<ToolEvent>): ToolEvent {

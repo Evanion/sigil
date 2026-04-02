@@ -88,9 +88,9 @@ describe("renderer", () => {
       // Selection handles are drawn as fillRect calls with SELECTION_COLOR
       // We should see 8 handle fills (4 corners + 4 edge midpoints)
       const handleFills = calls.filter(
-        (c) => c.method === "fillRect" && calls.some(
-          (sc) => sc.method === "set:fillStyle" && sc.args[0] === "#0d99ff",
-        ),
+        (c) =>
+          c.method === "fillRect" &&
+          calls.some((sc) => sc.method === "set:fillStyle" && sc.args[0] === "#0d99ff"),
       );
       // At minimum we should have the 8 handle rects after the selection highlight
       expect(handleFills.length).toBeGreaterThanOrEqual(8);
@@ -133,9 +133,7 @@ describe("renderer", () => {
       const calls = getCalls(ctx);
       // The node should be drawn at the preview position (200, 200), not (100, 100)
       const fillRectCalls = calls.filter((c) => c.method === "fillRect");
-      const hasPreviewPosition = fillRectCalls.some(
-        (c) => c.args[0] === 200 && c.args[1] === 200,
-      );
+      const hasPreviewPosition = fillRectCalls.some((c) => c.args[0] === 200 && c.args[1] === 200);
       expect(hasPreviewPosition).toBe(true);
     });
   });

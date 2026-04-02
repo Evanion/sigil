@@ -333,7 +333,10 @@ describe("app-shell accessibility", () => {
       const mockNode = {
         id: { index: 1, generation: 0 },
         uuid: "node-1",
-        kind: { type: "rectangle" as const, corner_radii: [0, 0, 0, 0] as [number, number, number, number] },
+        kind: {
+          type: "rectangle" as const,
+          corner_radii: [0, 0, 0, 0] as [number, number, number, number],
+        },
         name: "Rectangle 1",
         parent: null,
         children: [],

@@ -77,11 +77,7 @@ function getEffectiveTransform(
  *
  * Assumes the viewport transform is already applied to the context.
  */
-function drawNode(
-  ctx: CanvasRenderingContext2D,
-  node: DocumentNode,
-  transform: Transform,
-): void {
+function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: Transform): void {
   const { x, y, width, height } = transform;
 
   switch (node.kind.type) {
@@ -208,11 +204,7 @@ function drawSelectionHandles(
  *
  * Uses screen-space dash and line width so the preview does not scale with zoom.
  */
-function drawPreviewRect(
-  ctx: CanvasRenderingContext2D,
-  preview: PreviewRect,
-  zoom: number,
-): void {
+function drawPreviewRect(ctx: CanvasRenderingContext2D, preview: PreviewRect, zoom: number): void {
   const lineWidth = SELECTION_LINE_WIDTH / zoom;
   const dashScale = 1 / zoom;
 

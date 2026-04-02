@@ -190,9 +190,7 @@ describe("app-shell tool wiring", () => {
       document.body.appendChild(input);
       input.focus();
 
-      input.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "r", bubbles: true }),
-      );
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -209,9 +207,7 @@ describe("app-shell tool wiring", () => {
       document.body.appendChild(textarea);
       textarea.focus();
 
-      textarea.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "f", bubbles: true }),
-      );
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "f", bubbles: true }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
