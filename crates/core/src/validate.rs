@@ -85,6 +85,12 @@ pub const MAX_OVERRIDES_PER_INSTANCE: usize = 10_000;
 /// Maximum components per document.
 pub const MAX_COMPONENTS_PER_DOCUMENT: usize = 10_000;
 
+/// Maximum number of points in a polyline approximation for boolean operations.
+pub const MAX_BOOLEAN_OP_POINTS: usize = 1_000_000;
+
+/// Number of segments to approximate a cubic bezier curve for boolean operations.
+pub const BEZIER_APPROXIMATION_SEGMENTS: usize = 16;
+
 /// Maximum grid tracks (columns or rows) per grid layout.
 pub const MAX_GRID_TRACKS: usize = 1_000;
 
