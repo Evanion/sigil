@@ -20,8 +20,6 @@ pub struct AppState {
     /// blocking is not a concern.
     pub document: Arc<Mutex<Document>>,
     /// Broadcast channel for sending commands to all connected WebSocket clients.
-    /// Used by the WebSocket handler (Task 4) to fan out commands to all clients.
-    #[allow(dead_code)]
     pub broadcast_tx: broadcast::Sender<BroadcastCommand>,
 }
 
