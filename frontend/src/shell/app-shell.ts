@@ -537,10 +537,12 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
 
     const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
-    if (isCtrlOrMeta && e.key === "z" && !e.shiftKey) {
+    const key = e.key.toLowerCase();
+
+    if (isCtrlOrMeta && key === "z" && !e.shiftKey) {
       e.preventDefault();
       store.undo();
-    } else if (isCtrlOrMeta && e.key === "z" && e.shiftKey) {
+    } else if (isCtrlOrMeta && key === "z" && e.shiftKey) {
       e.preventDefault();
       store.redo();
     } else if (isCtrlOrMeta && e.key === "y") {
