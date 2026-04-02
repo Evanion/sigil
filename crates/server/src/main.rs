@@ -1,5 +1,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 
+mod state;
+
 use axum::{Router, routing::get};
 use tower_http::services::{ServeDir, ServeFile};
 use tracing_subscriber::EnvFilter;
