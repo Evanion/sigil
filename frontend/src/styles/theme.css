@@ -1,0 +1,41 @@
+/* Dark theme for Sigil design tool.
+ * Overrides Open Props defaults with design-tool-appropriate dark values.
+ * All components use these variables -- no hardcoded colors. */
+
+:root {
+  /* Surface hierarchy */
+  --surface-1: #1e1e1e;
+  --surface-2: #252525;
+  --surface-3: #2c2c2c;
+  --surface-4: #333333;
+
+  /* Text hierarchy */
+  --text-1: #e0e0e0;
+  --text-2: #a0a0a0;
+  --text-3: #666666;
+
+  /* Accent */
+  --accent: #0d99ff;
+  --accent-hover: #38aeff;
+  --accent-active: #0077cc;
+
+  /* Semantic */
+  --danger: #ef4444;
+  --danger-hover: #f87171;
+  --success: #22c55e;
+  --warning: #f59e0b;
+
+  /* Borders */
+  --border-1: #3a3a3a;
+  --border-2: #4a4a4a;
+
+  /* Component-specific */
+  --button-radius: var(--radius-2);
+  --input-radius: var(--radius-2);
+  --panel-radius: 0;
+  --tooltip-radius: var(--radius-2);
+
+  /* Focus ring */
+  --focus-ring: 2px solid var(--accent);
+  --focus-offset: 2px;
+}
