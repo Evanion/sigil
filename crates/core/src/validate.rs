@@ -73,7 +73,63 @@ pub const MAX_TRANSITION_DURATION: f64 = 300.0;
 /// Maximum transitions per document.
 pub const MAX_TRANSITIONS_PER_DOCUMENT: usize = 10_000;
 
+/// Maximum font weight value (CSS range).
+pub const MAX_FONT_WEIGHT: u16 = 1000;
+
+/// Minimum font weight value (CSS range).
+pub const MIN_FONT_WEIGHT: u16 = 1;
+
 // ── Validation Functions ───────────────────────────────────────────────
+
+/// Validates that a float value is finite (not NaN or infinity).
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the value is not finite.
+pub fn validate_finite(name: &str, value: f64) -> Result<(), CoreError> {
+    if !value.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "{name} must be finite, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+/// Recursively walks a JSON value and rejects any Number that converts to NaN or infinity.
+///
+/// Uses an iterative approach with an explicit stack to prevent stack overflow.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any float value is non-finite.
+pub fn validate_floats_in_value(value: &serde_json::Value) -> Result<(), CoreError> {
+    let mut stack = vec![value];
+
+    while let Some(v) = stack.pop() {
+        match v {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64()
+                    && !f.is_finite()
+                {
+                    return Err(CoreError::ValidationError(format!(
+                        "non-finite float value: {f}"
+                    )));
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for item in arr {
+                    stack.push(item);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for child in map.values() {
+                    stack.push(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
 
 /// Validates a node name: max 512 chars, no control characters (U+0000-U+001F).
 ///
@@ -149,6 +205,10 @@ pub fn validate_token_name(name: &str) -> Result<(), CoreError> {
 }
 
 /// Validates an asset reference: must be a relative path with no `..` components, max 256 chars.
+///
+/// Note: This performs lexical validation only. It does not handle URL-encoded
+/// traversal sequences (e.g., `%2e%2e`) or path canonicalization. The server layer
+/// must additionally canonicalize and verify paths resolve within the allowed root.
 ///
 /// # Errors
 /// Returns `CoreError::ValidationError` if the path is invalid.
@@ -576,5 +636,73 @@ mod tests {
     fn test_validate_grid_track_auto() {
         use crate::node::GridTrack;
         assert!(validate_grid_track(&GridTrack::Auto).is_ok());
+    }
+
+    // ── Float validation ─────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_finite_accepts_normal_float() {
+        assert!(validate_finite("x", 42.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_accepts_zero() {
+        assert!(validate_finite("x", 0.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_accepts_negative() {
+        assert!(validate_finite("x", -1.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_nan() {
+        assert!(validate_finite("x", f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_positive_infinity() {
+        assert!(validate_finite("x", f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_negative_infinity() {
+        assert!(validate_finite("x", f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_integer() {
+        let v = serde_json::json!(42);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_normal_float() {
+        let v = serde_json::json!(3.14);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_string() {
+        let v = serde_json::json!("hello");
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_nested_object() {
+        let v = serde_json::json!({"a": {"b": 1.0, "c": [2.0, 3.0]}});
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_null() {
+        let v = serde_json::json!(null);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_bool() {
+        let v = serde_json::json!(true);
+        assert!(validate_floats_in_value(&v).is_ok());
     }
 }

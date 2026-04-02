@@ -1,4 +1,7 @@
 // crates/core/src/path.rs
+// The Command trait's description() returns &str (not &'static str) because
+// CompoundCommand borrows from its String field. Literal returns in other impls
+// trigger this lint unnecessarily.
 #![allow(clippy::unnecessary_literal_bound)]
 
 use serde::{Deserialize, Serialize};
@@ -97,9 +100,9 @@ impl Default for PathData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CornerMode {
-    /// Handles are aligned and equal length.
-    Smooth,
     /// Handles are aligned but can differ in length.
+    Smooth,
+    /// Handles are aligned and equal length.
     Mirrored,
     /// Handles move independently.
     Disconnected,

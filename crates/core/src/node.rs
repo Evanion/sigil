@@ -9,10 +9,10 @@ use crate::id::{ComponentId, NodeId};
 // Re-export path types for backwards compatibility
 pub use crate::path::{FillRule, PathData};
 
-// ── Forward declarations / stubs for Plan 01c types ────────────────────
+// ── Forward declarations / stubs for Plan 01d types ────────────────────
 
 /// Stub for the override map used in component instances.
-/// Plan 01c will replace this with a full implementation.
+/// Plan 01d will replace this with a full implementation.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct OverrideMap {
     pub entries: HashMap<String, serde_json::Value>,
@@ -160,7 +160,7 @@ pub enum GridSpan {
     Line { index: i32 },
     /// Spans a number of tracks from the auto-placed position.
     Span { count: u32 },
-    /// From one line to another (1-based, exclusive end).
+    /// From one line to another (1-based, exclusive end). Negative indices count from the end.
     LineToLine { start: i32, end: i32 },
 }
 

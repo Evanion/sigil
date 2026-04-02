@@ -215,6 +215,16 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_duration_at_exact_max() {
+        assert!(validate_duration(MAX_TRANSITION_DURATION).is_ok());
+    }
+
+    #[test]
+    fn test_validate_duration_zero_is_valid() {
+        assert!(validate_duration(0.0).is_ok());
+    }
+
+    #[test]
     fn test_validate_transition_valid() {
         let t = Transition {
             animation: TransitionAnimation::Dissolve { duration: 0.5 },

@@ -693,6 +693,40 @@ mod tests {
     }
 
     #[test]
+    fn test_history_eviction_at_min_capacity_1() {
+        let mut doc = Document::new("Test".to_string());
+        doc.history = History::new(1);
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Execute 2 commands with max_history=1
+        let cmd1 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Name 0".to_string(),
+            old_name: "Frame".to_string(),
+        };
+        doc.execute(Box::new(cmd1)).expect("execute cmd1");
+
+        let cmd2 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Name 1".to_string(),
+            old_name: "Name 0".to_string(),
+        };
+        doc.execute(Box::new(cmd2)).expect("execute cmd2");
+
+        // Only 1 undo should be possible (the oldest was evicted)
+        assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
+        assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
+    }
+
+    #[test]
     fn test_history_min_capacity_enforced() {
         let h = History::new(0);
         assert_eq!(h.max_history(), 1, "max_history must be at least 1");

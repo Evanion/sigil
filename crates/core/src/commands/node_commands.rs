@@ -1,4 +1,7 @@
 // crates/core/src/commands/node_commands.rs
+// The Command trait's description() returns &str (not &'static str) because
+// CompoundCommand borrows from its String field. Literal returns in other impls
+// trigger this lint unnecessarily.
 #![allow(clippy::unnecessary_literal_bound)]
 
 use crate::command::{Command, SideEffect};
