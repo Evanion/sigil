@@ -1,0 +1,71 @@
+.sigil-dialog__overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 50;
+}
+
+.sigil-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--surface-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-5);
+  min-width: 400px;
+  max-width: 90vw;
+  max-height: 85vh;
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+}
+
+.sigil-dialog__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--size-4);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.sigil-dialog__title {
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-6);
+  color: var(--text-1);
+}
+
+.sigil-dialog__description {
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+  margin-top: var(--size-1);
+  padding: 0 var(--size-4);
+}
+
+.sigil-dialog__body {
+  padding: var(--size-4);
+  overflow-y: auto;
+  flex: 1;
+}
+
+.sigil-dialog__close {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: var(--size-1);
+  border-radius: var(--radius-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sigil-dialog__close:hover {
+  color: var(--text-1);
+}
+
+.sigil-dialog__close:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
