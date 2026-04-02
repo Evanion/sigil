@@ -1,12 +1,13 @@
 // crates/server/src/state.rs
 
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_designer_core::Document;
 use agent_designer_core::wire::BroadcastCommand;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 
 /// Maximum WebSocket message size in bytes (1 MiB).
 pub const MAX_WS_MESSAGE_SIZE: usize = 1_048_576;
@@ -92,10 +93,18 @@ pub struct AppState {
     pub broadcast_tx: broadcast::Sender<BroadcastEnvelope>,
     /// Monotonically increasing client ID counter.
     next_client_id: Arc<AtomicU64>,
+    /// Path to the loaded `.sigil/` workfile directory.
+    /// `None` when running in-memory only (e.g. tests).
+    pub workfile_path: Option<PathBuf>,
+    /// Sender to signal the persistence task that the document has changed.
+    /// `None` when persistence is not configured (in-memory mode).
+    dirty_tx: Option<mpsc::Sender<()>>,
 }
 
 impl AppState {
-    /// Creates a new `AppState` with an empty document.
+    /// Creates a new `AppState` with an empty document and no persistence.
+    ///
+    /// Suitable for tests and in-memory-only operation.
     #[must_use]
     pub fn new() -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
@@ -105,6 +114,63 @@ impl AppState {
             )))),
             broadcast_tx,
             next_client_id: Arc::new(AtomicU64::new(0)),
+            workfile_path: None,
+            dirty_tx: None,
+        }
+    }
+
+    /// Creates a new `AppState` backed by a workfile on disk.
+    ///
+    /// Spawns a background persistence task that debounces dirty signals and
+    /// writes the document to `workfile_path` after a quiet period.
+    #[must_use]
+    pub fn new_with_workfile(workfile_path: PathBuf) -> Self {
+        let document = Arc::new(Mutex::new(SendDocument(Document::new(
+            "Untitled".to_string(),
+        ))));
+        let dirty_tx = crate::persistence::spawn_persistence_task(
+            Arc::clone(&document),
+            workfile_path.clone(),
+        );
+        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+        Self {
+            document,
+            broadcast_tx,
+            next_client_id: Arc::new(AtomicU64::new(0)),
+            workfile_path: Some(workfile_path),
+            dirty_tx: Some(dirty_tx),
+        }
+    }
+
+    /// Creates an `AppState` with a pre-loaded document and workfile persistence.
+    ///
+    /// Used on startup when loading an existing workfile from disk.
+    #[must_use]
+    pub fn new_with_document_and_workfile(doc: Document, workfile_path: PathBuf) -> Self {
+        let document = Arc::new(Mutex::new(SendDocument(doc)));
+        let dirty_tx = crate::persistence::spawn_persistence_task(
+            Arc::clone(&document),
+            workfile_path.clone(),
+        );
+        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+        Self {
+            document,
+            broadcast_tx,
+            next_client_id: Arc::new(AtomicU64::new(0)),
+            workfile_path: Some(workfile_path),
+            dirty_tx: Some(dirty_tx),
+        }
+    }
+
+    /// Signals the persistence task that the document has been modified.
+    ///
+    /// This is fire-and-forget: if the channel is full, a save is already
+    /// pending. No-op if persistence is not configured (in-memory mode).
+    pub fn signal_dirty(&self) {
+        if let Some(ref tx) = self.dirty_tx {
+            // Use try_send to avoid blocking. If the channel is full,
+            // a save is already pending so the signal can be dropped.
+            let _ = tx.try_send(());
         }
     }
 
