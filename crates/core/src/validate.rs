@@ -64,6 +64,15 @@ pub const DEFAULT_MAX_HISTORY: usize = 500;
 /// Maximum root nodes per page.
 pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
 
+/// Maximum grid tracks (columns or rows) per grid layout.
+pub const MAX_GRID_TRACKS: usize = 1_000;
+
+/// Maximum transition duration in seconds.
+pub const MAX_TRANSITION_DURATION: f64 = 300.0;
+
+/// Maximum transitions per document.
+pub const MAX_TRANSITIONS_PER_DOCUMENT: usize = 10_000;
+
 // ── Validation Functions ───────────────────────────────────────────────
 
 /// Validates a node name: max 512 chars, no control characters (U+0000-U+001F).

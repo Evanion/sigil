@@ -34,6 +34,8 @@ pub struct SerializedNode {
     pub transform: serde_json::Value,
     pub style: serde_json::Value,
     pub constraints: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub grid_placement: Option<serde_json::Value>,
     pub visible: bool,
     pub locked: bool,
 }
@@ -131,6 +133,17 @@ pub fn nodes_to_serialized(
         let constraints_value = serde_json::to_value(node.constraints).map_err(|e| {
             CoreError::SerializationError(format!("failed to serialize constraints: {e}"))
         })?;
+        let grid_placement_value = node
+            .grid_placement
+            .as_ref()
+            .map(|gp| {
+                serde_json::to_value(gp).map_err(|e| {
+                    CoreError::SerializationError(format!(
+                        "failed to serialize grid_placement: {e}"
+                    ))
+                })
+            })
+            .transpose()?;
 
         result.push(SerializedNode {
             id: node.uuid,
@@ -141,6 +154,7 @@ pub fn nodes_to_serialized(
             transform: transform_value,
             style: style_value,
             constraints: constraints_value,
+            grid_placement: grid_placement_value,
             visible: node.visible,
             locked: node.locked,
         });

@@ -6,6 +6,9 @@ use uuid::Uuid;
 
 use crate::id::{ComponentId, NodeId};
 
+// Re-export path types for backwards compatibility
+pub use crate::path::{FillRule, PathData};
+
 // ── Forward declarations / stubs for Plan 01c types ────────────────────
 
 /// Stub for the override map used in component instances.
@@ -15,37 +18,12 @@ pub struct OverrideMap {
     pub entries: HashMap<String, serde_json::Value>,
 }
 
-/// Stub for path geometry data.
-/// Plan 01c will replace this with `SubPath`, `PathSegment`, `FillRule`, etc.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PathData {
-    pub subpaths: Vec<serde_json::Value>,
-    pub fill_rule: FillRule,
-}
-
-impl Default for PathData {
-    fn default() -> Self {
-        Self {
-            subpaths: Vec::new(),
-            fill_rule: FillRule::EvenOdd,
-        }
-    }
-}
-
-/// Fill rule for path rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillRule {
-    EvenOdd,
-    NonZero,
-}
-
-/// Layout mode for a frame. Currently only supports flex layout;
-/// additional modes (grid, absolute) may be added in the future.
+/// Layout mode for a frame's children.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum LayoutMode {
     Flex(FlexLayout),
+    Grid(GridLayout),
 }
 
 /// Flex layout configuration for frame children.
@@ -120,6 +98,86 @@ pub enum JustifyContent {
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
+}
+
+/// Justify items alignment for grid layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JustifyItems {
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+/// A grid track definition (column or row).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GridTrack {
+    /// Fixed size in pixels.
+    Fixed { size: f64 },
+    /// Fractional unit (like CSS `fr`).
+    Fractional { fraction: f64 },
+    /// Auto-sized based on content.
+    Auto,
+    /// Minimum and maximum size range.
+    MinMax { min: f64, max: f64 },
+}
+
+/// Grid layout configuration for frame children.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GridLayout {
+    pub columns: Vec<GridTrack>,
+    pub rows: Vec<GridTrack>,
+    pub column_gap: f64,
+    pub row_gap: f64,
+    pub padding: Padding,
+    pub align_items: AlignItems,
+    pub justify_items: JustifyItems,
+}
+
+impl Default for GridLayout {
+    fn default() -> Self {
+        Self {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            column_gap: 0.0,
+            row_gap: 0.0,
+            padding: Padding::default(),
+            align_items: AlignItems::Start,
+            justify_items: JustifyItems::Start,
+        }
+    }
+}
+
+/// How a child is placed within a grid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GridSpan {
+    /// Automatically placed by the grid algorithm.
+    Auto,
+    /// Placed at a specific grid line (1-based).
+    Line { index: i32 },
+    /// Spans a number of tracks from the auto-placed position.
+    Span { count: u32 },
+    /// From one line to another (1-based, exclusive end).
+    LineToLine { start: i32, end: i32 },
+}
+
+/// Grid placement for a child node within a grid parent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GridPlacement {
+    pub column: GridSpan,
+    pub row: GridSpan,
+}
+
+impl Default for GridPlacement {
+    fn default() -> Self {
+        Self {
+            column: GridSpan::Auto,
+            row: GridSpan::Auto,
+        }
+    }
 }
 
 // ── Text Style ─────────────────────────────────────────────────────────
@@ -516,6 +574,7 @@ pub struct Node {
     pub transform: Transform,
     pub style: Style,
     pub constraints: Constraints,
+    pub grid_placement: Option<GridPlacement>,
     pub visible: bool,
     pub locked: bool,
 }
@@ -551,6 +610,7 @@ impl Node {
             transform: Transform::default(),
             style: Style::default(),
             constraints: Constraints::default(),
+            grid_placement: None,
             visible: true,
             locked: false,
         })
@@ -1195,6 +1255,7 @@ mod tests {
             },
             visible: true,
             locked: false,
+            grid_placement: None,
         };
         let json = serde_json::to_string_pretty(&node).expect("serialize");
         let deserialized: Node = serde_json::from_str(&json).expect("deserialize");
@@ -1237,5 +1298,88 @@ mod tests {
         let json = serde_json::to_string(&c).expect("serialize");
         let deserialized: Constraints = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, deserialized);
+    }
+
+    // ── Grid layout types ─────────────────────────────────────────────
+
+    #[test]
+    fn test_grid_layout_default() {
+        let grid = GridLayout::default();
+        assert!(grid.columns.is_empty());
+        assert!(grid.rows.is_empty());
+        assert_eq!(grid.column_gap, 0.0);
+    }
+
+    #[test]
+    fn test_grid_layout_serde_round_trip() {
+        let grid = GridLayout {
+            columns: vec![
+                GridTrack::Fixed { size: 100.0 },
+                GridTrack::Fractional { fraction: 1.0 },
+                GridTrack::Auto,
+            ],
+            rows: vec![GridTrack::MinMax {
+                min: 50.0,
+                max: 200.0,
+            }],
+            column_gap: 10.0,
+            row_gap: 10.0,
+            padding: Padding::default(),
+            align_items: AlignItems::Center,
+            justify_items: JustifyItems::Stretch,
+        };
+        let json = serde_json::to_string(&grid).expect("serialize");
+        let deserialized: GridLayout = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(grid, deserialized);
+    }
+
+    #[test]
+    fn test_layout_mode_grid_serde() {
+        let mode = LayoutMode::Grid(GridLayout::default());
+        let json = serde_json::to_string(&mode).expect("serialize");
+        assert!(json.contains("\"mode\":\"grid\""));
+        let deserialized: LayoutMode = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(mode, deserialized);
+    }
+
+    #[test]
+    fn test_grid_placement_default() {
+        let placement = GridPlacement::default();
+        assert_eq!(placement.column, GridSpan::Auto);
+        assert_eq!(placement.row, GridSpan::Auto);
+    }
+
+    #[test]
+    fn test_grid_span_serde_round_trip() {
+        let spans = vec![
+            GridSpan::Auto,
+            GridSpan::Line { index: 2 },
+            GridSpan::Span { count: 3 },
+            GridSpan::LineToLine { start: 1, end: 4 },
+        ];
+        for span in spans {
+            let json = serde_json::to_string(&span).expect("serialize");
+            let deserialized: GridSpan = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(span, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_node_with_grid_placement() {
+        let mut node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            "Rect".to_string(),
+        )
+        .expect("create node");
+        assert!(node.grid_placement.is_none());
+        node.grid_placement = Some(GridPlacement {
+            column: GridSpan::Span { count: 2 },
+            row: GridSpan::Line { index: 1 },
+        });
+        assert!(node.grid_placement.is_some());
     }
 }

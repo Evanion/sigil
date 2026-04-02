@@ -1,0 +1,252 @@
+// crates/core/src/path.rs
+#![allow(clippy::unnecessary_literal_bound)]
+
+use serde::{Deserialize, Serialize};
+
+use crate::error::CoreError;
+use crate::node::Point;
+use crate::validate::{MAX_SEGMENTS_PER_SUBPATH, MAX_SUBPATHS_PER_PATH};
+
+/// A segment in a vector path.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum PathSegment {
+    /// Move the pen to a new position without drawing.
+    MoveTo { point: Point },
+    /// Draw a straight line to the given point.
+    LineTo { point: Point },
+    /// Draw a cubic bezier curve.
+    CubicTo {
+        control1: Point,
+        control2: Point,
+        end: Point,
+    },
+    /// Close the current subpath by drawing a line back to the start.
+    Close,
+}
+
+/// A continuous sequence of path segments.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SubPath {
+    pub segments: Vec<PathSegment>,
+    pub closed: bool,
+}
+
+impl SubPath {
+    /// Creates a new subpath, validating the segment count.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if segments exceed the maximum.
+    pub fn new(segments: Vec<PathSegment>, closed: bool) -> Result<Self, CoreError> {
+        if segments.len() > MAX_SEGMENTS_PER_SUBPATH {
+            return Err(CoreError::ValidationError(format!(
+                "subpath has {} segments (max {MAX_SEGMENTS_PER_SUBPATH})",
+                segments.len()
+            )));
+        }
+        Ok(Self { segments, closed })
+    }
+}
+
+/// Fill rule for path rendering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FillRule {
+    /// Even-odd fill rule.
+    EvenOdd,
+    /// Non-zero winding fill rule.
+    NonZero,
+}
+
+/// Vector path geometry data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PathData {
+    pub subpaths: Vec<SubPath>,
+    pub fill_rule: FillRule,
+}
+
+impl PathData {
+    /// Creates a new `PathData`, validating subpath count.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if subpaths exceed the maximum.
+    pub fn new(subpaths: Vec<SubPath>, fill_rule: FillRule) -> Result<Self, CoreError> {
+        if subpaths.len() > MAX_SUBPATHS_PER_PATH {
+            return Err(CoreError::ValidationError(format!(
+                "path has {} subpaths (max {MAX_SUBPATHS_PER_PATH})",
+                subpaths.len()
+            )));
+        }
+        Ok(Self {
+            subpaths,
+            fill_rule,
+        })
+    }
+}
+
+impl Default for PathData {
+    fn default() -> Self {
+        Self {
+            subpaths: Vec::new(),
+            fill_rule: FillRule::EvenOdd,
+        }
+    }
+}
+
+/// Corner mode for anchor point handles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerMode {
+    /// Handles are aligned and equal length.
+    Smooth,
+    /// Handles are aligned but can differ in length.
+    Mirrored,
+    /// Handles move independently.
+    Disconnected,
+    /// No handles — straight corner.
+    Straight,
+}
+
+/// An anchor point in the path editing UI.
+///
+/// This is a runtime-only editing view — not serialized to the file format.
+/// The serialized form is `PathSegment`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnchorPoint {
+    pub position: Point,
+    pub handle_in: Option<Point>,
+    pub handle_out: Option<Point>,
+    pub corner_mode: CornerMode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_subpath_new_valid() {
+        let segments = vec![
+            PathSegment::MoveTo {
+                point: Point::new(0.0, 0.0),
+            },
+            PathSegment::LineTo {
+                point: Point::new(100.0, 0.0),
+            },
+            PathSegment::Close,
+        ];
+        let subpath = SubPath::new(segments, true).expect("valid subpath");
+        assert!(subpath.closed);
+        assert_eq!(subpath.segments.len(), 3);
+    }
+
+    #[test]
+    fn test_subpath_exceeds_max_segments() {
+        let segments: Vec<PathSegment> = (0..MAX_SEGMENTS_PER_SUBPATH + 1)
+            .map(|i| PathSegment::LineTo {
+                point: Point::new(i as f64, 0.0),
+            })
+            .collect();
+        assert!(SubPath::new(segments, false).is_err());
+    }
+
+    #[test]
+    fn test_path_data_new_valid() {
+        let subpath = SubPath::new(
+            vec![PathSegment::MoveTo {
+                point: Point::zero(),
+            }],
+            false,
+        )
+        .expect("valid subpath");
+        let path = PathData::new(vec![subpath], FillRule::EvenOdd).expect("valid path");
+        assert_eq!(path.subpaths.len(), 1);
+    }
+
+    #[test]
+    fn test_path_data_exceeds_max_subpaths() {
+        let subpaths: Vec<SubPath> = (0..MAX_SUBPATHS_PER_PATH + 1)
+            .map(|_| SubPath {
+                segments: vec![],
+                closed: false,
+            })
+            .collect();
+        assert!(PathData::new(subpaths, FillRule::NonZero).is_err());
+    }
+
+    #[test]
+    fn test_path_data_default() {
+        let path = PathData::default();
+        assert!(path.subpaths.is_empty());
+        assert_eq!(path.fill_rule, FillRule::EvenOdd);
+    }
+
+    #[test]
+    fn test_path_segment_serde_round_trip() {
+        let segment = PathSegment::CubicTo {
+            control1: Point::new(10.0, 20.0),
+            control2: Point::new(30.0, 40.0),
+            end: Point::new(50.0, 60.0),
+        };
+        let json = serde_json::to_string(&segment).expect("serialize");
+        let deserialized: PathSegment = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(segment, deserialized);
+    }
+
+    #[test]
+    fn test_subpath_serde_round_trip() {
+        let subpath = SubPath::new(
+            vec![
+                PathSegment::MoveTo {
+                    point: Point::zero(),
+                },
+                PathSegment::LineTo {
+                    point: Point::new(100.0, 100.0),
+                },
+                PathSegment::Close,
+            ],
+            true,
+        )
+        .expect("valid subpath");
+        let json = serde_json::to_string(&subpath).expect("serialize");
+        let deserialized: SubPath = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(subpath, deserialized);
+    }
+
+    #[test]
+    fn test_path_data_serde_round_trip() {
+        let path = PathData::new(
+            vec![
+                SubPath::new(
+                    vec![
+                        PathSegment::MoveTo {
+                            point: Point::zero(),
+                        },
+                        PathSegment::CubicTo {
+                            control1: Point::new(10.0, 0.0),
+                            control2: Point::new(90.0, 100.0),
+                            end: Point::new(100.0, 100.0),
+                        },
+                    ],
+                    false,
+                )
+                .expect("valid subpath"),
+            ],
+            FillRule::NonZero,
+        )
+        .expect("valid path");
+        let json = serde_json::to_string(&path).expect("serialize");
+        let deserialized: PathData = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(path, deserialized);
+    }
+
+    #[test]
+    fn test_anchor_point_construction() {
+        let anchor = AnchorPoint {
+            position: Point::new(50.0, 50.0),
+            handle_in: Some(Point::new(40.0, 50.0)),
+            handle_out: Some(Point::new(60.0, 50.0)),
+            corner_mode: CornerMode::Smooth,
+        };
+        assert_eq!(anchor.corner_mode, CornerMode::Smooth);
+    }
+}
