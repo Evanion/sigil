@@ -61,6 +61,9 @@ pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 /// Default maximum history size (undo/redo).
 pub const DEFAULT_MAX_HISTORY: usize = 500;
 
+/// Maximum root nodes per page.
+pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
+
 // ── Validation Functions ───────────────────────────────────────────────
 
 /// Validates a node name: max 512 chars, no control characters (U+0000-U+001F).

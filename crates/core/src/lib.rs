@@ -3,6 +3,8 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod arena;
+pub mod command;
+pub mod commands;
 pub mod document;
 pub mod error;
 pub mod id;
@@ -38,6 +40,9 @@ pub use serialize::{
     SerializedNode, SerializedPage, deserialize_page, nodes_to_serialized, page_to_serialized,
     serialize_page,
 };
+
+// ── Re-exports: Command ──────────────────────────────────────────────
+pub use command::{Command, CompoundCommand, SideEffect};
 
 // ── Re-exports: Validation ─────────────────────────────────────────────
 pub use validate::{

@@ -95,6 +95,14 @@ This project uses Rust Edition 2024. Be aware of:
 - Check the Rust edition guide for other reserved keywords before naming variables
 - When porting code from examples or older projects, audit for edition compatibility
 
+## Defensive Coding
+
+- Arena undo operations must use `reinsert()` to preserve the original key — never `insert()` in an undo path.
+- When popping from a stack/queue and the subsequent operation may fail, push the item back before returning the error.
+- Both `apply` and `undo` must validate inputs — asymmetric validation allows undo to corrupt state.
+- Every `f64` field from external input must be checked for NaN/infinity and domain range.
+- Prefer `VecDeque` over `Vec` for FIFO queues. `Vec::remove(0)` is O(n). Consider access patterns during review.
+
 ## Before You Start
 
 1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
