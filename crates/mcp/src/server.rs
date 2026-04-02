@@ -135,6 +135,86 @@ impl SigilMcpServer {
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }
+
+    /// Creates a new node on the specified page, optionally under a parent node.
+    #[tool(
+        name = "create_node",
+        description = "Create a new node (frame, rectangle, ellipse, text, group, image). \
+                        Optionally place it on a page and/or under a parent node."
+    )]
+    fn create_node(
+        &self,
+        Parameters(input): Parameters<crate::types::CreateNodeInput>,
+    ) -> Result<Json<crate::types::CreateNodeResult>, rmcp::ErrorData> {
+        crate::tools::nodes::create_node_impl(
+            &self.state,
+            &input.kind,
+            &input.name,
+            input.page_id.as_deref(),
+            input.parent_uuid.as_deref(),
+            input.transform.as_ref(),
+        )
+        .map(Json)
+        .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Deletes a node by UUID.
+    #[tool(name = "delete_node", description = "Delete a node by UUID")]
+    fn delete_node(
+        &self,
+        Parameters(input): Parameters<crate::types::DeleteNodeInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::delete_node_impl(&self.state, &input.uuid)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Renames a node identified by UUID.
+    #[tool(name = "rename_node", description = "Rename a node")]
+    fn rename_node(
+        &self,
+        Parameters(input): Parameters<crate::types::RenameNodeInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::rename_node_impl(&self.state, &input.uuid, &input.new_name)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's transform (position, size, rotation, scale).
+    #[tool(
+        name = "set_transform",
+        description = "Set a node's transform: position (x, y), size (width, height), rotation, scale"
+    )]
+    fn set_transform(
+        &self,
+        Parameters(input): Parameters<crate::types::SetTransformInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::set_transform_impl(&self.state, &input.uuid, &input.transform)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's visibility.
+    #[tool(name = "set_visible", description = "Show or hide a node")]
+    fn set_visible(
+        &self,
+        Parameters(input): Parameters<crate::types::SetVisibleInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::set_visible_impl(&self.state, &input.uuid, input.visible)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's locked state.
+    #[tool(name = "set_locked", description = "Lock or unlock a node")]
+    fn set_locked(
+        &self,
+        Parameters(input): Parameters<crate::types::SetLockedInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::set_locked_impl(&self.state, &input.uuid, input.locked)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
 }
 
 impl ServerHandler for SigilMcpServer {

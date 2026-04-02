@@ -155,6 +155,49 @@ pub struct RenamePageInput {
     pub new_name: String,
 }
 
+/// Input for deleting a node.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteNodeInput {
+    /// UUID of the node to delete.
+    pub uuid: String,
+}
+
+/// Input for renaming a node.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RenameNodeInput {
+    /// UUID of the node to rename.
+    pub uuid: String,
+    /// New display name for the node.
+    pub new_name: String,
+}
+
+/// Input for setting a node's visibility.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetVisibleInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// New visibility state.
+    pub visible: bool,
+}
+
+/// Input for setting a node's locked state.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetLockedInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// New locked state.
+    pub locked: bool,
+}
+
+/// Input for setting a node's transform.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetTransformInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// New transform values.
+    pub transform: TransformInput,
+}
+
 /// Input for creating a new node.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateNodeInput {
