@@ -11,7 +11,7 @@
 //!    a [`PreparedSave`] containing all serialized JSON strings.
 //! 2. [`write_prepared_save`] — async, writes the prepared data to disk.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_designer_core::serialize::{
@@ -72,7 +72,7 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
             .map_err(|e| anyhow::anyhow!("failed to serialize page '{}': {e}", page.name))?;
         let json = serialize_page(&serialized)
             .map_err(|e| anyhow::anyhow!("failed to serialize page '{}': {e}", page.name))?;
-        let filename = sanitize_filename(&page.name);
+        let filename = page.id.uuid().to_string();
         pages.push((filename, json));
     }
 
@@ -82,10 +82,33 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
     })
 }
 
+/// Atomically writes content to a file by writing to a `.tmp` sibling first,
+/// then renaming into place.
+///
+/// # Errors
+///
+/// Returns an error if the write or rename fails.
+async fn atomic_write(path: &Path, content: &str) -> Result<()> {
+    let tmp_path = path.with_extension("json.tmp");
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
+    tokio::fs::rename(&tmp_path, path)
+        .await
+        .with_context(|| format!("failed to rename temp file to: {}", path.display()))?;
+    Ok(())
+}
+
 /// Writes a [`PreparedSave`] to the `.sigil/` directory on disk.
 ///
 /// This is the async half of the save pipeline. Call [`prepare_save`] first
 /// (under the document lock), then call this function after releasing the lock.
+///
+/// Pages are written first, then stale page files are removed, and the manifest
+/// is written last. The manifest acts as the commit point: if the process crashes
+/// mid-save, the manifest still points to a consistent set of page files.
+///
+/// All file writes use atomic write-to-temp-then-rename to prevent partial writes.
 ///
 /// # Errors
 ///
@@ -94,13 +117,38 @@ pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) 
     let pages_dir = workfile_path.join("pages");
     tokio::fs::create_dir_all(&pages_dir).await?;
 
-    // Write manifest
-    tokio::fs::write(workfile_path.join("manifest.json"), &prepared.manifest_json).await?;
+    // Build the set of current page filenames for stale-file detection
+    let current_filenames: HashSet<String> = prepared
+        .pages
+        .iter()
+        .map(|(filename, _)| format!("{filename}.json"))
+        .collect();
 
-    // Write each page
+    // Write each page first (before manifest)
     for (filename, json) in &prepared.pages {
-        tokio::fs::write(pages_dir.join(format!("{filename}.json")), json).await?;
+        atomic_write(&pages_dir.join(format!("{filename}.json")), json).await?;
     }
+
+    // Remove stale page files that are no longer in the current save set
+    let mut entries = tokio::fs::read_dir(&pages_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "json")
+            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && !current_filenames.contains(name)
+        {
+            tokio::fs::remove_file(&path)
+                .await
+                .with_context(|| format!("failed to remove stale page file: {}", path.display()))?;
+        }
+    }
+
+    // Write manifest LAST — this is the commit point
+    atomic_write(
+        &workfile_path.join("manifest.json"),
+        &prepared.manifest_json,
+    )
+    .await?;
 
     Ok(())
 }
@@ -145,6 +193,14 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
         .context("failed to read manifest.json")?;
     let manifest: Manifest =
         serde_json::from_str(&manifest_json).context("failed to parse manifest.json")?;
+
+    if manifest.schema_version > agent_designer_core::CURRENT_SCHEMA_VERSION {
+        bail!(
+            "workfile schema version {} is newer than supported version {}",
+            manifest.schema_version,
+            agent_designer_core::CURRENT_SCHEMA_VERSION
+        );
+    }
 
     let mut doc = Document::new(manifest.name.clone());
 
@@ -297,23 +353,6 @@ fn reorder_pages(doc: &mut Document, page_order: &[Uuid]) {
         .sort_by_key(|p| order_map.get(&p.id.uuid()).copied().unwrap_or(usize::MAX));
 }
 
-/// Sanitizes a string for use as a filename.
-///
-/// Replaces any character that is not alphanumeric, `-`, or `_` with `_`,
-/// then lowercases the result.
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .to_lowercase()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -343,14 +382,6 @@ mod tests {
         assert_eq!(manifest.name, deserialized.name);
         assert_eq!(manifest.schema_version, deserialized.schema_version);
         assert_eq!(manifest.page_order, deserialized.page_order);
-    }
-
-    #[test]
-    fn test_sanitize_filename_replaces_unsafe_chars() {
-        assert_eq!(sanitize_filename("Home Page"), "home_page");
-        assert_eq!(sanitize_filename("my-page_1"), "my-page_1");
-        assert_eq!(sanitize_filename("../../etc"), "______etc");
-        assert_eq!(sanitize_filename("Page/With\\Slashes"), "page_with_slashes");
     }
 
     #[tokio::test]
@@ -442,7 +473,7 @@ mod tests {
     }
 
     #[test]
-    fn test_prepare_save_serializes_pages() {
+    fn test_prepare_save_uses_uuid_filenames() {
         let mut doc = Document::new("Prepared".to_string());
         let page_id = PageId::new(Uuid::new_v4());
         doc.add_page(Page::new(page_id, "Page One".to_string()))
@@ -450,7 +481,7 @@ mod tests {
 
         let prepared = prepare_save(&doc).expect("prepare save");
         assert_eq!(prepared.pages.len(), 1);
-        assert_eq!(prepared.pages[0].0, "page_one"); // sanitized filename
+        assert_eq!(prepared.pages[0].0, page_id.uuid().to_string()); // UUID filename
         assert!(prepared.pages[0].1.contains("Page One")); // JSON contains page name
     }
 
@@ -514,5 +545,124 @@ mod tests {
         let loaded_child = loaded.arena.get(loaded_child_id).expect("get child");
         assert_eq!(loaded_child.name, "Child");
         assert_eq!(loaded_child.parent, Some(loaded_parent_id));
+    }
+
+    #[tokio::test]
+    async fn test_write_prepared_save_removes_stale_page_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("test.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Save a document with two pages
+        let mut doc = Document::new("Stale Test".to_string());
+        let page_a_id = PageId::new(Uuid::new_v4());
+        let page_b_id = PageId::new(Uuid::new_v4());
+        doc.add_page(Page::new(page_a_id, "Alpha".to_string()))
+            .expect("add page A");
+        doc.add_page(Page::new(page_b_id, "Beta".to_string()))
+            .expect("add page B");
+
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("first save");
+
+        // Verify both page files exist
+        let pages_dir = workfile_path.join("pages");
+        let alpha_path = pages_dir.join(format!("{}.json", page_a_id.uuid()));
+        let beta_path = pages_dir.join(format!("{}.json", page_b_id.uuid()));
+        assert!(tokio::fs::metadata(&alpha_path).await.is_ok());
+        assert!(tokio::fs::metadata(&beta_path).await.is_ok());
+
+        // Remove page B from the document and save again
+        doc.pages.retain(|p| p.id != page_b_id);
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("second save");
+
+        // Alpha should still exist, Beta should be cleaned up
+        assert!(tokio::fs::metadata(&alpha_path).await.is_ok());
+        assert!(
+            tokio::fs::metadata(&beta_path).await.is_err(),
+            "stale page file should have been removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_load_workfile_rejects_newer_schema_version() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("test.sigil");
+        tokio::fs::create_dir_all(workfile_path.join("pages"))
+            .await
+            .expect("create dirs");
+
+        let manifest = Manifest {
+            schema_version: agent_designer_core::CURRENT_SCHEMA_VERSION + 1,
+            name: "Future Doc".to_string(),
+            page_order: vec![],
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
+        tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
+            .await
+            .expect("write manifest");
+
+        let result = load_workfile(&workfile_path).await;
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("newer than supported"),
+            "expected schema version error, got: {err_msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_atomic_write_produces_final_file_not_tmp() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = dir.path().join("test.json");
+
+        atomic_write(&file_path, r#"{"test": true}"#)
+            .await
+            .expect("atomic write");
+
+        // Final file should exist
+        let content = tokio::fs::read_to_string(&file_path)
+            .await
+            .expect("read final");
+        assert_eq!(content, r#"{"test": true}"#);
+
+        // Temp file should NOT exist
+        let tmp_path = file_path.with_extension("json.tmp");
+        assert!(
+            tokio::fs::metadata(&tmp_path).await.is_err(),
+            "temp file should not remain after atomic write"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_writes_uuid_named_page_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("test.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let mut doc = Document::new("UUID Names".to_string());
+        let page_id = PageId::new(Uuid::new_v4());
+        doc.add_page(Page::new(page_id, "My Page!".to_string()))
+            .expect("add page");
+
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("save workfile");
+
+        // Page file should be named by UUID, not sanitized page name
+        let expected_path = workfile_path
+            .join("pages")
+            .join(format!("{}.json", page_id.uuid()));
+        assert!(
+            tokio::fs::metadata(&expected_path).await.is_ok(),
+            "page file should be named by UUID"
+        );
     }
 }
