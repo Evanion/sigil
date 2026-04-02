@@ -6,6 +6,7 @@ use uuid::Uuid;
 use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::Node;
+use crate::prototype::Transition;
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
 /// A serializable representation of a page (file format).
@@ -18,7 +19,7 @@ pub struct SerializedPage {
     pub id: Uuid,
     pub name: String,
     pub nodes: Vec<SerializedNode>,
-    pub transitions: Vec<serde_json::Value>,
+    pub transitions: Vec<Transition>,
 }
 
 /// A serializable representation of a node (file format).
@@ -94,6 +95,11 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
 
     // Validate collection sizes
     validate_deserialized_page(&page)?;
+
+    // Validate transitions
+    for transition in &page.transitions {
+        crate::prototype::validate_transition(transition)?;
+    }
 
     Ok(page)
 }
@@ -172,12 +178,31 @@ pub fn nodes_to_serialized(
 pub fn page_to_serialized(
     page: &crate::document::Page,
     arena: &crate::arena::Arena,
+    transitions: &[Transition],
 ) -> Result<SerializedPage, CoreError> {
     let mut all_nodes = Vec::new();
 
     for root_id in &page.root_nodes {
         collect_subtree(arena, *root_id, &mut all_nodes)?;
     }
+
+    // Collect all node UUIDs in this page for transition filtering
+    let mut page_node_uuids = std::collections::HashSet::new();
+    for node in &all_nodes {
+        page_node_uuids.insert(arena.uuid_of(node.id)?);
+    }
+
+    // Filter transitions whose source_node belongs to this page
+    let page_transitions: Vec<Transition> = transitions
+        .iter()
+        .filter(|t| {
+            arena
+                .uuid_of(t.source_node)
+                .ok()
+                .is_some_and(|uuid| page_node_uuids.contains(&uuid))
+        })
+        .cloned()
+        .collect();
 
     let node_refs: Vec<&Node> = all_nodes.iter().collect();
     let serialized_nodes = nodes_to_serialized(&node_refs, arena)?;
@@ -187,7 +212,7 @@ pub fn page_to_serialized(
         id: page.id.uuid(),
         name: page.name.clone(),
         nodes: serialized_nodes,
-        transitions: Vec::new(),
+        transitions: page_transitions,
     })
 }
 
@@ -551,7 +576,7 @@ mod tests {
         let arena = Arena::new(100);
         let page = Page::new(PageId::new(make_uuid(1)), "Empty".to_string());
 
-        let serialized = page_to_serialized(&page, &arena).expect("serialize");
+        let serialized = page_to_serialized(&page, &arena, &[]).expect("serialize");
         assert_eq!(serialized.name, "Empty");
         assert!(serialized.nodes.is_empty());
         assert_eq!(serialized.schema_version, CURRENT_SCHEMA_VERSION);
@@ -573,7 +598,7 @@ mod tests {
         let mut page = Page::new(page_id, "Home".to_string());
         page.root_nodes.push(root_id);
 
-        let serialized = page_to_serialized(&page, &arena).expect("serialize");
+        let serialized = page_to_serialized(&page, &arena, &[]).expect("serialize");
         assert_eq!(serialized.nodes.len(), 2);
         assert_eq!(serialized.nodes[0].id, root_uuid);
         assert_eq!(serialized.nodes[1].id, child_uuid);
@@ -611,7 +636,7 @@ mod tests {
         page.root_nodes.push(root_id);
 
         // Serialize
-        let serialized = page_to_serialized(&page, &arena).expect("page_to_serialized");
+        let serialized = page_to_serialized(&page, &arena, &[]).expect("page_to_serialized");
         let json = serialize_page(&serialized).expect("serialize_page");
 
         // Deserialize
@@ -705,5 +730,130 @@ mod tests {
 
         assert_eq!(serialized[0].children, vec![child_uuid]);
         assert_eq!(serialized[1].parent, Some(parent_uuid));
+    }
+
+    // ── Transitions round-trip ────────────────────────────────────────
+
+    #[test]
+    fn test_serialized_page_with_transitions_round_trip() {
+        use crate::prototype::{
+            SlideDirection, Transition, TransitionAnimation, TransitionTrigger,
+        };
+
+        let mut arena = Arena::new(100);
+        let root_uuid = make_uuid(10);
+        let root_id = insert_frame(&mut arena, root_uuid, "Root");
+
+        let page_id = PageId::new(make_uuid(1));
+        let mut page = Page::new(page_id, "Home".to_string());
+        page.root_nodes.push(root_id);
+
+        let transitions = vec![
+            Transition {
+                id: make_uuid(50),
+                source_node: root_id,
+                target_page: PageId::new(make_uuid(2)),
+                target_node: None,
+                trigger: TransitionTrigger::OnClick,
+                animation: TransitionAnimation::Dissolve { duration: 0.3 },
+            },
+            Transition {
+                id: make_uuid(51),
+                source_node: root_id,
+                target_page: PageId::new(make_uuid(3)),
+                target_node: Some(NodeId::new(0, 0)),
+                trigger: TransitionTrigger::AfterDelay { seconds: 2.0 },
+                animation: TransitionAnimation::SlideIn {
+                    direction: SlideDirection::Right,
+                    duration: 0.5,
+                },
+            },
+        ];
+
+        let serialized =
+            page_to_serialized(&page, &arena, &transitions).expect("page_to_serialized");
+        assert_eq!(serialized.transitions.len(), 2);
+
+        let json = serialize_page(&serialized).expect("serialize_page");
+        let deserialized = deserialize_page(&json).expect("deserialize_page");
+
+        assert_eq!(serialized.transitions.len(), deserialized.transitions.len());
+        for (orig, deser) in serialized
+            .transitions
+            .iter()
+            .zip(deserialized.transitions.iter())
+        {
+            assert_eq!(orig.id, deser.id);
+            assert_eq!(orig.trigger, deser.trigger);
+            assert_eq!(orig.animation, deser.animation);
+            assert_eq!(orig.target_page, deser.target_page);
+            assert_eq!(orig.target_node, deser.target_node);
+        }
+    }
+
+    #[test]
+    fn test_page_to_serialized_filters_transitions_by_page() {
+        use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
+
+        let mut arena = Arena::new(100);
+        let node_a_uuid = make_uuid(10);
+        let node_b_uuid = make_uuid(20);
+        let node_a_id = insert_frame(&mut arena, node_a_uuid, "NodeA");
+        let _node_b_id = insert_frame(&mut arena, node_b_uuid, "NodeB");
+
+        // Page only contains node_a
+        let page_id = PageId::new(make_uuid(1));
+        let mut page = Page::new(page_id, "PageA".to_string());
+        page.root_nodes.push(node_a_id);
+
+        let transitions = vec![
+            Transition {
+                id: make_uuid(50),
+                source_node: node_a_id,
+                target_page: PageId::new(make_uuid(2)),
+                target_node: None,
+                trigger: TransitionTrigger::OnClick,
+                animation: TransitionAnimation::Instant,
+            },
+            // This transition references node_b which is NOT in the page
+            Transition {
+                id: make_uuid(51),
+                source_node: _node_b_id,
+                target_page: PageId::new(make_uuid(2)),
+                target_node: None,
+                trigger: TransitionTrigger::OnHover,
+                animation: TransitionAnimation::Instant,
+            },
+        ];
+
+        let serialized =
+            page_to_serialized(&page, &arena, &transitions).expect("page_to_serialized");
+        // Only the transition for node_a should be included
+        assert_eq!(serialized.transitions.len(), 1);
+        assert_eq!(serialized.transitions[0].id, make_uuid(50));
+    }
+
+    #[test]
+    fn test_deserialize_rejects_invalid_transition_duration() {
+        // Construct JSON with an invalid transition duration (negative)
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [],
+                "transitions": [{{
+                    "id": "00000000-0000-0000-0000-000000000050",
+                    "source_node": {{"index": 0, "generation": 0}},
+                    "target_page": "00000000-0000-0000-0000-000000000002",
+                    "target_node": null,
+                    "trigger": {{"type": "on_click"}},
+                    "animation": {{"type": "dissolve", "duration": -1.0}}
+                }}]
+            }}"#,
+            CURRENT_SCHEMA_VERSION
+        );
+        let result = deserialize_page(&json);
+        assert!(result.is_err(), "should reject negative duration");
     }
 }
