@@ -684,4 +684,25 @@ mod tests {
         };
         assert!(cmd.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_rename_node_execute_undo_redo_round_trip() {
+        let (mut doc, node_id) = setup_doc_with_frame();
+
+        let cmd = RenameNode {
+            node_id,
+            new_name: "Renamed".to_string(),
+            old_name: "Frame 1".to_string(),
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert_eq!(doc.arena.get(node_id).expect("get").name, "Renamed");
+
+        doc.undo().expect("undo");
+        assert_eq!(doc.arena.get(node_id).expect("get").name, "Frame 1");
+
+        doc.redo().expect("redo");
+        assert_eq!(doc.arena.get(node_id).expect("get").name, "Renamed");
+    }
 }

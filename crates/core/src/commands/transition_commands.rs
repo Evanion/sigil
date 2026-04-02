@@ -236,4 +236,22 @@ mod tests {
         };
         assert!(cmd.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_add_transition_execute_undo_redo_round_trip() {
+        let mut doc = Document::new("Test".to_string());
+        let cmd = AddTransition {
+            transition: make_transition(1),
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert_eq!(doc.transitions.len(), 1);
+
+        doc.undo().expect("undo");
+        assert!(doc.transitions.is_empty());
+
+        doc.redo().expect("redo");
+        assert_eq!(doc.transitions.len(), 1);
+    }
 }

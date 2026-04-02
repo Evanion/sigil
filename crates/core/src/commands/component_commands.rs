@@ -398,4 +398,37 @@ mod tests {
         };
         assert!(cmd.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_add_component_execute_undo_redo_round_trip() {
+        let mut doc = Document::new("Test".to_string());
+        let def = ComponentDef::new(
+            ComponentId::new(make_uuid(50)),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+
+        let cmd = AddComponent {
+            component: def.clone(),
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert!(
+            doc.components
+                .contains_key(&ComponentId::new(make_uuid(50)))
+        );
+
+        doc.undo().expect("undo");
+        assert!(doc.components.is_empty());
+
+        doc.redo().expect("redo");
+        assert!(
+            doc.components
+                .contains_key(&ComponentId::new(make_uuid(50)))
+        );
+    }
 }

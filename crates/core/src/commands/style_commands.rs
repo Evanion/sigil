@@ -607,4 +607,34 @@ mod tests {
         };
         assert!(cmd_h.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_set_opacity_execute_undo_redo_round_trip() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+
+        let cmd = SetOpacity {
+            node_id,
+            new_opacity: StyleValue::Literal { value: 0.5 },
+            old_opacity: StyleValue::Literal { value: 1.0 },
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert_eq!(
+            doc.arena.get(node_id).expect("get").style.opacity,
+            StyleValue::Literal { value: 0.5 }
+        );
+
+        doc.undo().expect("undo");
+        assert_eq!(
+            doc.arena.get(node_id).expect("get").style.opacity,
+            StyleValue::Literal { value: 1.0 }
+        );
+
+        doc.redo().expect("redo");
+        assert_eq!(
+            doc.arena.get(node_id).expect("get").style.opacity,
+            StyleValue::Literal { value: 0.5 }
+        );
+    }
 }

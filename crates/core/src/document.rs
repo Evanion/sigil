@@ -987,7 +987,7 @@ mod tests {
     }
 
     #[test]
-    fn test_add_component_enforces_max_limit() {
+    fn test_max_components_per_document_enforced() {
         use crate::component::ComponentDef;
         use crate::id::ComponentId;
 

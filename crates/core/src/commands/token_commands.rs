@@ -228,4 +228,22 @@ mod tests {
         };
         assert!(cmd.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_add_token_execute_undo_redo_round_trip() {
+        let mut doc = Document::new("Test".to_string());
+        let cmd = AddToken {
+            token: make_color_token("color.primary"),
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert!(doc.token_context.get("color.primary").is_some());
+
+        doc.undo().expect("undo");
+        assert!(doc.token_context.get("color.primary").is_none());
+
+        doc.redo().expect("redo");
+        assert!(doc.token_context.get("color.primary").is_some());
+    }
 }
