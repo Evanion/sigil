@@ -53,7 +53,9 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
+**MANDATORY — do this FIRST, before any review work:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Every section contains rules that inform your review — not just Section 10. Architecture, code quality, testing, crate responsibilities, defensive coding — all sections are relevant.
 2. Read the PDR (`docs/superpowers/specs/2026-04-01-agent-designer-design.md`) for MVP scope
 3. Read the relevant sub-specs — architecture decisions are documented there
 4. Read the core crate's public API surface before reviewing consuming crates

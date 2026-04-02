@@ -96,7 +96,9 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
+**MANDATORY — do this FIRST, before any review work:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Every section contains security-relevant rules — not just Section 11. Validation rules, crate boundaries, testing standards, defensive coding — all sections inform your review.
 2. Read the relevant spec to understand intended behavior
 3. Focus on high-confidence findings — do not report speculative or low-probability issues
 4. For every new data type in the spec, ask: "What happens if this is maxed out, empty, cyclic, or malformed?"

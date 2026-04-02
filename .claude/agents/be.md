@@ -111,10 +111,13 @@ This project uses Rust Edition 2024. Be aware of:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
+**MANDATORY — do this FIRST, before writing any code:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Every section contains rules you must follow — not just Section 11. Identify all rules that apply to the files you are about to modify. If any rule in CLAUDE.md conflicts with code provided in a plan, the CLAUDE.md rule takes precedence.
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Read the implementation plan task you've been assigned
-4. Run `./dev.sh cargo test --workspace` to verify tests pass before making changes
-5. If working on core crate: verify WASM compat with `cargo check --target wasm32-unknown-unknown -p agent-designer-core`
-6. Run `./dev.sh cargo fmt` after every code change — CI will reject unformatted code
-7. Run `./dev.sh cargo clippy --workspace -- -D warnings` and fix all warnings before pushing
+4. Read the files you will modify — understand existing code before changing it
+5. Run `cargo test --workspace` to verify tests pass before making changes
+6. If working on core crate: verify WASM compat with `cargo check --target wasm32-unknown-unknown -p agent-designer-core`
+7. Run `cargo fmt` after every code change — CI will reject unformatted code
+8. Run `cargo clippy --workspace -- -D warnings` and fix all warnings before pushing

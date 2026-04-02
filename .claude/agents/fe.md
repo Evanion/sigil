@@ -28,7 +28,10 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions
+**MANDATORY — do this FIRST, before writing any code:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Identify all rules that apply to the files you are about to modify. If any rule in CLAUDE.md conflicts with code provided in a plan, the CLAUDE.md rule takes precedence.
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Read the implementation plan task you've been assigned
-4. Run `./dev.sh pnpm --prefix frontend test` to verify the test suite passes before making changes
+4. Read the files you will modify — understand existing code before changing it
+5. Run `pnpm --prefix frontend test` to verify the test suite passes before making changes
