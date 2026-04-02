@@ -18,7 +18,12 @@ use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
     handler::server::wrapper::{Json, Parameters},
-    model::{Implementation, ServerCapabilities, ServerInfo},
+    model::{
+        Implementation, ListResourcesResult, PaginatedRequestParams, ReadResourceRequestParams,
+        ReadResourceResult, ServerCapabilities, ServerInfo,
+    },
+    service::RequestContext,
+    service::RoleServer,
     tool, tool_router,
 };
 
@@ -316,6 +321,30 @@ impl ServerHandler for SigilMcpServer {
             "Sigil is an AI-native design tool. \
              Use the available tools to read and modify design documents, \
              manage pages and nodes, define design tokens, and undo/redo changes.",
+        )
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListResourcesResult, rmcp::ErrorData>>
+    + rmcp::service::MaybeSendFuture
+    + '_ {
+        std::future::ready(Ok(ListResourcesResult::with_all_items(
+            crate::resources::list_resources(),
+        )))
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ReadResourceResult, rmcp::ErrorData>>
+    + rmcp::service::MaybeSendFuture
+    + '_ {
+        std::future::ready(
+            crate::resources::read_resource(&self.state, &request.uri).map(ReadResourceResult::new),
         )
     }
 }
