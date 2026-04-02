@@ -268,6 +268,39 @@ impl SigilMcpServer {
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }
+
+    /// Lists all component definitions in the document.
+    #[tool(
+        name = "list_components",
+        description = "List all component definitions in the document, sorted by name"
+    )]
+    fn list_components(&self) -> Json<crate::types::ComponentListResult> {
+        Json(crate::types::ComponentListResult {
+            components: crate::tools::components::list_components_impl(&self.state),
+        })
+    }
+
+    /// Undoes the most recent document command.
+    #[tool(
+        name = "undo",
+        description = "Undo the most recent document mutation. Returns updated undo/redo availability."
+    )]
+    fn undo(&self) -> Result<Json<crate::types::UndoRedoResult>, rmcp::ErrorData> {
+        crate::tools::history::undo_impl(&self.state)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Redoes the most recently undone document command.
+    #[tool(
+        name = "redo",
+        description = "Redo the most recently undone document mutation. Returns updated undo/redo availability."
+    )]
+    fn redo(&self) -> Result<Json<crate::types::UndoRedoResult>, rmcp::ErrorData> {
+        crate::tools::history::redo_impl(&self.state)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
 }
 
 impl ServerHandler for SigilMcpServer {

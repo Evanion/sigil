@@ -303,6 +303,16 @@ pub struct TokenListResult {
     pub tokens: Vec<TokenInfo>,
 }
 
+/// Result of listing components.
+///
+/// Wraps the component list in an object so the MCP output schema has a root
+/// `object` type, as required by the MCP specification.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct ComponentListResult {
+    /// All component definitions in the document, sorted by name.
+    pub components: Vec<ComponentInfo>,
+}
+
 /// Result of a successful mutation.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
 pub struct MutationResult {
