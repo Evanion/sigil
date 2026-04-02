@@ -16,15 +16,18 @@ function makeEvent(worldX: number, worldY: number): ToolEvent {
   };
 }
 
-/** Minimal mock of DocumentStore that records createNode calls. */
+/** Minimal mock of DocumentStore that records createNode and select calls. */
 function makeMockStore(): DocumentStore & {
   createNodeCalls: Array<{ kind: NodeKind; name: string; transform: Transform }>;
+  selectCalls: (string | null)[];
 } {
   const createNodeCalls: Array<{ kind: NodeKind; name: string; transform: Transform }> = [];
+  const selectCalls: (string | null)[] = [];
   let callCount = 0;
 
   return {
     createNodeCalls,
+    selectCalls,
     createNode(kind: NodeKind, name: string, transform: Transform): string {
       createNodeCalls.push({ kind, name, transform });
       callCount++;
@@ -42,7 +45,9 @@ function makeMockStore(): DocumentStore & {
     undo: () => undefined,
     redo: () => undefined,
     getSelectedNodeId: () => null,
-    select: () => undefined,
+    select: (uuid: string | null) => {
+      selectCalls.push(uuid);
+    },
     getActivePage: () => undefined,
     subscribe: () => () => undefined,
     loadInitialState: () => Promise.resolve(),
@@ -377,6 +382,32 @@ describe("createShapeTool", () => {
 
       expect(store.createNodeCalls).toHaveLength(0);
       expect(onComplete).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("RF-009: auto-select after creation", () => {
+    it("should select the newly created node after creation", () => {
+      const store = makeMockStore();
+      const onComplete = vi.fn();
+      const tool = createShapeTool(store, rectangleKindFactory, "Rectangle", onComplete);
+
+      tool.onPointerDown(makeEvent(10, 20));
+      tool.onPointerMove(makeEvent(60, 80));
+      tool.onPointerUp(makeEvent(60, 80));
+
+      expect(store.selectCalls).toHaveLength(1);
+      expect(store.selectCalls[0]).toBe("uuid-1");
+    });
+
+    it("should not select when creation is skipped due to zero area", () => {
+      const store = makeMockStore();
+      const onComplete = vi.fn();
+      const tool = createShapeTool(store, rectangleKindFactory, "Rectangle", onComplete);
+
+      tool.onPointerDown(makeEvent(10, 20));
+      tool.onPointerUp(makeEvent(10, 20));
+
+      expect(store.selectCalls).toHaveLength(0);
     });
   });
 });

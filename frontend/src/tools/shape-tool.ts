@@ -101,7 +101,9 @@ export function createShapeTool(
         scale_y: 1,
       };
 
-      store.createNode(kindFactory(), name, transform);
+      // RF-009: Select the newly created node immediately.
+      const uuid = store.createNode(kindFactory(), name, transform);
+      store.select(uuid);
       onComplete();
     },
 

@@ -636,6 +636,89 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
+  // --- RF-001: Optimistic insert tests ---
+
+  it("should optimistically insert node into store on createNode", () => {
+    const store = createDocumentStore(mockWs);
+
+    const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
+    const transform: Transform = {
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+
+    const uuid = store.createNode(kind, "Rectangle 1", transform);
+
+    // Node should be immediately available in the store
+    const node = store.getNodeByUuid(uuid);
+    expect(node).toBeDefined();
+    expect(node?.uuid).toBe(uuid);
+    expect(node?.kind).toEqual(kind);
+    expect(node?.name).toBe("Rectangle 1");
+    expect(node?.transform).toEqual(transform);
+    // Placeholder NodeId
+    expect(node?.id).toEqual({ index: 0, generation: 0 });
+    store.destroy();
+  });
+
+  it("should notify subscribers when optimistic node is inserted", () => {
+    const store = createDocumentStore(mockWs);
+    const subscriber = vi.fn();
+    store.subscribe(subscriber);
+
+    const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
+    const transform: Transform = {
+      x: 0,
+      y: 0,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+
+    store.createNode(kind, "Rect", transform);
+
+    expect(subscriber).toHaveBeenCalledOnce();
+    store.destroy();
+  });
+
+  it("should update optimistic node with real NodeId on node_created", () => {
+    const store = createDocumentStore(mockWs);
+
+    const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
+    const transform: Transform = {
+      x: 0,
+      y: 0,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+
+    const uuid = store.createNode(kind, "Rect", transform);
+
+    // Verify placeholder id
+    expect(store.getNodeByUuid(uuid)?.id).toEqual({ index: 0, generation: 0 });
+
+    // Simulate server response
+    mockWs.simulateMessage({
+      type: "node_created",
+      uuid,
+      node_id: { index: 5, generation: 3 },
+    });
+
+    // Now the node should have the real id
+    expect(store.getNodeByUuid(uuid)?.id).toEqual({ index: 5, generation: 3 });
+    store.destroy();
+  });
+
   // --- getActivePage tests ---
 
   it("should return undefined for getActivePage when no pages are loaded", () => {

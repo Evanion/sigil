@@ -109,11 +109,13 @@ describe("app-shell tool wiring", () => {
       }
     });
 
-    it("should have tabindex on tool buttons for keyboard navigation", () => {
+    it("should have tabindex on tool buttons for keyboard navigation (roving tabindex)", () => {
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
-      for (const btn of Array.from(buttons ?? [])) {
-        expect(btn.getAttribute("tabindex")).toBe("0");
+      // RF-012: Only active button gets tabindex=0, others get -1
+      expect(buttons?.[0]?.getAttribute("tabindex")).toBe("0"); // select is active
+      for (let i = 1; i < (buttons?.length ?? 0); i++) {
+        expect(buttons?.[i]?.getAttribute("tabindex")).toBe("-1");
       }
     });
   });

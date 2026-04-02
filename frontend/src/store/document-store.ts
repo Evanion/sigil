@@ -311,6 +311,33 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
       const uuid = crypto.randomUUID();
       const activePage = pages[0];
       const pageId = activePage ? activePage.id : null;
+
+      // RF-001: Optimistic insert — add the node to the local store
+      // immediately so the canvas renders it before the server responds.
+      // The NodeId is a placeholder {0,0} until the server sends node_created.
+      const optimisticNode: DocumentNode = {
+        id: { index: 0, generation: 0 },
+        uuid,
+        kind,
+        name,
+        parent: null,
+        children: [],
+        transform,
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+        constraints: { horizontal: "start", vertical: "start" },
+        grid_placement: null,
+        visible: true,
+        locked: false,
+      };
+      nodes.set(uuid, optimisticNode);
+      notifySubscribers();
+
       wsClient.send({
         type: "create_node_request",
         uuid,

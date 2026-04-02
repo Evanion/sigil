@@ -15,6 +15,7 @@ import { render } from "../canvas/renderer";
 import { createToolManager } from "../tools/tool-manager";
 import type { ToolType, Tool } from "../tools/tool-manager";
 import { createSelectTool } from "../tools/select-tool";
+import type { PreviewTransform } from "../tools/select-tool";
 import { createShapeTool } from "../tools/shape-tool";
 import type { PreviewRect } from "../tools/shape-tool";
 
@@ -23,6 +24,14 @@ const MIDDLE_BUTTON = 1;
 
 /** Left mouse button constant. */
 const LEFT_BUTTON = 0;
+
+/** Human-readable labels for announcing tool changes (RF-013). */
+const TOOL_DISPLAY_NAMES: Readonly<Record<ToolType, string>> = {
+  select: "Select",
+  frame: "Frame",
+  rectangle: "Rectangle",
+  ellipse: "Ellipse",
+};
 
 /** Tool button definitions: key, label, tool type, and aria-label. */
 const TOOL_BUTTONS: ReadonlyArray<{
@@ -52,6 +61,9 @@ const TOOL_BUTTONS: ReadonlyArray<{
  * - Store subscription for re-render on state change
  * - Connection status indicator in status bar
  * - requestAnimationFrame batching for render calls
+ * - RF-011: aria-pressed on tool buttons
+ * - RF-012: roving tabindex on toolbar buttons
+ * - RF-013: aria-live announcements for tool and selection changes
  */
 export function mountAppShell(root: HTMLElement, store: DocumentStore): () => void {
   // ── State ──────────────────────────────────────────────────────
@@ -64,6 +76,9 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   let panStartY = 0;
   let panStartVpX = 0;
   let panStartVpY = 0;
+
+  // Track the previous selection UUID so we can announce changes (RF-013).
+  let previousSelectedUuid: string | null = null;
 
   // ── Tool Manager Setup ────────────────────────────────────────
 
@@ -112,6 +127,28 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     root.removeChild(root.firstChild);
   }
 
+  // RF-013: Visually-hidden live region for announcements
+  const liveRegion = document.createElement("span");
+  liveRegion.setAttribute("aria-live", "polite");
+  liveRegion.setAttribute("role", "log");
+  liveRegion.className = "sr-only";
+  // Visually hidden but accessible to screen readers
+  liveRegion.style.position = "absolute";
+  liveRegion.style.width = "1px";
+  liveRegion.style.height = "1px";
+  liveRegion.style.padding = "0";
+  liveRegion.style.margin = "-1px";
+  liveRegion.style.overflow = "hidden";
+  liveRegion.style.clip = "rect(0, 0, 0, 0)";
+  liveRegion.style.whiteSpace = "nowrap";
+  liveRegion.style.border = "0";
+  root.appendChild(liveRegion);
+
+  /** Announce a message to screen readers via the live region. */
+  function announce(message: string): void {
+    liveRegion.textContent = message;
+  }
+
   // Toolbar (RF-001: landmark, RF-002: focusable)
   const toolbar = document.createElement("div");
   toolbar.className = "toolbar";
@@ -127,12 +164,16 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   // Tool buttons — built via document.createElement (no innerHTML)
   const toolButtonElements: HTMLElement[] = [];
 
-  for (const def of TOOL_BUTTONS) {
+  for (let i = 0; i < TOOL_BUTTONS.length; i++) {
+    const def = TOOL_BUTTONS[i];
     const btn = document.createElement("button");
     btn.className = "toolbar__tool-btn";
     btn.textContent = def.label;
     btn.setAttribute("aria-label", def.ariaLabel);
-    btn.setAttribute("tabindex", "0");
+    // RF-011: aria-pressed
+    btn.setAttribute("aria-pressed", "false");
+    // RF-012: roving tabindex — only the first (default active) button gets tabindex="0"
+    btn.setAttribute("tabindex", i === 0 ? "0" : "-1");
     btn.setAttribute("type", "button");
     btn.addEventListener("click", () => {
       toolManager.setActiveTool(def.toolType);
@@ -141,7 +182,30 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     toolbar.appendChild(btn);
   }
 
-  /** Update the active highlight on tool buttons. */
+  // RF-012: Roving tabindex — Arrow key navigation within the toolbar
+  toolbar.addEventListener("keydown", (e: KeyboardEvent) => {
+    const focusableButtons = toolButtonElements;
+    const currentIndex = focusableButtons.indexOf(document.activeElement as HTMLElement);
+    if (currentIndex === -1) return;
+
+    let nextIndex: number | null = null;
+    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+      e.preventDefault();
+      nextIndex = (currentIndex + 1) % focusableButtons.length;
+    } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+      e.preventDefault();
+      nextIndex = (currentIndex - 1 + focusableButtons.length) % focusableButtons.length;
+    }
+
+    if (nextIndex !== null) {
+      // Update tabindex: old gets -1, new gets 0
+      focusableButtons[currentIndex].setAttribute("tabindex", "-1");
+      focusableButtons[nextIndex].setAttribute("tabindex", "0");
+      focusableButtons[nextIndex].focus();
+    }
+  });
+
+  /** Update the active highlight, aria-pressed, and roving tabindex on tool buttons. */
   function updateToolButtonHighlight(): void {
     const activeType = toolManager.getActiveTool();
     for (let i = 0; i < TOOL_BUTTONS.length; i++) {
@@ -149,8 +213,16 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
       const btn = toolButtonElements[i];
       if (def.toolType === activeType) {
         btn.classList.add("toolbar__tool-btn--active");
+        // RF-011: aria-pressed
+        btn.setAttribute("aria-pressed", "true");
+        // RF-012: roving tabindex — active button is focusable
+        btn.setAttribute("tabindex", "0");
       } else {
         btn.classList.remove("toolbar__tool-btn--active");
+        // RF-011: aria-pressed
+        btn.setAttribute("aria-pressed", "false");
+        // RF-012: roving tabindex — inactive buttons are not tab-focusable
+        btn.setAttribute("tabindex", "-1");
       }
     }
   }
@@ -250,6 +322,10 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   const unsubscribeToolManager = toolManager.subscribe(() => {
     updateCursor();
     updateToolButtonHighlight();
+    // RF-013: Announce tool change
+    const activeType = toolManager.getActiveTool();
+    const displayName = TOOL_DISPLAY_NAMES[activeType];
+    announce(`${displayName} tool active`);
     scheduleRender();
   });
 
@@ -271,6 +347,14 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     return null;
   }
 
+  /**
+   * Get the preview transform from the select tool, if applicable.
+   * Returns null if the select tool is not active or has no preview.
+   */
+  function getSelectToolPreviewTransform(): PreviewTransform | null {
+    return selectTool.getPreviewTransform();
+  }
+
   function scheduleRender(): void {
     if (renderScheduled) return;
     renderScheduled = true;
@@ -281,24 +365,17 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
         const selectedUuid = store.getSelectedNodeId();
         const nodes = [...store.getAllNodes().values()];
 
-        // Resolve selected node's NodeId from the UUID for the renderer
-        let selectedNodeId: { readonly index: number; readonly generation: number } | null = null;
-        if (selectedUuid !== null) {
-          const selectedNode = store.getNodeByUuid(selectedUuid);
-          if (selectedNode) {
-            selectedNodeId = selectedNode.id;
-          }
-        }
-
         const previewRect = getActiveToolPreviewRect();
+        const previewTransform = getSelectToolPreviewTransform();
 
         render(
           ctx,
           viewport,
           nodes,
-          selectedNodeId,
+          selectedUuid,
           window.devicePixelRatio || 1,
           previewRect,
+          previewTransform,
         );
       }
     });
@@ -545,16 +622,36 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     }
   }
 
+  // ── Selection Change Announcements (RF-013) ────────────────────
+
+  function announceSelectionChange(): void {
+    const currentUuid = store.getSelectedNodeId();
+    if (currentUuid === previousSelectedUuid) return;
+
+    if (currentUuid === null) {
+      announce("Selection cleared");
+    } else {
+      const node = store.getNodeByUuid(currentUuid);
+      if (node) {
+        announce(`${node.name} selected`);
+      }
+    }
+    previousSelectedUuid = currentUuid;
+  }
+
   // ── Store Subscription ─────────────────────────────────────────
 
   const unsubscribe = store.subscribe(() => {
     updateStatusBar();
+    announceSelectionChange();
     scheduleRender();
   });
 
   // Initial render and status update
   updateStatusBar();
   scheduleRender();
+  // RF-013: Announce initial tool
+  announce(`${TOOL_DISPLAY_NAMES[toolManager.getActiveTool()]} tool active`);
 
   // ── Cleanup ────────────────────────────────────────────────────
 

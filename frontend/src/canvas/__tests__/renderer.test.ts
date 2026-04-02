@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "../renderer";
 import type { Viewport } from "../viewport";
-import type { DocumentNode, NodeId } from "../../types/document";
+import type { DocumentNode } from "../../types/document";
 
 /** Create a minimal DocumentNode for testing. */
 function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
@@ -79,11 +79,10 @@ describe("renderer", () => {
   });
 
   describe("selection handles", () => {
-    it("should draw selection handles when a node is selected", () => {
+    it("should draw selection handles when a node is selected by UUID", () => {
       const node = createTestNode();
-      const selectedId: NodeId = { index: 1, generation: 0 };
 
-      render(ctx, viewport, [node], selectedId, 1);
+      render(ctx, viewport, [node], "test-uuid-1", 1);
 
       const calls = getCalls(ctx);
       // Selection handles are drawn as fillRect calls with SELECTION_COLOR
@@ -112,15 +111,32 @@ describe("renderer", () => {
 
     it("should not draw selection handles for invisible nodes", () => {
       const node = createTestNode({ visible: false });
-      const selectedId: NodeId = { index: 1, generation: 0 };
 
-      render(ctx, viewport, [node], selectedId, 1);
+      render(ctx, viewport, [node], "test-uuid-1", 1);
 
       const calls = getCalls(ctx);
       const selectionStyleSets = calls.filter(
         (c) => c.method === "set:fillStyle" && c.args[0] === "#0d99ff",
       );
       expect(selectionStyleSets.length).toBe(0);
+    });
+
+    it("should use preview transform for selected node when provided", () => {
+      const node = createTestNode({ uuid: "drag-node" });
+      const previewTransform = {
+        uuid: "drag-node",
+        transform: { x: 200, y: 200, width: 200, height: 150, rotation: 0, scale_x: 1, scale_y: 1 },
+      };
+
+      render(ctx, viewport, [node], "drag-node", 1, null, previewTransform);
+
+      const calls = getCalls(ctx);
+      // The node should be drawn at the preview position (200, 200), not (100, 100)
+      const fillRectCalls = calls.filter((c) => c.method === "fillRect");
+      const hasPreviewPosition = fillRectCalls.some(
+        (c) => c.args[0] === 200 && c.args[1] === 200,
+      );
+      expect(hasPreviewPosition).toBe(true);
     });
   });
 });
