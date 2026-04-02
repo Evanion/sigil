@@ -98,6 +98,62 @@ impl Arena {
         Ok(id)
     }
 
+    /// Reinserts a previously removed node at its exact original slot and generation.
+    ///
+    /// Used by undo operations to preserve `NodeId` stability across undo/redo.
+    /// The slot must be empty and the generation must still match (i.e., no other
+    /// node has been inserted into this slot since the removal).
+    ///
+    /// # Errors
+    /// - `CoreError::ValidationError` if the slot index is out of range.
+    /// - `CoreError::ValidationError` if the slot is already occupied.
+    /// - `CoreError::ValidationError` if the generation has been bumped (slot was reused).
+    pub fn reinsert(&mut self, id: NodeId, mut node: Node) -> Result<(), CoreError> {
+        let idx = id.index() as usize;
+
+        if idx >= self.nodes.len() {
+            return Err(CoreError::ValidationError(format!(
+                "reinsert: slot {} out of range (arena has {} slots)",
+                idx,
+                self.nodes.len()
+            )));
+        }
+
+        if self.nodes[idx].is_some() {
+            return Err(CoreError::ValidationError(format!(
+                "reinsert: slot {idx} is already occupied"
+            )));
+        }
+
+        if self.generation[idx] != id.generation() {
+            return Err(CoreError::ValidationError(format!(
+                "reinsert: generation mismatch at slot {} (expected {}, found {})",
+                idx,
+                id.generation(),
+                self.generation[idx]
+            )));
+        }
+
+        // Remove this index from the free list
+        self.free_list.retain(|&i| i != id.index());
+
+        // Stamp the node with the correct NodeId
+        node.id = id;
+
+        // Restore UUID mapping
+        let uuid = node.uuid;
+        if self.uuid_to_id.contains_key(&uuid) {
+            return Err(CoreError::DuplicateUuid(uuid));
+        }
+        self.uuids[idx] = Some(uuid);
+        self.uuid_to_id.insert(uuid, id);
+
+        // Restore the node
+        self.nodes[idx] = Some(node);
+
+        Ok(())
+    }
+
     /// Removes a node from the arena by its `NodeId`.
     ///
     /// The slot is added to the free list for reuse.
@@ -490,5 +546,119 @@ mod tests {
             assert_eq!(id.generation(), 1); // all reused, generation bumped once
         }
         assert_eq!(arena.len(), 10);
+    }
+
+    // ── reinsert ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_reinsert_restores_at_exact_slot() {
+        let mut arena = Arena::new(100);
+        let uuid = Uuid::nil();
+        let node = make_node(uuid, "Original");
+        let id = arena.insert(node).expect("insert");
+
+        let removed = arena.remove(id).expect("remove");
+        assert_eq!(arena.len(), 0);
+
+        arena.reinsert(id, removed).expect("reinsert");
+        assert_eq!(arena.len(), 1);
+
+        // The exact same NodeId must work
+        let retrieved = arena.get(id).expect("get after reinsert");
+        assert_eq!(retrieved.name, "Original");
+        assert_eq!(retrieved.id, id);
+    }
+
+    #[test]
+    fn test_reinsert_occupied_slot_fails() {
+        let mut arena = Arena::new(100);
+        let uuid = Uuid::nil();
+        let node = make_node(uuid, "Occupied");
+        let id = arena.insert(node).expect("insert");
+
+        // Slot is still occupied — reinsert must fail
+        let other_node = make_node(
+            Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            "Other",
+        );
+        let result = arena.reinsert(id, other_node);
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("already occupied")),
+            "expected 'already occupied' error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reinsert_preserves_uuid_mapping() {
+        let mut arena = Arena::new(100);
+        let uuid = Uuid::nil();
+        let node = make_node(uuid, "Mapped");
+        let id = arena.insert(node).expect("insert");
+
+        let removed = arena.remove(id).expect("remove");
+        assert!(arena.id_by_uuid(&uuid).is_none());
+
+        arena.reinsert(id, removed).expect("reinsert");
+        let found_id = arena.id_by_uuid(&uuid).expect("uuid lookup after reinsert");
+        assert_eq!(found_id, id);
+        assert_eq!(arena.uuid_of(id).expect("uuid_of"), uuid);
+    }
+
+    #[test]
+    fn test_reinsert_out_of_range_slot_fails() {
+        let mut arena = Arena::new(100);
+        let fake_id = NodeId::new(99, 0);
+        let node = make_node(Uuid::nil(), "Ghost");
+        let result = arena.reinsert(fake_id, node);
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("out of range")),
+            "expected 'out of range' error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reinsert_generation_mismatch_fails() {
+        let mut arena = Arena::new(100);
+        let uuid1 = Uuid::nil();
+        let id1 = arena.insert(make_node(uuid1, "First")).expect("insert");
+        arena.remove(id1).expect("remove");
+
+        // Insert a new node that reuses the slot, bumping the generation
+        let uuid2 = Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        let id2 = arena.insert(make_node(uuid2, "Second")).expect("insert reuse");
+        assert_eq!(id2.index(), id1.index()); // same slot
+        arena.remove(id2).expect("remove second");
+
+        // Try to reinsert with the old generation — must fail
+        let node = make_node(uuid1, "Stale");
+        let result = arena.reinsert(id1, node);
+        assert!(result.is_err());
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("generation mismatch")),
+            "expected 'generation mismatch' error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_reinsert_duplicate_uuid_fails() {
+        let mut arena = Arena::new(100);
+        let uuid = Uuid::nil();
+        let uuid2 = Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+
+        let id1 = arena.insert(make_node(uuid, "A")).expect("insert A");
+        let id2 = arena.insert(make_node(uuid2, "B")).expect("insert B");
+
+        let removed = arena.remove(id2).expect("remove B");
+
+        // Manually create a node with uuid that collides with the live node
+        let mut collision_node = removed;
+        collision_node.uuid = uuid; // same UUID as the still-live node A
+        let result = arena.reinsert(id2, collision_node);
+        assert!(matches!(result, Err(CoreError::DuplicateUuid(_))));
+
+        // Verify slot was not corrupted — id1 still works
+        let _ = arena.get(id1).expect("id1 still valid");
     }
 }

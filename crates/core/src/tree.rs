@@ -113,20 +113,26 @@ pub fn rearrange(
 
     let old_parent_id = arena.get(child_id)?.parent;
 
-    // Remove from old parent
-    if let Some(old_pid) = old_parent_id {
+    // Remove from old parent, recording original position for rollback
+    let old_position = if let Some(old_pid) = old_parent_id {
         let old_parent = arena.get_mut(old_pid)?;
+        let pos = old_parent.children.iter().position(|id| *id == child_id);
         old_parent.children.retain(|id| *id != child_id);
-    }
+        pos
+    } else {
+        None
+    };
 
     // Check children limit (if moving to a new parent)
     let is_same_parent = old_parent_id == Some(new_parent_id);
     if !is_same_parent {
         let new_parent = arena.get(new_parent_id)?;
         if new_parent.children.len() >= MAX_CHILDREN_PER_NODE {
-            // Restore old parent if we already removed
+            // Restore child to its original position in the old parent
             if let Some(old_pid) = old_parent_id {
-                arena.get_mut(old_pid)?.children.push(child_id);
+                let children = &mut arena.get_mut(old_pid)?.children;
+                let restore_pos = old_position.unwrap_or(children.len());
+                children.insert(restore_pos, child_id);
             }
             arena.get_mut(child_id)?.parent = old_parent_id;
             return Err(CoreError::ValidationError(format!(
@@ -422,6 +428,47 @@ mod tests {
 
         let p = arena.get(parent).expect("get");
         assert_eq!(p.children, vec![child]);
+    }
+
+    #[test]
+    fn test_rearrange_capacity_failure_preserves_sibling_order() {
+        let mut arena = Arena::new(10_010);
+        let old_parent = insert_group(&mut arena, make_uuid(1), "OldParent");
+        let child_a = insert_group(&mut arena, make_uuid(2), "A");
+        let child_b = insert_group(&mut arena, make_uuid(3), "B");
+        let child_c = insert_group(&mut arena, make_uuid(4), "C");
+        let new_parent = insert_group(&mut arena, make_uuid(5), "NewParent");
+
+        add_child(&mut arena, old_parent, child_a).expect("add A");
+        add_child(&mut arena, old_parent, child_b).expect("add B");
+        add_child(&mut arena, old_parent, child_c).expect("add C");
+
+        // Fill new_parent to MAX_CHILDREN_PER_NODE with dummy IDs so the
+        // capacity check fails when we try to move child_b there.
+        let new_parent_node = arena.get_mut(new_parent).expect("get new_parent");
+        let dummy_id = NodeId::new(9999, 0);
+        new_parent_node
+            .children
+            .resize(MAX_CHILDREN_PER_NODE, dummy_id);
+
+        // Attempt to rearrange child_b into the full new_parent — should fail
+        let result = rearrange(&mut arena, child_b, new_parent, 0);
+        assert!(result.is_err(), "rearrange should fail due to capacity");
+
+        // The original parent must still have [A, B, C] in that exact order
+        let children = &arena.get(old_parent).expect("get old_parent").children;
+        assert_eq!(
+            *children,
+            vec![child_a, child_b, child_c],
+            "sibling order must be preserved after failed rearrange"
+        );
+
+        // child_b's parent must still be old_parent
+        assert_eq!(
+            arena.get(child_b).expect("get B").parent,
+            Some(old_parent),
+            "child_b parent must be restored"
+        );
     }
 
     // ── is_ancestor ────────────────────────────────────────────────────
