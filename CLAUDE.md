@@ -270,3 +270,27 @@ Every public constructor (`new`, `from_*`, `try_from_*`) must call all applicabl
 When validation rules are added or changed in `validate.rs` (or equivalent), the deserialization entry points MUST be updated in the same commit to enforce the new rules. A checklist:
 - Every field validated in `validate.rs` must also be validated during deserialization.
 - When adding a new validation rule, search for all `deserialize_*` and `from_json` functions and update them.
+
+### Arena Operations Must Preserve Identity on Undo
+
+When using generational arenas, removing and re-inserting an entity produces a NEW key. Any operation that needs to restore a previous state (undo, rollback) MUST use `reinsert(key, value)` or equivalent to preserve the original key. Never use `insert()` in an undo path for arena-managed entities — this silently breaks all external references to that entity.
+
+### Restore State Before Propagating Errors
+
+When an item is removed from a collection (popped from a stack, removed from a vec, taken from a map) and a subsequent operation on that item may fail, the item MUST be restored to its original position before returning the error. Pattern: pop, attempt operation, push back on failure. Using `?` after a destructive removal without restoration loses the item permanently.
+
+### No Silent Error Suppression in Rollback Paths
+
+Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppressed errors in rollback can leave the document in a corrupted state with no diagnostic trail. Instead: collect errors into a `Vec<Error>` and return a compound error (e.g., `RollbackFailed { original_error, rollback_errors }`). The only acceptable use of `let _ =` is for non-fallible return values.
+
+### Ordered Collection Mutations Must Preserve Position
+
+When removing an element from an ordered collection (Vec, VecDeque) for a reversible operation, record the element's index at the time of removal. The undo path must use `insert(index, element)`, not `push(element)`. Pushing to the end silently changes ordering, which violates undo semantics.
+
+### Floating-Point Validation
+
+Every `f32`/`f64` field arriving from external input (deserialization, API parameter, MCP tool input) MUST be validated to reject NaN and infinity. For fields with domain constraints (e.g., opacity 0.0..=1.0, positive dimensions), validate the range in the same check. Do not rely on downstream code to handle non-finite floats — IEEE 754 NaN propagation corrupts calculations silently.
+
+### Symmetric Validation for Reversible Operations
+
+For any operation with an apply/undo pair (commands, transactions), both directions MUST validate their inputs. If `apply` validates a field before modifying it, `undo` must validate before reverting. Asymmetric validation means undo can corrupt state when applied to a document that has diverged.

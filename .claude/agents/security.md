@@ -77,6 +77,11 @@ For every deserialization entry point:
 3. For each field that has a validation rule, verify the deserialization path calls it.
 4. If validation exists but the deserialization path skips it, report as High — this is a bypass of intended security controls.
 
+## Review Checklist Additions
+
+- For every `let _ =` in the codebase, verify the suppressed return is not a `Result`. Silent error suppression in rollback/cleanup paths is a data corruption vector.
+- For every `f32`/`f64` field in a deserialized type, verify NaN/infinity rejection exists at the deserialization boundary.
+
 ## Output Format
 
 For each finding, report:
