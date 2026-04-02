@@ -59,49 +59,52 @@ pub async fn get_document_info(State(state): State<AppState>) -> Response {
 /// Returns the full document state: info + all pages with serialized nodes
 /// and transitions.
 ///
-/// Acquires the document lock, iterates all pages, and serializes each page's
-/// nodes using core's `page_to_serialized`. Returns HTTP 500 if serialization
-/// fails or the mutex is poisoned.
+/// RF-008: Clones all needed data under the lock, releases it, THEN serializes
+/// to JSON. This minimizes lock hold time and prevents serialization from
+/// blocking other clients.
 pub async fn get_document_full(State(state): State<AppState>) -> Response {
-    let doc_guard = match state.document.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            tracing::error!("document mutex poisoned in get_document_full, recovering");
-            poisoned.into_inner()
-        }
-    };
-
-    let info = DocumentInfo {
-        name: doc_guard.metadata.name.clone(),
-        page_count: doc_guard.pages.len(),
-        node_count: doc_guard.arena.len(),
-        can_undo: doc_guard.can_undo(),
-        can_redo: doc_guard.can_redo(),
-    };
-
-    let mut pages = Vec::with_capacity(doc_guard.pages.len());
-    for page in &doc_guard.pages {
-        match page_to_serialized(page, &doc_guard.arena, &doc_guard.transitions) {
-            Ok(serialized) => {
-                pages.push(FullPageEntry {
-                    id: serialized.id.to_string(),
-                    name: serialized.name,
-                    nodes: serialized.nodes,
-                    transitions: serialized.transitions,
-                });
+    let (info, pages) = {
+        let doc_guard = match state.document.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                tracing::error!("document mutex poisoned in get_document_full, recovering");
+                poisoned.into_inner()
             }
-            Err(e) => {
-                drop(doc_guard);
-                tracing::error!("failed to serialize page: {e}");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({ "error": format!("serialization failed: {e}") })),
-                )
-                    .into_response();
+        };
+
+        let info = DocumentInfo {
+            name: doc_guard.metadata.name.clone(),
+            page_count: doc_guard.pages.len(),
+            node_count: doc_guard.arena.len(),
+            can_undo: doc_guard.can_undo(),
+            can_redo: doc_guard.can_redo(),
+        };
+
+        let mut pages = Vec::with_capacity(doc_guard.pages.len());
+        for page in &doc_guard.pages {
+            match page_to_serialized(page, &doc_guard.arena, &doc_guard.transitions) {
+                Ok(serialized) => {
+                    pages.push(FullPageEntry {
+                        id: serialized.id.to_string(),
+                        name: serialized.name,
+                        nodes: serialized.nodes,
+                        transitions: serialized.transitions,
+                    });
+                }
+                Err(e) => {
+                    tracing::error!("failed to serialize page: {e}");
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(serde_json::json!({ "error": "serialization failed" })),
+                    )
+                        .into_response();
+                }
             }
         }
-    }
 
-    drop(doc_guard);
+        (info, pages)
+    }; // lock released here
+
+    // Serialize to JSON response outside the lock.
     (StatusCode::OK, Json(FullDocumentResponse { info, pages })).into_response()
 }

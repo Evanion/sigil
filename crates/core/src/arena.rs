@@ -55,6 +55,28 @@ impl Arena {
         self.max_nodes
     }
 
+    /// Returns the `NodeId` that the next `insert()` call would assign,
+    /// without modifying the arena.
+    ///
+    /// This is useful for building compound commands where a later sub-command
+    /// needs to reference a node that an earlier sub-command will create.
+    ///
+    /// # Errors
+    /// - `CoreError::CapacityExceeded` if the arena is already at capacity.
+    pub fn peek_next_id(&self) -> Result<NodeId, CoreError> {
+        if self.len() >= self.max_nodes {
+            return Err(CoreError::CapacityExceeded(self.max_nodes));
+        }
+        if let Some(&index) = self.free_list.last() {
+            let idx = index as usize;
+            Ok(NodeId::new(index, self.generation[idx] + 1))
+        } else {
+            let index = u32::try_from(self.nodes.len())
+                .map_err(|_| CoreError::CapacityExceeded(self.max_nodes))?;
+            Ok(NodeId::new(index, 0))
+        }
+    }
+
     /// Inserts a node into the arena, assigning it a `NodeId`.
     ///
     /// The node's `id` field is updated to match the assigned `NodeId`.

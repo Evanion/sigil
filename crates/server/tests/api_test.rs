@@ -431,7 +431,10 @@ async fn test_create_node_request_broadcasts_to_other_clients() {
         b_parsed["type"], "broadcast",
         "client B should receive broadcast, got: {b_parsed}"
     );
-    assert_eq!(b_parsed["command"]["type"], "create_node");
+    assert_eq!(
+        b_parsed["command"]["type"], "node_created_with_transform",
+        "broadcast should include transform for atomic create+transform"
+    );
 
     ws_a.close(None).await.expect("close A");
     ws_b.close(None).await.expect("close B");
