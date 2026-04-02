@@ -19,11 +19,5 @@ export function Divider(props: DividerProps) {
     return classes.join(" ");
   };
 
-  return (
-    <Separator
-      orientation={orientation()}
-      class={className()}
-      {...others}
-    />
-  );
+  return <Separator orientation={orientation()} class={className()} {...others} />;
 }

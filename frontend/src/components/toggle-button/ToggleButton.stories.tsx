@@ -47,11 +47,7 @@ export const Interactive: Story = {
   render: () => {
     const [pressed, setPressed] = createSignal(false);
     return (
-      <ToggleButton
-        pressed={pressed()}
-        onPressedChange={setPressed}
-        aria-label="Toggle bold"
-      >
+      <ToggleButton pressed={pressed()} onPressedChange={setPressed} aria-label="Toggle bold">
         B
       </ToggleButton>
     );

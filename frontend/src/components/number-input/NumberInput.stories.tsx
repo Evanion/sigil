@@ -52,20 +52,8 @@ export const Interactive: Story = {
     const [val, setVal] = createSignal(0);
     return (
       <div style={{ display: "flex", gap: "8px", "align-items": "flex-end" }}>
-        <NumberInput
-          value={val()}
-          onValueChange={setVal}
-          label="X"
-          suffix="px"
-          step={1}
-        />
-        <NumberInput
-          value={val()}
-          onValueChange={setVal}
-          label="Y"
-          suffix="px"
-          step={1}
-        />
+        <NumberInput value={val()} onValueChange={setVal} label="X" suffix="px" step={1} />
+        <NumberInput value={val()} onValueChange={setVal} label="Y" suffix="px" step={1} />
       </div>
     );
   },

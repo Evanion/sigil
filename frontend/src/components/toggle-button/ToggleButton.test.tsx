@@ -91,11 +91,7 @@ describe("ToggleButton", () => {
 
   it("should forward aria-label to the underlying element", () => {
     render(() => (
-      <ToggleButton
-        pressed={false}
-        onPressedChange={() => {}}
-        aria-label="Toggle bold"
-      >
+      <ToggleButton pressed={false} onPressedChange={() => {}} aria-label="Toggle bold">
         B
       </ToggleButton>
     ));
@@ -105,11 +101,7 @@ describe("ToggleButton", () => {
 
   it("should append custom class names alongside component classes", () => {
     render(() => (
-      <ToggleButton
-        pressed={false}
-        onPressedChange={() => {}}
-        class="my-custom"
-      >
+      <ToggleButton pressed={false} onPressedChange={() => {}} class="my-custom">
         Bold
       </ToggleButton>
     ));

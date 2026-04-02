@@ -57,8 +57,15 @@ export const Interactive: Story = {
     const [value, setValue] = createSignal("");
     return (
       <div style={{ display: "flex", "flex-direction": "column", gap: "8px" }}>
-        <TextInput value={value()} onValueChange={setValue} label="Interactive" placeholder="Type something..." />
-        <span style={{ color: "var(--text-2)", "font-size": "12px" }}>Current value: {value()}</span>
+        <TextInput
+          value={value()}
+          onValueChange={setValue}
+          label="Interactive"
+          placeholder="Type something..."
+        />
+        <span style={{ color: "var(--text-2)", "font-size": "12px" }}>
+          Current value: {value()}
+        </span>
       </div>
     );
   },

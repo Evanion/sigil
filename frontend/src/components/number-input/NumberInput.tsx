@@ -51,9 +51,7 @@ export function NumberInput(props: NumberInputProps) {
       {...others}
     >
       <Show when={local.label}>
-        <NumberField.Label class="sigil-number-input__label">
-          {local.label}
-        </NumberField.Label>
+        <NumberField.Label class="sigil-number-input__label">{local.label}</NumberField.Label>
       </Show>
       <div class="sigil-number-input__group">
         <NumberField.Input class="sigil-number-input__input" />
@@ -61,16 +59,10 @@ export function NumberInput(props: NumberInputProps) {
           <span class="sigil-number-input__suffix">{local.suffix}</span>
         </Show>
         <div class="sigil-number-input__buttons">
-          <NumberField.IncrementTrigger
-            aria-label="Increment"
-            class="sigil-number-input__btn"
-          >
+          <NumberField.IncrementTrigger aria-label="Increment" class="sigil-number-input__btn">
             <ChevronUp size={12} />
           </NumberField.IncrementTrigger>
-          <NumberField.DecrementTrigger
-            aria-label="Decrement"
-            class="sigil-number-input__btn"
-          >
+          <NumberField.DecrementTrigger aria-label="Decrement" class="sigil-number-input__btn">
             <ChevronDown size={12} />
           </NumberField.DecrementTrigger>
         </div>

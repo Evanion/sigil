@@ -53,11 +53,7 @@ export const Interactive: Story = {
   render: () => {
     const [checked, setChecked] = createSignal(false);
     return (
-      <Toggle
-        checked={checked()}
-        onCheckedChange={setChecked}
-        label={checked() ? "On" : "Off"}
-      />
+      <Toggle checked={checked()} onCheckedChange={setChecked} label={checked() ? "On" : "Off"} />
     );
   },
 };
