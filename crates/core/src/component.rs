@@ -54,6 +54,33 @@ pub enum PropertyPath {
     Transform,
 }
 
+impl PropertyPath {
+    /// Returns a stable sort key for deterministic serialization ordering.
+    #[must_use]
+    fn sort_key(&self) -> usize {
+        match self {
+            Self::Name => 0,
+            Self::TransformX => 1,
+            Self::TransformY => 2,
+            Self::Width => 3,
+            Self::Height => 4,
+            Self::Rotation => 5,
+            Self::ScaleX => 6,
+            Self::ScaleY => 7,
+            Self::Fill { .. } => 8,
+            Self::Stroke { .. } => 9,
+            Self::Opacity => 10,
+            Self::BlendMode => 11,
+            Self::Effect { .. } => 12,
+            Self::TextContent => 13,
+            Self::Visible => 14,
+            Self::Locked => 15,
+            Self::Constraints => 16,
+            Self::Transform => 17,
+        }
+    }
+}
+
 /// The value being set for an override at a specific `PropertyPath`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -80,6 +107,115 @@ pub enum OverrideValue {
     Transform { value: Transform },
 }
 
+/// Validates that an `OverrideValue` contains only finite f64 values and
+/// that string values do not exceed `MAX_TEXT_CONTENT_LEN`.
+///
+/// Checks:
+/// - `Number::value` is finite
+/// - `Opacity` literal is finite
+/// - `Transform` fields are all finite
+/// - `String::value` length does not exceed `MAX_TEXT_CONTENT_LEN`
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any float is non-finite or a string
+/// exceeds the maximum length.
+pub fn validate_override_value(value: &OverrideValue) -> Result<(), CoreError> {
+    match value {
+        OverrideValue::Number { value: v } => {
+            validate::validate_finite("override number", *v)?;
+        }
+        OverrideValue::Opacity {
+            value: StyleValue::Literal { value: v },
+        } => {
+            validate::validate_finite("override opacity", *v)?;
+        }
+        OverrideValue::Transform { value: t } => {
+            validate::validate_finite("override transform.x", t.x)?;
+            validate::validate_finite("override transform.y", t.y)?;
+            validate::validate_finite("override transform.width", t.width)?;
+            validate::validate_finite("override transform.height", t.height)?;
+            validate::validate_finite("override transform.rotation", t.rotation)?;
+            validate::validate_finite("override transform.scale_x", t.scale_x)?;
+            validate::validate_finite("override transform.scale_y", t.scale_y)?;
+        }
+        OverrideValue::String { value: s } => {
+            if s.len() > validate::MAX_TEXT_CONTENT_LEN {
+                return Err(CoreError::ValidationError(format!(
+                    "override string length {} exceeds max {}",
+                    s.len(),
+                    validate::MAX_TEXT_CONTENT_LEN
+                )));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Validates that a `PropertyPath` index field (Fill, Stroke, Effect) does not
+/// exceed the corresponding style limit.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the index is out of bounds.
+pub fn validate_property_path(path: &PropertyPath) -> Result<(), CoreError> {
+    match path {
+        PropertyPath::Fill { index } => {
+            if *index >= validate::MAX_FILLS_PER_STYLE {
+                return Err(CoreError::ValidationError(format!(
+                    "fill index {index} exceeds max {}",
+                    validate::MAX_FILLS_PER_STYLE
+                )));
+            }
+        }
+        PropertyPath::Stroke { index } => {
+            if *index >= validate::MAX_STROKES_PER_STYLE {
+                return Err(CoreError::ValidationError(format!(
+                    "stroke index {index} exceeds max {}",
+                    validate::MAX_STROKES_PER_STYLE
+                )));
+            }
+        }
+        PropertyPath::Effect { index } => {
+            if *index >= validate::MAX_EFFECTS_PER_STYLE {
+                return Err(CoreError::ValidationError(format!(
+                    "effect index {index} exceeds max {}",
+                    validate::MAX_EFFECTS_PER_STYLE
+                )));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+/// Validates that a `ComponentPropertyType` is compatible with an `OverrideValue`.
+///
+/// The allowed pairings are:
+/// - `Text` -> `OverrideValue::String`
+/// - `Boolean` -> `OverrideValue::Bool`
+/// - `InstanceSwap` -> `OverrideValue::String` (component ID as string)
+/// - `Variant` -> `OverrideValue::String` (variant name)
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` when the value type does not match.
+fn validate_property_type_value_compat(
+    property_type: ComponentPropertyType,
+    value: &OverrideValue,
+) -> Result<(), CoreError> {
+    let ok = match property_type {
+        ComponentPropertyType::Text => matches!(value, OverrideValue::String { .. }),
+        ComponentPropertyType::Boolean => matches!(value, OverrideValue::Bool { .. }),
+        ComponentPropertyType::InstanceSwap => matches!(value, OverrideValue::String { .. }),
+        ComponentPropertyType::Variant => matches!(value, OverrideValue::String { .. }),
+    };
+    if !ok {
+        return Err(CoreError::ValidationError(format!(
+            "property type {property_type:?} is not compatible with value type {value:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Tracks whether an override came from a variant or was applied by the user.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -94,10 +230,28 @@ pub enum OverrideSource {
 /// definition's subtree) and which property.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OverrideKey {
-    /// The UUID of the node within the component definition's subtree.
-    pub node_uuid: Uuid,
-    /// The property being overridden.
-    pub path: PropertyPath,
+    node_uuid: Uuid,
+    path: PropertyPath,
+}
+
+impl OverrideKey {
+    /// Creates a new override key.
+    #[must_use]
+    pub fn new(node_uuid: Uuid, path: PropertyPath) -> Self {
+        Self { node_uuid, path }
+    }
+
+    /// Returns the UUID of the target node within the component subtree.
+    #[must_use]
+    pub fn node_uuid(&self) -> Uuid {
+        self.node_uuid
+    }
+
+    /// Returns the property path being overridden.
+    #[must_use]
+    pub fn path(&self) -> &PropertyPath {
+        &self.path
+    }
 }
 
 /// A map of property overrides applied to a component instance.
@@ -121,13 +275,17 @@ impl OverrideMap {
     /// Sets an override, returning the previous value if any.
     ///
     /// # Errors
-    /// Returns `CoreError::ValidationError` if the map exceeds capacity.
+    /// Returns `CoreError::ValidationError` if the map exceeds capacity,
+    /// the value contains non-finite floats, string values are too long,
+    /// or the property path index is out of bounds.
     pub fn set(
         &mut self,
         key: OverrideKey,
         value: OverrideValue,
         source: OverrideSource,
     ) -> Result<Option<(OverrideValue, OverrideSource)>, CoreError> {
+        validate_override_value(&value)?;
+        validate_property_path(&key.path)?;
         if !self.entries.contains_key(&key)
             && self.entries.len() >= validate::MAX_OVERRIDES_PER_INSTANCE
         {
@@ -172,8 +330,18 @@ impl OverrideMap {
 impl Serialize for OverrideMap {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeSeq;
-        let mut seq = serializer.serialize_seq(Some(self.entries.len()))?;
-        for (key, (value, source)) in &self.entries {
+
+        // Sort entries by (node_uuid, path sort key) for deterministic output.
+        let mut sorted: Vec<_> = self.entries.iter().collect();
+        sorted.sort_by(|(a_key, _), (b_key, _)| {
+            a_key
+                .node_uuid()
+                .cmp(&b_key.node_uuid())
+                .then_with(|| a_key.path().sort_key().cmp(&b_key.path().sort_key()))
+        });
+
+        let mut seq = serializer.serialize_seq(Some(sorted.len()))?;
+        for (key, (value, source)) in &sorted {
             #[derive(Serialize)]
             struct Entry<'a> {
                 node_uuid: &'a Uuid,
@@ -182,8 +350,8 @@ impl Serialize for OverrideMap {
                 source: &'a OverrideSource,
             }
             seq.serialize_element(&Entry {
-                node_uuid: &key.node_uuid,
-                path: &key.path,
+                node_uuid: &key.node_uuid(),
+                path: key.path(),
                 value,
                 source,
             })?;
@@ -211,10 +379,16 @@ impl<'de> Deserialize<'de> for OverrideMap {
         }
         let mut map = HashMap::with_capacity(entries.len());
         for entry in entries {
-            let key = OverrideKey {
-                node_uuid: entry.node_uuid,
-                path: entry.path,
-            };
+            validate_override_value(&entry.value).map_err(serde::de::Error::custom)?;
+            validate_property_path(&entry.path).map_err(serde::de::Error::custom)?;
+            let key = OverrideKey::new(entry.node_uuid, entry.path);
+            if map.contains_key(&key) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate override key: node_uuid={}, path={:?}",
+                    key.node_uuid(),
+                    key.path()
+                )));
+            }
             map.insert(key, (entry.value, entry.source));
         }
         Ok(Self { entries: map })
@@ -286,16 +460,22 @@ pub struct ComponentProperty {
 }
 
 impl ComponentProperty {
-    /// Creates a new component property, validating the name.
+    /// Creates a new component property, validating the name and
+    /// ensuring the default value type is compatible with the property type.
     ///
     /// # Errors
-    /// Returns `CoreError::ValidationError` if the name is invalid.
+    /// Returns `CoreError::ValidationError` if:
+    /// - The name is invalid
+    /// - The default value type does not match the property type
+    /// - The default value contains non-finite floats or exceeds length limits
     pub fn new(
         name: String,
         property_type: ComponentPropertyType,
         default_value: OverrideValue,
     ) -> Result<Self, CoreError> {
         validate::validate_node_name(&name)?;
+        validate_override_value(&default_value)?;
+        validate_property_type_value_compat(property_type, &default_value)?;
         Ok(Self {
             name,
             property_type,
@@ -435,6 +615,7 @@ impl<'de> Deserialize<'de> for ComponentDef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::Point;
 
     #[test]
     fn test_property_path_serde_round_trip() {
@@ -496,6 +677,87 @@ mod tests {
         assert_eq!(val, deserialized);
     }
 
+    // RF-011: serde round-trip tests for missing OverrideValue variants
+
+    #[test]
+    fn test_override_value_stroke_serde() {
+        let val = OverrideValue::Stroke {
+            value: Stroke::default(),
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_opacity_serde() {
+        let val = OverrideValue::Opacity {
+            value: StyleValue::Literal { value: 0.5 },
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_blend_mode_serde() {
+        let val = OverrideValue::BlendMode {
+            value: BlendMode::Multiply,
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_effect_serde() {
+        let val = OverrideValue::Effect {
+            value: Effect::LayerBlur {
+                radius: StyleValue::Literal { value: 4.0 },
+            },
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_constraints_serde() {
+        let val = OverrideValue::Constraints {
+            value: Constraints::default(),
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_transform_serde() {
+        let val = OverrideValue::Transform {
+            value: Transform::default(),
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
+    #[test]
+    fn test_override_value_effect_drop_shadow_serde() {
+        let val = OverrideValue::Effect {
+            value: Effect::DropShadow {
+                color: StyleValue::Literal {
+                    value: Color::default(),
+                },
+                offset: Point { x: 2.0, y: 2.0 },
+                blur: StyleValue::Literal { value: 4.0 },
+                spread: StyleValue::Literal { value: 0.0 },
+            },
+        };
+        let json = serde_json::to_string(&val).expect("serialize");
+        let deserialized: OverrideValue = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(val, deserialized);
+    }
+
     #[test]
     fn test_override_source_serde() {
         let sources = vec![OverrideSource::Variant, OverrideSource::User];
@@ -516,15 +778,23 @@ mod tests {
         assert_eq!(set.len(), 3);
     }
 
+    // ── OverrideKey ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_override_key_accessors() {
+        let uuid = Uuid::nil();
+        let path = PropertyPath::Width;
+        let key = OverrideKey::new(uuid, path.clone());
+        assert_eq!(key.node_uuid(), uuid);
+        assert_eq!(*key.path(), path);
+    }
+
     // ── OverrideMap ─────────────────────────────────────────────────────
 
     #[test]
     fn test_override_map_set_and_get() {
         let mut map = OverrideMap::new();
-        let key = OverrideKey {
-            node_uuid: Uuid::nil(),
-            path: PropertyPath::Visible,
-        };
+        let key = OverrideKey::new(Uuid::nil(), PropertyPath::Visible);
         map.set(
             key.clone(),
             OverrideValue::Bool { value: false },
@@ -539,10 +809,7 @@ mod tests {
     #[test]
     fn test_override_map_remove() {
         let mut map = OverrideMap::new();
-        let key = OverrideKey {
-            node_uuid: Uuid::nil(),
-            path: PropertyPath::Name,
-        };
+        let key = OverrideKey::new(Uuid::nil(), PropertyPath::Name);
         map.set(
             key.clone(),
             OverrideValue::String {
@@ -560,19 +827,13 @@ mod tests {
     fn test_override_map_serde_round_trip() {
         let mut map = OverrideMap::new();
         map.set(
-            OverrideKey {
-                node_uuid: Uuid::nil(),
-                path: PropertyPath::Visible,
-            },
+            OverrideKey::new(Uuid::nil(), PropertyPath::Visible),
             OverrideValue::Bool { value: false },
             OverrideSource::User,
         )
         .expect("set");
         map.set(
-            OverrideKey {
-                node_uuid: Uuid::nil(),
-                path: PropertyPath::TransformX,
-            },
+            OverrideKey::new(Uuid::nil(), PropertyPath::TransformX),
             OverrideValue::Number { value: 100.0 },
             OverrideSource::Variant,
         )
@@ -589,15 +850,37 @@ mod tests {
         }
     }
 
+    // RF-013: deterministic serialization
+    #[test]
+    fn test_override_map_serialization_is_deterministic() {
+        let mut map = OverrideMap::new();
+        // Insert in arbitrary order — serialization must be sorted by (node_uuid, path discriminant).
+        map.set(
+            OverrideKey::new(Uuid::nil(), PropertyPath::Width),
+            OverrideValue::Number { value: 200.0 },
+            OverrideSource::User,
+        )
+        .expect("set");
+        map.set(
+            OverrideKey::new(Uuid::nil(), PropertyPath::Name),
+            OverrideValue::String {
+                value: "a".to_string(),
+            },
+            OverrideSource::User,
+        )
+        .expect("set");
+
+        let json1 = serde_json::to_string(&map).expect("serialize first");
+        let json2 = serde_json::to_string(&map).expect("serialize second");
+        assert_eq!(json1, json2, "serialization must be deterministic");
+    }
+
     #[test]
     fn test_override_map_capacity_limit() {
         let mut map = OverrideMap::new();
         assert!(map.is_empty());
         map.set(
-            OverrideKey {
-                node_uuid: Uuid::nil(),
-                path: PropertyPath::Name,
-            },
+            OverrideKey::new(Uuid::nil(), PropertyPath::Name),
             OverrideValue::String {
                 value: "test".to_string(),
             },
@@ -610,10 +893,7 @@ mod tests {
     #[test]
     fn test_override_map_set_replaces_existing_key() {
         let mut map = OverrideMap::new();
-        let key = OverrideKey {
-            node_uuid: Uuid::nil(),
-            path: PropertyPath::Width,
-        };
+        let key = OverrideKey::new(Uuid::nil(), PropertyPath::Width);
         map.set(
             key.clone(),
             OverrideValue::Number { value: 100.0 },
@@ -662,16 +942,31 @@ mod tests {
     fn test_override_map_iter() {
         let mut map = OverrideMap::new();
         map.set(
-            OverrideKey {
-                node_uuid: Uuid::nil(),
-                path: PropertyPath::Locked,
-            },
+            OverrideKey::new(Uuid::nil(), PropertyPath::Locked),
             OverrideValue::Bool { value: true },
             OverrideSource::User,
         )
         .expect("set");
         let entries: Vec<_> = map.iter().collect();
         assert_eq!(entries.len(), 1);
+    }
+
+    // RF-010: Aliased tests following test_<constant_name_lowercase>_enforced convention
+
+    #[test]
+    fn test_max_overrides_per_instance_enforced() {
+        let mut entries = Vec::new();
+        for i in 0..=validate::MAX_OVERRIDES_PER_INSTANCE {
+            entries.push(serde_json::json!({
+                "node_uuid": Uuid::nil(),
+                "path": { "type": "fill", "index": i },
+                "value": { "type": "number", "value": 1.0 },
+                "source": "user"
+            }));
+        }
+        let json = serde_json::to_string(&entries).expect("serialize array");
+        let result: Result<OverrideMap, _> = serde_json::from_str(&json);
+        assert!(result.is_err());
     }
 
     // ── Variant ─────────────────────────────────────────────────────
@@ -906,6 +1201,51 @@ mod tests {
 
     #[test]
     fn test_component_def_rejects_too_many_properties() {
+        let properties: Vec<ComponentProperty> = (0..=validate::MAX_PROPERTIES_PER_COMPONENT)
+            .map(|i| {
+                ComponentProperty::new(
+                    format!("P{i}"),
+                    ComponentPropertyType::Text,
+                    OverrideValue::String {
+                        value: "x".to_string(),
+                    },
+                )
+                .expect("valid")
+            })
+            .collect();
+        assert!(
+            ComponentDef::new(
+                ComponentId::new(Uuid::nil()),
+                "Overflow".to_string(),
+                NodeId::new(0, 0),
+                vec![],
+                properties,
+            )
+            .is_err()
+        );
+    }
+
+    // RF-010: Aliased tests following test_<constant_name_lowercase>_enforced convention
+
+    #[test]
+    fn test_max_variants_per_component_enforced() {
+        let variants: Vec<Variant> = (0..=validate::MAX_VARIANTS_PER_COMPONENT)
+            .map(|i| Variant::new(format!("V{i}"), OverrideMap::new()).expect("valid"))
+            .collect();
+        assert!(
+            ComponentDef::new(
+                ComponentId::new(Uuid::nil()),
+                "Overflow".to_string(),
+                NodeId::new(0, 0),
+                variants,
+                vec![],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_max_properties_per_component_enforced() {
         let properties: Vec<ComponentProperty> = (0..=validate::MAX_PROPERTIES_PER_COMPONENT)
             .map(|i| {
                 ComponentProperty::new(
