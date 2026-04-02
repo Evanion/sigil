@@ -274,6 +274,13 @@ pub struct UpdateTokenInput {
     pub description: Option<String>,
 }
 
+/// Input for deleting a design token.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteTokenInput {
+    /// Name of the token to delete (e.g. "color.primary").
+    pub name: String,
+}
+
 // ── Tool output types ─────────────────────────────────────────────────
 
 /// Result of listing pages.
@@ -284,6 +291,16 @@ pub struct UpdateTokenInput {
 pub struct PageListResult {
     /// All pages in the document.
     pub pages: Vec<PageInfo>,
+}
+
+/// Result of listing tokens.
+///
+/// Wraps the token list in an object so the MCP output schema has a root
+/// `object` type, as required by the MCP specification.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct TokenListResult {
+    /// All tokens in the document, sorted by name.
+    pub tokens: Vec<TokenInfo>,
 }
 
 /// Result of a successful mutation.

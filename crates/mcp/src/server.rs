@@ -215,6 +215,59 @@ impl SigilMcpServer {
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }
+
+    /// Lists all design tokens in the document.
+    #[tool(
+        name = "list_tokens",
+        description = "List all design tokens in the document, sorted by name"
+    )]
+    fn list_tokens(&self) -> Json<crate::types::TokenListResult> {
+        Json(crate::types::TokenListResult {
+            tokens: crate::tools::tokens::list_tokens_impl(&self.state),
+        })
+    }
+
+    /// Creates a new design token.
+    #[tool(
+        name = "create_token",
+        description = "Create a new design token. token_type must be one of: color, dimension, \
+                        font_family, font_weight, duration, cubic_bezier, number, shadow, \
+                        gradient, typography. The value JSON must match the token_type structure."
+    )]
+    fn create_token(
+        &self,
+        Parameters(input): Parameters<crate::types::CreateTokenInput>,
+    ) -> Result<Json<crate::types::TokenInfo>, rmcp::ErrorData> {
+        crate::tools::tokens::create_token_impl(&self.state, &input)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Updates an existing design token's type, value, and/or description.
+    #[tool(
+        name = "update_token",
+        description = "Update an existing design token (identified by name) with a new type, \
+                        value, or description"
+    )]
+    fn update_token(
+        &self,
+        Parameters(input): Parameters<crate::types::UpdateTokenInput>,
+    ) -> Result<Json<crate::types::TokenInfo>, rmcp::ErrorData> {
+        crate::tools::tokens::update_token_impl(&self.state, &input)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Deletes a design token by name.
+    #[tool(name = "delete_token", description = "Delete a design token by name")]
+    fn delete_token(
+        &self,
+        Parameters(input): Parameters<crate::types::DeleteTokenInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::tokens::delete_token_impl(&self.state, &input.name)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
 }
 
 impl ServerHandler for SigilMcpServer {
