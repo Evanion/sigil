@@ -153,7 +153,13 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
       renderScheduled = false;
       zoomText.textContent = `${String(Math.round(viewport.zoom * 100))}%`;
       if (ctx) {
-        render(ctx, viewport, [...store.getAllNodes().values()], null, window.devicePixelRatio || 1);
+        render(
+          ctx,
+          viewport,
+          [...store.getAllNodes().values()],
+          null,
+          window.devicePixelRatio || 1,
+        );
       }
     });
   }
@@ -283,12 +289,20 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     } else if (isCtrlOrMeta && e.key === "=") {
       // Zoom in
       e.preventDefault();
-      viewport = { x: viewport.x, y: viewport.y, zoom: Math.min(10, viewport.zoom * KEYBOARD_ZOOM_FACTOR) };
+      viewport = {
+        x: viewport.x,
+        y: viewport.y,
+        zoom: Math.min(10, viewport.zoom * KEYBOARD_ZOOM_FACTOR),
+      };
       scheduleRender();
     } else if (isCtrlOrMeta && e.key === "-") {
       // Zoom out
       e.preventDefault();
-      viewport = { x: viewport.x, y: viewport.y, zoom: Math.max(0.1, viewport.zoom / KEYBOARD_ZOOM_FACTOR) };
+      viewport = {
+        x: viewport.x,
+        y: viewport.y,
+        zoom: Math.max(0.1, viewport.zoom / KEYBOARD_ZOOM_FACTOR),
+      };
       scheduleRender();
     }
   }

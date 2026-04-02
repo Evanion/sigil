@@ -402,7 +402,11 @@ describe("DocumentStore", () => {
     for (let i = 0; i < 5; i++) {
       mockWs.simulateMessage({
         type: "broadcast",
-        command: { type: "rename_node", node_id: { index: 0, generation: 0 }, new_name: `N${String(i)}` },
+        command: {
+          type: "rename_node",
+          node_id: { index: 0, generation: 0 },
+          new_name: `N${String(i)}`,
+        },
       });
     }
 

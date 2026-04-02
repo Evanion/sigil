@@ -49,8 +49,7 @@ function setupDomStubs(): void {
     }
   }
 
-  globalThis.ResizeObserver =
-    StubResizeObserver as unknown as typeof ResizeObserver;
+  globalThis.ResizeObserver = StubResizeObserver as unknown as typeof ResizeObserver;
 }
 
 describe("app-shell accessibility", () => {
@@ -92,9 +91,7 @@ describe("app-shell accessibility", () => {
       const canvasContainer = root.querySelector(".canvas-container");
       expect(canvasContainer).not.toBeNull();
       expect(canvasContainer?.getAttribute("role")).toBe("main");
-      expect(canvasContainer?.getAttribute("aria-label")).toBe(
-        "Design canvas",
-      );
+      expect(canvasContainer?.getAttribute("aria-label")).toBe("Design canvas");
     });
 
     it("should assign role=complementary and aria-label to the right panel", () => {
