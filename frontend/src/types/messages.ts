@@ -1,67 +1,74 @@
 /**
- * Wire-format message types for WebSocket communication.
- * These mirror the Rust server's ClientMessage and ServerMessage enums.
+ * TypeScript types for WebSocket messages between client and server.
  *
- * NOTE: These are placeholder types for the frontend foundation.
- * They will be expanded when the core crate's wire format is finalized.
+ * Both `ClientMessage` and `ServerMessage` are tagged unions using
+ * `#[serde(tag = "type", rename_all = "snake_case")]`.
+ *
+ * Source: crates/server/src/routes/ws.rs
  */
 
-// --- Client -> Server messages ---
+import type { BroadcastCommand, SerializableCommand } from "./commands";
 
-export interface ExecuteCommandMessage {
-  readonly type: "execute_command";
+// ── ClientMessage (client -> server) ──────────────────────────────────
+
+export interface ClientMessageCommand {
+  readonly type: "command";
   readonly command: SerializableCommand;
 }
 
-export interface UndoMessage {
+export interface ClientMessageUndo {
   readonly type: "undo";
 }
 
-export interface RedoMessage {
+export interface ClientMessageRedo {
   readonly type: "redo";
 }
 
-export type ClientMessage =
-  | ExecuteCommandMessage
-  | UndoMessage
-  | RedoMessage;
+export type ClientMessage = ClientMessageCommand | ClientMessageUndo | ClientMessageRedo;
 
-// --- Server -> Client messages ---
+// ── ServerMessage (server -> client) ──────────────────────────────────
 
-export interface CommandBroadcastMessage {
-  readonly type: "command_broadcast";
+export interface ServerMessageBroadcast {
+  readonly type: "broadcast";
   readonly command: BroadcastCommand;
 }
 
-export interface UndoRedoStateMessage {
-  readonly type: "undo_redo_state";
-  readonly can_undo: boolean;
-  readonly can_redo: boolean;
-}
-
-export interface DocumentChangedMessage {
-  readonly type: "document_changed";
-}
-
-export interface ErrorMessage {
+export interface ServerMessageError {
   readonly type: "error";
   readonly message: string;
 }
 
-export type ServerMessage =
-  | CommandBroadcastMessage
-  | UndoRedoStateMessage
-  | DocumentChangedMessage
-  | ErrorMessage;
-
-// --- Placeholder command types (will be expanded by Task 1 / spec-01) ---
-
-export interface SerializableCommand {
-  readonly kind: string;
-  readonly [key: string]: unknown;
+export interface ServerMessageUndoRedo {
+  readonly type: "undo_redo";
+  readonly can_undo: boolean;
+  readonly can_redo: boolean;
 }
 
-export interface BroadcastCommand {
-  readonly kind: string;
-  readonly [key: string]: unknown;
+export interface ServerMessageDocumentChanged {
+  readonly type: "document_changed";
+  readonly can_undo: boolean;
+  readonly can_redo: boolean;
+}
+
+export type ServerMessage =
+  | ServerMessageBroadcast
+  | ServerMessageError
+  | ServerMessageUndoRedo
+  | ServerMessageDocumentChanged;
+
+// ── Helper constructors ───────────────────────────────────────────────
+
+/** Create a command message to send to the server. */
+export function commandMessage(command: SerializableCommand): ClientMessage {
+  return { type: "command", command };
+}
+
+/** Create an undo message. */
+export function undoMessage(): ClientMessage {
+  return { type: "undo" };
+}
+
+/** Create a redo message. */
+export function redoMessage(): ClientMessage {
+  return { type: "redo" };
 }
