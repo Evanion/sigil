@@ -34,9 +34,23 @@ pub enum BooleanOp {
 /// - `CoreError::BooleanOpFailed` if the operation produces no valid geometry.
 /// - `CoreError::ValidationError` if input paths exceed safety limits.
 pub fn boolean_op(a: &PathData, b: &PathData, op: BooleanOp) -> Result<PathData, CoreError> {
+    // RF-002: fill rules must match
+    if a.fill_rule() != b.fill_rule() {
+        return Err(CoreError::ValidationError(
+            "boolean_op: paths must have the same fill rule".to_string(),
+        ));
+    }
+
     // Convert PathData to i_overlay polygon format
-    let polys_a = path_data_to_polygons(a)?;
-    let polys_b = path_data_to_polygons(b)?;
+    // RF-003: track cumulative point counts across both paths
+    let (polys_a, points_a) = path_data_to_polygons(a)?;
+    let (polys_b, points_b) = path_data_to_polygons(b)?;
+    if points_a + points_b > MAX_BOOLEAN_OP_POINTS {
+        return Err(CoreError::ValidationError(format!(
+            "boolean op total points {} exceeds {MAX_BOOLEAN_OP_POINTS}",
+            points_a + points_b
+        )));
+    }
 
     if polys_a.is_empty() || polys_b.is_empty() {
         return Err(CoreError::BooleanOpFailed(
@@ -73,8 +87,13 @@ pub fn boolean_op(a: &PathData, b: &PathData, op: BooleanOp) -> Result<PathData,
     polygons_to_path_data(&result_shapes, a.fill_rule())
 }
 
+/// A polygon represented as a list of `[x, y]` coordinate pairs.
+type Polygon = Vec<[f64; 2]>;
+
 /// Converts `PathData` to `i_overlay` polygon format by flattening bezier curves.
-fn path_data_to_polygons(path: &PathData) -> Result<Vec<Vec<[f64; 2]>>, CoreError> {
+///
+/// Returns the polygons and the total point count for cumulative limit checking.
+fn path_data_to_polygons(path: &PathData) -> Result<(Vec<Polygon>, usize), CoreError> {
     let mut polygons = Vec::new();
     let mut total_points = 0usize;
 
@@ -85,14 +104,17 @@ fn path_data_to_polygons(path: &PathData) -> Result<Vec<Vec<[f64; 2]>>, CoreErro
         for segment in subpath.segments() {
             match segment {
                 PathSegment::MoveTo { point } => {
-                    if !points.is_empty() {
+                    // RF-009: filter out degenerate polygons (fewer than 3 points)
+                    if points.len() >= 3 {
                         total_points += points.len();
                         if total_points > MAX_BOOLEAN_OP_POINTS {
                             return Err(CoreError::ValidationError(format!(
                                 "boolean op input exceeds {MAX_BOOLEAN_OP_POINTS} points"
                             )));
                         }
-                        polygons.push(points.clone());
+                        // RF-010: take instead of clone+clear
+                        polygons.push(std::mem::take(&mut points));
+                    } else {
                         points.clear();
                     }
                     points.push([point.x, point.y]);
@@ -122,7 +144,8 @@ fn path_data_to_polygons(path: &PathData) -> Result<Vec<Vec<[f64; 2]>>, CoreErro
             }
         }
 
-        if !points.is_empty() {
+        // RF-009: filter out degenerate polygons (fewer than 3 points)
+        if points.len() >= 3 {
             total_points += points.len();
             if total_points > MAX_BOOLEAN_OP_POINTS {
                 return Err(CoreError::ValidationError(format!(
@@ -133,7 +156,7 @@ fn path_data_to_polygons(path: &PathData) -> Result<Vec<Vec<[f64; 2]>>, CoreErro
         }
     }
 
-    Ok(polygons)
+    Ok((polygons, total_points))
 }
 
 /// Converts `i_overlay` result shapes back to `PathData`.
@@ -143,6 +166,18 @@ fn polygons_to_path_data(
     shapes: &[Vec<Vec<[f64; 2]>>],
     fill_rule: FillRule,
 ) -> Result<PathData, CoreError> {
+    // RF-006: count total output points before constructing SubPath objects
+    let total_output_points: usize = shapes
+        .iter()
+        .flat_map(|shape| shape.iter())
+        .map(Vec::len)
+        .sum();
+    if total_output_points > MAX_BOOLEAN_OP_POINTS {
+        return Err(CoreError::ValidationError(format!(
+            "boolean op output has {total_output_points} points, exceeds {MAX_BOOLEAN_OP_POINTS}"
+        )));
+    }
+
     let mut subpaths = Vec::new();
 
     for shape in shapes {
@@ -331,17 +366,79 @@ mod tests {
     }
 
     #[test]
+    fn test_boolean_op_mismatched_fill_rules() {
+        let a = make_rect(0.0, 0.0, 10.0, 10.0); // EvenOdd (default)
+        let segments = vec![
+            PathSegment::MoveTo {
+                point: Point::new(5.0, 0.0),
+            },
+            PathSegment::LineTo {
+                point: Point::new(15.0, 0.0),
+            },
+            PathSegment::LineTo {
+                point: Point::new(15.0, 10.0),
+            },
+            PathSegment::LineTo {
+                point: Point::new(5.0, 10.0),
+            },
+            PathSegment::Close,
+        ];
+        let subpath = SubPath::new(segments, true).expect("valid rect");
+        let b = PathData::new(vec![subpath], FillRule::NonZero).expect("valid path");
+
+        let result = boolean_op(&a, &b, BooleanOp::Union);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("same fill rule"),
+            "expected fill rule mismatch error, got: {err_msg}"
+        );
+    }
+
+    #[test]
     fn test_max_boolean_op_points_enforced() {
-        // We cannot easily create a path with 1M+ points without hitting
-        // MAX_SEGMENTS_PER_SUBPATH first, but we can verify the constant
-        // is wired in by checking that the validation logic references it.
-        // Use a path with many CubicTo segments that expand to many points.
-        // Each CubicTo produces BEZIER_APPROXIMATION_SEGMENTS (16) points,
-        // so we need ~62,501 CubicTo segments to exceed 1M points.
-        // That would exceed MAX_SEGMENTS_PER_SUBPATH (100,000), so this
-        // limit is effectively guarded by the subpath segment limit.
-        // We test that the constant exists and has the expected value.
-        assert_eq!(MAX_BOOLEAN_OP_POINTS, 1_000_000);
+        // RF-004: Two paths that each individually stay under MAX_BOOLEAN_OP_POINTS
+        // but cumulatively exceed it. Each CubicTo expands to BEZIER_APPROXIMATION_SEGMENTS
+        // (16) points. We use multiple subpaths per path to stay within
+        // MAX_SEGMENTS_PER_SUBPATH (100,000) per subpath.
+        //
+        // Strategy: each path has 10 subpaths, each with 4,000 CubicTo segments.
+        // Points per path: 10 * 4,000 * 16 = 640,000 (under 1M).
+        // Cumulative: 640,000 + 640,000 = 1,280,000 (over 1M).
+        fn make_heavy_path() -> PathData {
+            let mut subpaths = Vec::new();
+            for sp_idx in 0..10 {
+                #[allow(clippy::cast_precision_loss)]
+                let offset = sp_idx as f64 * 1000.0;
+                let mut segments = Vec::with_capacity(4_002);
+                segments.push(PathSegment::MoveTo {
+                    point: Point::new(offset, 0.0),
+                });
+                for i in 0..4_000 {
+                    #[allow(clippy::cast_precision_loss)]
+                    let x = offset + i as f64;
+                    segments.push(PathSegment::CubicTo {
+                        control1: Point::new(x + 0.25, 1.0),
+                        control2: Point::new(x + 0.75, 1.0),
+                        end: Point::new(x + 1.0, 0.0),
+                    });
+                }
+                segments.push(PathSegment::Close);
+                subpaths.push(SubPath::new(segments, true).expect("valid heavy subpath"));
+            }
+            PathData::new(subpaths, FillRule::EvenOdd).expect("valid heavy path")
+        }
+
+        let a = make_heavy_path();
+        let b = make_heavy_path();
+
+        let result = boolean_op(&a, &b, BooleanOp::Union);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("total points") && err_msg.contains("exceeds"),
+            "expected cumulative point limit error, got: {err_msg}"
+        );
     }
 
     #[test]
