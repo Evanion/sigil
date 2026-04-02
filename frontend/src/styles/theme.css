@@ -35,6 +35,28 @@
   --panel-radius: 0;
   --tooltip-radius: var(--radius-2);
 
+  /* Toggle button */
+  --toggle-button-radius: var(--radius-2);
+
+  /* Input controls */
+  --input-height: 28px;
+  --input-padding-x: var(--size-2);
+  --input-bg: var(--surface-4);
+  --input-border: var(--border-1);
+  --input-border-focus: var(--accent);
+
+  /* Select */
+  --select-trigger-radius: var(--radius-2);
+  --select-content-radius: var(--radius-2);
+
+  /* Toggle / Switch */
+  --toggle-track-width: 32px;
+  --toggle-track-height: 18px;
+  --toggle-thumb-size: 14px;
+
+  /* Divider */
+  --divider-color: var(--border-1);
+
   /* Focus ring */
   --focus-ring: 2px solid var(--accent);
   --focus-offset: 2px;
