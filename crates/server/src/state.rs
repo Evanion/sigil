@@ -186,3 +186,45 @@ impl Default for AppState {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compile-time assertion: `SendDocument` must implement `Send`.
+    /// If the inner `Document` changes in a way that makes this unsound,
+    /// this test will fail to compile.
+    fn _assert_send_document_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<SendDocument>();
+    }
+
+    /// Compile-time assertion: `SendDocument` must implement `Sync`.
+    fn _assert_send_document_is_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<SendDocument>();
+    }
+
+    /// Compile-time assertion: `AppState` must implement `Send` and `Sync`
+    /// to be usable with Axum's state extractor and tokio's async runtime.
+    fn _assert_app_state_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AppState>();
+    }
+
+    #[test]
+    fn test_app_state_new_creates_empty_document() {
+        let state = AppState::new();
+        let doc = state.document.lock().unwrap();
+        assert_eq!(doc.metadata.name, "Untitled");
+        assert_eq!(doc.pages.len(), 0);
+        assert_eq!(doc.arena.len(), 0);
+    }
+
+    #[test]
+    fn test_signal_dirty_without_persistence_is_noop() {
+        let state = AppState::new();
+        // Should not panic — no persistence configured
+        state.signal_dirty();
+    }
+}

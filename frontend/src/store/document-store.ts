@@ -448,7 +448,7 @@ export function createDocumentStore(client: Client): DocumentStore {
       nodes.set(uuid, optimisticNode);
       notifySubscribers();
 
-      // Fire-and-forget mutation; on result, update with server data
+      // Fire-and-forget mutation; on result, remap to the server's authoritative UUID
       void (async () => {
         try {
           const result = await client
@@ -460,12 +460,27 @@ export function createDocumentStore(client: Client): DocumentStore {
             })
             .toPromise();
           if (result.data && isCreateNodeResult(result.data)) {
+            const serverUuid = result.data.createNode.uuid;
             const serverNode = gqlNodeToDocumentNode(result.data.createNode.node);
-            nodes.set(uuid, serverNode);
+            // Remove optimistic node under client-generated UUID
+            nodes.delete(uuid);
+            // Insert under the server's authoritative UUID
+            nodes.set(serverUuid, serverNode);
+            // Update selection if the optimistic node was selected
+            if (selectedNodeId === uuid) {
+              selectedNodeId = serverUuid;
+            }
+            notifySubscribers();
+          } else if (result.error) {
+            console.warn("createNode mutation failed:", result.error.message);
+            // Remove failed optimistic node
+            nodes.delete(uuid);
             notifySubscribers();
           }
         } catch {
-          // Mutation errors are silently ignored; optimistic node remains
+          // Remove failed optimistic node
+          nodes.delete(uuid);
+          notifySubscribers();
         }
       })();
 
@@ -473,23 +488,85 @@ export function createDocumentStore(client: Client): DocumentStore {
     },
 
     setTransform(uuid: string, transform: Transform): void {
-      void client.mutation(SET_TRANSFORM_MUTATION, { uuid, transform }).toPromise();
+      // Optimistic update -- apply transform locally for immediate visual feedback
+      const existing = nodes.get(uuid);
+      if (existing) {
+        nodes.set(uuid, { ...existing, transform });
+        notifySubscribers();
+      }
+      void client
+        .mutation(SET_TRANSFORM_MUTATION, { uuid, transform })
+        .toPromise()
+        .then((result) => {
+          if (result.error) {
+            console.warn("setTransform mutation failed:", result.error.message);
+          }
+        });
     },
 
     renameNode(uuid: string, newName: string): void {
-      void client.mutation(RENAME_NODE_MUTATION, { uuid, newName }).toPromise();
+      const existing = nodes.get(uuid);
+      if (existing) {
+        nodes.set(uuid, { ...existing, name: newName });
+        notifySubscribers();
+      }
+      void client
+        .mutation(RENAME_NODE_MUTATION, { uuid, newName })
+        .toPromise()
+        .then((result) => {
+          if (result.error) {
+            console.warn("renameNode mutation failed:", result.error.message);
+          }
+        });
     },
 
     deleteNode(uuid: string): void {
-      void client.mutation(DELETE_NODE_MUTATION, { uuid }).toPromise();
+      // Optimistic delete
+      nodes.delete(uuid);
+      if (selectedNodeId === uuid) {
+        selectedNodeId = null;
+      }
+      notifySubscribers();
+      void client
+        .mutation(DELETE_NODE_MUTATION, { uuid })
+        .toPromise()
+        .then((result) => {
+          if (result.error) {
+            console.warn("deleteNode mutation failed:", result.error.message);
+          }
+        });
     },
 
     setVisible(uuid: string, visible: boolean): void {
-      void client.mutation(SET_VISIBLE_MUTATION, { uuid, visible }).toPromise();
+      const existing = nodes.get(uuid);
+      if (existing) {
+        nodes.set(uuid, { ...existing, visible });
+        notifySubscribers();
+      }
+      void client
+        .mutation(SET_VISIBLE_MUTATION, { uuid, visible })
+        .toPromise()
+        .then((result) => {
+          if (result.error) {
+            console.warn("setVisible mutation failed:", result.error.message);
+          }
+        });
     },
 
     setLocked(uuid: string, locked: boolean): void {
-      void client.mutation(SET_LOCKED_MUTATION, { uuid, locked }).toPromise();
+      const existing = nodes.get(uuid);
+      if (existing) {
+        nodes.set(uuid, { ...existing, locked });
+        notifySubscribers();
+      }
+      void client
+        .mutation(SET_LOCKED_MUTATION, { uuid, locked })
+        .toPromise()
+        .then((result) => {
+          if (result.error) {
+            console.warn("setLocked mutation failed:", result.error.message);
+          }
+        });
     },
 
     subscribe(fn: Subscriber): Unsubscribe {

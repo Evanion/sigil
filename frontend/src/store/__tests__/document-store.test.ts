@@ -171,6 +171,137 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
+  it("should optimistically update node transform before mutation resolves", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-t1", name: "Rect" })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    // Reset mock for tracking the setTransform mutation
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
+
+    const newTransform: Transform = {
+      x: 50,
+      y: 60,
+      width: 200,
+      height: 150,
+      rotation: 45,
+      scale_x: 2,
+      scale_y: 2,
+    };
+
+    store.setTransform("node-t1", newTransform);
+
+    // Node transform should be updated locally IMMEDIATELY (before mutation resolves)
+    const node = store.getNodeByUuid("node-t1");
+    expect(node).toBeDefined();
+    expect(node?.transform).toEqual(newTransform);
+    store.destroy();
+  });
+
+  it("should optimistically delete node and clear selection", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-del", name: "ToDelete" })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    store.select("node-del");
+    expect(store.getSelectedNodeId()).toBe("node-del");
+
+    // Reset mock for tracking the delete mutation
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
+
+    store.deleteNode("node-del");
+
+    // Node should be gone immediately
+    expect(store.getNodeByUuid("node-del")).toBeUndefined();
+    // Selection should be cleared
+    expect(store.getSelectedNodeId()).toBeNull();
+    store.destroy();
+  });
+
+  it("should optimistically update node visibility", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-vis", name: "Rect", visible: true })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
+
+    store.setVisible("node-vis", false);
+
+    expect(store.getNodeByUuid("node-vis")?.visible).toBe(false);
+    store.destroy();
+  });
+
+  it("should optimistically update node locked state", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-lck", name: "Rect", locked: false })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
+
+    store.setLocked("node-lck", true);
+
+    expect(store.getNodeByUuid("node-lck")?.locked).toBe(true);
+    store.destroy();
+  });
+
+  it("should optimistically update node name", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-ren", name: "OldName" })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
+
+    store.renameNode("node-ren", "NewName");
+
+    expect(store.getNodeByUuid("node-ren")?.name).toBe("NewName");
+    store.destroy();
+  });
+
   it("should call renameNode mutation via urql", () => {
     const store = createDocumentStore(asClient(mockClient));
     store.renameNode("node-1", "NewName");
@@ -595,25 +726,25 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
-  it("should update optimistic node with server data on mutation result", async () => {
+  it("should remap optimistic node to server UUID on createNode response", async () => {
     const serverNode = makeGqlNode({
-      uuid: "server-uuid",
+      uuid: "server-uuid-abc",
       name: "Server Rect",
     });
 
-    // Set up mutation to return server data
+    // Set up mutation to return server data with a DIFFERENT UUID
     mockClient.mutation.mockReturnValue({
       toPromise: () =>
         Promise.resolve({
-          data: { createNode: { uuid: "server-uuid", node: serverNode } },
+          data: { createNode: { uuid: "server-uuid-abc", node: serverNode } },
         }),
     });
 
     const store = createDocumentStore(asClient(mockClient));
 
-    // We need to mock crypto.randomUUID to control the UUID
+    // Mock crypto.randomUUID to return a known client-side UUID
     const originalRandomUUID = crypto.randomUUID;
-    crypto.randomUUID = () => "server-uuid" as ReturnType<typeof crypto.randomUUID>;
+    crypto.randomUUID = () => "client-uuid-123" as ReturnType<typeof crypto.randomUUID>;
 
     const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
     const transform: Transform = {
@@ -627,11 +758,97 @@ describe("DocumentStore", () => {
     };
 
     const uuid = store.createNode(kind, "Rect", transform);
-    expect(uuid).toBe("server-uuid");
+    expect(uuid).toBe("client-uuid-123");
 
-    // Wait for mutation to resolve
+    // Optimistic node should exist under client UUID
+    expect(store.getNodeByUuid("client-uuid-123")).toBeDefined();
+
+    // Wait for mutation to resolve and remap
     await vi.waitFor(() => {
-      expect(store.getNodeByUuid("server-uuid")?.name).toBe("Server Rect");
+      expect(store.getNodeByUuid("server-uuid-abc")).toBeDefined();
+    });
+
+    // Old client UUID key should be removed
+    expect(store.getNodeByUuid("client-uuid-123")).toBeUndefined();
+    // Server node should have the server's data
+    expect(store.getNodeByUuid("server-uuid-abc")?.name).toBe("Server Rect");
+
+    crypto.randomUUID = originalRandomUUID;
+    store.destroy();
+  });
+
+  it("should update selectedNodeId when optimistic node is remapped to server UUID", async () => {
+    const serverNode = makeGqlNode({
+      uuid: "server-uuid-xyz",
+      name: "Selected Rect",
+    });
+
+    mockClient.mutation.mockReturnValue({
+      toPromise: () =>
+        Promise.resolve({
+          data: { createNode: { uuid: "server-uuid-xyz", node: serverNode } },
+        }),
+    });
+
+    const store = createDocumentStore(asClient(mockClient));
+
+    const originalRandomUUID = crypto.randomUUID;
+    crypto.randomUUID = () => "client-uuid-sel" as ReturnType<typeof crypto.randomUUID>;
+
+    const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
+    const transform: Transform = {
+      x: 0,
+      y: 0,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+
+    const uuid = store.createNode(kind, "Rect", transform);
+    // Select the optimistic node
+    store.select(uuid);
+    expect(store.getSelectedNodeId()).toBe("client-uuid-sel");
+
+    // Wait for mutation to resolve and remap
+    await vi.waitFor(() => {
+      expect(store.getSelectedNodeId()).toBe("server-uuid-xyz");
+    });
+
+    crypto.randomUUID = originalRandomUUID;
+    store.destroy();
+  });
+
+  it("should remove optimistic node on createNode mutation failure", async () => {
+    mockClient.mutation.mockReturnValue({
+      toPromise: () => Promise.reject(new Error("Network error")),
+    });
+
+    const store = createDocumentStore(asClient(mockClient));
+
+    const originalRandomUUID = crypto.randomUUID;
+    crypto.randomUUID = () => "client-uuid-fail" as ReturnType<typeof crypto.randomUUID>;
+
+    const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
+    const transform: Transform = {
+      x: 0,
+      y: 0,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+
+    store.createNode(kind, "Rect", transform);
+
+    // Optimistic node exists immediately
+    expect(store.getNodeByUuid("client-uuid-fail")).toBeDefined();
+
+    // Wait for mutation rejection to be handled
+    await vi.waitFor(() => {
+      expect(store.getNodeByUuid("client-uuid-fail")).toBeUndefined();
     });
 
     crypto.randomUUID = originalRandomUUID;

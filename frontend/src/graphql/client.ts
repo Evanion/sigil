@@ -19,7 +19,6 @@ export function createGraphQLClient(): Client {
     url: httpUrl,
     exchanges: [
       cacheExchange,
-      fetchExchange,
       subscriptionExchange({
         forwardSubscription(request) {
           const input = { ...request, query: request.query || "" };
@@ -31,6 +30,7 @@ export function createGraphQLClient(): Client {
           };
         },
       }),
+      fetchExchange,
     ],
   });
 }
