@@ -1,0 +1,49 @@
+.sigil-text-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+}
+
+.sigil-text-input__label {
+  font-size: var(--font-size-00);
+  font-weight: var(--font-weight-5);
+  color: var(--text-2);
+  user-select: none;
+}
+
+.sigil-text-input__input {
+  height: var(--input-height);
+  padding: 0 var(--input-padding-x);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  font-family: inherit;
+  outline: none;
+  transition:
+    border-color 150ms,
+    background-color 150ms;
+}
+
+.sigil-text-input__input::placeholder {
+  color: var(--text-3);
+}
+
+.sigil-text-input__input:hover {
+  border-color: var(--border-2);
+}
+
+.sigil-text-input__input:focus {
+  border-color: var(--input-border-focus);
+}
+
+.sigil-text-input__input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-text-input[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
