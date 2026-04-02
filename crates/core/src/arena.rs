@@ -627,7 +627,9 @@ mod tests {
 
         // Insert a new node that reuses the slot, bumping the generation
         let uuid2 = Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-        let id2 = arena.insert(make_node(uuid2, "Second")).expect("insert reuse");
+        let id2 = arena
+            .insert(make_node(uuid2, "Second"))
+            .expect("insert reuse");
         assert_eq!(id2.index(), id1.index()); // same slot
         arena.remove(id2).expect("remove second");
 

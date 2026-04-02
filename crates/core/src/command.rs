@@ -65,6 +65,12 @@ pub trait Command: std::fmt::Debug {
     fn description(&self) -> &str;
 }
 
+/// Maximum number of sub-commands in a compound command.
+pub const MAX_COMPOUND_COMMANDS: usize = 10_000;
+
+/// Maximum length of a compound command description.
+const MAX_COMPOUND_DESCRIPTION_LEN: usize = 1024;
+
 /// A command that applies multiple sub-commands as one atomic unit.
 ///
 /// If any sub-command fails during `apply`, all previously applied
@@ -77,12 +83,26 @@ pub struct CompoundCommand {
 
 impl CompoundCommand {
     /// Creates a new compound command.
-    #[must_use]
-    pub fn new(commands: Vec<Box<dyn Command>>, description: String) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the number of sub-commands
+    /// exceeds `MAX_COMPOUND_COMMANDS`.
+    pub fn new(commands: Vec<Box<dyn Command>>, description: String) -> Result<Self, CoreError> {
+        if commands.len() > MAX_COMPOUND_COMMANDS {
+            return Err(CoreError::ValidationError(format!(
+                "compound command has {} sub-commands (max {MAX_COMPOUND_COMMANDS})",
+                commands.len()
+            )));
+        }
+        let description = if description.len() > MAX_COMPOUND_DESCRIPTION_LEN {
+            description[..MAX_COMPOUND_DESCRIPTION_LEN].to_string()
+        } else {
+            description
+        };
+        Ok(Self {
             commands,
             description,
-        }
+        })
     }
 }
 
@@ -154,33 +174,6 @@ mod tests {
     }
 
     #[test]
-    fn test_side_effect_validates_path() {
-        let valid = SideEffect::MoveTokenToWorkfile {
-            token_id: TokenId::new(uuid::Uuid::nil()),
-            target_workfile: "tokens/colors.sigil".to_string(),
-        };
-        assert!(valid.validate().is_ok());
-
-        let invalid_absolute = SideEffect::MoveTokenToWorkfile {
-            token_id: TokenId::new(uuid::Uuid::nil()),
-            target_workfile: "/etc/passwd".to_string(),
-        };
-        assert!(invalid_absolute.validate().is_err());
-
-        let invalid_traversal = SideEffect::MoveComponentToWorkfile {
-            component_id: ComponentId::new(uuid::Uuid::nil()),
-            target_workfile: "../../../secret".to_string(),
-        };
-        assert!(invalid_traversal.validate().is_err());
-
-        let invalid_empty = SideEffect::MoveTokenToWorkfile {
-            token_id: TokenId::new(uuid::Uuid::nil()),
-            target_workfile: String::new(),
-        };
-        assert!(invalid_empty.validate().is_err());
-    }
-
-    #[test]
     fn test_compound_command_applies_all_subcommands() {
         use crate::id::NodeId;
         use crate::node::{Node, NodeKind};
@@ -210,7 +203,8 @@ mod tests {
         let compound = CompoundCommand::new(
             vec![Box::new(cmd1), Box::new(cmd2)],
             "Rename twice".to_string(),
-        );
+        )
+        .expect("create compound");
 
         compound.apply(&mut doc).expect("apply compound");
         assert_eq!(doc.arena.get(node_id).expect("get node").name, "Step 2");
@@ -221,14 +215,82 @@ mod tests {
 
     #[test]
     fn test_compound_command_description() {
-        let compound = CompoundCommand::new(vec![], "Test compound".to_string());
+        let compound =
+            CompoundCommand::new(vec![], "Test compound".to_string()).expect("create compound");
         assert_eq!(compound.description(), "Test compound");
+    }
+
+    #[test]
+    fn test_side_effect_validates_path() {
+        let valid = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: "tokens/colors.sigil".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_absolute = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: "/etc/passwd".to_string(),
+        };
+        assert!(invalid_absolute.validate().is_err());
+
+        let invalid_traversal = SideEffect::MoveComponentToWorkfile {
+            component_id: ComponentId::new(uuid::Uuid::nil()),
+            target_workfile: "../../../secret".to_string(),
+        };
+        assert!(invalid_traversal.validate().is_err());
+
+        let invalid_empty = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: String::new(),
+        };
+        assert!(invalid_empty.validate().is_err());
+    }
+
+    #[test]
+    fn test_compound_command_rollback_on_partial_failure() {
+        use crate::id::NodeId;
+        use crate::node::{Node, NodeKind};
+
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            uuid::Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            NodeKind::Frame { layout: None },
+            "Original".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // cmd1 succeeds, cmd2 targets a nonexistent node and fails
+        let cmd1 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Renamed".to_string(),
+            old_name: "Original".to_string(),
+        };
+        let bad_id = NodeId::new(99, 0);
+        let cmd2 = crate::commands::node_commands::RenameNode {
+            node_id: bad_id,
+            new_name: "Bad".to_string(),
+            old_name: "Whatever".to_string(),
+        };
+
+        let compound = CompoundCommand::new(
+            vec![Box::new(cmd1), Box::new(cmd2)],
+            "Should rollback".to_string(),
+        )
+        .expect("create compound");
+
+        let result = compound.apply(&mut doc);
+        assert!(result.is_err());
+        // Verify rollback: name should be back to "Original"
+        assert_eq!(doc.arena.get(node_id).expect("get node").name, "Original");
     }
 
     #[test]
     fn test_compound_command_empty_is_noop() {
         let mut doc = Document::new("Test".to_string());
-        let compound = CompoundCommand::new(vec![], "Empty".to_string());
+        let compound = CompoundCommand::new(vec![], "Empty".to_string()).expect("create compound");
         let effects = compound.apply(&mut doc).expect("apply empty");
         assert!(effects.is_empty());
         let effects = compound.undo(&mut doc).expect("undo empty");

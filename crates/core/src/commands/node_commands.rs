@@ -1,4 +1,5 @@
 // crates/core/src/commands/node_commands.rs
+#![allow(clippy::unnecessary_literal_bound)]
 
 use crate::command::{Command, SideEffect};
 use crate::document::Document;
@@ -59,7 +60,6 @@ impl Command for CreateNode {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Create node"
     }
@@ -124,7 +124,6 @@ impl Command for DeleteNode {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Delete node"
     }
@@ -150,12 +149,12 @@ impl Command for RenameNode {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_node_name(&self.old_name)?;
         let node = doc.arena.get_mut(self.node_id)?;
         node.name.clone_from(&self.old_name);
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Rename node"
     }
@@ -183,7 +182,6 @@ impl Command for SetVisible {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set visibility"
     }
@@ -211,7 +209,6 @@ impl Command for SetLocked {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set locked"
     }
@@ -260,7 +257,6 @@ impl Command for SetTextContent {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set text content"
     }
@@ -372,7 +368,10 @@ mod tests {
 
         cmd.undo(&mut doc).expect("undo delete");
         // NodeId must be exactly the same after undo (reinsert preserves slot+generation)
-        let restored = doc.arena.get(node_id).expect("get by original NodeId after undo");
+        let restored = doc
+            .arena
+            .get(node_id)
+            .expect("get by original NodeId after undo");
         assert_eq!(restored.name, "Frame");
         assert!(doc.page(page_id).unwrap().root_nodes.contains(&node_id));
     }
@@ -428,7 +427,10 @@ mod tests {
 
         cmd.undo(&mut doc).expect("undo delete");
         // Child is back at exact NodeId
-        let restored = doc.arena.get(child_id).expect("child restored at same NodeId");
+        let restored = doc
+            .arena
+            .get(child_id)
+            .expect("child restored at same NodeId");
         assert_eq!(restored.name, "Child");
         assert_eq!(restored.parent, Some(parent_id));
         // Parent's children list is restored
@@ -643,6 +645,39 @@ mod tests {
             old_content: "Hello".to_string(),
         };
 
+        assert!(cmd.apply(&mut doc).is_err());
+    }
+
+    // ── Stale NodeId edge case (RF-015) ────────────────────────────
+
+    #[test]
+    fn test_command_on_stale_node_id() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Group,
+            "G".to_string(),
+        )
+        .expect("node");
+        let node_id = doc.arena.insert(node).expect("insert");
+        doc.arena.remove(node_id).expect("remove");
+        // Insert a new node at the same slot (different generation)
+        let node2 = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "G2".to_string(),
+        )
+        .expect("node");
+        let _new_id = doc.arena.insert(node2).expect("insert");
+
+        // Old node_id should be stale
+        let cmd = SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
         assert!(cmd.apply(&mut doc).is_err());
     }
 }

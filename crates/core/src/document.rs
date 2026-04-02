@@ -88,7 +88,7 @@ impl History {
         Self {
             undo_stack: VecDeque::new(),
             redo_stack: VecDeque::new(),
-            max_history,
+            max_history: max_history.max(1),
         }
     }
 
@@ -218,6 +218,13 @@ impl Document {
 
         let page = self.page_mut(page_id)?;
         if !page.root_nodes.contains(&node_id) {
+            if page.root_nodes.len() >= crate::validate::MAX_ROOT_NODES_PER_PAGE {
+                return Err(CoreError::ValidationError(format!(
+                    "page already has {} root nodes (maximum {})",
+                    page.root_nodes.len(),
+                    crate::validate::MAX_ROOT_NODES_PER_PAGE
+                )));
+            }
             page.root_nodes.push(node_id);
         }
         Ok(())
@@ -688,5 +695,17 @@ mod tests {
 
         // The command must still be on the redo stack — not lost
         assert!(doc.can_redo());
+    }
+
+    #[test]
+    fn test_history_min_capacity_enforced() {
+        let h = History::new(0);
+        assert_eq!(h.max_history(), 1, "max_history must be at least 1");
+
+        let h2 = History::new(1);
+        assert_eq!(h2.max_history(), 1);
+
+        let h3 = History::new(100);
+        assert_eq!(h3.max_history(), 100);
     }
 }
