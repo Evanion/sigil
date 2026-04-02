@@ -8,6 +8,7 @@
  * with a status bar row at the bottom.
  */
 
+import { tinykeys } from "tinykeys";
 import type { DocumentStore } from "../store/document-store";
 import type { Viewport } from "../canvas/viewport";
 import { createViewport, screenToWorld, zoomAt } from "../canvas/viewport";
@@ -513,77 +514,23 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   canvasContainer.addEventListener("pointermove", handlePointerMove);
   canvasContainer.addEventListener("pointerup", handlePointerUp);
 
-  // ── Keyboard Shortcuts ─────────────────────────────────────────
+  // ── Keyboard Shortcuts (via tinykeys) ──────────────────────────
 
-  /** Zoom multiplier for keyboard zoom shortcuts (Ctrl+= / Ctrl+-). */
+  /** Zoom multiplier for keyboard zoom shortcuts. */
   const KEYBOARD_ZOOM_FACTOR = 1.5;
 
-  /** Map of lowercase key to tool type for single-key tool shortcuts. */
-  const TOOL_SHORTCUT_MAP: ReadonlyMap<string, ToolType> = new Map([
-    ["v", "select"],
-    ["f", "frame"],
-    ["r", "rectangle"],
-    ["o", "ellipse"],
-  ]);
+  /** Helper: check if the active element is a text input (skip shortcuts). */
+  function isTyping(): boolean {
+    const el = document.activeElement;
+    return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+  }
 
+  // Space key needs manual tracking for space+drag panning
   function handleKeyDown(e: KeyboardEvent): void {
-    // Track space for Space+drag panning
     if (e.key === " " && !e.repeat) {
       spaceHeld = true;
       canvasContainer.classList.add("canvas-container--grab");
       e.preventDefault();
-      return;
-    }
-
-    const isCtrlOrMeta = e.ctrlKey || e.metaKey;
-
-    const key = e.key.toLowerCase();
-
-    if (isCtrlOrMeta && key === "z" && !e.shiftKey) {
-      e.preventDefault();
-      store.undo();
-    } else if (isCtrlOrMeta && key === "z" && e.shiftKey) {
-      e.preventDefault();
-      store.redo();
-    } else if (isCtrlOrMeta && e.key === "y") {
-      // Windows-style redo
-      e.preventDefault();
-      store.redo();
-    } else if (isCtrlOrMeta && e.key === "0") {
-      // Reset zoom to 100%
-      e.preventDefault();
-      viewport = { x: viewport.x, y: viewport.y, zoom: 1 };
-      scheduleRender();
-    } else if (isCtrlOrMeta && e.key === "=") {
-      // Zoom in
-      e.preventDefault();
-      viewport = {
-        x: viewport.x,
-        y: viewport.y,
-        zoom: Math.min(10, viewport.zoom * KEYBOARD_ZOOM_FACTOR),
-      };
-      scheduleRender();
-    } else if (isCtrlOrMeta && e.key === "-") {
-      // Zoom out
-      e.preventDefault();
-      viewport = {
-        x: viewport.x,
-        y: viewport.y,
-        zoom: Math.max(0.1, viewport.zoom / KEYBOARD_ZOOM_FACTOR),
-      };
-      scheduleRender();
-    } else if (!isCtrlOrMeta && !e.shiftKey && !e.altKey) {
-      // Tool switching shortcuts — only when no modifier keys are held
-      // and the event target is not an input or textarea
-      const target = e.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
-      }
-
-      const toolType = TOOL_SHORTCUT_MAP.get(e.key.toLowerCase());
-      if (toolType !== undefined) {
-        toolManager.setActiveTool(toolType);
-      }
     }
   }
 
@@ -596,6 +543,54 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
 
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
+
+  // All other shortcuts via tinykeys
+  const unsubscribeKeys = tinykeys(window, {
+    // Undo / Redo
+    "$mod+z": (e: KeyboardEvent) => {
+      e.preventDefault();
+      store.undo();
+    },
+    "$mod+Shift+z": (e: KeyboardEvent) => {
+      e.preventDefault();
+      store.redo();
+    },
+    "$mod+y": (e: KeyboardEvent) => {
+      e.preventDefault();
+      store.redo();
+    },
+
+    // Zoom
+    "$mod+0": (e: KeyboardEvent) => {
+      e.preventDefault();
+      viewport = { x: viewport.x, y: viewport.y, zoom: 1 };
+      scheduleRender();
+    },
+    "$mod+=": (e: KeyboardEvent) => {
+      e.preventDefault();
+      viewport = { ...viewport, zoom: Math.min(10, viewport.zoom * KEYBOARD_ZOOM_FACTOR) };
+      scheduleRender();
+    },
+    "$mod+-": (e: KeyboardEvent) => {
+      e.preventDefault();
+      viewport = { ...viewport, zoom: Math.max(0.1, viewport.zoom / KEYBOARD_ZOOM_FACTOR) };
+      scheduleRender();
+    },
+
+    // Tool shortcuts (only when not typing in an input)
+    v: () => {
+      if (!isTyping()) toolManager.setActiveTool("select");
+    },
+    f: () => {
+      if (!isTyping()) toolManager.setActiveTool("frame");
+    },
+    r: () => {
+      if (!isTyping()) toolManager.setActiveTool("rectangle");
+    },
+    o: () => {
+      if (!isTyping()) toolManager.setActiveTool("ellipse");
+    },
+  });
 
   // ── Status Bar Updates ─────────────────────────────────────────
 
@@ -664,5 +659,6 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     canvasContainer.removeEventListener("pointerup", handlePointerUp);
     document.removeEventListener("keydown", handleKeyDown);
     document.removeEventListener("keyup", handleKeyUp);
+    unsubscribeKeys();
   };
 }
