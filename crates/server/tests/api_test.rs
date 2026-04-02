@@ -1,6 +1,7 @@
 //! Integration tests for the server HTTP and WebSocket endpoints.
 
 use std::net::SocketAddr;
+use std::time::Duration;
 
 use agent_designer_server::{build_app, state::AppState};
 
@@ -153,4 +154,81 @@ async fn test_websocket_invalid_json_returns_error() {
     assert_eq!(parsed["type"], "error");
 
     ws.close(None).await.expect("close");
+}
+
+#[tokio::test]
+async fn test_create_node_broadcasts_to_other_client_but_not_sender() {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let addr = start_test_server().await;
+
+    // Connect two WebSocket clients.
+    let (mut ws_a, _) = connect_async(format!("ws://{addr}/ws"))
+        .await
+        .expect("client A connect");
+    let (mut ws_b, _) = connect_async(format!("ws://{addr}/ws"))
+        .await
+        .expect("client B connect");
+
+    // Client A sends a CreateNode command.
+    let node_uuid = uuid::Uuid::new_v4();
+    let create_msg = serde_json::json!({
+        "type": "command",
+        "command": {
+            "type": "create_node",
+            "node_id": { "index": 0, "generation": 0 },
+            "uuid": node_uuid.to_string(),
+            "kind": { "type": "frame", "layout": null },
+            "name": "TestFrame",
+            "page_id": null
+        }
+    });
+    ws_a.send(Message::Text(
+        serde_json::to_string(&create_msg)
+            .expect("serialize")
+            .into(),
+    ))
+    .await
+    .expect("client A send");
+
+    // Client B should receive the broadcast.
+    let b_response = tokio::time::timeout(Duration::from_secs(2), ws_b.next())
+        .await
+        .expect("client B response within timeout")
+        .expect("client B message received")
+        .expect("client B valid message");
+
+    let Message::Text(b_text) = b_response else {
+        panic!("expected text message from client B, got {b_response:?}");
+    };
+    let b_parsed: serde_json::Value = serde_json::from_str(&b_text).expect("parse B response");
+    assert_eq!(
+        b_parsed["type"], "broadcast",
+        "client B should receive a broadcast, got: {b_parsed}"
+    );
+    assert_eq!(b_parsed["command"]["type"], "create_node");
+    assert_eq!(b_parsed["command"]["name"], "TestFrame");
+
+    // Client A should NOT receive any message (echo filtering).
+    let a_result = tokio::time::timeout(Duration::from_millis(200), ws_a.next()).await;
+    assert!(
+        a_result.is_err(),
+        "client A should not receive its own broadcast (echo filtering)"
+    );
+
+    // Verify the document now has a node via the HTTP API.
+    let resp = reqwest::get(format!("http://{addr}/api/document"))
+        .await
+        .expect("GET /api/document");
+    assert_eq!(resp.status(), 200);
+    let doc: serde_json::Value = resp.json().await.expect("json body");
+    assert!(
+        doc["node_count"].as_u64().expect("node_count") >= 1,
+        "document should have at least 1 node, got: {doc}"
+    );
+
+    ws_a.close(None).await.expect("close A");
+    ws_b.close(None).await.expect("close B");
 }

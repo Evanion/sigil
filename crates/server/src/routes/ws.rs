@@ -72,11 +72,14 @@ pub async fn ws_handler(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     // RF-007: Validate origin header
-    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
-        if !is_allowed_origin(origin) {
-            tracing::warn!(origin, "rejected WebSocket connection from disallowed origin");
-            return axum::http::StatusCode::FORBIDDEN.into_response();
-        }
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok())
+        && !is_allowed_origin(origin)
+    {
+        tracing::warn!(
+            origin,
+            "rejected WebSocket connection from disallowed origin"
+        );
+        return axum::http::StatusCode::FORBIDDEN.into_response();
     }
 
     let client_id = state.next_client_id();
@@ -116,9 +119,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, client_id: u64) {
 
                         let msg = match envelope.payload {
                             BroadcastPayload::Command(cmd) => {
-                                ServerMessage::Broadcast {
-                                    command: Box::new(cmd),
-                                }
+                                ServerMessage::Broadcast { command: cmd }
                             }
                             BroadcastPayload::DocumentChanged { can_undo, can_redo } => {
                                 ServerMessage::DocumentChanged { can_undo, can_redo }
@@ -208,17 +209,14 @@ fn acquire_document_lock(
 ///
 /// All `Mutex` access is confined to this synchronous function, ensuring
 /// the lock is never held across an `.await` point.
-fn process_client_message(
-    text: &str,
-    state: &AppState,
-    client_id: u64,
-) -> Option<ServerMessage> {
+#[allow(clippy::too_many_lines)]
+fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Option<ServerMessage> {
     let client_msg: ClientMessage = match serde_json::from_str(text) {
         Ok(m) => m,
         Err(e) => {
             tracing::warn!("invalid client message: {e}");
             return Some(ServerMessage::Error {
-                message: format!("invalid message: {e}"),
+                message: "invalid message format".to_string(),
             });
         }
     };
@@ -233,32 +231,41 @@ fn process_client_message(
                 Err(e) => {
                     tracing::warn!("dispatch error: {e}");
                     return Some(ServerMessage::Error {
-                        message: format!("dispatch error: {e}"),
+                        message: "command dispatch failed".to_string(),
                     });
                 }
             };
 
             // RF-009: Graceful mutex handling instead of expect().
             let mut doc_guard = acquire_document_lock(state);
-            match doc_guard.0.execute(executable) {
+            match doc_guard.execute(executable) {
                 Ok(side_effects) => {
                     // RF-005: Log side effects at warn level if non-empty.
                     if !side_effects.is_empty() {
-                        tracing::warn!(count = side_effects.len(), ?side_effects, "side effects produced but not yet processed");
+                        tracing::warn!(
+                            count = side_effects.len(),
+                            ?side_effects,
+                            "side effects produced but not yet processed"
+                        );
                         // TODO(plan-02b): process side effects for file I/O
                     }
                     drop(doc_guard); // Release lock before broadcast
-                    // Ignore send errors -- they mean no receivers are listening.
-                    let _ = state.broadcast_tx.send(BroadcastEnvelope {
-                        sender_id: client_id,
-                        payload: BroadcastPayload::Command(broadcast),
-                    });
+                    if state
+                        .broadcast_tx
+                        .send(BroadcastEnvelope {
+                            sender_id: client_id,
+                            payload: BroadcastPayload::Command(Box::new(broadcast)),
+                        })
+                        .is_err()
+                    {
+                        tracing::debug!("no broadcast receivers connected");
+                    }
                     None
                 }
                 Err(e) => {
                     tracing::warn!("command execution failed: {e}");
                     Some(ServerMessage::Error {
-                        message: format!("execution error: {e}"),
+                        message: "command execution failed".to_string(),
                     })
                 }
             }
@@ -266,21 +273,31 @@ fn process_client_message(
         ClientMessage::Undo => {
             // RF-009: Graceful mutex handling instead of expect().
             let mut doc_guard = acquire_document_lock(state);
-            match doc_guard.0.undo() {
+            match doc_guard.undo() {
                 Ok(side_effects) => {
                     // RF-005: Log side effects at warn level if non-empty.
                     if !side_effects.is_empty() {
-                        tracing::warn!(count = side_effects.len(), ?side_effects, "side effects produced but not yet processed");
+                        tracing::warn!(
+                            count = side_effects.len(),
+                            ?side_effects,
+                            "side effects produced but not yet processed"
+                        );
                         // TODO(plan-02b): process side effects for file I/O
                     }
-                    let can_undo = doc_guard.0.can_undo();
-                    let can_redo = doc_guard.0.can_redo();
+                    let can_undo = doc_guard.can_undo();
+                    let can_redo = doc_guard.can_redo();
                     drop(doc_guard); // Release lock before broadcast
                     tracing::debug!(can_undo, can_redo, "undo successful");
-                    let _ = state.broadcast_tx.send(BroadcastEnvelope {
-                        sender_id: client_id,
-                        payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
-                    });
+                    if state
+                        .broadcast_tx
+                        .send(BroadcastEnvelope {
+                            sender_id: client_id,
+                            payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
+                        })
+                        .is_err()
+                    {
+                        tracing::debug!("no broadcast receivers connected");
+                    }
                     Some(ServerMessage::UndoRedo { can_undo, can_redo })
                 }
                 Err(e) => {
@@ -294,21 +311,31 @@ fn process_client_message(
         ClientMessage::Redo => {
             // RF-009: Graceful mutex handling instead of expect().
             let mut doc_guard = acquire_document_lock(state);
-            match doc_guard.0.redo() {
+            match doc_guard.redo() {
                 Ok(side_effects) => {
                     // RF-005: Log side effects at warn level if non-empty.
                     if !side_effects.is_empty() {
-                        tracing::warn!(count = side_effects.len(), ?side_effects, "side effects produced but not yet processed");
+                        tracing::warn!(
+                            count = side_effects.len(),
+                            ?side_effects,
+                            "side effects produced but not yet processed"
+                        );
                         // TODO(plan-02b): process side effects for file I/O
                     }
-                    let can_undo = doc_guard.0.can_undo();
-                    let can_redo = doc_guard.0.can_redo();
+                    let can_undo = doc_guard.can_undo();
+                    let can_redo = doc_guard.can_redo();
                     drop(doc_guard); // Release lock before broadcast
                     tracing::debug!(can_undo, can_redo, "redo successful");
-                    let _ = state.broadcast_tx.send(BroadcastEnvelope {
-                        sender_id: client_id,
-                        payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
-                    });
+                    if state
+                        .broadcast_tx
+                        .send(BroadcastEnvelope {
+                            sender_id: client_id,
+                            payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
+                        })
+                        .is_err()
+                    {
+                        tracing::debug!("no broadcast receivers connected");
+                    }
                     Some(ServerMessage::UndoRedo { can_undo, can_redo })
                 }
                 Err(e) => {

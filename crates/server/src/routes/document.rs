@@ -1,5 +1,7 @@
 use axum::Json;
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
 use crate::state::AppState;
@@ -15,17 +17,23 @@ pub struct DocumentInfo {
 
 /// Returns basic info about the current document.
 ///
-/// # Panics
-///
-/// Panics if the document mutex is poisoned (another thread panicked while
-/// holding the lock). This indicates an unrecoverable internal error.
-pub async fn get_document_info(State(state): State<AppState>) -> Json<DocumentInfo> {
-    let doc = state.document.lock().expect("document lock poisoned");
-    Json(DocumentInfo {
-        name: doc.metadata.name.clone(),
-        page_count: doc.pages.len(),
-        node_count: doc.arena.len(),
-        can_undo: doc.can_undo(),
-        can_redo: doc.can_redo(),
-    })
+/// RF-009: Returns HTTP 500 if the document mutex is poisoned instead of
+/// panicking, allowing the server to continue serving other requests.
+pub async fn get_document_info(State(state): State<AppState>) -> Response {
+    let doc_guard = match state.document.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("document mutex poisoned in get_document_info, recovering");
+            poisoned.into_inner()
+        }
+    };
+    let info = DocumentInfo {
+        name: doc_guard.0.metadata.name.clone(),
+        page_count: doc_guard.0.pages.len(),
+        node_count: doc_guard.0.arena.len(),
+        can_undo: doc_guard.0.can_undo(),
+        can_redo: doc_guard.0.can_redo(),
+    };
+    drop(doc_guard);
+    (StatusCode::OK, Json(info)).into_response()
 }
