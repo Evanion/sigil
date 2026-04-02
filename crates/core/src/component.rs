@@ -1244,6 +1244,154 @@ mod tests {
         );
     }
 
+    // ── RF-002: validate_override_value ──────────────────────────────
+
+    #[test]
+    fn test_validate_override_value_rejects_nan_number() {
+        let val = OverrideValue::Number { value: f64::NAN };
+        assert!(validate_override_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_validate_override_value_rejects_infinite_number() {
+        let val = OverrideValue::Number {
+            value: f64::INFINITY,
+        };
+        assert!(validate_override_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_validate_override_value_accepts_finite_number() {
+        let val = OverrideValue::Number { value: 42.0 };
+        assert!(validate_override_value(&val).is_ok());
+    }
+
+    #[test]
+    fn test_validate_override_value_rejects_nan_opacity() {
+        let val = OverrideValue::Opacity {
+            value: StyleValue::Literal { value: f64::NAN },
+        };
+        assert!(validate_override_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_validate_override_value_rejects_nan_transform_field() {
+        let mut t = Transform::default();
+        t.x = f64::NAN;
+        let val = OverrideValue::Transform { value: t };
+        assert!(validate_override_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_validate_override_value_accepts_valid_transform() {
+        let val = OverrideValue::Transform {
+            value: Transform::default(),
+        };
+        assert!(validate_override_value(&val).is_ok());
+    }
+
+    #[test]
+    fn test_override_map_set_rejects_nan_value() {
+        let mut map = OverrideMap::new();
+        let key = OverrideKey::new(Uuid::nil(), PropertyPath::Width);
+        let result = map.set(
+            key,
+            OverrideValue::Number { value: f64::NAN },
+            OverrideSource::User,
+        );
+        assert!(result.is_err());
+    }
+
+    // ── RF-003: cross-field validation ────────────────────────────────
+
+    #[test]
+    fn test_component_property_text_requires_string_value() {
+        let result = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::Bool { value: true },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_property_boolean_requires_bool_value() {
+        let result = ComponentProperty::new(
+            "visible".to_string(),
+            ComponentPropertyType::Boolean,
+            OverrideValue::String {
+                value: "yes".to_string(),
+            },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_property_instance_swap_requires_string_value() {
+        let result = ComponentProperty::new(
+            "icon".to_string(),
+            ComponentPropertyType::InstanceSwap,
+            OverrideValue::Bool { value: false },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_property_variant_requires_string_value() {
+        let result = ComponentProperty::new(
+            "state".to_string(),
+            ComponentPropertyType::Variant,
+            OverrideValue::Number { value: 1.0 },
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_property_text_accepts_string_value() {
+        let result = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::String {
+                value: "Click".to_string(),
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_component_property_boolean_accepts_bool_value() {
+        let result = ComponentProperty::new(
+            "visible".to_string(),
+            ComponentPropertyType::Boolean,
+            OverrideValue::Bool { value: true },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_component_property_instance_swap_accepts_string_value() {
+        let result = ComponentProperty::new(
+            "icon".to_string(),
+            ComponentPropertyType::InstanceSwap,
+            OverrideValue::String {
+                value: "icon-check".to_string(),
+            },
+        );
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_component_property_variant_accepts_string_value() {
+        let result = ComponentProperty::new(
+            "state".to_string(),
+            ComponentPropertyType::Variant,
+            OverrideValue::String {
+                value: "Hover".to_string(),
+            },
+        );
+        assert!(result.is_ok());
+    }
+
     #[test]
     fn test_max_properties_per_component_enforced() {
         let properties: Vec<ComponentProperty> = (0..=validate::MAX_PROPERTIES_PER_COMPONENT)
