@@ -128,6 +128,13 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 
 - The server must handle SIGTERM/SIGINT: stop accepting new connections, drain existing WebSocket connections, shut down within a bounded timeout. Required for container orchestration. The drain timeout must be a named constant.
 
+#### File Persistence Safety
+
+- All file writes must be atomic: write to a temporary file in the same directory, then rename. Never write directly to the target path — interrupted writes produce corrupt files.
+- Before loading a workfile directory, validate the manifest against the actual files on disk. Stale files (present on disk but absent from the manifest) must be ignored or deleted, never silently loaded. Orphaned manifest entries (referenced but missing on disk) must produce a warning.
+- File names derived from user input (page names, component names) must use deterministic collision-free identifiers (e.g., UUID) rather than sanitized user strings.
+- On graceful shutdown, flush all dirty documents to disk before exiting.
+
 ### `agent-designer-mcp`
 
 - Owns the MCP tool/resource definitions.
@@ -334,3 +341,7 @@ Types that represent arena indices or generational IDs (e.g., `NodeId`) MUST NOT
 ### Uniqueness Constraints on Named Collections
 
 When a collection contains entities with a name or identifier field that must be unique within that collection (e.g., component names in a document, property names in a component, variant names in a component), the insertion point MUST reject duplicates with a typed error. Do not rely on the collection type (HashMap vs Vec) to enforce this implicitly — validate explicitly and return an error that identifies the conflicting name.
+
+### Filesystem Writes Must Be Atomic
+
+Every file write in the server crate must use the write-to-temp-then-rename pattern. Write the full content to a temporary file in the SAME directory as the target (to ensure same-filesystem rename), then `fs::rename()` to the final path. This prevents partial writes on crash or power loss. Direct `fs::write()` to the final path is a bug in the server crate.
