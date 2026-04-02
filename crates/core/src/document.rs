@@ -181,6 +181,36 @@ impl Document {
         Ok(())
     }
 
+    /// Adds a transition to the document.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the transition is invalid or the document
+    /// is at capacity.
+    pub fn add_transition(
+        &mut self,
+        transition: crate::prototype::Transition,
+    ) -> Result<(), CoreError> {
+        crate::prototype::validate_transition(&transition)?;
+        if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(format!(
+                "document already has {} transitions (maximum {})",
+                self.transitions.len(),
+                crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
+            )));
+        }
+        self.transitions.push(transition);
+        Ok(())
+    }
+
+    /// Removes a transition by ID. Returns the removed transition if found.
+    pub fn remove_transition(&mut self, id: uuid::Uuid) -> Option<crate::prototype::Transition> {
+        if let Some(pos) = self.transitions.iter().position(|t| t.id == id) {
+            Some(self.transitions.remove(pos))
+        } else {
+            None
+        }
+    }
+
     /// Finds a page by its ID.
     ///
     /// # Errors
@@ -742,6 +772,99 @@ mod tests {
 
         let h3 = History::new(100);
         assert_eq!(h3.max_history(), 100);
+    }
+
+    // ── Transition mutation API ────────────────────────────────────────
+
+    #[test]
+    fn test_add_transition() {
+        use crate::prototype::{TransitionAnimation, TransitionTrigger};
+
+        let mut doc = Document::new("Test".to_string());
+        let t = Transition {
+            id: make_uuid(1),
+            source_node: NodeId::new(0, 0),
+            target_page: PageId::new(make_uuid(10)),
+            target_node: None,
+            trigger: TransitionTrigger::OnClick,
+            animation: TransitionAnimation::Instant,
+        };
+        doc.add_transition(t).expect("add transition");
+        assert_eq!(doc.transitions.len(), 1);
+    }
+
+    #[test]
+    fn test_add_transition_validates() {
+        use crate::prototype::{TransitionAnimation, TransitionTrigger};
+
+        let mut doc = Document::new("Test".to_string());
+        let t = Transition {
+            id: make_uuid(1),
+            source_node: NodeId::new(0, 0),
+            target_page: PageId::new(make_uuid(10)),
+            target_node: None,
+            trigger: TransitionTrigger::AfterDelay { seconds: -1.0 },
+            animation: TransitionAnimation::Instant,
+        };
+        assert!(doc.add_transition(t).is_err());
+    }
+
+    #[test]
+    fn test_remove_transition() {
+        use crate::prototype::{TransitionAnimation, TransitionTrigger};
+
+        let mut doc = Document::new("Test".to_string());
+        let id = make_uuid(1);
+        let t = Transition {
+            id,
+            source_node: NodeId::new(0, 0),
+            target_page: PageId::new(make_uuid(10)),
+            target_node: None,
+            trigger: TransitionTrigger::OnClick,
+            animation: TransitionAnimation::Instant,
+        };
+        doc.add_transition(t).expect("add");
+        let removed = doc.remove_transition(id);
+        assert!(removed.is_some());
+        assert!(doc.transitions.is_empty());
+    }
+
+    #[test]
+    fn test_remove_transition_not_found() {
+        let mut doc = Document::new("Test".to_string());
+        assert!(doc.remove_transition(make_uuid(99)).is_none());
+    }
+
+    #[test]
+    fn test_max_transitions_per_document_enforced() {
+        use crate::prototype::{TransitionAnimation, TransitionTrigger};
+
+        let mut doc = Document::new("Test".to_string());
+        for i in 0..crate::validate::MAX_TRANSITIONS_PER_DOCUMENT {
+            let uuid = Uuid::from_u128(i as u128);
+            let t = Transition {
+                id: uuid,
+                source_node: NodeId::new(0, 0),
+                target_page: PageId::new(make_uuid(10)),
+                target_node: None,
+                trigger: TransitionTrigger::OnClick,
+                animation: TransitionAnimation::Instant,
+            };
+            doc.add_transition(t).expect("add transition");
+        }
+        assert_eq!(
+            doc.transitions.len(),
+            crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
+        );
+        let overflow = Transition {
+            id: Uuid::from_u128(999_999),
+            source_node: NodeId::new(0, 0),
+            target_page: PageId::new(make_uuid(10)),
+            target_node: None,
+            trigger: TransitionTrigger::OnClick,
+            animation: TransitionAnimation::Instant,
+        };
+        assert!(doc.add_transition(overflow).is_err());
     }
 
     // ── RF-006: add_component ─────────────────────────────────────────
