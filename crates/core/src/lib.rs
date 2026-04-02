@@ -12,6 +12,7 @@ pub mod node;
 pub mod path;
 pub mod prototype;
 pub mod serialize;
+pub mod token;
 pub mod tree;
 pub mod validate;
 
@@ -36,6 +37,12 @@ pub use path::{AnchorPoint, CornerMode, PathSegment, SubPath};
 // ── Re-exports: Prototype ────────────────────────────────────────────
 pub use prototype::{
     SlideDirection, TransitionAnimation, TransitionTrigger, validate_duration, validate_transition,
+};
+
+// ── Re-exports: Token ──────────────────────────────────────────────────
+pub use token::{
+    DimensionUnit, GradientValue, ShadowValue, Token, TokenType, TokenValue, TypographyValue,
+    validate_token_value,
 };
 
 // ── Re-exports: Arena ──────────────────────────────────────────────────
