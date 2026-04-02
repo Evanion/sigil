@@ -232,3 +232,71 @@ async fn test_create_node_broadcasts_to_other_client_but_not_sender() {
     ws_a.close(None).await.expect("close A");
     ws_b.close(None).await.expect("close B");
 }
+
+#[tokio::test]
+async fn test_document_full_returns_info_and_empty_pages() {
+    let addr = start_test_server().await;
+    let resp = reqwest::get(format!("http://{addr}/api/document/full"))
+        .await
+        .expect("GET /api/document/full");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json body");
+    // Info section must be present with expected fields.
+    assert_eq!(body["info"]["name"], "Untitled");
+    assert_eq!(body["info"]["page_count"], 0);
+    assert_eq!(body["info"]["node_count"], 0);
+    assert_eq!(body["info"]["can_undo"], false);
+    assert_eq!(body["info"]["can_redo"], false);
+    // Pages array must be present and empty for a fresh document.
+    assert!(body["pages"].is_array());
+    assert_eq!(body["pages"].as_array().expect("pages array").len(), 0);
+}
+
+#[tokio::test]
+async fn test_document_full_returns_pages_with_nodes_after_creation() {
+    use futures_util::SinkExt;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let addr = start_test_server().await;
+
+    // First, add a page by creating a node with a page_id via WebSocket.
+    // We need to set up a document with a page first. The default AppState
+    // has no pages, so let's create a node without a page_id, which will
+    // still populate the arena.
+    let (mut ws, _) = connect_async(format!("ws://{addr}/ws"))
+        .await
+        .expect("WebSocket connect");
+
+    let node_uuid = uuid::Uuid::new_v4();
+    let create_msg = serde_json::json!({
+        "type": "command",
+        "command": {
+            "type": "create_node",
+            "node_id": { "index": 0, "generation": 0 },
+            "uuid": node_uuid.to_string(),
+            "kind": { "type": "rectangle", "corner_radii": [0.0, 0.0, 0.0, 0.0] },
+            "name": "Rect1",
+            "page_id": null
+        }
+    });
+    ws.send(Message::Text(
+        serde_json::to_string(&create_msg)
+            .expect("serialize")
+            .into(),
+    ))
+    .await
+    .expect("send create");
+
+    // Give server a moment to process.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let resp = reqwest::get(format!("http://{addr}/api/document/full"))
+        .await
+        .expect("GET /api/document/full");
+    assert_eq!(resp.status(), 200);
+    let body: serde_json::Value = resp.json().await.expect("json body");
+    assert_eq!(body["info"]["node_count"], 1);
+
+    ws.close(None).await.expect("close");
+}
