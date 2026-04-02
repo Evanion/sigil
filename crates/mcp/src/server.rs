@@ -17,7 +17,7 @@ use std::sync::MutexGuard;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
-    handler::server::wrapper::Json,
+    handler::server::wrapper::{Json, Parameters},
     model::{Implementation, ServerCapabilities, ServerInfo},
     tool, tool_router,
 };
@@ -87,6 +87,53 @@ impl SigilMcpServer {
     )]
     fn get_document_tree(&self) -> Json<crate::types::DocumentTree> {
         Json(crate::tools::document::get_document_tree_impl(&self.state))
+    }
+
+    /// Lists all pages in the document with their root node UUIDs.
+    #[tool(
+        name = "list_pages",
+        description = "List all pages in the document with their root node UUIDs"
+    )]
+    fn list_pages(&self) -> Json<crate::types::PageListResult> {
+        Json(crate::types::PageListResult {
+            pages: crate::tools::pages::list_pages_impl(&self.state),
+        })
+    }
+
+    /// Creates a new page in the document.
+    #[tool(
+        name = "create_page",
+        description = "Create a new page in the document"
+    )]
+    fn create_page(
+        &self,
+        Parameters(input): Parameters<crate::types::CreatePageInput>,
+    ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
+        crate::tools::pages::create_page_impl(&self.state, &input.name)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Deletes a page by UUID.
+    #[tool(name = "delete_page", description = "Delete a page by UUID")]
+    fn delete_page(
+        &self,
+        Parameters(input): Parameters<crate::types::DeletePageInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::pages::delete_page_impl(&self.state, &input.page_id)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Renames a page identified by UUID.
+    #[tool(name = "rename_page", description = "Rename a page")]
+    fn rename_page(
+        &self,
+        Parameters(input): Parameters<crate::types::RenamePageInput>,
+    ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
+        crate::tools::pages::rename_page_impl(&self.state, &input.page_id, &input.new_name)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
     }
 }
 

@@ -139,6 +139,22 @@ pub struct CreatePageInput {
     pub name: String,
 }
 
+/// Input for deleting a page.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeletePageInput {
+    /// UUID of the page to delete.
+    pub page_id: String,
+}
+
+/// Input for renaming a page.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RenamePageInput {
+    /// UUID of the page to rename.
+    pub page_id: String,
+    /// New name for the page.
+    pub new_name: String,
+}
+
 /// Input for creating a new node.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreateNodeInput {
@@ -216,6 +232,16 @@ pub struct UpdateTokenInput {
 }
 
 // ── Tool output types ─────────────────────────────────────────────────
+
+/// Result of listing pages.
+///
+/// Wraps the page list in an object so the MCP output schema has a root
+/// `object` type, as required by the MCP specification.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct PageListResult {
+    /// All pages in the document.
+    pub pages: Vec<PageInfo>,
+}
 
 /// Result of a successful mutation.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
