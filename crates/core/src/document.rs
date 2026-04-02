@@ -230,6 +230,9 @@ impl Document {
     /// Returns `CoreError` if the command's `apply` fails.
     pub fn execute(&mut self, cmd: Box<dyn Command>) -> Result<Vec<SideEffect>, CoreError> {
         let effects = cmd.apply(self)?;
+        for effect in &effects {
+            effect.validate()?;
+        }
         self.history.redo_stack.clear();
         self.history.undo_stack.push_back(cmd);
         if self.history.undo_stack.len() > self.history.max_history {

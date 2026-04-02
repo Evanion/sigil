@@ -60,6 +60,14 @@ pub enum CoreError {
 
     #[error("nothing to redo")]
     NothingToRedo,
+
+    #[error(
+        "rollback failed during compound command: original error: {original}, rollback errors: {rollback_errors:?}"
+    )]
+    RollbackFailed {
+        original: Box<CoreError>,
+        rollback_errors: Vec<CoreError>,
+    },
 }
 
 #[cfg(test)]

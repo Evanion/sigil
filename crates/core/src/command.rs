@@ -20,6 +20,26 @@ pub enum SideEffect {
     },
 }
 
+impl SideEffect {
+    /// Validates all fields in the side effect.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if any field is invalid.
+    pub fn validate(&self) -> Result<(), CoreError> {
+        match self {
+            Self::MoveTokenToWorkfile {
+                target_workfile, ..
+            }
+            | Self::MoveComponentToWorkfile {
+                target_workfile, ..
+            } => {
+                crate::validate::validate_asset_ref(target_workfile)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// A reversible mutation on a Document.
 ///
 /// Commands capture everything needed to apply and reverse the operation.
@@ -74,12 +94,19 @@ impl Command for CompoundCommand {
                 Ok(effects) => all_effects.extend(effects),
                 Err(e) => {
                     // Rollback: undo commands 0..i in reverse order
+                    let mut rollback_errors = Vec::new();
                     for cmd_to_undo in self.commands[..i].iter().rev() {
-                        // Best-effort rollback — if undo itself fails, we're in a bad state.
-                        // The spec says "the original error is returned with rollback context."
-                        let _ = cmd_to_undo.undo(doc);
+                        if let Err(re) = cmd_to_undo.undo(doc) {
+                            rollback_errors.push(re);
+                        }
                     }
-                    return Err(e);
+                    if rollback_errors.is_empty() {
+                        return Err(e);
+                    }
+                    return Err(CoreError::RollbackFailed {
+                        original: Box::new(e),
+                        rollback_errors,
+                    });
                 }
             }
         }
@@ -124,6 +151,33 @@ mod tests {
         let json = serde_json::to_string(&effect).expect("serialize");
         let deserialized: SideEffect = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(effect, deserialized);
+    }
+
+    #[test]
+    fn test_side_effect_validates_path() {
+        let valid = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: "tokens/colors.sigil".to_string(),
+        };
+        assert!(valid.validate().is_ok());
+
+        let invalid_absolute = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: "/etc/passwd".to_string(),
+        };
+        assert!(invalid_absolute.validate().is_err());
+
+        let invalid_traversal = SideEffect::MoveComponentToWorkfile {
+            component_id: ComponentId::new(uuid::Uuid::nil()),
+            target_workfile: "../../../secret".to_string(),
+        };
+        assert!(invalid_traversal.validate().is_err());
+
+        let invalid_empty = SideEffect::MoveTokenToWorkfile {
+            token_id: TokenId::new(uuid::Uuid::nil()),
+            target_workfile: String::new(),
+        };
+        assert!(invalid_empty.validate().is_err());
     }
 
     #[test]
