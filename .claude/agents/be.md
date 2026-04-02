@@ -108,6 +108,7 @@ This project uses Rust Edition 2024. Be aware of:
 - Cross-field invariant validation: when two fields must be consistent, validate the relationship in the constructor.
 - Depth guard comparisons: use `>=` (not `>`) against the limit constant.
 - Named collections must reject duplicate names/identifiers at the insertion point — do not rely on HashMap deduplication silently.
+- Every command must have an integration test through `Document::execute` -> `undo` -> `redo`, not just direct `apply`/`undo` calls on the command struct.
 
 ## Before You Start
 
