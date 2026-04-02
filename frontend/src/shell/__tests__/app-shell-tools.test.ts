@@ -124,7 +124,7 @@ describe("app-shell tool wiring", () => {
 
   describe("keyboard shortcuts for tool switching", () => {
     it("should switch to frame tool when F is pressed", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "f" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "f" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -136,7 +136,7 @@ describe("app-shell tool wiring", () => {
     });
 
     it("should switch to rectangle tool when R is pressed", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -148,7 +148,7 @@ describe("app-shell tool wiring", () => {
     });
 
     it("should switch to ellipse tool when O is pressed", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "o" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "o" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -161,9 +161,9 @@ describe("app-shell tool wiring", () => {
 
     it("should switch back to select tool when V is pressed", () => {
       // Switch away first
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
       // Switch back
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "v" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "v" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -175,7 +175,7 @@ describe("app-shell tool wiring", () => {
     });
 
     it("should not switch tools when modifier keys are held", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r", ctrlKey: true }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r", ctrlKey: true }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -229,7 +229,7 @@ describe("app-shell tool wiring", () => {
     });
 
     it("should set crosshair cursor for shape tools", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
 
       const canvasContainer = root.querySelector(".canvas-container") as HTMLElement;
       expect(canvasContainer.style.cursor).toBe("crosshair");

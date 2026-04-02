@@ -8,7 +8,7 @@ use crate::command::{Command, SideEffect};
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::{NodeId, PageId};
-use crate::node::{Node, NodeKind};
+use crate::node::{Node, NodeKind, Transform};
 use crate::validate::{validate_node_name, validate_text_content};
 use uuid::Uuid;
 
@@ -26,16 +26,22 @@ pub struct CreateNode {
     pub name: String,
     /// If set, the node is added as a root node on this page.
     pub page_id: Option<PageId>,
+    /// Optional initial transform. If set, overrides the default transform
+    /// on the created node. This ensures redo restores the correct position.
+    pub initial_transform: Option<Transform>,
 }
 
 impl Command for CreateNode {
     fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        let node = Node::new(
+        let mut node = Node::new(
             self.node_id,
             self.uuid,
             self.kind.clone(),
             self.name.clone(),
         )?;
+        if let Some(ref t) = self.initial_transform {
+            node.transform = *t;
+        }
         let actual_id = doc.arena.insert(node)?;
         if let Some(page_id) = self.page_id {
             doc.add_root_node_to_page(page_id, actual_id)?;
@@ -307,6 +313,7 @@ mod tests {
             },
             name: "Rect".to_string(),
             page_id: Some(page_id),
+            initial_transform: None,
         };
 
         cmd.apply(&mut doc).expect("apply");
@@ -328,6 +335,7 @@ mod tests {
             kind: NodeKind::Frame { layout: None },
             name: "Frame".to_string(),
             page_id: Some(page_id),
+            initial_transform: None,
         };
 
         cmd.apply(&mut doc).expect("apply");
@@ -516,6 +524,7 @@ mod tests {
             },
             name: "Child".to_string(),
             page_id: None,
+            initial_transform: None,
         };
         cmd.apply(&mut doc).expect("apply create");
         let child_id = doc.arena.id_by_uuid(&make_uuid(2)).expect("find child");

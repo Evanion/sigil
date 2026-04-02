@@ -202,7 +202,7 @@ describe("app-shell accessibility", () => {
 
     it("should update aria-pressed when tool changes", () => {
       // Switch to rectangle tool
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -248,7 +248,7 @@ describe("app-shell accessibility", () => {
 
     it("should update roving tabindex when tool changes", () => {
       // Switch to rectangle tool (index 2)
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
 
       const toolbar = root.querySelector(".toolbar");
       const buttons = toolbar?.querySelectorAll(".toolbar__tool-btn");
@@ -322,7 +322,7 @@ describe("app-shell accessibility", () => {
     });
 
     it("should announce tool change when switching tools", () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
 
       const liveRegion = root.querySelector("[aria-live='polite']");
       expect(liveRegion?.textContent).toBe("Rectangle tool active");

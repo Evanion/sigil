@@ -212,6 +212,8 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
       case "undo_redo":
         undoAvailable = message.can_undo;
         redoAvailable = message.can_redo;
+        // Re-fetch full document state so the canvas reflects the undo/redo
+        debouncedFetchFullDocument();
         notifySubscribers();
         break;
 
