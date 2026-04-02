@@ -26,6 +26,20 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 - Keep files focused — one component/module per file
 - Test names describe behavior: `it("should update selection when clicking a node")`
 
+### Accessibility Baseline
+- Every page/view must have ARIA landmark roles on layout regions
+- All interactive elements must be keyboard-reachable (focusable with tabindex, operable with Enter/Space)
+- `<canvas>` elements must have `aria-label` and accessible fallback content
+- Text must meet WCAG 2.2 AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
+- Status changes must use ARIA live regions for screen reader announcement
+- Include `:focus-visible` styles and `prefers-reduced-motion` media queries
+
+### Canvas DPR Handling
+- When working with HTML5 Canvas, always account for `window.devicePixelRatio`
+- Canvas `width`/`height` attributes must be multiplied by DPR; CSS dimensions set to logical size
+- All coordinate transforms (screen-to-canvas, canvas-to-world) must factor in DPR
+- Never call `ctx.scale(dpr, dpr)` independently — compose DPR into the viewport transform via `setTransform`
+
 ## Before You Start
 
 **MANDATORY — do this FIRST, before writing any code:**

@@ -1,0 +1,177 @@
+/* ── Reset & Base ───────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  font-family:
+    "Inter",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  font-size: 13px;
+  background: #1e1e1e;
+  color: #cccccc;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── App Layout ─────────────────────────────────────────────────── */
+
+#app {
+  display: grid;
+  grid-template-columns: 48px 240px 1fr 280px;
+  grid-template-rows: 1fr 28px;
+  grid-template-areas:
+    "toolbar left-panel canvas right-panel"
+    "status  status     status status";
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ── Toolbar ────────────────────────────────────────────────────── */
+
+.toolbar {
+  grid-area: toolbar;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: #252525;
+  border-right: 1px solid #333333;
+  padding-top: 12px;
+  gap: 8px;
+}
+
+.toolbar__logo {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #a0a0a0;
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  user-select: none;
+}
+
+/* ── Panels ─────────────────────────────────────────────────────── */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: #252525;
+  overflow-y: auto;
+}
+
+.panel--left {
+  grid-area: left-panel;
+  border-right: 1px solid #333333;
+}
+
+.panel--right {
+  grid-area: right-panel;
+  border-left: 1px solid #333333;
+}
+
+.panel__heading {
+  padding: 12px 16px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: #a0a0a0;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+/* ── Canvas Container ───────────────────────────────────────────── */
+
+.canvas-container {
+  grid-area: canvas;
+  position: relative;
+  overflow: hidden;
+  cursor: default;
+}
+
+.canvas-container canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.canvas-container--panning {
+  cursor: grab;
+}
+
+.canvas-container--panning:active {
+  cursor: grabbing;
+}
+
+/* ── Status Bar ─────────────────────────────────────────────────── */
+
+.status-bar {
+  grid-area: status;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: #1a1a1a;
+  border-top: 1px solid #333333;
+  font-size: 11px;
+  color: #a0a0a0;
+  user-select: none;
+}
+
+.status-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-bar__indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #555555;
+}
+
+.status-bar__indicator--connected {
+  background: #3cb371;
+}
+
+.status-bar__indicator--disconnected {
+  background: #cd5c5c;
+}
+
+/* ── RF-022: Focus-visible styles ──────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid #0d99ff;
+  outline-offset: 2px;
+}
+
+/* ── RF-021: Reduced motion preference ─────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    --motion-duration: 0s;
+    animation-duration: 0s !important;
+    transition-duration: 0s !important;
+  }
+}

@@ -162,6 +162,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - No `any` types.
 - ESLint strict config.
 - Prettier for formatting.
+- Every frontend view must include ARIA landmark roles (`role="toolbar"`, `role="complementary"`, `role="main"`, `role="status"`). Interactive elements must be keyboard-navigable with `tabindex`. The `<canvas>` element must have `aria-label`. Accessibility is part of "done", not optional polish.
 
 ---
 
@@ -341,6 +342,10 @@ Types that represent arena indices or generational IDs (e.g., `NodeId`) MUST NOT
 ### Uniqueness Constraints on Named Collections
 
 When a collection contains entities with a name or identifier field that must be unique within that collection (e.g., component names in a document, property names in a component, variant names in a component), the insertion point MUST reject duplicates with a typed error. Do not rely on the collection type (HashMap vs Vec) to enforce this implicitly — validate explicitly and return an error that identifies the conflicting name.
+
+### Defensive Message Parsing
+
+Every `JSON.parse` call on data from an external source (WebSocket, fetch, postMessage, file read) must be wrapped in try-catch. Parse failures must be handled gracefully — log and discard, never crash the application. After parsing, validate the shape of the parsed object before type-casting. This applies to both frontend TypeScript and any future Node.js code.
 
 ### Filesystem Writes Must Be Atomic
 
