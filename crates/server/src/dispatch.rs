@@ -345,4 +345,44 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap().description(), "Delete node");
     }
+
+    /// Compile-time assertion that all concrete command types are `Send`.
+    /// This validates the safety of the `SendDocument` unsafe impl.
+    #[test]
+    fn test_all_concrete_command_types_are_send() {
+        fn assert_send<T: Send>() {}
+
+        assert_send::<CreateNode>();
+        assert_send::<DeleteNode>();
+        assert_send::<RenameNode>();
+        assert_send::<SetVisible>();
+        assert_send::<SetLocked>();
+        assert_send::<SetTextContent>();
+        assert_send::<SetTransform>();
+        assert_send::<SetFills>();
+        assert_send::<SetStrokes>();
+        assert_send::<SetOpacity>();
+        assert_send::<SetBlendMode>();
+        assert_send::<SetEffects>();
+        assert_send::<SetConstraints>();
+        assert_send::<ReparentNode>();
+        assert_send::<ReorderChildren>();
+        assert_send::<AddTransition>();
+        assert_send::<RemoveTransition>();
+        assert_send::<UpdateTransition>();
+        assert_send::<AddToken>();
+        assert_send::<RemoveToken>();
+        assert_send::<UpdateToken>();
+        assert_send::<AddComponent>();
+        assert_send::<RemoveComponent>();
+        assert_send::<SetOverride>();
+        assert_send::<RemoveOverride>();
+    }
+
+    /// Compile-time assertion that `SendDocument` is `Send + Sync`.
+    #[test]
+    fn test_send_document_is_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<crate::state::SendDocument>();
+    }
 }
