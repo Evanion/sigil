@@ -6,46 +6,24 @@ use uuid::Uuid;
 
 use crate::id::{ComponentId, NodeId};
 
-// ── Forward declarations / stubs for Plan 01c types ────────────────────
+// Re-export path types for backwards compatibility
+pub use crate::path::{FillRule, PathData};
+
+// ── Forward declarations / stubs for Plan 01d types ────────────────────
 
 /// Stub for the override map used in component instances.
-/// Plan 01c will replace this with a full implementation.
+/// Plan 01d will replace this with a full implementation.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct OverrideMap {
     pub entries: HashMap<String, serde_json::Value>,
 }
 
-/// Stub for path geometry data.
-/// Plan 01c will replace this with `SubPath`, `PathSegment`, `FillRule`, etc.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PathData {
-    pub subpaths: Vec<serde_json::Value>,
-    pub fill_rule: FillRule,
-}
-
-impl Default for PathData {
-    fn default() -> Self {
-        Self {
-            subpaths: Vec::new(),
-            fill_rule: FillRule::EvenOdd,
-        }
-    }
-}
-
-/// Fill rule for path rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FillRule {
-    EvenOdd,
-    NonZero,
-}
-
-/// Layout mode for a frame. Currently only supports flex layout;
-/// additional modes (grid, absolute) may be added in the future.
+/// Layout mode for a frame's children.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub enum LayoutMode {
     Flex(FlexLayout),
+    Grid(GridLayout),
 }
 
 /// Flex layout configuration for frame children.
@@ -120,6 +98,86 @@ pub enum JustifyContent {
     SpaceBetween,
     SpaceAround,
     SpaceEvenly,
+}
+
+/// Justify items alignment for grid layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum JustifyItems {
+    Start,
+    Center,
+    End,
+    Stretch,
+}
+
+/// A grid track definition (column or row).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GridTrack {
+    /// Fixed size in pixels.
+    Fixed { size: f64 },
+    /// Fractional unit (like CSS `fr`).
+    Fractional { fraction: f64 },
+    /// Auto-sized based on content.
+    Auto,
+    /// Minimum and maximum size range.
+    MinMax { min: f64, max: f64 },
+}
+
+/// Grid layout configuration for frame children.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GridLayout {
+    pub columns: Vec<GridTrack>,
+    pub rows: Vec<GridTrack>,
+    pub column_gap: f64,
+    pub row_gap: f64,
+    pub padding: Padding,
+    pub align_items: AlignItems,
+    pub justify_items: JustifyItems,
+}
+
+impl Default for GridLayout {
+    fn default() -> Self {
+        Self {
+            columns: Vec::new(),
+            rows: Vec::new(),
+            column_gap: 0.0,
+            row_gap: 0.0,
+            padding: Padding::default(),
+            align_items: AlignItems::Start,
+            justify_items: JustifyItems::Start,
+        }
+    }
+}
+
+/// How a child is placed within a grid.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GridSpan {
+    /// Automatically placed by the grid algorithm.
+    Auto,
+    /// Placed at a specific grid line (1-based).
+    Line { index: i32 },
+    /// Spans a number of tracks from the auto-placed position.
+    Span { count: u32 },
+    /// From one line to another (1-based, exclusive end). Negative indices count from the end.
+    LineToLine { start: i32, end: i32 },
+}
+
+/// Grid placement for a child node within a grid parent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GridPlacement {
+    pub column: GridSpan,
+    pub row: GridSpan,
+}
+
+impl Default for GridPlacement {
+    fn default() -> Self {
+        Self {
+            column: GridSpan::Auto,
+            row: GridSpan::Auto,
+        }
+    }
 }
 
 // ── Text Style ─────────────────────────────────────────────────────────
@@ -516,6 +574,7 @@ pub struct Node {
     pub transform: Transform,
     pub style: Style,
     pub constraints: Constraints,
+    pub grid_placement: Option<GridPlacement>,
     pub visible: bool,
     pub locked: bool,
 }
@@ -524,11 +583,12 @@ impl Node {
     /// Creates a new node with the given id, uuid, kind, and name.
     /// All other fields are set to defaults.
     ///
-    /// Validates the node name and, for Image nodes, the `asset_ref`.
+    /// Validates the node name and kind-specific invariants.
     ///
     /// # Errors
     /// - `CoreError::ValidationError` if the name is invalid.
-    /// - `CoreError::ValidationError` if an Image node has an invalid `asset_ref`.
+    /// - `CoreError::ValidationError` if kind-specific validation fails (e.g.,
+    ///   invalid `asset_ref`, non-finite corner radii, text content too long, etc.).
     pub fn new(
         id: NodeId,
         uuid: Uuid,
@@ -536,10 +596,7 @@ impl Node {
         name: String,
     ) -> Result<Self, crate::error::CoreError> {
         crate::validate::validate_node_name(&name)?;
-
-        if let NodeKind::Image { ref asset_ref } = kind {
-            crate::validate::validate_asset_ref(asset_ref)?;
-        }
+        validate_node_kind(&kind)?;
 
         Ok(Self {
             id,
@@ -551,10 +608,148 @@ impl Node {
             transform: Transform::default(),
             style: Style::default(),
             constraints: Constraints::default(),
+            grid_placement: None,
             visible: true,
             locked: false,
         })
     }
+}
+
+/// Validates kind-specific invariants for a `NodeKind`.
+///
+/// Called from `Node::new` to ensure all node kinds pass validation
+/// before the node is constructed.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any kind-specific validation fails.
+fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
+    use crate::validate::{
+        MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MIN_FONT_WEIGHT, validate_finite,
+        validate_text_content,
+    };
+
+    match kind {
+        NodeKind::Image { asset_ref } => {
+            crate::validate::validate_asset_ref(asset_ref)?;
+        }
+        NodeKind::Text {
+            content,
+            text_style,
+        } => {
+            validate_text_content(content)?;
+            if text_style.font_family.len() > MAX_FONT_FAMILY_LEN {
+                return Err(crate::error::CoreError::ValidationError(format!(
+                    "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+                    text_style.font_family.len()
+                )));
+            }
+            if text_style.font_weight < MIN_FONT_WEIGHT || text_style.font_weight > MAX_FONT_WEIGHT
+            {
+                return Err(crate::error::CoreError::ValidationError(format!(
+                    "font_weight must be in {}..={}, got {}",
+                    MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, text_style.font_weight
+                )));
+            }
+        }
+        NodeKind::Rectangle { corner_radii } => {
+            for (i, r) in corner_radii.iter().enumerate() {
+                validate_finite(&format!("corner_radii[{i}]"), *r)?;
+                if *r < 0.0 {
+                    return Err(crate::error::CoreError::ValidationError(format!(
+                        "corner_radii[{i}] must be >= 0.0, got {r}"
+                    )));
+                }
+            }
+        }
+        NodeKind::Ellipse { arc_start, arc_end } => {
+            validate_finite("arc_start", *arc_start)?;
+            validate_finite("arc_end", *arc_end)?;
+        }
+        NodeKind::Frame {
+            layout: Some(LayoutMode::Flex(flex)),
+        } => {
+            validate_flex_layout(flex)?;
+        }
+        NodeKind::Frame {
+            layout: Some(LayoutMode::Grid(grid)),
+        } => {
+            validate_grid_layout(grid)?;
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+/// Validates a flex layout's gap and padding values.
+fn validate_flex_layout(flex: &FlexLayout) -> Result<(), crate::error::CoreError> {
+    use crate::validate::validate_finite;
+
+    validate_finite("flex gap", flex.gap)?;
+    if flex.gap < 0.0 {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "flex gap must be >= 0.0, got {}",
+            flex.gap
+        )));
+    }
+    validate_padding("flex", &flex.padding)?;
+    Ok(())
+}
+
+/// Validates a grid layout's gaps, padding, track counts, and track values.
+fn validate_grid_layout(grid: &GridLayout) -> Result<(), crate::error::CoreError> {
+    use crate::validate::{MAX_GRID_TRACKS, validate_finite, validate_grid_track};
+
+    validate_finite("grid column_gap", grid.column_gap)?;
+    validate_finite("grid row_gap", grid.row_gap)?;
+    if grid.column_gap < 0.0 {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "grid column_gap must be >= 0.0, got {}",
+            grid.column_gap
+        )));
+    }
+    if grid.row_gap < 0.0 {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "grid row_gap must be >= 0.0, got {}",
+            grid.row_gap
+        )));
+    }
+    validate_padding("grid", &grid.padding)?;
+    if grid.columns.len() > MAX_GRID_TRACKS {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "grid columns exceeds max of {MAX_GRID_TRACKS} (got {})",
+            grid.columns.len()
+        )));
+    }
+    if grid.rows.len() > MAX_GRID_TRACKS {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "grid rows exceeds max of {MAX_GRID_TRACKS} (got {})",
+            grid.rows.len()
+        )));
+    }
+    for track in &grid.columns {
+        validate_grid_track(track)?;
+    }
+    for track in &grid.rows {
+        validate_grid_track(track)?;
+    }
+    Ok(())
+}
+
+/// Validates that all padding values are finite and non-negative.
+fn validate_padding(prefix: &str, padding: &Padding) -> Result<(), crate::error::CoreError> {
+    use crate::validate::validate_finite;
+
+    validate_finite(&format!("{prefix} padding.top"), padding.top)?;
+    validate_finite(&format!("{prefix} padding.right"), padding.right)?;
+    validate_finite(&format!("{prefix} padding.bottom"), padding.bottom)?;
+    validate_finite(&format!("{prefix} padding.left"), padding.left)?;
+    if padding.top < 0.0 || padding.right < 0.0 || padding.bottom < 0.0 || padding.left < 0.0 {
+        return Err(crate::error::CoreError::ValidationError(format!(
+            "{prefix} padding values must be >= 0.0"
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -693,8 +888,8 @@ mod tests {
         .expect("create test node");
         match &node.kind {
             NodeKind::Path { path_data } => {
-                assert!(path_data.subpaths.is_empty());
-                assert_eq!(path_data.fill_rule, FillRule::EvenOdd);
+                assert!(path_data.subpaths().is_empty());
+                assert_eq!(path_data.fill_rule(), FillRule::EvenOdd);
             }
             other => panic!("expected Path, got {other:?}"),
         }
@@ -1195,6 +1390,7 @@ mod tests {
             },
             visible: true,
             locked: false,
+            grid_placement: None,
         };
         let json = serde_json::to_string_pretty(&node).expect("serialize");
         let deserialized: Node = serde_json::from_str(&json).expect("deserialize");
@@ -1237,5 +1433,345 @@ mod tests {
         let json = serde_json::to_string(&c).expect("serialize");
         let deserialized: Constraints = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(c, deserialized);
+    }
+
+    // ── Grid layout types ─────────────────────────────────────────────
+
+    #[test]
+    fn test_grid_layout_default() {
+        let grid = GridLayout::default();
+        assert!(grid.columns.is_empty());
+        assert!(grid.rows.is_empty());
+        assert_eq!(grid.column_gap, 0.0);
+    }
+
+    #[test]
+    fn test_grid_layout_serde_round_trip() {
+        let grid = GridLayout {
+            columns: vec![
+                GridTrack::Fixed { size: 100.0 },
+                GridTrack::Fractional { fraction: 1.0 },
+                GridTrack::Auto,
+            ],
+            rows: vec![GridTrack::MinMax {
+                min: 50.0,
+                max: 200.0,
+            }],
+            column_gap: 10.0,
+            row_gap: 10.0,
+            padding: Padding::default(),
+            align_items: AlignItems::Center,
+            justify_items: JustifyItems::Stretch,
+        };
+        let json = serde_json::to_string(&grid).expect("serialize");
+        let deserialized: GridLayout = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(grid, deserialized);
+    }
+
+    #[test]
+    fn test_layout_mode_grid_serde() {
+        let mode = LayoutMode::Grid(GridLayout::default());
+        let json = serde_json::to_string(&mode).expect("serialize");
+        assert!(json.contains("\"mode\":\"grid\""));
+        let deserialized: LayoutMode = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(mode, deserialized);
+    }
+
+    #[test]
+    fn test_grid_placement_default() {
+        let placement = GridPlacement::default();
+        assert_eq!(placement.column, GridSpan::Auto);
+        assert_eq!(placement.row, GridSpan::Auto);
+    }
+
+    #[test]
+    fn test_grid_span_serde_round_trip() {
+        let spans = vec![
+            GridSpan::Auto,
+            GridSpan::Line { index: 2 },
+            GridSpan::Span { count: 3 },
+            GridSpan::LineToLine { start: 1, end: 4 },
+        ];
+        for span in spans {
+            let json = serde_json::to_string(&span).expect("serialize");
+            let deserialized: GridSpan = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(span, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_node_with_grid_placement() {
+        let mut node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            "Rect".to_string(),
+        )
+        .expect("create node");
+        assert!(node.grid_placement.is_none());
+        node.grid_placement = Some(GridPlacement {
+            column: GridSpan::Span { count: 2 },
+            row: GridSpan::Line { index: 1 },
+        });
+        assert!(node.grid_placement.is_some());
+    }
+
+    // ── RF-006: Node::new validation for all NodeKind variants ────────
+
+    #[test]
+    fn test_text_node_rejects_too_long_content() {
+        let content = "x".repeat(crate::validate::MAX_TEXT_CONTENT_LEN + 1);
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content,
+                text_style: TextStyle::default(),
+            },
+            "Text".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_node_rejects_too_long_font_family() {
+        let font_family = "x".repeat(crate::validate::MAX_FONT_FAMILY_LEN + 1);
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hello".to_string(),
+                text_style: TextStyle {
+                    font_family,
+                    ..TextStyle::default()
+                },
+            },
+            "Text".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_node_rejects_zero_font_weight() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hello".to_string(),
+                text_style: TextStyle {
+                    font_weight: 0,
+                    ..TextStyle::default()
+                },
+            },
+            "Text".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_node_rejects_font_weight_over_1000() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hello".to_string(),
+                text_style: TextStyle {
+                    font_weight: 1001,
+                    ..TextStyle::default()
+                },
+            },
+            "Text".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_node_accepts_valid_font_weight_boundaries() {
+        for weight in [1, 400, 1000] {
+            let result = Node::new(
+                NodeId::new(0, 0),
+                Uuid::nil(),
+                NodeKind::Text {
+                    content: "Hello".to_string(),
+                    text_style: TextStyle {
+                        font_weight: weight,
+                        ..TextStyle::default()
+                    },
+                },
+                "Text".to_string(),
+            );
+            assert!(result.is_ok(), "font_weight {weight} should be valid");
+        }
+    }
+
+    #[test]
+    fn test_rectangle_rejects_nan_corner_radius() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [0.0, f64::NAN, 0.0, 0.0],
+            },
+            "Rect".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rectangle_rejects_negative_corner_radius() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [4.0, -1.0, 4.0, 4.0],
+            },
+            "Rect".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rectangle_rejects_infinite_corner_radius() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [4.0, 4.0, f64::INFINITY, 4.0],
+            },
+            "Rect".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ellipse_rejects_nan_arc_start() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Ellipse {
+                arc_start: f64::NAN,
+                arc_end: 360.0,
+            },
+            "Ellipse".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ellipse_rejects_infinite_arc_end() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Ellipse {
+                arc_start: 0.0,
+                arc_end: f64::INFINITY,
+            },
+            "Ellipse".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_flex_rejects_nan_gap() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Flex(FlexLayout {
+                    gap: f64::NAN,
+                    ..FlexLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_flex_rejects_negative_gap() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Flex(FlexLayout {
+                    gap: -1.0,
+                    ..FlexLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_flex_rejects_negative_padding() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Flex(FlexLayout {
+                    padding: Padding {
+                        top: -1.0,
+                        ..Padding::default()
+                    },
+                    ..FlexLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_grid_rejects_negative_gap() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Grid(GridLayout {
+                    column_gap: -1.0,
+                    ..GridLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_grid_rejects_too_many_columns() {
+        let tracks: Vec<GridTrack> = (0..crate::validate::MAX_GRID_TRACKS + 1)
+            .map(|_| GridTrack::Auto)
+            .collect();
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Grid(GridLayout {
+                    columns: tracks,
+                    ..GridLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_frame_grid_validates_track_values() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Frame {
+                layout: Some(LayoutMode::Grid(GridLayout {
+                    columns: vec![GridTrack::Fixed { size: -10.0 }],
+                    ..GridLayout::default()
+                })),
+            },
+            "Frame".to_string(),
+        );
+        assert!(result.is_err());
     }
 }

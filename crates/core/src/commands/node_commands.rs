@@ -1,4 +1,7 @@
 // crates/core/src/commands/node_commands.rs
+// The Command trait's description() returns &str (not &'static str) because
+// CompoundCommand borrows from its String field. Literal returns in other impls
+// trigger this lint unnecessarily.
 #![allow(clippy::unnecessary_literal_bound)]
 
 use crate::command::{Command, SideEffect};
@@ -243,6 +246,7 @@ impl Command for SetTextContent {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_text_content(&self.old_content)?;
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
             NodeKind::Text { content, .. } => {

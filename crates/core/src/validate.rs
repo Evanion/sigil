@@ -64,7 +64,72 @@ pub const DEFAULT_MAX_HISTORY: usize = 500;
 /// Maximum root nodes per page.
 pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
 
+/// Maximum grid tracks (columns or rows) per grid layout.
+pub const MAX_GRID_TRACKS: usize = 1_000;
+
+/// Maximum transition duration in seconds.
+pub const MAX_TRANSITION_DURATION: f64 = 300.0;
+
+/// Maximum transitions per document.
+pub const MAX_TRANSITIONS_PER_DOCUMENT: usize = 10_000;
+
+/// Maximum font weight value (CSS range).
+pub const MAX_FONT_WEIGHT: u16 = 1000;
+
+/// Minimum font weight value (CSS range).
+pub const MIN_FONT_WEIGHT: u16 = 1;
+
 // ── Validation Functions ───────────────────────────────────────────────
+
+/// Validates that a float value is finite (not NaN or infinity).
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the value is not finite.
+pub fn validate_finite(name: &str, value: f64) -> Result<(), CoreError> {
+    if !value.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "{name} must be finite, got {value}"
+        )));
+    }
+    Ok(())
+}
+
+/// Recursively walks a JSON value and rejects any Number that converts to NaN or infinity.
+///
+/// Uses an iterative approach with an explicit stack to prevent stack overflow.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any float value is non-finite.
+pub fn validate_floats_in_value(value: &serde_json::Value) -> Result<(), CoreError> {
+    let mut stack = vec![value];
+
+    while let Some(v) = stack.pop() {
+        match v {
+            serde_json::Value::Number(n) => {
+                if let Some(f) = n.as_f64()
+                    && !f.is_finite()
+                {
+                    return Err(CoreError::ValidationError(format!(
+                        "non-finite float value: {f}"
+                    )));
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                for item in arr {
+                    stack.push(item);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for child in map.values() {
+                    stack.push(child);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Ok(())
+}
 
 /// Validates a node name: max 512 chars, no control characters (U+0000-U+001F).
 ///
@@ -141,6 +206,10 @@ pub fn validate_token_name(name: &str) -> Result<(), CoreError> {
 
 /// Validates an asset reference: must be a relative path with no `..` components, max 256 chars.
 ///
+/// Note: This performs lexical validation only. It does not handle URL-encoded
+/// traversal sequences (e.g., `%2e%2e`) or path canonicalization. The server layer
+/// must additionally canonicalize and verify paths resolve within the allowed root.
+///
 /// # Errors
 /// Returns `CoreError::ValidationError` if the path is invalid.
 pub fn validate_asset_ref(path: &str) -> Result<(), CoreError> {
@@ -196,6 +265,45 @@ pub fn validate_collection_size(
         return Err(CoreError::ValidationError(format!(
             "{collection_name} exceeds maximum of {max} (got {actual})"
         )));
+    }
+    Ok(())
+}
+
+/// Validates a grid track value.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if values are non-finite, negative,
+/// or `MinMax` has min > max.
+pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreError> {
+    use crate::node::GridTrack;
+    match track {
+        GridTrack::Fixed { size } => {
+            if !size.is_finite() || *size < 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track fixed size must be non-negative and finite, got {size}"
+                )));
+            }
+        }
+        GridTrack::Fractional { fraction } => {
+            if !fraction.is_finite() || *fraction < 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track fraction must be non-negative and finite, got {fraction}"
+                )));
+            }
+        }
+        GridTrack::Auto => {}
+        GridTrack::MinMax { min, max } => {
+            if !min.is_finite() || !max.is_finite() || *min < 0.0 || *max < 0.0 {
+                return Err(CoreError::ValidationError(
+                    "grid track min/max must be non-negative and finite".to_string(),
+                ));
+            }
+            if min > max {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track min ({min}) must be <= max ({max})"
+                )));
+            }
+        }
     }
     Ok(())
 }
@@ -431,5 +539,170 @@ mod tests {
     #[test]
     fn test_validate_collection_size_zero() {
         assert!(validate_collection_size("fills", 0, MAX_FILLS_PER_STYLE).is_ok());
+    }
+
+    // ── Grid track validation ─────────────────────────────────────────
+
+    #[test]
+    fn test_validate_grid_track_fixed_valid() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: 100.0 }).is_ok());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fixed_negative() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: -1.0 }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fixed_nan() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: f64::NAN }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_valid() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fractional { fraction: 1.0 }).is_ok());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_negative() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fractional { fraction: -0.5 }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_infinity() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::Fractional {
+                fraction: f64::INFINITY
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_valid() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: 50.0,
+                max: 200.0,
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_inverted() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: 200.0,
+                max: 50.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_nan() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: f64::NAN,
+                max: 100.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_negative() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: -10.0,
+                max: 100.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_auto() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Auto).is_ok());
+    }
+
+    // ── Float validation ─────────────────────────────────────────────
+
+    #[test]
+    fn test_validate_finite_accepts_normal_float() {
+        assert!(validate_finite("x", 42.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_accepts_zero() {
+        assert!(validate_finite("x", 0.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_accepts_negative() {
+        assert!(validate_finite("x", -1.0).is_ok());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_nan() {
+        assert!(validate_finite("x", f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_positive_infinity() {
+        assert!(validate_finite("x", f64::INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_finite_rejects_negative_infinity() {
+        assert!(validate_finite("x", f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_integer() {
+        let v = serde_json::json!(42);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_normal_float() {
+        let v = serde_json::json!(3.14);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_string() {
+        let v = serde_json::json!("hello");
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_nested_object() {
+        let v = serde_json::json!({"a": {"b": 1.0, "c": [2.0, 3.0]}});
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_null() {
+        let v = serde_json::json!(null);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_accepts_bool() {
+        let v = serde_json::json!(true);
+        assert!(validate_floats_in_value(&v).is_ok());
     }
 }

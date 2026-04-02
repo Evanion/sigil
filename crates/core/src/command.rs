@@ -135,9 +135,28 @@ impl Command for CompoundCommand {
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
         let mut all_effects = Vec::new();
-        for cmd in self.commands.iter().rev() {
-            let effects = cmd.undo(doc)?;
-            all_effects.extend(effects);
+        for (i, cmd) in self.commands.iter().enumerate().rev() {
+            match cmd.undo(doc) {
+                Ok(effects) => all_effects.extend(effects),
+                Err(e) => {
+                    // Rollback: commands at indices (i+1)..len have already been
+                    // undone (they came first in reverse iteration). Re-apply them
+                    // in forward order to restore the post-compound state.
+                    let mut rollback_errors = Vec::new();
+                    for cmd_to_reapply in self.commands.iter().skip(i + 1) {
+                        if let Err(re) = cmd_to_reapply.apply(doc) {
+                            rollback_errors.push(re);
+                        }
+                    }
+                    if rollback_errors.is_empty() {
+                        return Err(e);
+                    }
+                    return Err(CoreError::RollbackFailed {
+                        original: Box::new(e),
+                        rollback_errors,
+                    });
+                }
+            }
         }
         Ok(all_effects)
     }

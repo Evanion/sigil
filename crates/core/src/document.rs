@@ -2,12 +2,12 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
-use uuid::Uuid;
 
 use crate::arena::Arena;
 use crate::command::{Command, SideEffect};
 use crate::error::CoreError;
 use crate::id::{ComponentId, NodeId, PageId};
+pub use crate::prototype::Transition;
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
 /// Metadata about the document.
@@ -54,12 +54,6 @@ pub struct ComponentDef {
     pub id: ComponentId,
     pub name: String,
     pub root_node: NodeId,
-}
-
-/// Stub for transition model — Plan 01c will fill this in.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Transition {
-    pub id: Uuid,
 }
 
 /// Stub for token context — Plan 01c will fill this in.
@@ -309,6 +303,7 @@ impl Document {
 mod tests {
     use super::*;
     use crate::node::{Node, NodeKind};
+    use uuid::Uuid;
 
     fn make_uuid(n: u8) -> Uuid {
         Uuid::from_bytes([n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -695,6 +690,40 @@ mod tests {
 
         // The command must still be on the redo stack — not lost
         assert!(doc.can_redo());
+    }
+
+    #[test]
+    fn test_history_eviction_at_min_capacity_1() {
+        let mut doc = Document::new("Test".to_string());
+        doc.history = History::new(1);
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Execute 2 commands with max_history=1
+        let cmd1 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Name 0".to_string(),
+            old_name: "Frame".to_string(),
+        };
+        doc.execute(Box::new(cmd1)).expect("execute cmd1");
+
+        let cmd2 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Name 1".to_string(),
+            old_name: "Name 0".to_string(),
+        };
+        doc.execute(Box::new(cmd2)).expect("execute cmd2");
+
+        // Only 1 undo should be possible (the oldest was evicted)
+        assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
+        assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
     }
 
     #[test]

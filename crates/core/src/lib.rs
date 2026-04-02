@@ -9,6 +9,8 @@ pub mod document;
 pub mod error;
 pub mod id;
 pub mod node;
+pub mod path;
+pub mod prototype;
 pub mod serialize;
 pub mod tree;
 pub mod validate;
@@ -22,9 +24,18 @@ pub use id::{ComponentId, NodeId, PageId, TokenId};
 // ── Re-exports: Node model ────────────────────────────────────────────
 pub use node::{
     AlignItems, BlendMode, Color, Constraints, Effect, Fill, FillRule, FlexLayout, GradientDef,
-    GradientStop, JustifyContent, LayoutDirection, LayoutMode, Node, NodeKind, OverrideMap,
-    Padding, PathData, PinConstraint, Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap,
-    StrokeJoin, Style, StyleValue, TextAlign, TextStyle, Transform,
+    GradientStop, GridLayout, GridPlacement, GridSpan, GridTrack, JustifyContent, JustifyItems,
+    LayoutDirection, LayoutMode, Node, NodeKind, OverrideMap, Padding, PathData, PinConstraint,
+    Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap, StrokeJoin, Style, StyleValue, TextAlign,
+    TextStyle, Transform,
+};
+
+// ── Re-exports: Path ─────────────────────────────────────────────────
+pub use path::{AnchorPoint, CornerMode, PathSegment, SubPath};
+
+// ── Re-exports: Prototype ────────────────────────────────────────────
+pub use prototype::{
+    SlideDirection, TransitionAnimation, TransitionTrigger, validate_duration, validate_transition,
 };
 
 // ── Re-exports: Arena ──────────────────────────────────────────────────
@@ -37,8 +48,8 @@ pub use document::{
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
-    SerializedNode, SerializedPage, deserialize_page, nodes_to_serialized, page_to_serialized,
-    serialize_page,
+    SerializedNode, SerializedPage, SerializedTransition, deserialize_page, nodes_to_serialized,
+    page_to_serialized, serialize_page,
 };
 
 // ── Re-exports: Command ──────────────────────────────────────────────
@@ -48,10 +59,12 @@ pub use command::{Command, CompoundCommand, SideEffect};
 pub use validate::{
     CURRENT_SCHEMA_VERSION, DEFAULT_MAX_HISTORY, DEFAULT_MAX_NODES, MAX_ALIAS_CHAIN_DEPTH,
     MAX_ASSET_REF_LEN, MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILE_SIZE,
-    MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN, MAX_GRADIENT_STOPS, MAX_JSON_NESTING_DEPTH,
-    MAX_NODE_NAME_LEN, MAX_PAGES_PER_DOCUMENT, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
-    MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TOKEN_NAME_LEN, validate_asset_ref,
-    validate_collection_size, validate_node_name, validate_text_content, validate_token_name,
+    MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MAX_GRADIENT_STOPS, MAX_GRID_TRACKS,
+    MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN, MAX_PAGES_PER_DOCUMENT, MAX_SEGMENTS_PER_SUBPATH,
+    MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TOKEN_NAME_LEN,
+    MAX_TRANSITION_DURATION, MAX_TRANSITIONS_PER_DOCUMENT, MIN_FONT_WEIGHT, validate_asset_ref,
+    validate_collection_size, validate_finite, validate_floats_in_value, validate_grid_track,
+    validate_node_name, validate_text_content, validate_token_name,
 };
 
 #[must_use]
