@@ -6,6 +6,8 @@ import "./Toast.css";
 
 export type ToastVariant = "info" | "success" | "error" | "warning";
 
+const VALID_VARIANTS = new Set<ToastVariant>(["info", "success", "error", "warning"]);
+
 export interface ToastData {
   title: string;
   description?: string;
@@ -13,11 +15,11 @@ export interface ToastData {
 }
 
 export function showToast(data: ToastData): void {
+  const variant: ToastVariant = data.variant ?? "info";
+  const variantClass = VALID_VARIANTS.has(variant) ? ` sigil-toast--${variant}` : "";
+
   toaster.show((props) => (
-    <Toast
-      toastId={props.toastId}
-      class={`sigil-toast${data.variant ? ` sigil-toast--${data.variant}` : ""}`}
-    >
+    <Toast toastId={props.toastId} class={`sigil-toast${variantClass}`}>
       <Toast.Title class="sigil-toast__title">{data.title}</Toast.Title>
       {data.description && (
         <Toast.Description class="sigil-toast__description">{data.description}</Toast.Description>
@@ -32,7 +34,7 @@ export function showToast(data: ToastData): void {
 export function ToastRegion(): JSX.Element {
   return (
     <Portal>
-      <Toast.Region>
+      <Toast.Region aria-label="Notifications">
         <Toast.List class="sigil-toast-region" />
       </Toast.Region>
     </Portal>

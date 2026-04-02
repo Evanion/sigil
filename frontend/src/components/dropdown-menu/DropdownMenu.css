@@ -1,6 +1,11 @@
-/* DropdownMenu trigger wrapper — transparent */
+/* DropdownMenu trigger — reset button appearance for custom triggers */
 .sigil-dropdown-menu__trigger {
-  display: contents;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 /* DropdownMenu content panel */

@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { fn } from "storybook/test";
 import { ContextMenu, type ContextMenuProps } from "./ContextMenu";
 
 const meta: Meta<ContextMenuProps> = {
@@ -17,7 +18,7 @@ export const Default: Story = {
       { key: "duplicate", label: "Duplicate" },
       { key: "delete", label: "Delete" },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     children: (
       <div
         style={{
@@ -44,7 +45,7 @@ export const WithShortcuts: Story = {
       { key: "copy", label: "Copy", shortcut: "Ctrl+C" },
       { key: "paste", label: "Paste", shortcut: "Ctrl+V" },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     children: (
       <div
         style={{
@@ -70,7 +71,7 @@ export const WithDisabledItems: Story = {
       { key: "paste", label: "Paste", disabled: true },
       { key: "delete", label: "Delete", disabled: true },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     children: (
       <div
         style={{

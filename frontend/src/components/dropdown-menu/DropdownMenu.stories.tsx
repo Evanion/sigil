@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { fn } from "storybook/test";
 import { DropdownMenu, type DropdownMenuProps } from "./DropdownMenu";
 import { Button } from "../button/Button";
 
@@ -18,7 +19,7 @@ export const Default: Story = {
       { key: "duplicate", label: "Duplicate Page" },
       { key: "delete", label: "Delete Page" },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     trigger: <Button variant="secondary">Page Actions</Button>,
   },
 };
@@ -32,7 +33,7 @@ export const WithShortcuts: Story = {
       { key: "copy", label: "Copy", shortcut: "Ctrl+C" },
       { key: "paste", label: "Paste", shortcut: "Ctrl+V" },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     trigger: <Button variant="secondary">Edit</Button>,
   },
 };
@@ -45,7 +46,7 @@ export const WithDisabledItems: Story = {
       { key: "paste", label: "Paste", disabled: true },
       { key: "delete", label: "Delete", disabled: true },
     ],
-    onSelect: (key: string) => console.log("Selected:", key),
+    onSelect: fn(),
     trigger: <Button variant="ghost">More Options</Button>,
   },
 };

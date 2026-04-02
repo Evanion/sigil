@@ -1,6 +1,14 @@
-/* ContextMenu trigger area — transparent wrapper */
+/* ContextMenu trigger area — reset to wrap arbitrary content */
 .sigil-context-menu__trigger {
-  display: contents;
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  text-align: inherit;
+  cursor: default;
 }
 
 /* ContextMenu content panel */

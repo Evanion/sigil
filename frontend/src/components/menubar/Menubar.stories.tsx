@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { fn } from "storybook/test";
 import { Menubar, type MenubarProps } from "./Menubar";
 
 const meta: Meta<typeof Menubar> = {
@@ -82,17 +83,13 @@ const shortcutMenus: MenubarProps["menus"] = [
 export const Default: Story = {
   args: {
     menus: defaultMenus,
-    onSelect: (menuLabel: string, itemKey: string) => {
-      console.log(`Selected ${menuLabel} > ${itemKey}`);
-    },
+    onSelect: fn(),
   },
 };
 
 export const WithShortcuts: Story = {
   args: {
     menus: shortcutMenus,
-    onSelect: (menuLabel: string, itemKey: string) => {
-      console.log(`Selected ${menuLabel} > ${itemKey}`);
-    },
+    onSelect: fn(),
   },
 };
