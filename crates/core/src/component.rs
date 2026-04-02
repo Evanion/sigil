@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::error::CoreError;
+use crate::id::{ComponentId, NodeId};
 use crate::node::{BlendMode, Constraints, Effect, Fill, Stroke, StyleValue, Transform};
 use crate::validate;
 
@@ -217,6 +218,217 @@ impl<'de> Deserialize<'de> for OverrideMap {
             map.insert(key, (entry.value, entry.source));
         }
         Ok(Self { entries: map })
+    }
+}
+
+/// A named variant of a component with its override set.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Variant {
+    name: String,
+    overrides: OverrideMap,
+}
+
+impl Variant {
+    /// Creates a new variant, validating the name.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the name is invalid.
+    pub fn new(name: String, overrides: OverrideMap) -> Result<Self, CoreError> {
+        validate::validate_node_name(&name)?;
+        Ok(Self { name, overrides })
+    }
+
+    /// Returns the variant name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the variant's overrides.
+    #[must_use]
+    pub fn overrides(&self) -> &OverrideMap {
+        &self.overrides
+    }
+}
+
+impl<'de> Deserialize<'de> for Variant {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            name: String,
+            overrides: OverrideMap,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Self::new(raw.name, raw.overrides).map_err(serde::de::Error::custom)
+    }
+}
+
+/// The type of a component property.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ComponentPropertyType {
+    /// Maps to text content override.
+    Text,
+    /// Maps to visibility override.
+    Boolean,
+    /// Maps to swapping a nested component instance.
+    InstanceSwap,
+    /// Maps to variant selection.
+    Variant,
+}
+
+/// A component property definition.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ComponentProperty {
+    name: String,
+    property_type: ComponentPropertyType,
+    default_value: OverrideValue,
+}
+
+impl ComponentProperty {
+    /// Creates a new component property, validating the name.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the name is invalid.
+    pub fn new(
+        name: String,
+        property_type: ComponentPropertyType,
+        default_value: OverrideValue,
+    ) -> Result<Self, CoreError> {
+        validate::validate_node_name(&name)?;
+        Ok(Self {
+            name,
+            property_type,
+            default_value,
+        })
+    }
+
+    /// Returns the property name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the property type.
+    #[must_use]
+    pub fn property_type(&self) -> ComponentPropertyType {
+        self.property_type
+    }
+
+    /// Returns the default value.
+    #[must_use]
+    pub fn default_value(&self) -> &OverrideValue {
+        &self.default_value
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentProperty {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            name: String,
+            property_type: ComponentPropertyType,
+            default_value: OverrideValue,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Self::new(raw.name, raw.property_type, raw.default_value).map_err(serde::de::Error::custom)
+    }
+}
+
+/// A component definition — a reusable design element with variants and properties.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ComponentDef {
+    id: ComponentId,
+    name: String,
+    root_node: NodeId,
+    variants: Vec<Variant>,
+    properties: Vec<ComponentProperty>,
+}
+
+impl ComponentDef {
+    /// Creates a new component definition, validating name and collection sizes.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` for invalid name or collection limit violations.
+    pub fn new(
+        id: ComponentId,
+        name: String,
+        root_node: NodeId,
+        variants: Vec<Variant>,
+        properties: Vec<ComponentProperty>,
+    ) -> Result<Self, CoreError> {
+        validate::validate_node_name(&name)?;
+        validate::validate_collection_size(
+            "variants",
+            variants.len(),
+            validate::MAX_VARIANTS_PER_COMPONENT,
+        )?;
+        validate::validate_collection_size(
+            "properties",
+            properties.len(),
+            validate::MAX_PROPERTIES_PER_COMPONENT,
+        )?;
+        Ok(Self {
+            id,
+            name,
+            root_node,
+            variants,
+            properties,
+        })
+    }
+
+    /// Returns the component ID.
+    #[must_use]
+    pub fn id(&self) -> ComponentId {
+        self.id
+    }
+
+    /// Returns the component name.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the root node ID.
+    #[must_use]
+    pub fn root_node(&self) -> NodeId {
+        self.root_node
+    }
+
+    /// Returns the component variants.
+    #[must_use]
+    pub fn variants(&self) -> &[Variant] {
+        &self.variants
+    }
+
+    /// Returns the component properties.
+    #[must_use]
+    pub fn properties(&self) -> &[ComponentProperty] {
+        &self.properties
+    }
+}
+
+impl<'de> Deserialize<'de> for ComponentDef {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Raw {
+            id: ComponentId,
+            name: String,
+            root_node: NodeId,
+            #[serde(default)]
+            variants: Vec<Variant>,
+            #[serde(default)]
+            properties: Vec<ComponentProperty>,
+        }
+        let raw = Raw::deserialize(deserializer)?;
+        Self::new(
+            raw.id,
+            raw.name,
+            raw.root_node,
+            raw.variants,
+            raw.properties,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -460,5 +672,261 @@ mod tests {
         .expect("set");
         let entries: Vec<_> = map.iter().collect();
         assert_eq!(entries.len(), 1);
+    }
+
+    // ── Variant ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_variant_new_valid() {
+        let v = Variant::new("Default".to_string(), OverrideMap::new()).expect("valid");
+        assert_eq!(v.name(), "Default");
+        assert!(v.overrides().is_empty());
+    }
+
+    #[test]
+    fn test_variant_new_invalid_name() {
+        assert!(Variant::new(String::new(), OverrideMap::new()).is_err());
+    }
+
+    #[test]
+    fn test_variant_serde_round_trip() {
+        let v = Variant::new("Hover".to_string(), OverrideMap::new()).expect("valid");
+        let json = serde_json::to_string(&v).expect("serialize");
+        let deserialized: Variant = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(v, deserialized);
+    }
+
+    #[test]
+    fn test_variant_deserialize_rejects_invalid_name() {
+        let json = r#"{"name":"","overrides":[]}"#;
+        let result: Result<Variant, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    // ── ComponentPropertyType ───────────────────────────────────────
+
+    #[test]
+    fn test_component_property_type_serde_round_trip() {
+        let types = vec![
+            ComponentPropertyType::Text,
+            ComponentPropertyType::Boolean,
+            ComponentPropertyType::InstanceSwap,
+            ComponentPropertyType::Variant,
+        ];
+        for pt in types {
+            let json = serde_json::to_string(&pt).expect("serialize");
+            let deserialized: ComponentPropertyType =
+                serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(pt, deserialized);
+        }
+    }
+
+    // ── ComponentProperty ───────────────────────────────────────────
+
+    #[test]
+    fn test_component_property_new_valid() {
+        let p = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::String {
+                value: "Click me".to_string(),
+            },
+        )
+        .expect("valid");
+        assert_eq!(p.name(), "label");
+        assert_eq!(p.property_type(), ComponentPropertyType::Text);
+        assert_eq!(
+            *p.default_value(),
+            OverrideValue::String {
+                value: "Click me".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn test_component_property_new_invalid_name() {
+        assert!(
+            ComponentProperty::new(
+                String::new(),
+                ComponentPropertyType::Boolean,
+                OverrideValue::Bool { value: true },
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_component_property_serde_round_trip() {
+        let p = ComponentProperty::new(
+            "visible".to_string(),
+            ComponentPropertyType::Boolean,
+            OverrideValue::Bool { value: true },
+        )
+        .expect("valid");
+        let json = serde_json::to_string(&p).expect("serialize");
+        let deserialized: ComponentProperty = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(p, deserialized);
+    }
+
+    #[test]
+    fn test_component_property_deserialize_rejects_invalid_name() {
+        let json =
+            r#"{"name":"","property_type":"text","default_value":{"type":"bool","value":true}}"#;
+        let result: Result<ComponentProperty, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    // ── ComponentDef ────────────────────────────────────────────────
+
+    #[test]
+    fn test_component_def_new_valid() {
+        let def = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+        assert_eq!(def.name(), "Button");
+        assert_eq!(def.id(), ComponentId::new(Uuid::nil()));
+        assert_eq!(def.root_node(), NodeId::new(0, 0));
+        assert!(def.variants().is_empty());
+        assert!(def.properties().is_empty());
+    }
+
+    #[test]
+    fn test_component_def_with_variants_and_properties() {
+        let variant = Variant::new("Hover".to_string(), OverrideMap::new()).expect("valid");
+        let prop = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::String {
+                value: "Click".to_string(),
+            },
+        )
+        .expect("valid");
+
+        let def = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![variant],
+            vec![prop],
+        )
+        .expect("valid");
+        assert_eq!(def.variants().len(), 1);
+        assert_eq!(def.variants()[0].name(), "Hover");
+        assert_eq!(def.properties().len(), 1);
+        assert_eq!(def.properties()[0].name(), "label");
+    }
+
+    #[test]
+    fn test_component_def_serde_round_trip() {
+        let def = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Card".to_string(),
+            NodeId::new(0, 0),
+            vec![Variant::new("Selected".to_string(), OverrideMap::new()).expect("valid")],
+            vec![
+                ComponentProperty::new(
+                    "title".to_string(),
+                    ComponentPropertyType::Text,
+                    OverrideValue::String {
+                        value: "Title".to_string(),
+                    },
+                )
+                .expect("valid"),
+            ],
+        )
+        .expect("valid");
+        let json = serde_json::to_string(&def).expect("serialize");
+        let deserialized: ComponentDef = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(def, deserialized);
+    }
+
+    #[test]
+    fn test_component_def_invalid_name() {
+        assert!(
+            ComponentDef::new(
+                ComponentId::new(Uuid::nil()),
+                String::new(),
+                NodeId::new(0, 0),
+                vec![],
+                vec![],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_component_def_deserialize_rejects_invalid_name() {
+        let json = serde_json::json!({
+            "id": Uuid::nil(),
+            "name": "",
+            "root_node": {"index": 0, "generation": 0},
+            "variants": [],
+            "properties": []
+        });
+        let result: Result<ComponentDef, _> = serde_json::from_str(&json.to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_def_deserialize_with_defaults() {
+        // variants and properties should default to empty when omitted
+        let json = serde_json::json!({
+            "id": Uuid::nil(),
+            "name": "Simple",
+            "root_node": {"index": 0, "generation": 0}
+        });
+        let def: ComponentDef =
+            serde_json::from_str(&json.to_string()).expect("deserialize with defaults");
+        assert_eq!(def.name(), "Simple");
+        assert!(def.variants().is_empty());
+        assert!(def.properties().is_empty());
+    }
+
+    #[test]
+    fn test_component_def_rejects_too_many_variants() {
+        let variants: Vec<Variant> = (0..=validate::MAX_VARIANTS_PER_COMPONENT)
+            .map(|i| Variant::new(format!("V{i}"), OverrideMap::new()).expect("valid"))
+            .collect();
+        assert!(
+            ComponentDef::new(
+                ComponentId::new(Uuid::nil()),
+                "Overflow".to_string(),
+                NodeId::new(0, 0),
+                variants,
+                vec![],
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_component_def_rejects_too_many_properties() {
+        let properties: Vec<ComponentProperty> = (0..=validate::MAX_PROPERTIES_PER_COMPONENT)
+            .map(|i| {
+                ComponentProperty::new(
+                    format!("P{i}"),
+                    ComponentPropertyType::Text,
+                    OverrideValue::String {
+                        value: "x".to_string(),
+                    },
+                )
+                .expect("valid")
+            })
+            .collect();
+        assert!(
+            ComponentDef::new(
+                ComponentId::new(Uuid::nil()),
+                "Overflow".to_string(),
+                NodeId::new(0, 0),
+                vec![],
+                properties,
+            )
+            .is_err()
+        );
     }
 }

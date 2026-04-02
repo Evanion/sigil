@@ -50,9 +50,7 @@ pub use token::{
 pub use arena::Arena;
 
 // ── Re-exports: Document ───────────────────────────────────────────────
-pub use document::{
-    ComponentDef, Document, DocumentMetadata, History, LayoutEngine, Page, Transition,
-};
+pub use document::{Document, DocumentMetadata, History, LayoutEngine, Page, Transition};
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
@@ -64,7 +62,10 @@ pub use serialize::{
 pub use command::{Command, CompoundCommand, SideEffect};
 
 // ── Re-exports: Component ───────────────────────────────────────────────
-pub use component::{OverrideKey, OverrideMap, OverrideSource, OverrideValue, PropertyPath};
+pub use component::{
+    ComponentDef, ComponentProperty, ComponentPropertyType, OverrideKey, OverrideMap,
+    OverrideSource, OverrideValue, PropertyPath, Variant,
+};
 
 // ── Re-exports: Validation ─────────────────────────────────────────────
 pub use validate::{

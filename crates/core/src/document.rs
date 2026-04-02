@@ -48,14 +48,7 @@ impl Page {
     }
 }
 
-/// Stub for component definitions — Plan 01c will fill this in.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ComponentDef {
-    pub id: ComponentId,
-    pub name: String,
-    pub root_node: NodeId,
-}
-
+pub use crate::component::ComponentDef;
 pub use crate::token::TokenContext;
 
 /// Undo/redo history for the document.
