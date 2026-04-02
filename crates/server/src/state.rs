@@ -2,44 +2,16 @@
 
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_designer_core::Document;
-use agent_designer_core::wire::BroadcastCommand;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::graphql::types::DocumentEvent;
 use tokio::task::JoinHandle;
 
-/// Maximum WebSocket message size in bytes (1 MiB).
-pub const MAX_WS_MESSAGE_SIZE: usize = 1_048_576;
-
-/// Capacity of the broadcast channel for WebSocket command fan-out.
-pub const BROADCAST_CHANNEL_CAPACITY: usize = 256;
-
 /// Capacity of the broadcast channel for GraphQL subscription events.
 pub const GRAPHQL_BROADCAST_CAPACITY: usize = 256;
-
-/// Payload carried inside a [`BroadcastEnvelope`].
-#[derive(Clone, Debug)]
-pub enum BroadcastPayload {
-    /// A design command that other clients should apply.
-    Command(Box<BroadcastCommand>),
-    /// The document state changed (e.g. via undo/redo) and other clients
-    /// should re-fetch or update their undo/redo UI state.
-    DocumentChanged { can_undo: bool, can_redo: bool },
-}
-
-/// Wraps a [`BroadcastPayload`] with the sender's client ID so that
-/// receiving clients can skip messages they originated.
-#[derive(Clone, Debug)]
-pub struct BroadcastEnvelope {
-    /// The client that produced this broadcast.
-    pub sender_id: u64,
-    /// The broadcast payload.
-    pub payload: BroadcastPayload,
-}
 
 /// Newtype wrapper around `Document` that allows us to assert `Send` and `Sync`
 /// without placing blanket unsafe impls on the entire `AppState`.
@@ -79,8 +51,8 @@ impl DerefMut for SendDocument {
 /// # Concurrency note
 ///
 /// The `document` field uses a single `std::sync::Mutex`, which serializes all
-/// access. Under high contention (many concurrent WebSocket clients issuing
-/// commands) this becomes a throughput bottleneck. The planned mitigation is
+/// access. Under high contention (many concurrent GraphQL clients issuing
+/// mutations) this becomes a throughput bottleneck. The planned mitigation is
 /// per-document sharding: each open document gets its own `Arc<Mutex<Document>>`
 /// looked up by document ID, so independent documents never contend. For a
 /// single document with many writers, an actor/channel model can replace the
@@ -94,16 +66,11 @@ pub struct AppState {
     /// We use `std::sync::Mutex` rather than `tokio::sync::RwLock` because
     /// the `Mutex` is never held across `.await` points.
     pub document: Arc<Mutex<SendDocument>>,
-    /// Broadcast channel for sending envelopes (command + sender ID) to all
-    /// connected WebSocket clients.
-    pub broadcast_tx: broadcast::Sender<BroadcastEnvelope>,
     /// Broadcast channel for GraphQL subscription events.
     ///
     /// Mutations publish [`DocumentEvent`] values here; the `documentChanged`
     /// subscription stream reads from a receiver obtained via `.subscribe()`.
     pub graphql_tx: broadcast::Sender<DocumentEvent>,
-    /// Monotonically increasing client ID counter.
-    next_client_id: Arc<AtomicU64>,
     /// Path to the loaded `.sigil/` workfile directory.
     /// `None` when running in-memory only (e.g. tests).
     pub workfile_path: Option<PathBuf>,
@@ -123,15 +90,12 @@ impl AppState {
     /// Suitable for tests and in-memory-only operation.
     #[must_use]
     pub fn new() -> Self {
-        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
         let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document: Arc::new(Mutex::new(SendDocument(Document::new(
                 "Untitled".to_string(),
             )))),
-            broadcast_tx,
             graphql_tx,
-            next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: None,
             dirty_tx: None,
             persistence_handle: Arc::new(Mutex::new(None)),
@@ -151,13 +115,10 @@ impl AppState {
             Arc::clone(&document),
             workfile_path.clone(),
         );
-        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
         let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document,
-            broadcast_tx,
             graphql_tx,
-            next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: Some(workfile_path),
             dirty_tx: Some(dirty_tx),
             persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
@@ -174,13 +135,10 @@ impl AppState {
             Arc::clone(&document),
             workfile_path.clone(),
         );
-        let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
         let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document,
-            broadcast_tx,
             graphql_tx,
-            next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: Some(workfile_path),
             dirty_tx: Some(dirty_tx),
             persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
@@ -221,16 +179,52 @@ impl AppState {
     pub fn take_dirty_tx(&mut self) -> Option<mpsc::Sender<()>> {
         self.dirty_tx.take()
     }
-
-    /// Allocates a unique client ID for a new WebSocket connection.
-    #[must_use]
-    pub fn next_client_id(&self) -> u64 {
-        self.next_client_id.fetch_add(1, Ordering::Relaxed)
-    }
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Compile-time assertion: `SendDocument` must implement `Send`.
+    /// If the inner `Document` changes in a way that makes this unsound,
+    /// this test will fail to compile.
+    fn _assert_send_document_is_send() {
+        fn assert_send<T: Send>() {}
+        assert_send::<SendDocument>();
+    }
+
+    /// Compile-time assertion: `SendDocument` must implement `Sync`.
+    fn _assert_send_document_is_sync() {
+        fn assert_sync<T: Sync>() {}
+        assert_sync::<SendDocument>();
+    }
+
+    /// Compile-time assertion: `AppState` must implement `Send` and `Sync`
+    /// to be usable with Axum's state extractor and tokio's async runtime.
+    fn _assert_app_state_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<AppState>();
+    }
+
+    #[test]
+    fn test_app_state_new_creates_empty_document() {
+        let state = AppState::new();
+        let doc = state.document.lock().unwrap();
+        assert_eq!(doc.metadata.name, "Untitled");
+        assert_eq!(doc.pages.len(), 0);
+        assert_eq!(doc.arena.len(), 0);
+    }
+
+    #[test]
+    fn test_signal_dirty_without_persistence_is_noop() {
+        let state = AppState::new();
+        // Should not panic — no persistence configured
+        state.signal_dirty();
     }
 }

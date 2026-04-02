@@ -5,7 +5,6 @@
 //! Exposes the application router builder and shared state types so that
 //! integration tests can spin up test servers without duplicating setup.
 
-pub mod dispatch;
 pub mod graphql;
 pub mod persistence;
 pub mod routes;
@@ -24,7 +23,6 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::graphql::SigilSchema;
-use crate::routes::ws::is_allowed_origin;
 use crate::state::AppState;
 
 /// Builds the full application router.
@@ -56,15 +54,6 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
 
     let mut app = Router::new()
         .route("/health", get(routes::health::health))
-        .route("/api/document", get(routes::document::get_document_info))
-        .route(
-            "/api/document/full",
-            get(routes::document::get_document_full),
-        )
-        .route("/ws", get(routes::ws::ws_handler))
-        // TODO(RF-011): GraphQLSubscription/GraphQLWebSocket does not expose
-        // max-message-size config easily. When switching to `GraphQLWebSocket`
-        // directly (see RF-002), configure the WS message size limit there.
         .route("/graphql/ws", get(graphql_ws_handler));
 
     // RF-004: Only expose GraphiQL IDE in development mode.
@@ -98,6 +87,21 @@ async fn graphiql() -> Html<String> {
             .subscription_endpoint("/graphql/ws")
             .finish(),
     )
+}
+
+/// Returns `true` if the given origin is acceptable for WebSocket connections.
+///
+/// When `SIGIL_DEV_CORS` is set, all origins are accepted (development mode).
+/// Otherwise, only `localhost` origins (any port, http or https) are permitted.
+fn is_allowed_origin(origin: &str) -> bool {
+    if std::env::var("SIGIL_DEV_CORS").is_ok() {
+        return true;
+    }
+    // Accept http(s)://localhost[:port]
+    origin
+        .strip_prefix("http://localhost")
+        .or_else(|| origin.strip_prefix("https://localhost"))
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(':'))
 }
 
 /// Handles the GraphQL WebSocket subscription endpoint with origin validation.

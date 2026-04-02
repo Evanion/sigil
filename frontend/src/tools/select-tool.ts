@@ -3,13 +3,11 @@
  *
  * Handles click-to-select and drag-to-move interactions on the canvas.
  * Uses hit testing to determine which node is under the pointer, selects
- * it in the store, and sends a single set_transform command on pointer up.
+ * it in the store, and sends a single setTransform mutation on pointer up.
  *
- * RF-002: Uses UUID-based addressing. Looks up node fresh from store
- * on each interaction to get the latest NodeId (which may be a placeholder
- * until the server responds with node_created).
+ * RF-002: Uses UUID-based addressing via GraphQL mutations.
  *
- * RF-005: Only sends a single SetTransform command on pointerUp, not on
+ * RF-005: Only sends a single setTransform on pointerUp, not on
  * every pointerMove. During drag, updates a local previewTransform that
  * the renderer can query for visual feedback.
  */
@@ -17,16 +15,7 @@
 import type { DocumentStore } from "../store/document-store";
 import type { Transform } from "../types/document";
 import { hitTest } from "../canvas/hit-test";
-import { setTransform } from "../types/commands";
 import type { Tool, ToolEvent } from "./tool-manager";
-
-/** The placeholder NodeId used for optimistically inserted nodes. */
-const PLACEHOLDER_NODE_ID = { index: 0, generation: 0 };
-
-/** Check whether a NodeId is still the placeholder (not yet assigned by server). */
-function isPlaceholderNodeId(id: { readonly index: number; readonly generation: number }): boolean {
-  return id.index === PLACEHOLDER_NODE_ID.index && id.generation === PLACEHOLDER_NODE_ID.generation;
-}
 
 /** Internal drag state tracked between pointerdown and pointerup. */
 interface DragState {
@@ -104,17 +93,8 @@ export function createSelectTool(store: DocumentStore): Tool & {
 
     onPointerUp(): void {
       if (dragState !== null && previewTransform !== null) {
-        // RF-002: Look up the node fresh from the store to get the latest NodeId.
-        const node = store.getNodeByUuid(dragState.draggedUuid);
-        if (node && !isPlaceholderNodeId(node.id)) {
-          // RF-005: Send a single SetTransform command with old and new transforms.
-          const command = setTransform(
-            node.id,
-            previewTransform.transform,
-            dragState.originalTransform,
-          );
-          store.sendCommand(command);
-        }
+        // RF-005: Send a single setTransform mutation with the final transform.
+        store.setTransform(dragState.draggedUuid, previewTransform.transform);
       }
       dragState = null;
       previewTransform = null;

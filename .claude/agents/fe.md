@@ -18,7 +18,7 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 | Icons | Lucide (`lucide-solid`) — tree-shakeable |
 | Design tokens | Open Props + CSS custom properties (dark theme in `styles/theme.css`) |
 | Canvas | HTML5 Canvas 2D (vanilla — NOT managed by Solid) |
-| GraphQL client | urql (`@urql/solid`) — planned migration from raw WebSocket |
+| GraphQL client | urql (framework-agnostic `Client`) + graphql-ws for subscriptions |
 | Keyboard shortcuts | tinykeys |
 | Build | Vite 8 + `vite-plugin-solid` |
 | Tests | Vitest + `@solidjs/testing-library` |
@@ -41,6 +41,17 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 - Follow existing component patterns in the codebase
 - Keep files focused — one component/module per file
 - Test names describe behavior: `it("should update selection when clicking a node")`
+
+### Optimistic Update Safety
+
+When implementing optimistic updates (updating local state before the server responds):
+- If the client generates a temporary ID (e.g., UUID) for the new entity, the mutation response handler MUST remap the temporary ID to the server-assigned ID. Failing to remap leaves orphaned entries in local state under the wrong key.
+- If the mutation fails, the optimistic state change MUST be rolled back — remove the optimistic entry, restore previous values.
+- Never assume the client-generated ID will match the server-generated ID unless the API contract explicitly guarantees it.
+
+### urql Exchange Ordering
+
+urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST be placed BEFORE `fetchExchange` in the exchanges array. If `fetchExchange` comes first, it consumes subscription operations via HTTP instead of passing them to the WebSocket transport. When reviewing or writing urql client configuration, verify exchange ordering matches: `[cacheExchange, subscriptionExchange, fetchExchange]` (with any custom exchanges slotted appropriately).
 
 ### Solid.js Conventions
 

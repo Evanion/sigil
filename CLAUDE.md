@@ -123,6 +123,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 
 - WebSocket broadcasts must exclude the originating client. The originator already applied the mutation locally; echoing it causes duplicate application.
 - All state-mutating operations (execute, undo, redo) must broadcast to non-originating clients. If execute broadcasts, undo and redo must also broadcast — asymmetric broadcasting desynchronizes clients.
+- The frontend subscription handler must ignore events that originated from the local client. Until the server provides a sender ID for filtering, the client must use a correlation mechanism (e.g., matching mutation IDs against incoming subscription events) to suppress self-echoed updates. Without this, clients double-apply their own mutations.
 
 #### Graceful Shutdown
 
@@ -350,3 +351,17 @@ Every `JSON.parse` call on data from an external source (WebSocket, fetch, postM
 ### Filesystem Writes Must Be Atomic
 
 Every file write in the server crate must use the write-to-temp-then-rename pattern. Write the full content to a temporary file in the SAME directory as the target (to ensure same-filesystem rename), then `fs::rename()` to the final path. This prevents partial writes on crash or power loss. Direct `fs::write()` to the final path is a bug in the server crate.
+
+### No Fire-and-Forget Mutations
+
+Every mutation call (GraphQL mutation, REST POST/PUT/DELETE, WebSocket command) that modifies server state MUST handle the response or rejection. Calling a mutation without awaiting the result or attaching an error handler is a bug — it silently drops failures and leaves the UI in a state that diverges from the server. At minimum: log the error AND revert any optimistic local state change. For user-initiated operations: display a visible error notification. This applies to both frontend TypeScript and any future backend-to-backend calls.
+
+### Migrations Must Remove All Superseded Code
+
+When migrating from one protocol, library, or API to another (e.g., WebSocket to GraphQL, REST to gRPC), the migration PR MUST include deletion of ALL superseded artifacts. Before marking a migration complete, search for:
+1. Dead route/proxy configuration (e.g., Vite proxy entries, nginx routes, reverse proxy rules).
+2. Dead type definitions that only served the old protocol's wire format.
+3. Dead handler/endpoint code that is no longer reachable.
+4. Dead test fixtures or mocks for the old protocol.
+5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
+A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.

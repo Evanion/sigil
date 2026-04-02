@@ -24,19 +24,11 @@ use agent_designer_core::commands::style_commands::SetTransform;
 use agent_designer_core::node::Transform;
 use agent_designer_core::{NodeId, NodeKind, PageId};
 
-use crate::state::{AppState, BroadcastEnvelope, BroadcastPayload};
+use crate::state::AppState;
 
 use super::types::{
     CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult, node_to_gql,
 };
-
-/// Dedicated sender ID for mutations originating from GraphQL.
-///
-/// GraphQL mutations are not associated with a specific WebSocket client, so
-/// we use a reserved ID that will never collide with real client IDs (which
-/// start at 0 and increment). This ensures WS clients always receive the
-/// broadcast and never filter it as self-originated.
-const GRAPHQL_SENDER_ID: u64 = u64::MAX;
 
 pub struct MutationRoot;
 
@@ -60,34 +52,6 @@ fn acquire_document_lock(
 pub fn publish_event(state: &AppState, event: DocumentEvent) {
     if state.graphql_tx.send(event).is_err() {
         tracing::debug!("no GraphQL subscription listeners");
-    }
-}
-
-/// RF-003: Publishes a document-changed envelope to the WS broadcast channel
-/// so that legacy WebSocket clients see changes made via GraphQL mutations.
-///
-/// Uses [`GRAPHQL_SENDER_ID`] so no WS client filters this as self-originated.
-fn publish_ws_document_changed(state: &AppState) {
-    let doc_guard = match state.document.lock() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            tracing::error!("document mutex poisoned in publish_ws_document_changed");
-            poisoned.into_inner()
-        }
-    };
-    let can_undo = doc_guard.can_undo();
-    let can_redo = doc_guard.can_redo();
-    drop(doc_guard);
-
-    if state
-        .broadcast_tx
-        .send(BroadcastEnvelope {
-            sender_id: GRAPHQL_SENDER_ID,
-            payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
-        })
-        .is_err()
-    {
-        tracing::debug!("no WS broadcast receivers connected");
     }
 }
 
@@ -174,7 +138,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(CreateNodeResult {
             uuid: node_uuid.to_string(),
@@ -250,7 +213,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(true)
     }
@@ -306,7 +268,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(node_gql)
     }
@@ -368,7 +329,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(node_gql)
     }
@@ -418,7 +378,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(node_gql)
     }
@@ -468,7 +427,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        publish_ws_document_changed(state);
 
         Ok(node_gql)
     }
@@ -498,17 +456,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        // RF-003: Also broadcast to WS clients.
-        if state
-            .broadcast_tx
-            .send(BroadcastEnvelope {
-                sender_id: GRAPHQL_SENDER_ID,
-                payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
-            })
-            .is_err()
-        {
-            tracing::debug!("no WS broadcast receivers connected");
-        }
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
@@ -538,17 +485,6 @@ impl MutationRoot {
                 sender_id: None,
             },
         );
-        // RF-003: Also broadcast to WS clients.
-        if state
-            .broadcast_tx
-            .send(BroadcastEnvelope {
-                sender_id: GRAPHQL_SENDER_ID,
-                payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
-            })
-            .is_err()
-        {
-            tracing::debug!("no WS broadcast receivers connected");
-        }
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
