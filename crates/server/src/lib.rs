@@ -6,8 +6,10 @@
 //! integration tests can spin up test servers without duplicating setup.
 
 pub mod dispatch;
+pub mod persistence;
 pub mod routes;
 pub mod state;
+pub mod workfile;
 
 use axum::Router;
 use axum::http::{HeaderValue, Method};

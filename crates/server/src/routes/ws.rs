@@ -247,9 +247,9 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                             ?side_effects,
                             "side effects produced but not yet processed"
                         );
-                        // TODO(plan-02b): process side effects for file I/O
                     }
                     drop(doc_guard); // Release lock before broadcast
+                    state.signal_dirty();
                     if state
                         .broadcast_tx
                         .send(BroadcastEnvelope {
@@ -282,11 +282,11 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                             ?side_effects,
                             "side effects produced but not yet processed"
                         );
-                        // TODO(plan-02b): process side effects for file I/O
                     }
                     let can_undo = doc_guard.can_undo();
                     let can_redo = doc_guard.can_redo();
                     drop(doc_guard); // Release lock before broadcast
+                    state.signal_dirty();
                     tracing::debug!(can_undo, can_redo, "undo successful");
                     if state
                         .broadcast_tx
@@ -320,11 +320,11 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                             ?side_effects,
                             "side effects produced but not yet processed"
                         );
-                        // TODO(plan-02b): process side effects for file I/O
                     }
                     let can_undo = doc_guard.can_undo();
                     let can_redo = doc_guard.can_redo();
                     drop(doc_guard); // Release lock before broadcast
+                    state.signal_dirty();
                     tracing::debug!(can_undo, can_redo, "redo successful");
                     if state
                         .broadcast_tx
