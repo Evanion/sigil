@@ -143,7 +143,7 @@ describe("WebSocketClient", () => {
     client.onMessage(handler);
 
     const serverMsg: ServerMessage = {
-      type: "undo_redo_state",
+      type: "undo_redo",
       can_undo: true,
       can_redo: false,
     };
@@ -164,7 +164,7 @@ describe("WebSocketClient", () => {
     client.onMessage(handler1);
     client.onMessage(handler2);
 
-    const serverMsg: ServerMessage = { type: "document_changed" };
+    const serverMsg: ServerMessage = { type: "document_changed", can_undo: false, can_redo: false };
     ws.simulateMessage(serverMsg);
 
     expect(handler1).toHaveBeenCalledOnce();
@@ -209,7 +209,7 @@ describe("WebSocketClient", () => {
     const handler = vi.fn();
     const unsubscribe = client.onMessage(handler);
 
-    const serverMsg: ServerMessage = { type: "document_changed" };
+    const serverMsg: ServerMessage = { type: "document_changed", can_undo: false, can_redo: false };
     ws.simulateMessage(serverMsg);
     expect(handler).toHaveBeenCalledOnce();
 
