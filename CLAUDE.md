@@ -130,6 +130,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Core crate: no `unwrap()` or `expect()` — return `Result` types.
 - Always run `cargo fmt` after any code change before committing. Formatting is checked in CI; unformatted code will fail the pipeline.
 - Avoid Rust reserved keywords as identifiers — check against both current and future editions (e.g., `gen` is reserved in Edition 2024). Use `generation`, `gen_value`, or similar alternatives.
+- Define all validation limit constants (`MAX_*`, `LIMIT_*`, `MIN_*`) in `validate.rs`, not scattered across type definition files. Co-locating limits makes audit and enforcement traceable.
 
 ### TypeScript
 
@@ -259,7 +260,7 @@ Every recursive function MUST accept a depth parameter or use an explicit stack 
 - JSON processing (e.g., `sort_json_keys`)
 - Any function that calls itself or walks a graph
 
-The depth limit must be a named constant, not a magic number.
+The depth limit must be a named constant, not a magic number. Use `>=` (not `>`) when comparing depth to the limit constant — depth is zero-indexed, so `depth >= MAX` allows exactly MAX levels (0 through MAX-1). An off-by-one here silently permits one extra recursion level.
 
 ### Constructors Must Validate
 
@@ -294,6 +295,10 @@ Every `f32`/`f64` field arriving from external input (deserialization, API param
 ### Symmetric Validation for Reversible Operations
 
 For any operation with an apply/undo pair (commands, transactions), both directions MUST validate their inputs. If `apply` validates a field before modifying it, `undo` must validate before reverting. Asymmetric validation means undo can corrupt state when applied to a document that has diverged.
+
+### Cross-Field Invariant Validation
+
+When a type has fields that must be mutually consistent (e.g., a discriminant enum and a value enum, a unit field and a numeric field), the constructor and deserialization path MUST validate the relationship between them. Single-field validation is not sufficient — add an explicit cross-field check and a test for each invalid combination.
 
 ### No Derive Deserialize on Validated Types
 
