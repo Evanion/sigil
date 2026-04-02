@@ -336,4 +336,96 @@ describe("DocumentStore", () => {
     expect(store.getNodeByUuid("some-uuid")).toBeUndefined();
     store.destroy();
   });
+
+  it("should fetch document info when connection becomes true", async () => {
+    const docInfo: DocumentInfo = {
+      name: "Reconnected Doc",
+      page_count: 1,
+      node_count: 3,
+      can_undo: false,
+      can_redo: false,
+    };
+    mockFetchDocumentInfo(docInfo);
+
+    const store = createDocumentStore(mockWs);
+
+    mockWs.simulateConnectionChange(true);
+
+    await vi.waitFor(() => {
+      expect(store.getInfo()).toEqual(docInfo);
+    });
+
+    store.destroy();
+  });
+
+  it("should not fetch document info when connection becomes false", () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          name: "X",
+          page_count: 0,
+          node_count: 0,
+          can_undo: false,
+          can_redo: false,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const store = createDocumentStore(mockWs);
+
+    mockWs.simulateConnectionChange(false);
+
+    // fetch should not have been called for a disconnect event
+    expect(fetchSpy).not.toHaveBeenCalled();
+    store.destroy();
+  });
+
+  it("should debounce rapid broadcast messages into a single fetch", async () => {
+    vi.useFakeTimers();
+    const docInfo: DocumentInfo = {
+      name: "Debounced",
+      page_count: 1,
+      node_count: 1,
+      can_undo: false,
+      can_redo: false,
+    };
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(docInfo),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const store = createDocumentStore(mockWs);
+
+    // Fire 5 rapid broadcast messages
+    for (let i = 0; i < 5; i++) {
+      mockWs.simulateMessage({
+        type: "broadcast",
+        command: { type: "rename_node", node_id: { index: 0, generation: 0 }, new_name: `N${String(i)}` },
+      });
+    }
+
+    // Before debounce fires, fetch should not have been called
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    // Advance timers past the 100ms debounce
+    await vi.advanceTimersByTimeAsync(150);
+
+    // Only one fetch should have been triggered
+    expect(fetchSpy).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
+    store.destroy();
+  });
+
+  it("should return a ReadonlyMap from getAllNodes", () => {
+    const store = createDocumentStore(mockWs);
+    const nodesMap = store.getAllNodes();
+    // ReadonlyMap should not have set/delete/clear at the type level,
+    // but at runtime the underlying Map is returned. Verify it is a Map instance.
+    expect(nodesMap).toBeInstanceOf(Map);
+    expect(nodesMap.size).toBe(0);
+    store.destroy();
+  });
 });

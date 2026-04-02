@@ -32,7 +32,7 @@ function main(): void {
   void store.loadInitialState();
 
   // Clean up on page unload
-  window.addEventListener("unload", () => {
+  window.addEventListener("pagehide", () => {
     cleanup();
     store.destroy();
     wsClient.close();

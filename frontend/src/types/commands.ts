@@ -14,6 +14,7 @@ import type {
   ComponentDef,
   ComponentId,
   Constraints,
+  DocumentNode,
   Effect,
   Fill,
   NodeId,
@@ -44,7 +45,7 @@ export type SerializableCommand =
   | {
       readonly type: "delete_node";
       readonly node_id: NodeId;
-      readonly snapshot: unknown;
+      readonly snapshot: DocumentNode | null;
       readonly page_id: PageId | null;
       readonly page_root_index: number | null;
       readonly parent_id: NodeId | null;
