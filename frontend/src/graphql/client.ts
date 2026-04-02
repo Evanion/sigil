@@ -1,9 +1,4 @@
-import {
-  Client,
-  cacheExchange,
-  fetchExchange,
-  subscriptionExchange,
-} from "urql";
+import { Client, cacheExchange, fetchExchange, subscriptionExchange } from "urql";
 import { createClient as createWSClient } from "graphql-ws";
 
 /**

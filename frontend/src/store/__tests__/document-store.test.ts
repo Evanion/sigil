@@ -1,75 +1,53 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { WebSocketClient } from "../../ws/client";
-import type { ClientMessage, ServerMessage } from "../../types/messages";
-import type { SerializableCommand } from "../../types/commands";
-import type {
-  DocumentInfo,
-  FullDocumentResponse,
-  NodeKind,
-  SerializedNode,
-  Transform,
-} from "../../types/document";
+import type { Client } from "urql";
+import type { DocumentNode, NodeKind, Transform } from "../../types/document";
 import { createDocumentStore } from "../document-store";
 
-// --- Mock WebSocket client ---
+// ── urql mock client ─────────────────────────────────────────────────
 
-type MessageHandler = (message: ServerMessage) => void;
-type ConnectionHandler = (connected: boolean) => void;
+/** Callback type matching urql's subscription subscribe handler. */
+type SubscriptionHandler = (result: { data: unknown }) => void;
 
-function createMockWebSocketClient(): WebSocketClient & {
-  sentMessages: ClientMessage[];
-  simulateMessage: (msg: ServerMessage) => void;
-  simulateConnectionChange: (connected: boolean) => void;
-} {
-  const messageHandlers = new Set<MessageHandler>();
-  const connectionHandlers = new Set<ConnectionHandler>();
-  const sentMessages: ClientMessage[] = [];
-
-  return {
-    sentMessages,
-
-    send(message: ClientMessage): void {
-      sentMessages.push(message);
-    },
-
-    onMessage(handler: MessageHandler): () => void {
-      messageHandlers.add(handler);
-      return () => {
-        messageHandlers.delete(handler);
-      };
-    },
-
-    onConnectionChange(handler: ConnectionHandler): () => void {
-      connectionHandlers.add(handler);
-      return () => {
-        connectionHandlers.delete(handler);
-      };
-    },
-
-    isConnected(): boolean {
-      return false;
-    },
-
-    close(): void {
-      messageHandlers.clear();
-      connectionHandlers.clear();
-    },
-
-    simulateMessage(msg: ServerMessage): void {
-      for (const handler of messageHandlers) {
-        handler(msg);
-      }
-    },
-
-    simulateConnectionChange(connected: boolean): void {
-      for (const handler of connectionHandlers) {
-        handler(connected);
-      }
-    },
-  };
+interface MockClient {
+  query: ReturnType<typeof vi.fn>;
+  mutation: ReturnType<typeof vi.fn>;
+  subscription: ReturnType<typeof vi.fn>;
+  /** Simulate a subscription event being delivered. */
+  simulateSubscriptionEvent: (data: unknown) => void;
 }
 
-// --- Helpers ---
+function createMockClient(): MockClient {
+  let subscriptionHandler: SubscriptionHandler | null = null;
+
+  const mockClient: MockClient = {
+    simulateSubscriptionEvent: (data: unknown) => {
+      if (subscriptionHandler) {
+        subscriptionHandler({ data });
+      }
+    },
+    query: vi.fn().mockReturnValue({
+      toPromise: () => Promise.resolve({ data: null }),
+    }),
+    mutation: vi.fn().mockReturnValue({
+      toPromise: () => Promise.resolve({ data: null }),
+    }),
+    subscription: vi.fn().mockReturnValue({
+      subscribe: (handler: SubscriptionHandler) => {
+        subscriptionHandler = handler;
+        return { unsubscribe: vi.fn() };
+      },
+    }),
+  };
+
+  return mockClient;
+}
+
+/** Cast mock client to urql Client for the store constructor. */
+function asClient(mock: MockClient): Client {
+  return mock as unknown as Client;
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
 
 const DEFAULT_STYLE = {
   fills: [],
@@ -79,77 +57,74 @@ const DEFAULT_STYLE = {
   effects: [],
 };
 
-const DEFAULT_CONSTRAINTS = {
-  horizontal: "start" as const,
-  vertical: "start" as const,
-};
-
-function makeSerializedNode(overrides: Partial<SerializedNode> & { id: string }): SerializedNode {
+function makeGqlNode(
+  overrides: Partial<{
+    uuid: string;
+    name: string;
+    kind: NodeKind;
+    parent: string | null;
+    children: readonly string[];
+    transform: Transform;
+    style: DocumentNode["style"];
+    visible: boolean;
+    locked: boolean;
+  }> & { uuid: string },
+): Record<string, unknown> {
   return {
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
-    name: "Node",
-    parent: null,
-    children: [],
-    transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
-    style: DEFAULT_STYLE,
-    constraints: DEFAULT_CONSTRAINTS,
-    grid_placement: null,
-    visible: true,
-    locked: false,
-    ...overrides,
+    uuid: overrides.uuid,
+    name: overrides.name ?? "Node",
+    kind: overrides.kind ?? { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    parent: overrides.parent ?? null,
+    children: overrides.children ?? [],
+    transform: overrides.transform ?? {
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    },
+    style: overrides.style ?? DEFAULT_STYLE,
+    visible: overrides.visible ?? true,
+    locked: overrides.locked ?? false,
   };
 }
 
-function makeFullDocumentResponse(
-  info: DocumentInfo,
-  pages: FullDocumentResponse["pages"] = [],
-): FullDocumentResponse {
-  return { info, pages };
+function makePagesQueryData(
+  pages: Array<{
+    id: string;
+    name: string;
+    nodes: Array<Record<string, unknown>>;
+  }>,
+): { pages: typeof pages } {
+  return { pages };
 }
 
-const DEFAULT_INFO: DocumentInfo = {
-  name: "Test Doc",
-  page_count: 1,
-  node_count: 0,
-  can_undo: false,
-  can_redo: false,
-};
-
-// --- Mock fetch ---
-
-function mockFetchFullDocument(response: FullDocumentResponse): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(response),
-    }),
-  );
+function mockQueryReturning(mock: MockClient, data: unknown): void {
+  mock.query.mockReturnValue({
+    toPromise: () => Promise.resolve({ data }),
+  });
 }
 
-function mockFetchFailure(): void {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      statusText: "Internal Server Error",
-    }),
-  );
+function mockMutationReturning(mock: MockClient, data: unknown): void {
+  mock.mutation.mockReturnValue({
+    toPromise: () => Promise.resolve({ data }),
+  });
 }
 
-// --- Tests ---
+// ── Tests ────────────────────────────────────────────────────────────
 
 describe("DocumentStore", () => {
-  let mockWs: ReturnType<typeof createMockWebSocketClient>;
+  let mockClient: MockClient;
 
   beforeEach(() => {
-    mockWs = createMockWebSocketClient();
+    mockClient = createMockClient();
     vi.restoreAllMocks();
   });
 
   it("should start with null document info", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     expect(store.getInfo()).toBeNull();
     expect(store.getAllNodes().size).toBe(0);
     expect(store.getPages()).toEqual([]);
@@ -157,178 +132,128 @@ describe("DocumentStore", () => {
   });
 
   it("should report initial canUndo and canRedo as false", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     expect(store.canUndo()).toBe(false);
     expect(store.canRedo()).toBe(false);
     store.destroy();
   });
 
-  it("should send undo command via WebSocket", () => {
-    const store = createDocumentStore(mockWs);
+  it("should call undo mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
     store.undo();
-    expect(mockWs.sentMessages).toHaveLength(1);
-    expect(mockWs.sentMessages[0]).toEqual({ type: "undo" });
+    expect(mockClient.mutation).toHaveBeenCalledWith(expect.stringContaining("mutation Undo"), {});
     store.destroy();
   });
 
-  it("should send redo command via WebSocket", () => {
-    const store = createDocumentStore(mockWs);
+  it("should call redo mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
     store.redo();
-    expect(mockWs.sentMessages).toHaveLength(1);
-    expect(mockWs.sentMessages[0]).toEqual({ type: "redo" });
+    expect(mockClient.mutation).toHaveBeenCalledWith(expect.stringContaining("mutation Redo"), {});
     store.destroy();
   });
 
-  it("should send command via WebSocket", () => {
-    const store = createDocumentStore(mockWs);
-    const cmd: SerializableCommand = {
-      type: "rename_node",
-      node_id: { index: 0, generation: 0 },
-      new_name: "NewName",
-      old_name: "OldName",
+  it("should call setTransform mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
+    const transform: Transform = {
+      x: 10,
+      y: 20,
+      width: 100,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
     };
-    store.sendCommand(cmd);
-
-    expect(mockWs.sentMessages).toHaveLength(1);
-    expect(mockWs.sentMessages[0]).toEqual({
-      type: "command",
-      command: cmd,
-    });
+    store.setTransform("node-1", transform);
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation SetTransform"),
+      { uuid: "node-1", transform },
+    );
     store.destroy();
   });
 
-  it("should notify subscribers on connection change", () => {
-    const store = createDocumentStore(mockWs);
-    const subscriber = vi.fn();
-    store.subscribe(subscriber);
-
-    mockWs.simulateConnectionChange(true);
-
-    expect(subscriber).toHaveBeenCalledOnce();
+  it("should call renameNode mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
+    store.renameNode("node-1", "NewName");
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation RenameNode"),
+      { uuid: "node-1", newName: "NewName" },
+    );
     store.destroy();
   });
 
-  it("should report connection status", () => {
-    const store = createDocumentStore(mockWs);
+  it("should call deleteNode mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
+    store.deleteNode("node-1");
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation DeleteNode"),
+      { uuid: "node-1" },
+    );
+    store.destroy();
+  });
+
+  it("should call setVisible mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
+    store.setVisible("node-1", false);
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation SetVisible"),
+      { uuid: "node-1", visible: false },
+    );
+    store.destroy();
+  });
+
+  it("should call setLocked mutation via urql", () => {
+    const store = createDocumentStore(asClient(mockClient));
+    store.setLocked("node-1", true);
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation SetLocked"),
+      { uuid: "node-1", locked: true },
+    );
+    store.destroy();
+  });
+
+  it("should report connection status as false initially", () => {
+    const store = createDocumentStore(asClient(mockClient));
     expect(store.isConnected()).toBe(false);
     store.destroy();
   });
 
-  it("should update canUndo and canRedo on undo_redo message", () => {
-    const store = createDocumentStore(mockWs);
+  it("should report connected after subscription receives first event", async () => {
+    const pagesData = makePagesQueryData([]);
+    mockQueryReturning(mockClient, pagesData);
 
-    mockWs.simulateMessage({
-      type: "undo_redo",
-      can_undo: true,
-      can_redo: false,
-    });
-
-    expect(store.canUndo()).toBe(true);
-    expect(store.canRedo()).toBe(false);
-    store.destroy();
-  });
-
-  it("should notify subscribers on undo_redo message", () => {
-    const store = createDocumentStore(mockWs);
-    const subscriber = vi.fn();
-    store.subscribe(subscriber);
-
-    mockWs.simulateMessage({
-      type: "undo_redo",
-      can_undo: true,
-      can_redo: true,
-    });
-
-    expect(subscriber).toHaveBeenCalledOnce();
-    store.destroy();
-  });
-
-  it("should update canUndo and canRedo on document_changed message", () => {
-    const store = createDocumentStore(mockWs);
-
-    mockWs.simulateMessage({
-      type: "document_changed",
-      can_undo: false,
-      can_redo: true,
-    });
-
-    expect(store.canUndo()).toBe(false);
-    expect(store.canRedo()).toBe(true);
-    store.destroy();
-  });
-
-  it("should re-fetch state on broadcast message", async () => {
-    const fullResponse = makeFullDocumentResponse({
-      ...DEFAULT_INFO,
-      name: "Test Doc",
-      node_count: 5,
-      can_undo: true,
-    });
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
-    const subscriber = vi.fn();
-    store.subscribe(subscriber);
-
-    mockWs.simulateMessage({
-      type: "broadcast",
-      command: { type: "rename_node", node_id: { index: 0, generation: 0 }, new_name: "Foo" },
-    });
-
-    // Wait for the async fetch to complete
-    await vi.waitFor(() => {
-      expect(subscriber).toHaveBeenCalled();
-    });
-
-    expect(store.getInfo()).toEqual(fullResponse.info);
-    expect(store.canUndo()).toBe(true);
-    expect(store.canRedo()).toBe(false);
-    store.destroy();
-  });
-
-  it("should re-fetch state on document_changed message", async () => {
-    const fullResponse = makeFullDocumentResponse({
-      ...DEFAULT_INFO,
-      name: "Updated Doc",
-      page_count: 2,
-      node_count: 10,
-      can_redo: true,
-    });
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
-
-    mockWs.simulateMessage({
-      type: "document_changed",
-      can_undo: false,
-      can_redo: true,
-    });
-
-    await vi.waitFor(() => {
-      expect(store.getInfo()).toEqual(fullResponse.info);
-    });
-
-    store.destroy();
-  });
-
-  it("should load initial state from /api/document/full", async () => {
-    const fullResponse = makeFullDocumentResponse(
-      { ...DEFAULT_INFO, name: "My Design", page_count: 1, node_count: 1 },
-      [
-        {
-          id: "page-1",
-          name: "Home",
-          nodes: [makeSerializedNode({ id: "node-1", name: "Rect 1" })],
-          transitions: [],
-        },
-      ],
-    );
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
-    expect(store.getInfo()).toEqual(fullResponse.info);
+    expect(store.isConnected()).toBe(false);
+
+    // Simulate subscription delivering an event
+    mockClient.simulateSubscriptionEvent({
+      documentChanged: {
+        eventType: "node_updated",
+        uuid: "some-uuid",
+        data: null,
+        senderId: null,
+      },
+    });
+
+    expect(store.isConnected()).toBe(true);
+    store.destroy();
+  });
+
+  it("should load initial state via pages query", async () => {
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Home",
+        nodes: [makeGqlNode({ uuid: "node-1", name: "Rect 1" })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    expect(store.getInfo()).not.toBeNull();
     expect(store.getPages()).toHaveLength(1);
     expect(store.getPages()[0]).toEqual({
       id: "page-1",
@@ -342,29 +267,24 @@ describe("DocumentStore", () => {
   });
 
   it("should populate nodes from multiple pages", async () => {
-    const fullResponse = makeFullDocumentResponse(
-      { ...DEFAULT_INFO, page_count: 2, node_count: 3 },
-      [
-        {
-          id: "page-1",
-          name: "Page 1",
-          nodes: [
-            makeSerializedNode({ id: "node-a", name: "A" }),
-            makeSerializedNode({ id: "node-b", name: "B" }),
-          ],
-          transitions: [],
-        },
-        {
-          id: "page-2",
-          name: "Page 2",
-          nodes: [makeSerializedNode({ id: "node-c", name: "C" })],
-          transitions: [],
-        },
-      ],
-    );
-    mockFetchFullDocument(fullResponse);
+    const pagesData = makePagesQueryData([
+      {
+        id: "page-1",
+        name: "Page 1",
+        nodes: [
+          makeGqlNode({ uuid: "node-a", name: "A" }),
+          makeGqlNode({ uuid: "node-b", name: "B" }),
+        ],
+      },
+      {
+        id: "page-2",
+        name: "Page 2",
+        nodes: [makeGqlNode({ uuid: "node-c", name: "C" })],
+      },
+    ]);
+    mockQueryReturning(mockClient, pagesData);
 
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
     expect(store.getAllNodes().size).toBe(3);
@@ -375,149 +295,137 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
-  it("should handle loadInitialState fetch failure gracefully", async () => {
-    mockFetchFailure();
-
-    const store = createDocumentStore(mockWs);
-    // Should not throw
+  it("should handle loadInitialState query failure gracefully", async () => {
+    // Query returns null data (error case)
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
     expect(store.getInfo()).toBeNull();
     store.destroy();
   });
 
-  it("should allow unsubscribing from notifications", () => {
-    const store = createDocumentStore(mockWs);
+  it("should handle loadInitialState with unexpected data shape gracefully", async () => {
+    mockQueryReturning(mockClient, { unexpected: "shape" });
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    expect(store.getInfo()).toBeNull();
+    store.destroy();
+  });
+
+  it("should allow unsubscribing from notifications", async () => {
+    const pagesData = makePagesQueryData([]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
     const subscriber = vi.fn();
     const unsubscribe = store.subscribe(subscriber);
 
-    mockWs.simulateMessage({
-      type: "undo_redo",
-      can_undo: true,
-      can_redo: true,
-    });
+    // Trigger a change
+    store.select("node-123");
     expect(subscriber).toHaveBeenCalledOnce();
 
     unsubscribe();
 
-    mockWs.simulateMessage({
-      type: "undo_redo",
-      can_undo: false,
-      can_redo: false,
-    });
+    store.select("node-456");
     // Should not have been called again
     expect(subscriber).toHaveBeenCalledOnce();
     store.destroy();
   });
 
-  it("should clean up subscriptions on destroy", () => {
-    const store = createDocumentStore(mockWs);
+  it("should clean up subscriptions on destroy", async () => {
+    const store = createDocumentStore(asClient(mockClient));
     const subscriber = vi.fn();
     store.subscribe(subscriber);
 
     store.destroy();
 
-    // After destroy, messages should not trigger subscribers
-    mockWs.simulateMessage({
-      type: "undo_redo",
-      can_undo: true,
-      can_redo: true,
-    });
+    // After destroy, state changes should not trigger subscribers
+    // (select would normally notify, but destroy clears subscribers)
+    store.select("node-123");
     expect(subscriber).not.toHaveBeenCalled();
   });
 
   it("should return node by uuid after loading state", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     // Initially no nodes
     expect(store.getNodeByUuid("some-uuid")).toBeUndefined();
     store.destroy();
   });
 
-  it("should fetch full document when connection becomes true", async () => {
-    const fullResponse = makeFullDocumentResponse({
-      ...DEFAULT_INFO,
-      name: "Reconnected Doc",
-      node_count: 3,
-    });
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
-
-    mockWs.simulateConnectionChange(true);
-
-    await vi.waitFor(() => {
-      expect(store.getInfo()).toEqual(fullResponse.info);
-    });
-
-    store.destroy();
-  });
-
-  it("should not fetch document when connection becomes false", () => {
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () =>
-        Promise.resolve(
-          makeFullDocumentResponse({
-            ...DEFAULT_INFO,
-            name: "X",
-          }),
-        ),
-    });
-    vi.stubGlobal("fetch", fetchSpy);
-
-    const store = createDocumentStore(mockWs);
-
-    mockWs.simulateConnectionChange(false);
-
-    // fetch should not have been called for a disconnect event
-    expect(fetchSpy).not.toHaveBeenCalled();
-    store.destroy();
-  });
-
-  it("should debounce rapid broadcast messages into a single fetch", async () => {
+  it("should re-fetch pages on subscription event", async () => {
     vi.useFakeTimers();
-    const fullResponse = makeFullDocumentResponse({
-      ...DEFAULT_INFO,
-      name: "Debounced",
-    });
-    const fetchSpy = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(fullResponse),
-    });
-    vi.stubGlobal("fetch", fetchSpy);
 
-    const store = createDocumentStore(mockWs);
+    const pagesData = makePagesQueryData([{ id: "page-1", name: "Home", nodes: [] }]);
+    mockQueryReturning(mockClient, pagesData);
 
-    // Fire 5 rapid broadcast messages
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    // Reset query mock to track re-fetch
+    mockClient.query.mockClear();
+    mockQueryReturning(mockClient, pagesData);
+
+    // Simulate subscription event
+    mockClient.simulateSubscriptionEvent({
+      documentChanged: {
+        eventType: "node_updated",
+        uuid: "some-uuid",
+        data: null,
+        senderId: null,
+      },
+    });
+
+    // Advance past debounce timer
+    await vi.advanceTimersByTimeAsync(150);
+
+    expect(mockClient.query).toHaveBeenCalledOnce();
+
+    vi.useRealTimers();
+    store.destroy();
+  });
+
+  it("should debounce rapid subscription events into a single re-fetch", async () => {
+    vi.useFakeTimers();
+
+    const pagesData = makePagesQueryData([]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    mockClient.query.mockClear();
+    mockQueryReturning(mockClient, pagesData);
+
+    // Fire 5 rapid subscription events
     for (let i = 0; i < 5; i++) {
-      mockWs.simulateMessage({
-        type: "broadcast",
-        command: {
-          type: "rename_node",
-          node_id: { index: 0, generation: 0 },
-          new_name: `N${String(i)}`,
+      mockClient.simulateSubscriptionEvent({
+        documentChanged: {
+          eventType: "node_updated",
+          uuid: `uuid-${String(i)}`,
+          data: null,
+          senderId: null,
         },
       });
     }
 
-    // Before debounce fires, fetch should not have been called
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // Before debounce fires, query should not have been called
+    expect(mockClient.query).not.toHaveBeenCalled();
 
     // Advance timers past the 100ms debounce
     await vi.advanceTimersByTimeAsync(150);
 
-    // Only one fetch should have been triggered
-    expect(fetchSpy).toHaveBeenCalledOnce();
+    // Only one query should have been triggered
+    expect(mockClient.query).toHaveBeenCalledOnce();
 
     vi.useRealTimers();
     store.destroy();
   });
 
   it("should return a ReadonlyMap from getAllNodes", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     const nodesMap = store.getAllNodes();
-    // ReadonlyMap should not have set/delete/clear at the type level,
-    // but at runtime the underlying Map is returned. Verify it is a Map instance.
     expect(nodesMap).toBeInstanceOf(Map);
     expect(nodesMap.size).toBe(0);
     store.destroy();
@@ -526,20 +434,20 @@ describe("DocumentStore", () => {
   // --- Selection tests ---
 
   it("should start with no selection", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     expect(store.getSelectedNodeId()).toBeNull();
     store.destroy();
   });
 
   it("should update selection when calling select", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     store.select("node-123");
     expect(store.getSelectedNodeId()).toBe("node-123");
     store.destroy();
   });
 
   it("should clear selection when passing null to select", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     store.select("node-123");
     store.select(null);
     expect(store.getSelectedNodeId()).toBeNull();
@@ -547,7 +455,7 @@ describe("DocumentStore", () => {
   });
 
   it("should notify subscribers when selection changes", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     const subscriber = vi.fn();
     store.subscribe(subscriber);
 
@@ -560,7 +468,7 @@ describe("DocumentStore", () => {
   });
 
   it("should not notify subscribers when selecting the same node", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     store.select("node-abc");
 
     const subscriber = vi.fn();
@@ -573,8 +481,8 @@ describe("DocumentStore", () => {
 
   // --- createNode tests ---
 
-  it("should send create_node_request via WebSocket when calling createNode", () => {
-    const store = createDocumentStore(mockWs);
+  it("should call create node mutation via urql when calling createNode", () => {
+    const store = createDocumentStore(asClient(mockClient));
 
     const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
     const transform: Transform = {
@@ -592,27 +500,28 @@ describe("DocumentStore", () => {
     expect(typeof uuid).toBe("string");
     expect(uuid.length).toBeGreaterThan(0);
 
-    expect(mockWs.sentMessages).toHaveLength(1);
-    const msg = mockWs.sentMessages[0];
-    expect(msg).toEqual({
-      type: "create_node_request",
-      uuid,
-      kind,
-      name: "Rectangle 1",
-      page_id: null,
-      transform,
-    });
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation CreateNode"),
+      {
+        kind,
+        name: "Rectangle 1",
+        pageId: null,
+        transform,
+      },
+    );
     store.destroy();
   });
 
-  it("should include active page id in create_node_request when pages exist", async () => {
-    const fullResponse = makeFullDocumentResponse({ ...DEFAULT_INFO, page_count: 1 }, [
-      { id: "page-xyz", name: "Home", nodes: [], transitions: [] },
-    ]);
-    mockFetchFullDocument(fullResponse);
+  it("should include active page id in create node mutation when pages exist", async () => {
+    const pagesData = makePagesQueryData([{ id: "page-xyz", name: "Home", nodes: [] }]);
+    mockQueryReturning(mockClient, pagesData);
 
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
+
+    // Reset mock to track createNode mutation
+    mockClient.mutation.mockClear();
+    mockMutationReturning(mockClient, null);
 
     const kind: NodeKind = { type: "frame", layout: null };
     const transform: Transform = {
@@ -627,19 +536,17 @@ describe("DocumentStore", () => {
 
     store.createNode(kind, "Frame 1", transform);
 
-    expect(mockWs.sentMessages).toHaveLength(1);
-    const msg = mockWs.sentMessages[0];
-    expect(msg).toHaveProperty("type", "create_node_request");
-    if (msg.type === "create_node_request") {
-      expect(msg.page_id).toBe("page-xyz");
-    }
+    expect(mockClient.mutation).toHaveBeenCalledWith(
+      expect.stringContaining("mutation CreateNode"),
+      expect.objectContaining({ pageId: "page-xyz" }),
+    );
     store.destroy();
   });
 
-  // --- RF-001: Optimistic insert tests ---
+  // --- Optimistic insert tests ---
 
   it("should optimistically insert node into store on createNode", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
 
     const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
     const transform: Transform = {
@@ -667,7 +574,7 @@ describe("DocumentStore", () => {
   });
 
   it("should notify subscribers when optimistic node is inserted", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     const subscriber = vi.fn();
     store.subscribe(subscriber);
 
@@ -688,8 +595,25 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
-  it("should update optimistic node with real NodeId on node_created", () => {
-    const store = createDocumentStore(mockWs);
+  it("should update optimistic node with server data on mutation result", async () => {
+    const serverNode = makeGqlNode({
+      uuid: "server-uuid",
+      name: "Server Rect",
+    });
+
+    // Set up mutation to return server data
+    mockClient.mutation.mockReturnValue({
+      toPromise: () =>
+        Promise.resolve({
+          data: { createNode: { uuid: "server-uuid", node: serverNode } },
+        }),
+    });
+
+    const store = createDocumentStore(asClient(mockClient));
+
+    // We need to mock crypto.randomUUID to control the UUID
+    const originalRandomUUID = crypto.randomUUID;
+    crypto.randomUUID = () => "server-uuid" as ReturnType<typeof crypto.randomUUID>;
 
     const kind: NodeKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
     const transform: Transform = {
@@ -703,38 +627,33 @@ describe("DocumentStore", () => {
     };
 
     const uuid = store.createNode(kind, "Rect", transform);
+    expect(uuid).toBe("server-uuid");
 
-    // Verify placeholder id
-    expect(store.getNodeByUuid(uuid)?.id).toEqual({ index: 0, generation: 0 });
-
-    // Simulate server response
-    mockWs.simulateMessage({
-      type: "node_created",
-      uuid,
-      node_id: { index: 5, generation: 3 },
+    // Wait for mutation to resolve
+    await vi.waitFor(() => {
+      expect(store.getNodeByUuid("server-uuid")?.name).toBe("Server Rect");
     });
 
-    // Now the node should have the real id
-    expect(store.getNodeByUuid(uuid)?.id).toEqual({ index: 5, generation: 3 });
+    crypto.randomUUID = originalRandomUUID;
     store.destroy();
   });
 
   // --- getActivePage tests ---
 
   it("should return undefined for getActivePage when no pages are loaded", () => {
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     expect(store.getActivePage()).toBeUndefined();
     store.destroy();
   });
 
   it("should return the first page as the active page", async () => {
-    const fullResponse = makeFullDocumentResponse({ ...DEFAULT_INFO, page_count: 2 }, [
-      { id: "page-1", name: "First Page", nodes: [], transitions: [] },
-      { id: "page-2", name: "Second Page", nodes: [], transitions: [] },
+    const pagesData = makePagesQueryData([
+      { id: "page-1", name: "First Page", nodes: [] },
+      { id: "page-2", name: "Second Page", nodes: [] },
     ]);
-    mockFetchFullDocument(fullResponse);
+    mockQueryReturning(mockClient, pagesData);
 
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
     const activePage = store.getActivePage();
@@ -744,112 +663,94 @@ describe("DocumentStore", () => {
     store.destroy();
   });
 
-  // --- node_created server message ---
+  // --- Undo/Redo result handling ---
 
-  it("should update node id when receiving node_created message", async () => {
-    const fullResponse = makeFullDocumentResponse({ ...DEFAULT_INFO, node_count: 1 }, [
-      {
-        id: "page-1",
-        name: "Home",
-        nodes: [makeSerializedNode({ id: "node-uuid-1", name: "Rect" })],
-        transitions: [],
-      },
-    ]);
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
-    await store.loadInitialState();
-
-    // Verify node has placeholder id
-    const nodeBefore = store.getNodeByUuid("node-uuid-1");
-    expect(nodeBefore?.id).toEqual({ index: 0, generation: 0 });
-
-    // Simulate server sending the real NodeId
-    mockWs.simulateMessage({
-      type: "node_created",
-      uuid: "node-uuid-1",
-      node_id: { index: 42, generation: 7 },
+  it("should update canUndo and canRedo from undo mutation result", async () => {
+    mockClient.mutation.mockReturnValue({
+      toPromise: () =>
+        Promise.resolve({
+          data: { undo: { canUndo: false, canRedo: true } },
+        }),
     });
+    // Also mock query for the re-fetch after undo
+    mockQueryReturning(mockClient, makePagesQueryData([]));
 
-    const nodeAfter = store.getNodeByUuid("node-uuid-1");
-    expect(nodeAfter?.id).toEqual({ index: 42, generation: 7 });
+    const store = createDocumentStore(asClient(mockClient));
+    store.undo();
+
+    await vi.waitFor(() => {
+      expect(store.canRedo()).toBe(true);
+    });
+    expect(store.canUndo()).toBe(false);
     store.destroy();
   });
 
-  it("should notify subscribers when node_created message is received for existing node", async () => {
-    const fullResponse = makeFullDocumentResponse({ ...DEFAULT_INFO, node_count: 1 }, [
-      {
-        id: "page-1",
-        name: "Home",
-        nodes: [makeSerializedNode({ id: "node-uuid-1", name: "Rect" })],
-        transitions: [],
-      },
-    ]);
-    mockFetchFullDocument(fullResponse);
-
-    const store = createDocumentStore(mockWs);
-    await store.loadInitialState();
-
-    const subscriber = vi.fn();
-    store.subscribe(subscriber);
-
-    mockWs.simulateMessage({
-      type: "node_created",
-      uuid: "node-uuid-1",
-      node_id: { index: 1, generation: 1 },
+  it("should update canUndo and canRedo from redo mutation result", async () => {
+    mockClient.mutation.mockReturnValue({
+      toPromise: () =>
+        Promise.resolve({
+          data: { redo: { canUndo: true, canRedo: false } },
+        }),
     });
+    mockQueryReturning(mockClient, makePagesQueryData([]));
 
-    expect(subscriber).toHaveBeenCalledOnce();
+    const store = createDocumentStore(asClient(mockClient));
+    store.redo();
+
+    await vi.waitFor(() => {
+      expect(store.canUndo()).toBe(true);
+    });
+    expect(store.canRedo()).toBe(false);
     store.destroy();
   });
 
-  it("should ignore node_created message for unknown uuid", () => {
-    const store = createDocumentStore(mockWs);
-    const subscriber = vi.fn();
-    store.subscribe(subscriber);
+  // --- Defensive parsing ---
 
-    mockWs.simulateMessage({
-      type: "node_created",
-      uuid: "nonexistent-uuid",
-      node_id: { index: 1, generation: 1 },
+  it("should handle query rejection gracefully", async () => {
+    mockClient.query.mockReturnValue({
+      toPromise: () => Promise.reject(new Error("Network failure")),
     });
 
-    // Should not notify because nothing changed
-    expect(subscriber).not.toHaveBeenCalled();
-    store.destroy();
-  });
-
-  // --- Defensive JSON parsing ---
-
-  it("should handle malformed JSON from /api/document/full gracefully", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.reject(new Error("Invalid JSON")),
-      }),
-    );
-
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
     expect(store.getInfo()).toBeNull();
     store.destroy();
   });
 
-  it("should handle unexpected response shape from /api/document/full gracefully", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ unexpected: "shape" }),
-      }),
-    );
+  it("should start subscription on loadInitialState", async () => {
+    const pagesData = makePagesQueryData([]);
+    mockQueryReturning(mockClient, pagesData);
 
-    const store = createDocumentStore(mockWs);
+    const store = createDocumentStore(asClient(mockClient));
     await store.loadInitialState();
 
-    expect(store.getInfo()).toBeNull();
+    expect(mockClient.subscription).toHaveBeenCalledOnce();
+    store.destroy();
+  });
+
+  it("should ignore subscription events with unexpected shape", async () => {
+    vi.useFakeTimers();
+
+    const pagesData = makePagesQueryData([]);
+    mockQueryReturning(mockClient, pagesData);
+
+    const store = createDocumentStore(asClient(mockClient));
+    await store.loadInitialState();
+
+    mockClient.query.mockClear();
+    mockQueryReturning(mockClient, pagesData);
+
+    // Send a subscription event with unexpected shape
+    mockClient.simulateSubscriptionEvent({ unexpected: "shape" });
+
+    // Advance past debounce timer
+    await vi.advanceTimersByTimeAsync(150);
+
+    // Should NOT have re-fetched pages because the event shape was invalid
+    expect(mockClient.query).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
     store.destroy();
   });
 });
