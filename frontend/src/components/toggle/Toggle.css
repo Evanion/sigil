@@ -1,0 +1,73 @@
+.sigil-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-2);
+}
+
+/* Track */
+.sigil-toggle__track {
+  position: relative;
+  width: var(--toggle-track-width);
+  height: var(--toggle-track-height);
+  border-radius: 999px;
+  background: var(--surface-4);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    border-color 150ms;
+}
+
+/* Checked track */
+.sigil-toggle__track[data-checked] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Thumb */
+.sigil-toggle__thumb {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: var(--toggle-thumb-size);
+  height: var(--toggle-thumb-size);
+  border-radius: 50%;
+  background: var(--text-on-accent);
+  transform: translateY(-50%);
+  transition: left 150ms;
+}
+
+/* Checked thumb: left = track-width - thumb-size - 2px */
+.sigil-toggle__thumb[data-checked] {
+  left: calc(var(--toggle-track-width) - var(--toggle-thumb-size) - 2px);
+}
+
+/* Label */
+.sigil-toggle__label {
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  user-select: none;
+}
+
+/* Disabled */
+.sigil-toggle[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Focus ring on track */
+.sigil-toggle__track:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-toggle__thumb {
+    transition: none;
+  }
+
+  .sigil-toggle__track {
+    transition: none;
+  }
+}

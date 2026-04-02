@@ -1,0 +1,79 @@
+/* Menubar root */
+.sigil-menubar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-1);
+  height: 28px;
+  padding: 0 var(--size-2);
+}
+
+/* Trigger button for each menu */
+.sigil-menubar__trigger {
+  padding: var(--size-1) var(--size-2);
+  font-size: var(--font-size-00);
+  color: var(--text-2);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: var(--radius-1);
+  user-select: none;
+  outline: none;
+}
+
+.sigil-menubar__trigger:hover {
+  background: var(--surface-4);
+}
+
+.sigil-menubar__trigger[data-expanded] {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sigil-menubar__trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Content panel — matches dropdown menu style */
+.sigil-menubar__content {
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-2);
+  box-shadow: var(--shadow-3);
+  padding: var(--size-1) 0;
+  min-width: 180px;
+  z-index: var(--z-dropdown);
+}
+
+/* Menu item — matches dropdown menu item style */
+.sigil-menubar__item {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--size-1) var(--size-3);
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  cursor: pointer;
+  outline: none;
+}
+
+.sigil-menubar__item[data-highlighted] {
+  background: var(--surface-4);
+}
+
+.sigil-menubar__item[data-disabled] {
+  color: var(--text-3);
+  cursor: default;
+  pointer-events: none;
+}
+
+/* Keyboard shortcut hint */
+.sigil-menubar__shortcut {
+  color: var(--text-3);
+  font-size: var(--font-size-00);
+  margin-left: auto;
+  padding-left: var(--size-4);
+}

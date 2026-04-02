@@ -1,0 +1,101 @@
+/* Select trigger */
+.sigil-select__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: var(--input-height);
+  padding: 0 var(--input-padding-x);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--select-trigger-radius);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  transition:
+    border-color 150ms,
+    background-color 150ms;
+}
+
+.sigil-select__trigger:hover {
+  border-color: var(--border-2);
+}
+
+.sigil-select__trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-select__trigger[disabled],
+.sigil-select__trigger[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Icon inside trigger */
+.sigil-select__icon {
+  display: flex;
+  align-items: center;
+  color: var(--text-2);
+}
+
+/* Label */
+.sigil-select__label {
+  display: block;
+  margin-bottom: var(--size-1);
+  font-size: var(--font-size-00);
+  color: var(--text-2);
+  user-select: none;
+}
+
+/* Dropdown content */
+.sigil-select__content {
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--select-content-radius);
+  box-shadow: var(--shadow-3);
+  z-index: var(--z-dropdown);
+  overflow: hidden;
+}
+
+/* Listbox */
+.sigil-select__listbox {
+  padding: var(--size-1) 0;
+  list-style: none;
+  margin: 0;
+}
+
+/* Item */
+.sigil-select__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--size-1) var(--size-2);
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  cursor: pointer;
+  user-select: none;
+  outline: none;
+}
+
+.sigil-select__item[data-highlighted] {
+  background: var(--surface-4);
+}
+
+.sigil-select__item[data-selected] {
+  color: var(--accent);
+}
+
+/* Item indicator (check icon) */
+.sigil-select__item-indicator {
+  display: flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-select__trigger {
+    transition: none;
+  }
+}

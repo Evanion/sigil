@@ -65,7 +65,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 ### Styling Conventions
 
 - All colors, spacing, typography, and radii use CSS custom properties from `styles/theme.css`
-- No hardcoded hex colors — always `var(--surface-1)`, `var(--text-1)`, `var(--accent)`, etc.
+- No hardcoded visual values in component CSS. Colors, z-index, box-shadow, and opacity must use CSS custom properties from `styles/theme.css`. Hardcoded `#hex`, `rgba()`, numeric `z-index`, and raw `box-shadow` values are bugs — use `var(--surface-1)`, `var(--z-dropdown)`, `var(--shadow-3)`, etc. If a token does not exist, add it to `theme.css` first.
 - Component styles in co-located `.css` files (not CSS-in-JS)
 - Class names prefixed with `sigil-` to avoid collisions (e.g., `sigil-button`, `sigil-tooltip`)
 - Open Props provides the scale system (spacing, font sizes, easing, shadows)

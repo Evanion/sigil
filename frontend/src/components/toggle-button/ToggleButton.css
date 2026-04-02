@@ -1,0 +1,55 @@
+.sigil-toggle-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--toggle-button-radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  transition:
+    background-color 150ms,
+    color 150ms;
+  user-select: none;
+}
+
+/* Hover — unpressed */
+.sigil-toggle-button:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+/* Pressed state */
+.sigil-toggle-button--pressed {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+/* Hover — pressed */
+.sigil-toggle-button--pressed:hover {
+  background: var(--accent-hover);
+}
+
+/* Disabled */
+.sigil-toggle-button[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Focus */
+.sigil-toggle-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-toggle-button {
+    transition: none;
+  }
+}

@@ -164,6 +164,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - ESLint strict config.
 - Prettier for formatting.
 - Every frontend view must include ARIA landmark roles (`role="toolbar"`, `role="complementary"`, `role="main"`, `role="status"`). Interactive elements must be keyboard-navigable with `tabindex`. The `<canvas>` element must have `aria-label`. Accessibility is part of "done", not optional polish.
+- Never override Kobalte trigger or interactive primitives with non-interactive elements (`as="span"`, `as="div"`, `as="p"`). Kobalte renders triggers as `<button>` by default, which provides keyboard focus, Enter/Space activation, and ARIA semantics. Overriding with a non-interactive element removes all of these. If you need custom styling, use CSS on the default element or use `as="button"` explicitly.
 
 ---
 
@@ -318,7 +319,11 @@ When removing an element from an ordered collection (Vec, VecDeque) for a revers
 
 ### Floating-Point Validation
 
-Every `f32`/`f64` field arriving from external input (deserialization, API parameter, MCP tool input) MUST be validated to reject NaN and infinity. For fields with domain constraints (e.g., opacity 0.0..=1.0, positive dimensions), validate the range in the same check. Do not rely on downstream code to handle non-finite floats — IEEE 754 NaN propagation corrupts calculations silently.
+Every `f32`/`f64` field arriving from external input (deserialization, API parameter, MCP tool input) MUST be validated to reject NaN and infinity. For fields with domain constraints (e.g., opacity 0.0..=1.0, positive dimensions), validate the range in the same check. In TypeScript, every numeric value received from a third-party component callback (e.g., Kobalte NumberInput `onChange`), parsed from user input (`parseFloat`, `Number()`), or received from an external API must be guarded with `Number.isFinite()` before use. Do not rely on downstream code to handle non-finite floats — IEEE 754 NaN propagation corrupts calculations silently.
+
+### CSS Animations Must Respect Reduced Motion
+
+Every CSS `transition`, `animation`, or `@keyframes` rule in component stylesheets MUST have a corresponding `@media (prefers-reduced-motion: reduce)` block that disables or shortens the animation. This applies to all frontend CSS files. Omitting this causes vestibular discomfort for users with motion sensitivity (WCAG 2.3.3). When adding a transition or animation, add the media query in the same file, in the same commit.
 
 ### Symmetric Validation for Reversible Operations
 
