@@ -402,7 +402,10 @@ mod tests {
     fn test_subpath_deserialize_rejects_non_move_to_start() {
         let json = r#"{"segments":[{"type":"line_to","point":{"x":10,"y":10}}],"closed":false}"#;
         let result: Result<SubPath, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "deserialization should reject non-MoveTo start");
+        assert!(
+            result.is_err(),
+            "deserialization should reject non-MoveTo start"
+        );
     }
 
     #[test]

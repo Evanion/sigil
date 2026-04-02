@@ -312,8 +312,7 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
         MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
         MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT,
-        validate_asset_ref, validate_collection_size, validate_floats_in_value,
-        validate_node_name,
+        validate_asset_ref, validate_collection_size, validate_floats_in_value, validate_node_name,
     };
 
     // Validate page name
@@ -1040,10 +1039,7 @@ mod tests {
         let deserialized = deserialize_page(&json).expect("deserialize");
         assert_eq!(deserialized.transitions[0].source_node, make_uuid(10));
         assert_eq!(deserialized.transitions[0].target_page, make_uuid(2));
-        assert_eq!(
-            deserialized.transitions[0].target_node,
-            Some(make_uuid(11))
-        );
+        assert_eq!(deserialized.transitions[0].target_node, Some(make_uuid(11)));
     }
 
     // ── RF-002: Transition count limit ──────────────────────────────────
@@ -1286,6 +1282,9 @@ mod tests {
             CURRENT_SCHEMA_VERSION,
         );
         let result = deserialize_page(&json);
-        assert!(result.is_ok(), "valid grid layout should be accepted: {result:?}");
+        assert!(
+            result.is_ok(),
+            "valid grid layout should be accepted: {result:?}"
+        );
     }
 }

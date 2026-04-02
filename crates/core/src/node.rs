@@ -643,8 +643,7 @@ fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
                     text_style.font_family.len()
                 )));
             }
-            if text_style.font_weight < MIN_FONT_WEIGHT
-                || text_style.font_weight > MAX_FONT_WEIGHT
+            if text_style.font_weight < MIN_FONT_WEIGHT || text_style.font_weight > MAX_FONT_WEIGHT
             {
                 return Err(crate::error::CoreError::ValidationError(format!(
                     "font_weight must be in {}..={}, got {}",
@@ -662,10 +661,7 @@ fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
                 }
             }
         }
-        NodeKind::Ellipse {
-            arc_start,
-            arc_end,
-        } => {
+        NodeKind::Ellipse { arc_start, arc_end } => {
             validate_finite("arc_start", *arc_start)?;
             validate_finite("arc_end", *arc_end)?;
         }
