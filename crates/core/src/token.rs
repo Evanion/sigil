@@ -1547,4 +1547,380 @@ mod tests {
         assert!(ctx.is_empty());
         assert_eq!(ctx.len(), 0);
     }
+
+    // ── RF-001: Token deserialization routes through validation ─────
+
+    #[test]
+    fn test_token_deserialize_rejects_invalid_name() {
+        let json = r#"{"id":"00000001-0000-0000-0000-000000000000","name":"123bad","value":{"type":"number","value":1.0},"token_type":"number","description":null}"#;
+        let result: Result<Token, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "deserializing a Token with invalid name should fail"
+        );
+    }
+
+    #[test]
+    fn test_token_deserialize_rejects_invalid_value() {
+        // NaN dimension should be rejected during deserialization
+        let json = r#"{"id":"00000001-0000-0000-0000-000000000000","name":"spacing.bad","value":{"type":"dimension","value":null,"unit":"px"},"token_type":"dimension","description":null}"#;
+        let result: Result<Token, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "deserializing a Token with invalid value should fail"
+        );
+    }
+
+    // ── RF-003: Description length validation ──────────────────────
+
+    #[test]
+    fn test_token_description_too_long() {
+        let long_desc = "x".repeat(MAX_TOKEN_DESCRIPTION_LEN + 1);
+        let result = Token::new(
+            make_token_id(1),
+            "color.test".to_string(),
+            TokenValue::Color {
+                value: Color::default(),
+            },
+            TokenType::Color,
+            Some(long_desc),
+        );
+        assert!(
+            result.is_err(),
+            "description exceeding MAX_TOKEN_DESCRIPTION_LEN should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_token_description_at_max_length_is_valid() {
+        let desc = "x".repeat(MAX_TOKEN_DESCRIPTION_LEN);
+        let result = Token::new(
+            make_token_id(1),
+            "color.test".to_string(),
+            TokenValue::Color {
+                value: Color::default(),
+            },
+            TokenType::Color,
+            Some(desc),
+        );
+        assert!(
+            result.is_ok(),
+            "description at exactly MAX_TOKEN_DESCRIPTION_LEN should be accepted"
+        );
+    }
+
+    // ── RF-004: Type/value cross-validation ────────────────────────
+
+    #[test]
+    fn test_token_type_value_mismatch_rejected() {
+        let result = Token::new(
+            make_token_id(1),
+            "color.wrong".to_string(),
+            TokenValue::Number { value: 42.0 },
+            TokenType::Color,
+            None,
+        );
+        assert!(
+            result.is_err(),
+            "token type/value mismatch should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_token_alias_value_accepted_with_any_type() {
+        let result = Token::new(
+            make_token_id(1),
+            "color.alias".to_string(),
+            TokenValue::Alias {
+                name: "color.primary".to_string(),
+            },
+            TokenType::Color,
+            None,
+        );
+        assert!(
+            result.is_ok(),
+            "alias value should be accepted with any token type"
+        );
+    }
+
+    // ── RF-005: Shadow blur and typography positivity ──────────────
+
+    #[test]
+    fn test_validate_token_value_shadow_negative_blur() {
+        let val = TokenValue::Shadow {
+            value: ShadowValue {
+                color: Color::default(),
+                offset: Point::zero(),
+                blur: -1.0,
+                spread: 0.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "negative shadow blur should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_typography_zero_font_size() {
+        let val = TokenValue::Typography {
+            value: TypographyValue {
+                font_family: "Inter".to_string(),
+                font_size: 0.0,
+                font_weight: 400,
+                line_height: 1.5,
+                letter_spacing: 0.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "zero font size should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_typography_negative_font_size() {
+        let val = TokenValue::Typography {
+            value: TypographyValue {
+                font_family: "Inter".to_string(),
+                font_size: -16.0,
+                font_weight: 400,
+                line_height: 1.5,
+                letter_spacing: 0.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "negative font size should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_typography_zero_line_height() {
+        let val = TokenValue::Typography {
+            value: TypographyValue {
+                font_family: "Inter".to_string(),
+                font_size: 16.0,
+                font_weight: 400,
+                line_height: 0.0,
+                letter_spacing: 0.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "zero line height should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_typography_negative_line_height() {
+        let val = TokenValue::Typography {
+            value: TypographyValue {
+                font_family: "Inter".to_string(),
+                font_size: 16.0,
+                font_weight: 400,
+                line_height: -1.5,
+                letter_spacing: 0.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "negative line height should be rejected"
+        );
+    }
+
+    // ── RF-006: Color channel and gradient validation ──────────────
+
+    #[test]
+    fn test_validate_token_value_color_nan_channel() {
+        let val = TokenValue::Color {
+            value: Color::Srgb {
+                r: f64::NAN,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "NaN color channel should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_color_infinity_channel() {
+        let val = TokenValue::Color {
+            value: Color::DisplayP3 {
+                r: 0.0,
+                g: f64::INFINITY,
+                b: 0.0,
+                a: 1.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "infinite color channel should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_color_oklch_nan() {
+        let val = TokenValue::Color {
+            value: Color::Oklch {
+                l: 0.5,
+                c: 0.1,
+                h: f64::NAN,
+                a: 1.0,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "NaN in Oklch should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_color_oklab_nan() {
+        let val = TokenValue::Color {
+            value: Color::Oklab {
+                l: 0.5,
+                a: 0.0,
+                b: 0.0,
+                alpha: f64::NAN,
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "NaN in Oklab should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_too_many_stops() {
+        use crate::node::{GradientStop, StyleValue};
+        let stops: Vec<GradientStop> = (0..=crate::validate::MAX_GRADIENT_STOPS)
+            .map(|i| GradientStop {
+                position: i as f64 / crate::validate::MAX_GRADIENT_STOPS as f64,
+                color: StyleValue::Literal {
+                    value: Color::default(),
+                },
+            })
+            .collect();
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops,
+                start: Point::zero(),
+                end: Point::new(1.0, 1.0),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "too many gradient stops should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_nan_start_point() {
+        use crate::node::{GradientStop, StyleValue};
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops: vec![GradientStop {
+                    position: 0.0,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                start: Point::new(f64::NAN, 0.0),
+                end: Point::new(1.0, 1.0),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "NaN gradient start should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_nan_end_point() {
+        use crate::node::{GradientStop, StyleValue};
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops: vec![GradientStop {
+                    position: 0.0,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                start: Point::zero(),
+                end: Point::new(1.0, f64::INFINITY),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "infinite gradient end should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_stop_position_out_of_range() {
+        use crate::node::{GradientStop, StyleValue};
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops: vec![GradientStop {
+                    position: 1.5,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                start: Point::zero(),
+                end: Point::new(1.0, 1.0),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "gradient stop position > 1.0 should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_stop_position_negative() {
+        use crate::node::{GradientStop, StyleValue};
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops: vec![GradientStop {
+                    position: -0.1,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                start: Point::zero(),
+                end: Point::new(1.0, 1.0),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "gradient stop position < 0.0 should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_token_value_gradient_stop_position_nan() {
+        use crate::node::{GradientStop, StyleValue};
+        let val = TokenValue::Gradient {
+            gradient: GradientDef {
+                stops: vec![GradientStop {
+                    position: f64::NAN,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                start: Point::zero(),
+                end: Point::new(1.0, 1.0),
+            },
+        };
+        assert!(
+            validate_token_value(&val).is_err(),
+            "NaN gradient stop position should be rejected"
+        );
+    }
 }
