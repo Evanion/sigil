@@ -41,7 +41,7 @@ pub use serialize::{
 };
 
 // ── Re-exports: Command ──────────────────────────────────────────────
-pub use command::{Command, SideEffect};
+pub use command::{Command, CompoundCommand, SideEffect};
 
 // ── Re-exports: Validation ─────────────────────────────────────────────
 pub use validate::{
