@@ -4,7 +4,7 @@ import type { ClientMessage, ServerMessage } from "../../types/messages";
 
 // --- MockWebSocket ---
 
-type MockWSListener = (event: { data: string }) => void;
+type MockWSListener = (event: { data: unknown }) => void;
 type MockWSCloseListener = (event: { code: number; reason: string }) => void;
 type MockWSVoidListener = () => void;
 
@@ -57,6 +57,12 @@ class MockWebSocket {
   simulateMessage(data: ServerMessage): void {
     if (this.onmessage) {
       this.onmessage({ data: JSON.stringify(data) });
+    }
+  }
+
+  simulateRawMessage(data: unknown): void {
+    if (this.onmessage) {
+      this.onmessage({ data });
     }
   }
 
@@ -342,6 +348,53 @@ describe("WebSocketClient", () => {
 
     vi.advanceTimersByTime(60_000);
     expect(MockWebSocket.instances).toHaveLength(1);
+    client.close();
+  });
+
+  it("should not call message handlers when JSON.parse fails", () => {
+    const client = createWebSocketClient(TEST_URL);
+    const ws = MockWebSocket.latest();
+    ws.simulateOpen();
+
+    const handler = vi.fn();
+    client.onMessage(handler);
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    ws.simulateRawMessage("not valid json {{{");
+    expect(handler).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith("Failed to parse WebSocket message");
+    consoleSpy.mockRestore();
+    client.close();
+  });
+
+  it("should not call message handlers when message has invalid shape", () => {
+    const client = createWebSocketClient(TEST_URL);
+    const ws = MockWebSocket.latest();
+    ws.simulateOpen();
+
+    const handler = vi.fn();
+    client.onMessage(handler);
+
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Valid JSON but missing 'type' field
+    ws.simulateRawMessage(JSON.stringify({ foo: "bar" }));
+    expect(handler).not.toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalledWith("Invalid server message shape");
+    consoleSpy.mockRestore();
+    client.close();
+  });
+
+  it("should ignore non-string message data", () => {
+    const client = createWebSocketClient(TEST_URL);
+    const ws = MockWebSocket.latest();
+    ws.simulateOpen();
+
+    const handler = vi.fn();
+    client.onMessage(handler);
+
+    // Binary data (ArrayBuffer) should be silently ignored
+    ws.simulateRawMessage(new ArrayBuffer(8));
+    expect(handler).not.toHaveBeenCalled();
     client.close();
   });
 });

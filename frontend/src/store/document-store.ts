@@ -23,7 +23,7 @@ export interface DocumentStore {
   getInfo(): DocumentInfo | null;
 
   /** Get all nodes as a Map keyed by UUID. */
-  getAllNodes(): Map<string, DocumentNode>;
+  getAllNodes(): ReadonlyMap<string, DocumentNode>;
 
   /** Get a single node by UUID, or undefined if not found. */
   getNodeByUuid(uuid: string): DocumentNode | undefined;
@@ -68,6 +68,9 @@ export interface DocumentStore {
  * - `document_changed`: updates can_undo/can_redo and re-fetches
  * - `error`: logged to console
  */
+// TODO(plan-04b): Implement full document state endpoint. Currently only DocumentInfo
+// (name, counts) is fetched. Node and page data will be populated when the server
+// provides a /api/document/full endpoint.
 export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
   let info: DocumentInfo | null = null;
   let nodes: Map<string, DocumentNode> = new Map();
@@ -75,6 +78,9 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
   let undoAvailable = false;
   let redoAvailable = false;
   let destroyed = false;
+  let fetchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const FETCH_DEBOUNCE_MS = 100;
 
   const subscribers = new Set<Subscriber>();
 
@@ -102,13 +108,24 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     }
   }
 
+  /** Debounced version of fetchDocumentInfo — collapses rapid calls into one. */
+  function debouncedFetchDocumentInfo(): void {
+    if (fetchDebounceTimer !== null) {
+      clearTimeout(fetchDebounceTimer);
+    }
+    fetchDebounceTimer = setTimeout(() => {
+      fetchDebounceTimer = null;
+      void fetchDocumentInfo();
+    }, FETCH_DEBOUNCE_MS);
+  }
+
   function handleServerMessage(message: ServerMessage): void {
     if (destroyed) return;
 
     switch (message.type) {
       case "broadcast":
-        // Another client made a change; re-fetch full state
-        void fetchDocumentInfo();
+        // Another client made a change; re-fetch full state (debounced)
+        debouncedFetchDocumentInfo();
         break;
 
       case "undo_redo":
@@ -120,8 +137,8 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
       case "document_changed":
         undoAvailable = message.can_undo;
         redoAvailable = message.can_redo;
-        // Also re-fetch since another client changed the document
-        void fetchDocumentInfo();
+        // Also re-fetch since another client changed the document (debounced)
+        debouncedFetchDocumentInfo();
         break;
 
       case "error":
@@ -131,8 +148,11 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     }
   }
 
-  function handleConnectionChange(): void {
+  function handleConnectionChange(connected: boolean): void {
     if (destroyed) return;
+    if (connected) {
+      void fetchDocumentInfo();
+    }
     notifySubscribers();
   }
 
@@ -145,7 +165,7 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
       return info;
     },
 
-    getAllNodes(): Map<string, DocumentNode> {
+    getAllNodes(): ReadonlyMap<string, DocumentNode> {
       return nodes;
     },
 
@@ -210,6 +230,10 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
 
     destroy(): void {
       destroyed = true;
+      if (fetchDebounceTimer !== null) {
+        clearTimeout(fetchDebounceTimer);
+        fetchDebounceTimer = null;
+      }
       subscribers.clear();
       unsubscribeMessage();
       unsubscribeConnection();

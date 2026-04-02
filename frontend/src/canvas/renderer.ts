@@ -7,7 +7,6 @@
 
 import type { DocumentNode, NodeId } from "../types/document";
 import type { Viewport } from "./viewport";
-import { applyViewport } from "./viewport";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -148,13 +147,22 @@ export function render(
   viewport: Viewport,
   nodes: readonly DocumentNode[],
   selectedNodeId: NodeId | null,
+  dpr = 1,
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
-  // Apply viewport transform so drawing uses world coordinates.
-  applyViewport(ctx, viewport);
+  // Apply DPR + viewport: compose them so drawing uses world coordinates
+  // scaled to physical pixels.
+  ctx.setTransform(
+    viewport.zoom * dpr,
+    0,
+    0,
+    viewport.zoom * dpr,
+    viewport.x * dpr,
+    viewport.y * dpr,
+  );
 
   // Draw each visible node.
   for (const node of nodes) {

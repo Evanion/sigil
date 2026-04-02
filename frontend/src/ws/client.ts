@@ -50,12 +50,6 @@ export function createWebSocketClient(url: string): WebSocketClient {
     }
   }
 
-  function notifyMessage(message: ServerMessage): void {
-    for (const handler of messageHandlers) {
-      handler(message);
-    }
-  }
-
   function connect(): void {
     if (closed) return;
 
@@ -66,9 +60,23 @@ export function createWebSocketClient(url: string): WebSocketClient {
       notifyConnectionChange(true);
     };
 
-    ws.onmessage = (event: MessageEvent<string>) => {
-      const parsed = JSON.parse(event.data) as ServerMessage;
-      notifyMessage(parsed);
+    ws.onmessage = (event: MessageEvent) => {
+      if (typeof event.data !== "string") return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(event.data);
+      } catch {
+        console.error("Failed to parse WebSocket message");
+        return;
+      }
+      // Basic shape check
+      if (typeof parsed !== "object" || parsed === null || !("type" in parsed)) {
+        console.error("Invalid server message shape");
+        return;
+      }
+      for (const handler of messageHandlers) {
+        handler(parsed as ServerMessage);
+      }
     };
 
     ws.onclose = (event: CloseEvent) => {

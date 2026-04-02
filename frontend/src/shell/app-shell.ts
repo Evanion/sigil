@@ -22,8 +22,10 @@ const MIDDLE_BUTTON = 1;
  * Wires up:
  * - Canvas with ResizeObserver for responsive sizing
  * - Wheel events for pan (scroll) and zoom (ctrl/cmd+scroll)
- * - Middle-click and shift+click for pan dragging
+ * - Middle-click and Space+drag for pan dragging
  * - Ctrl+Z / Ctrl+Shift+Z for undo/redo
+ * - Ctrl+0 reset zoom, Ctrl+= zoom in, Ctrl+- zoom out
+ * - Zoom percentage display in the status bar
  * - Store subscription for re-render on state change
  * - Connection status indicator in status bar
  * - requestAnimationFrame batching for render calls
@@ -34,6 +36,7 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   let viewport: Viewport = createViewport();
   let renderScheduled = false;
   let isPanning = false;
+  let spaceHeld = false;
   let panStartX = 0;
   let panStartY = 0;
   let panStartVpX = 0;
@@ -46,49 +49,68 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     root.removeChild(root.firstChild);
   }
 
-  // Toolbar
+  // Toolbar (RF-001: landmark, RF-002: focusable)
   const toolbar = document.createElement("div");
   toolbar.className = "toolbar";
+  toolbar.setAttribute("role", "toolbar");
+  toolbar.setAttribute("aria-label", "Tools");
+  toolbar.setAttribute("tabindex", "0");
 
   const logo = document.createElement("div");
   logo.className = "toolbar__logo";
   logo.textContent = "SIGIL";
   toolbar.appendChild(logo);
 
-  // Left panel
+  // Left panel (RF-001: landmark, RF-002: focusable)
   const leftPanel = document.createElement("div");
   leftPanel.className = "panel panel--left";
+  leftPanel.setAttribute("role", "complementary");
+  leftPanel.setAttribute("aria-label", "Layers panel");
+  leftPanel.setAttribute("tabindex", "0");
 
-  const layersHeading = document.createElement("div");
+  // RF-011: semantic heading element
+  const layersHeading = document.createElement("h2");
   layersHeading.className = "panel__heading";
   layersHeading.textContent = "LAYERS";
   leftPanel.appendChild(layersHeading);
 
-  // Canvas container
+  // Canvas container (RF-001: landmark)
   const canvasContainer = document.createElement("div");
   canvasContainer.className = "canvas-container";
+  canvasContainer.setAttribute("role", "main");
+  canvasContainer.setAttribute("aria-label", "Design canvas");
 
+  // RF-003: canvas aria-label
   const canvas = document.createElement("canvas");
+  canvas.setAttribute("aria-label", "Design canvas");
   canvasContainer.appendChild(canvas);
 
-  // Right panel
+  // Right panel (RF-001: landmark, RF-002: focusable)
   const rightPanel = document.createElement("div");
   rightPanel.className = "panel panel--right";
+  rightPanel.setAttribute("role", "complementary");
+  rightPanel.setAttribute("aria-label", "Properties panel");
+  rightPanel.setAttribute("tabindex", "0");
 
-  const propertiesHeading = document.createElement("div");
+  // RF-011: semantic heading element
+  const propertiesHeading = document.createElement("h2");
   propertiesHeading.className = "panel__heading";
   propertiesHeading.textContent = "PROPERTIES";
   rightPanel.appendChild(propertiesHeading);
 
-  // Status bar
+  // Status bar (RF-001: landmark, RF-010: live region)
   const statusBar = document.createElement("div");
   statusBar.className = "status-bar";
+  statusBar.setAttribute("role", "status");
+  statusBar.setAttribute("aria-label", "Editor status");
 
   const statusLeft = document.createElement("div");
   statusLeft.className = "status-bar__left";
 
+  // RF-010 / RF-020: decorative indicator hidden from assistive tech
   const connectionIndicator = document.createElement("span");
   connectionIndicator.className = "status-bar__indicator";
+  connectionIndicator.setAttribute("aria-hidden", "true");
 
   const connectionText = document.createElement("span");
   connectionText.textContent = "Disconnected";
@@ -102,7 +124,11 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
   const docInfoText = document.createElement("span");
   docInfoText.textContent = "No document";
 
+  const zoomText = document.createElement("span");
+  zoomText.textContent = "100%";
+
   statusRight.appendChild(docInfoText);
+  statusRight.appendChild(zoomText);
 
   statusBar.appendChild(statusLeft);
   statusBar.appendChild(statusRight);
@@ -125,8 +151,9 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     renderScheduled = true;
     requestAnimationFrame(() => {
       renderScheduled = false;
+      zoomText.textContent = `${String(Math.round(viewport.zoom * 100))}%`;
       if (ctx) {
-        render(ctx, viewport, [...store.getAllNodes().values()], null);
+        render(ctx, viewport, [...store.getAllNodes().values()], null, window.devicePixelRatio || 1);
       }
     });
   }
@@ -144,10 +171,6 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
       canvas.height = height;
       canvas.style.width = `${String(rect.width)}px`;
       canvas.style.height = `${String(rect.height)}px`;
-
-      if (ctx) {
-        ctx.scale(dpr, dpr);
-      }
 
       scheduleRender();
     }
@@ -180,13 +203,13 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
 
   canvasContainer.addEventListener("wheel", handleWheel, { passive: false });
 
-  // ── Pan Dragging (Middle-Click or Shift+Click) ─────────────────
+  // ── Pan Dragging (Middle-Click or Space+Drag) ──────────────────
 
   function handlePointerDown(e: PointerEvent): void {
     const isMiddleClick = e.button === MIDDLE_BUTTON;
-    const isShiftClick = e.shiftKey && e.button === 0;
+    const isSpaceDrag = spaceHeld && e.button === 0;
 
-    if (!isMiddleClick && !isShiftClick) return;
+    if (!isMiddleClick && !isSpaceDrag) return;
 
     e.preventDefault();
     isPanning = true;
@@ -228,7 +251,18 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
 
   // ── Keyboard Shortcuts ─────────────────────────────────────────
 
+  /** Zoom multiplier for keyboard zoom shortcuts (Ctrl+= / Ctrl+-). */
+  const KEYBOARD_ZOOM_FACTOR = 1.5;
+
   function handleKeyDown(e: KeyboardEvent): void {
+    // Track space for Space+drag panning
+    if (e.key === " " && !e.repeat) {
+      spaceHeld = true;
+      canvasContainer.classList.add("canvas-container--grab");
+      e.preventDefault();
+      return;
+    }
+
     const isCtrlOrMeta = e.ctrlKey || e.metaKey;
 
     if (isCtrlOrMeta && e.key === "z" && !e.shiftKey) {
@@ -241,10 +275,33 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
       // Windows-style redo
       e.preventDefault();
       store.redo();
+    } else if (isCtrlOrMeta && e.key === "0") {
+      // Reset zoom to 100%
+      e.preventDefault();
+      viewport = { x: viewport.x, y: viewport.y, zoom: 1 };
+      scheduleRender();
+    } else if (isCtrlOrMeta && e.key === "=") {
+      // Zoom in
+      e.preventDefault();
+      viewport = { x: viewport.x, y: viewport.y, zoom: Math.min(10, viewport.zoom * KEYBOARD_ZOOM_FACTOR) };
+      scheduleRender();
+    } else if (isCtrlOrMeta && e.key === "-") {
+      // Zoom out
+      e.preventDefault();
+      viewport = { x: viewport.x, y: viewport.y, zoom: Math.max(0.1, viewport.zoom / KEYBOARD_ZOOM_FACTOR) };
+      scheduleRender();
+    }
+  }
+
+  function handleKeyUp(e: KeyboardEvent): void {
+    if (e.key === " ") {
+      spaceHeld = false;
+      canvasContainer.classList.remove("canvas-container--grab");
     }
   }
 
   document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("keyup", handleKeyUp);
 
   // ── Status Bar Updates ─────────────────────────────────────────
 
@@ -262,8 +319,11 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     const info = store.getInfo();
     if (info) {
       docInfoText.textContent = `${info.name} \u2014 ${String(info.node_count)} nodes, ${String(info.page_count)} pages`;
+      // RF-023: reflect document name in browser tab
+      document.title = `${info.name} \u2014 Sigil`;
     } else {
       docInfoText.textContent = "No document";
+      document.title = "Sigil";
     }
   }
 
@@ -288,5 +348,6 @@ export function mountAppShell(root: HTMLElement, store: DocumentStore): () => vo
     canvasContainer.removeEventListener("pointermove", handlePointerMove);
     canvasContainer.removeEventListener("pointerup", handlePointerUp);
     document.removeEventListener("keydown", handleKeyDown);
+    document.removeEventListener("keyup", handleKeyUp);
   };
 }

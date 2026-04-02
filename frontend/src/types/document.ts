@@ -13,7 +13,12 @@
 
 // ── ID Types ──────────────────────────────────────────────────────────
 
-/** Generational arena index — serialized as `{ index, generation }`. */
+/**
+ * Generational arena index — serialized as `{ index, generation }`.
+ *
+ * NOTE: generation is u64 in Rust. JS number is safe up to 2^53.
+ * If generation exceeds Number.MAX_SAFE_INTEGER, consider using string serialization.
+ */
 export interface NodeId {
   readonly index: number;
   readonly generation: number;
