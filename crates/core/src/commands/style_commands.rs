@@ -54,12 +54,20 @@ impl Command for SetFills {
                 self.new_fills.len()
             )));
         }
-        doc.arena.get_mut(self.node_id)?.style.fills.clone_from(&self.new_fills);
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .fills
+            .clone_from(&self.new_fills);
         Ok(vec![])
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena.get_mut(self.node_id)?.style.fills.clone_from(&self.old_fills);
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .fills
+            .clone_from(&self.old_fills);
         Ok(vec![])
     }
 
@@ -88,12 +96,20 @@ impl Command for SetStrokes {
                 self.new_strokes.len()
             )));
         }
-        doc.arena.get_mut(self.node_id)?.style.strokes.clone_from(&self.new_strokes);
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .strokes
+            .clone_from(&self.new_strokes);
         Ok(vec![])
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena.get_mut(self.node_id)?.style.strokes.clone_from(&self.old_strokes);
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .strokes
+            .clone_from(&self.old_strokes);
         Ok(vec![])
     }
 
@@ -125,6 +141,7 @@ impl Command for SetOpacity {
         Ok(vec![])
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set opacity"
     }
@@ -152,6 +169,7 @@ impl Command for SetBlendMode {
         Ok(vec![])
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set blend mode"
     }
@@ -176,15 +194,24 @@ impl Command for SetEffects {
                 self.new_effects.len()
             )));
         }
-        doc.arena.get_mut(self.node_id)?.style.effects = self.new_effects.clone();
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .effects
+            .clone_from(&self.new_effects);
         Ok(vec![])
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena.get_mut(self.node_id)?.style.effects = self.old_effects.clone();
+        doc.arena
+            .get_mut(self.node_id)?
+            .style
+            .effects
+            .clone_from(&self.old_effects);
         Ok(vec![])
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set effects"
     }
@@ -212,6 +239,7 @@ impl Command for SetConstraints {
         Ok(vec![])
     }
 
+    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set constraints"
     }

@@ -126,45 +126,44 @@ mod tests {
         assert_eq!(effect, deserialized);
     }
 
-    // TODO: uncomment after Task 5 (RenameNode)
-    // #[test]
-    // fn test_compound_command_applies_all_subcommands() {
-    //     use crate::node::{Node, NodeKind};
-    //     use crate::id::NodeId;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         uuid::Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     // Two rename commands in sequence
-    //     let cmd1 = super::super::commands::node_commands::RenameNode {
-    //         node_id,
-    //         new_name: "Step 1".to_string(),
-    //         old_name: "Frame".to_string(),
-    //     };
-    //     let cmd2 = super::super::commands::node_commands::RenameNode {
-    //         node_id,
-    //         new_name: "Step 2".to_string(),
-    //         old_name: "Step 1".to_string(),
-    //     };
-    //
-    //     let compound = CompoundCommand::new(
-    //         vec![Box::new(cmd1), Box::new(cmd2)],
-    //         "Rename twice".to_string(),
-    //     );
-    //
-    //     compound.apply(&mut doc).expect("apply compound");
-    //     assert_eq!(doc.arena.get(node_id).unwrap().name, "Step 2");
-    //
-    //     compound.undo(&mut doc).expect("undo compound");
-    //     assert_eq!(doc.arena.get(node_id).unwrap().name, "Frame");
-    // }
+    #[test]
+    fn test_compound_command_applies_all_subcommands() {
+        use crate::id::NodeId;
+        use crate::node::{Node, NodeKind};
+
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            uuid::Uuid::from_bytes([1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Two rename commands in sequence
+        let cmd1 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Step 1".to_string(),
+            old_name: "Frame".to_string(),
+        };
+        let cmd2 = crate::commands::node_commands::RenameNode {
+            node_id,
+            new_name: "Step 2".to_string(),
+            old_name: "Step 1".to_string(),
+        };
+
+        let compound = CompoundCommand::new(
+            vec![Box::new(cmd1), Box::new(cmd2)],
+            "Rename twice".to_string(),
+        );
+
+        compound.apply(&mut doc).expect("apply compound");
+        assert_eq!(doc.arena.get(node_id).expect("get node").name, "Step 2");
+
+        compound.undo(&mut doc).expect("undo compound");
+        assert_eq!(doc.arena.get(node_id).expect("get node").name, "Frame");
+    }
 
     #[test]
     fn test_compound_command_description() {

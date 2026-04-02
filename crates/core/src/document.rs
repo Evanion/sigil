@@ -464,162 +464,146 @@ mod tests {
         assert!(matches!(result, Err(CoreError::NothingToRedo)));
     }
 
-    // TODO: uncomment after Task 5/6
-    // #[test]
-    // fn test_execute_pushes_to_undo_stack() {
-    //     use crate::command::Command;
-    //     use crate::node::NodeKind;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         make_uuid(1),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     // We'll use a simple test command — SetVisible
-    //     let cmd = crate::commands::node_commands::SetVisible {
-    //         node_id,
-    //         new_visible: false,
-    //         old_visible: true,
-    //     };
-    //
-    //     doc.execute(Box::new(cmd)).expect("execute");
-    //     assert!(!doc.arena.get(node_id).unwrap().visible);
-    //     assert!(doc.can_undo());
-    //     assert!(!doc.can_redo());
-    // }
+    #[test]
+    fn test_execute_pushes_to_undo_stack() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
 
-    // TODO: uncomment after Task 5/6
-    // #[test]
-    // fn test_undo_reverses_command() {
-    //     use crate::node::NodeKind;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         make_uuid(1),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     let cmd = crate::commands::node_commands::SetVisible {
-    //         node_id,
-    //         new_visible: false,
-    //         old_visible: true,
-    //     };
-    //
-    //     doc.execute(Box::new(cmd)).expect("execute");
-    //     assert!(!doc.arena.get(node_id).unwrap().visible);
-    //
-    //     doc.undo().expect("undo");
-    //     assert!(doc.arena.get(node_id).unwrap().visible);
-    //     assert!(!doc.can_undo());
-    //     assert!(doc.can_redo());
-    // }
+        // We'll use a simple test command — SetVisible
+        let cmd = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
 
-    // TODO: uncomment after Task 5/6
-    // #[test]
-    // fn test_redo_reapplies_command() {
-    //     use crate::node::NodeKind;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         make_uuid(1),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     let cmd = crate::commands::node_commands::SetVisible {
-    //         node_id,
-    //         new_visible: false,
-    //         old_visible: true,
-    //     };
-    //
-    //     doc.execute(Box::new(cmd)).expect("execute");
-    //     doc.undo().expect("undo");
-    //     doc.redo().expect("redo");
-    //     assert!(!doc.arena.get(node_id).unwrap().visible);
-    //     assert!(doc.can_undo());
-    //     assert!(!doc.can_redo());
-    // }
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert!(!doc.arena.get(node_id).expect("get node").visible);
+        assert!(doc.can_undo());
+        assert!(!doc.can_redo());
+    }
 
-    // TODO: uncomment after Task 5/6
-    // #[test]
-    // fn test_execute_clears_redo_stack() {
-    //     use crate::node::NodeKind;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         make_uuid(1),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     let cmd1 = crate::commands::node_commands::SetVisible {
-    //         node_id,
-    //         new_visible: false,
-    //         old_visible: true,
-    //     };
-    //     let cmd2 = crate::commands::node_commands::SetVisible {
-    //         node_id,
-    //         new_visible: true,
-    //         old_visible: false,
-    //     };
-    //
-    //     doc.execute(Box::new(cmd1)).expect("execute cmd1");
-    //     doc.undo().expect("undo cmd1");
-    //     assert!(doc.can_redo());
-    //
-    //     doc.execute(Box::new(cmd2)).expect("execute cmd2");
-    //     assert!(!doc.can_redo()); // redo stack cleared
-    // }
+    #[test]
+    fn test_undo_reverses_command() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
 
-    // TODO: uncomment after Task 5/6
-    // #[test]
-    // fn test_history_eviction_fifo() {
-    //     use crate::node::NodeKind;
-    //
-    //     let mut doc = Document::new("Test".to_string());
-    //     doc.history = History::new(2); // max 2 undo entries
-    //
-    //     let node = Node::new(
-    //         NodeId::new(0, 0),
-    //         make_uuid(1),
-    //         NodeKind::Frame { layout: None },
-    //         "Frame".to_string(),
-    //     )
-    //     .expect("create node");
-    //     let node_id = doc.arena.insert(node).expect("insert");
-    //
-    //     // Execute 3 commands with max_history=2
-    //     for i in 0..3u8 {
-    //         let cmd = crate::commands::node_commands::RenameNode {
-    //             node_id,
-    //             new_name: format!("Name {i}"),
-    //             old_name: if i == 0 {
-    //                 "Frame".to_string()
-    //             } else {
-    //                 format!("Name {}", i - 1)
-    //             },
-    //         };
-    //         doc.execute(Box::new(cmd)).expect("execute");
-    //     }
-    //
-    //     // Only 2 undos should be possible (oldest evicted)
-    //     assert!(doc.undo().is_ok()); // undo "Name 2" -> "Name 1"
-    //     assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
-    //     assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
-    // }
+        let cmd = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
+
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert!(!doc.arena.get(node_id).expect("get node").visible);
+
+        doc.undo().expect("undo");
+        assert!(doc.arena.get(node_id).expect("get node").visible);
+        assert!(!doc.can_undo());
+        assert!(doc.can_redo());
+    }
+
+    #[test]
+    fn test_redo_reapplies_command() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        let cmd = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
+
+        doc.execute(Box::new(cmd)).expect("execute");
+        doc.undo().expect("undo");
+        doc.redo().expect("redo");
+        assert!(!doc.arena.get(node_id).expect("get node").visible);
+        assert!(doc.can_undo());
+        assert!(!doc.can_redo());
+    }
+
+    #[test]
+    fn test_execute_clears_redo_stack() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        let cmd1 = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
+        let cmd2 = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: true,
+            old_visible: false,
+        };
+
+        doc.execute(Box::new(cmd1)).expect("execute cmd1");
+        doc.undo().expect("undo cmd1");
+        assert!(doc.can_redo());
+
+        doc.execute(Box::new(cmd2)).expect("execute cmd2");
+        assert!(!doc.can_redo()); // redo stack cleared
+    }
+
+    #[test]
+    fn test_history_eviction_fifo() {
+        let mut doc = Document::new("Test".to_string());
+        doc.history = History::new(2); // max 2 undo entries
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Execute 3 commands with max_history=2
+        for i in 0..3u8 {
+            let cmd = crate::commands::node_commands::RenameNode {
+                node_id,
+                new_name: format!("Name {i}"),
+                old_name: if i == 0 {
+                    "Frame".to_string()
+                } else {
+                    format!("Name {}", i - 1)
+                },
+            };
+            doc.execute(Box::new(cmd)).expect("execute");
+        }
+
+        // Only 2 undos should be possible (oldest evicted)
+        assert!(doc.undo().is_ok()); // undo "Name 2" -> "Name 1"
+        assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
+        assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
+    }
 }
