@@ -6,6 +6,7 @@
  */
 
 import type { DocumentNode, NodeId } from "../types/document";
+import type { PreviewRect } from "../tools/shape-tool";
 import type { Viewport } from "./viewport";
 
 /** Default fill color for nodes without explicit fills. */
@@ -20,8 +21,17 @@ const SELECTION_LINE_WIDTH = 2;
 /** Name label font size in screen pixels. */
 const LABEL_FONT_SIZE = 10;
 
+/** Selection handle size in screen pixels. */
+const HANDLE_SIZE = 6;
+
 /** Name label color. */
 const LABEL_COLOR = "#999999";
+
+/** Preview rect stroke color. */
+const PREVIEW_COLOR = "#0d99ff";
+
+/** Preview rect dash pattern in screen pixels. */
+const PREVIEW_DASH = [4, 4];
 
 /** Compare two NodeId values for equality. */
 function nodeIdEquals(a: NodeId, b: NodeId): boolean {
@@ -136,11 +146,67 @@ function drawNameLabel(ctx: CanvasRenderingContext2D, node: DocumentNode, zoom: 
 }
 
 /**
+ * Draw 8 selection handles (4 corners + 4 edge midpoints) on a node.
+ *
+ * Handles are drawn in world coordinates but sized relative to screen pixels
+ * so they maintain a consistent visual size regardless of zoom.
+ */
+function drawSelectionHandles(
+  ctx: CanvasRenderingContext2D,
+  node: DocumentNode,
+  zoom: number,
+): void {
+  const { x, y, width, height } = node.transform;
+  const halfHandle = HANDLE_SIZE / 2 / zoom;
+
+  // The 8 handle positions: 4 corners + 4 edge midpoints
+  const positions: ReadonlyArray<readonly [number, number]> = [
+    // Corners
+    [x, y],
+    [x + width, y],
+    [x + width, y + height],
+    [x, y + height],
+    // Edge midpoints
+    [x + width / 2, y],
+    [x + width, y + height / 2],
+    [x + width / 2, y + height],
+    [x, y + height / 2],
+  ];
+
+  ctx.fillStyle = SELECTION_COLOR;
+
+  for (const [px, py] of positions) {
+    ctx.fillRect(px - halfHandle, py - halfHandle, halfHandle * 2, halfHandle * 2);
+  }
+}
+
+/**
+ * Draw a dashed preview rectangle for the shape tool drag operation.
+ *
+ * Uses screen-space dash and line width so the preview does not scale with zoom.
+ */
+function drawPreviewRect(
+  ctx: CanvasRenderingContext2D,
+  preview: PreviewRect,
+  zoom: number,
+): void {
+  const lineWidth = SELECTION_LINE_WIDTH / zoom;
+  const dashScale = 1 / zoom;
+
+  ctx.strokeStyle = PREVIEW_COLOR;
+  ctx.lineWidth = lineWidth;
+  ctx.setLineDash(PREVIEW_DASH.map((d) => d * dashScale));
+  ctx.strokeRect(preview.x, preview.y, preview.width, preview.height);
+  ctx.setLineDash([]);
+}
+
+/**
  * Render the document onto the canvas.
  *
  * Clears the canvas, applies the viewport transform, and draws all visible
- * nodes. If a selectedNodeId is provided, draws a selection highlight and
- * name label on the matching node.
+ * nodes. If a selectedNodeId is provided, draws a selection highlight,
+ * name label, and 8 resize handles on the matching node. If a previewRect
+ * is provided, draws a dashed outline for the shape tool drag preview.
  */
 export function render(
   ctx: CanvasRenderingContext2D,
@@ -148,6 +214,7 @@ export function render(
   nodes: readonly DocumentNode[],
   selectedNodeId: NodeId | null,
   dpr = 1,
+  previewRect: PreviewRect | null = null,
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -181,9 +248,15 @@ export function render(
       if (nodeIdEquals(node.id, selectedNodeId)) {
         drawSelectionHighlight(ctx, node, viewport.zoom);
         drawNameLabel(ctx, node, viewport.zoom);
+        drawSelectionHandles(ctx, node, viewport.zoom);
         break;
       }
     }
+  }
+
+  // Draw shape tool preview rectangle if active.
+  if (previewRect !== null) {
+    drawPreviewRect(ctx, previewRect, viewport.zoom);
   }
 
   // Reset transform to identity.
