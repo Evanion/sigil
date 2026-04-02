@@ -73,6 +73,18 @@ pub const MAX_TOKEN_FONT_FAMILIES: usize = 32;
 /// Maximum root nodes per page.
 pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
 
+/// Maximum variants per component definition.
+pub const MAX_VARIANTS_PER_COMPONENT: usize = 100;
+
+/// Maximum properties per component definition.
+pub const MAX_PROPERTIES_PER_COMPONENT: usize = 100;
+
+/// Maximum overrides per component instance.
+pub const MAX_OVERRIDES_PER_INSTANCE: usize = 10_000;
+
+/// Maximum components per document.
+pub const MAX_COMPONENTS_PER_DOCUMENT: usize = 10_000;
+
 /// Maximum grid tracks (columns or rows) per grid layout.
 pub const MAX_GRID_TRACKS: usize = 1_000;
 
