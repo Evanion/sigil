@@ -1,8 +1,10 @@
 // crates/core/src/node.rs
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::component::OverrideValue;
 use crate::id::{ComponentId, NodeId};
 
 // Re-export path types for backwards compatibility
@@ -551,7 +553,9 @@ pub enum NodeKind {
     Group,
     ComponentInstance {
         component_id: ComponentId,
+        variant: Option<String>,
         overrides: OverrideMap,
+        property_values: HashMap<String, OverrideValue>,
     },
 }
 
@@ -667,6 +671,18 @@ fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
             layout: Some(LayoutMode::Grid(grid)),
         } => {
             validate_grid_layout(grid)?;
+        }
+        NodeKind::ComponentInstance {
+            variant,
+            property_values,
+            ..
+        } => {
+            if let Some(v) = variant {
+                crate::validate::validate_node_name(v)?;
+            }
+            for key in property_values.keys() {
+                crate::validate::validate_node_name(key)?;
+            }
         }
         _ => {}
     }
@@ -898,7 +914,9 @@ mod tests {
             uuid,
             NodeKind::ComponentInstance {
                 component_id,
+                variant: None,
                 overrides: OverrideMap::default(),
+                property_values: HashMap::new(),
             },
             "Instance 1".to_string(),
         )
@@ -906,13 +924,133 @@ mod tests {
         match &node.kind {
             NodeKind::ComponentInstance {
                 component_id: cid,
+                variant,
                 overrides,
+                property_values,
             } => {
                 assert_eq!(*cid, component_id);
+                assert!(variant.is_none());
                 assert!(overrides.is_empty());
+                assert!(property_values.is_empty());
             }
             other => panic!("expected ComponentInstance, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_component_instance_with_variant() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some("Hover".to_string()),
+                overrides: OverrideMap::new(),
+                property_values: HashMap::new(),
+            },
+            "Button 1".to_string(),
+        )
+        .expect("valid");
+        match &node.kind {
+            NodeKind::ComponentInstance { variant, .. } => {
+                assert_eq!(variant.as_deref(), Some("Hover"));
+            }
+            other => panic!("expected ComponentInstance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_component_instance_with_property_values() {
+        let mut props = HashMap::new();
+        props.insert(
+            "label".to_string(),
+            OverrideValue::String {
+                value: "Click".to_string(),
+            },
+        );
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Button 1".to_string(),
+        )
+        .expect("valid");
+        match &node.kind {
+            NodeKind::ComponentInstance {
+                property_values, ..
+            } => {
+                assert_eq!(property_values.len(), 1);
+            }
+            other => panic!("expected ComponentInstance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_component_instance_invalid_variant_name_rejected() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some(String::new()),
+                overrides: OverrideMap::new(),
+                property_values: HashMap::new(),
+            },
+            "Instance".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_instance_invalid_property_key_rejected() {
+        let mut props = HashMap::new();
+        props.insert(String::new(), OverrideValue::Bool { value: true });
+
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_instance_serde_round_trip() {
+        let mut props = HashMap::new();
+        props.insert(
+            "label".to_string(),
+            OverrideValue::String {
+                value: "Hi".to_string(),
+            },
+        );
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some("Active".to_string()),
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
+        )
+        .expect("valid");
+        let json = serde_json::to_string(&node).expect("serialize");
+        let deserialized: Node = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(node, deserialized);
     }
 
     // ── Transform ──────────────────────────────────────────────────────
