@@ -1,9 +1,15 @@
 #![warn(clippy::all, clippy::pedantic)]
 
+use std::time::Duration;
+
 use anyhow::Context as _;
 
 use agent_designer_server::{build_app, state::AppState};
 use tracing_subscriber::EnvFilter;
+
+/// Maximum time to wait for the persistence task to complete a final flush
+/// during shutdown.
+const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -21,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
 
     let workfile_env = std::env::var("WORKFILE").ok();
 
-    let state = if let Some(ref workfile_str) = workfile_env {
+    let mut state = if let Some(ref workfile_str) = workfile_env {
         let workfile_path = std::path::PathBuf::from(workfile_str);
         tracing::info!("loading workfile from {}", workfile_path.display());
 
@@ -35,6 +41,11 @@ async fn main() -> anyhow::Result<()> {
         AppState::new()
     };
 
+    // Take the persistence handle and dirty_tx before moving state into the app.
+    // We need these for graceful shutdown after the server stops.
+    let persistence_handle = state.take_persistence_handle();
+    let dirty_tx = state.take_dirty_tx();
+
     let app = build_app(state, Some(&static_dir));
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
@@ -42,6 +53,21 @@ async fn main() -> anyhow::Result<()> {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    // Graceful shutdown: drop the dirty sender to signal the persistence task
+    // to perform a final save, then await the task with a timeout.
+    drop(dirty_tx);
+    if let Some(handle) = persistence_handle {
+        tracing::info!("waiting for persistence task to flush...");
+        match tokio::time::timeout(PERSISTENCE_SHUTDOWN_TIMEOUT, handle).await {
+            Ok(Ok(())) => tracing::info!("persistence task completed"),
+            Ok(Err(e)) => tracing::error!("persistence task panicked: {e}"),
+            Err(_) => tracing::warn!(
+                "persistence task did not complete within {:?} — giving up",
+                PERSISTENCE_SHUTDOWN_TIMEOUT
+            ),
+        }
+    }
 
     Ok(())
 }

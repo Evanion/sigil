@@ -22,6 +22,15 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Maximum manifest file size (1 MiB).
+const MAX_MANIFEST_SIZE: u64 = 1_048_576;
+
+/// Maximum page file size (50 MiB — matches core's `MAX_FILE_SIZE`).
+const MAX_PAGE_FILE_SIZE: u64 = 52_428_800;
+
+/// Maximum manifest name length.
+const MAX_MANIFEST_NAME_LEN: usize = 512;
+
 /// The workfile manifest — stored as `manifest.json` in the `.sigil/` root.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
@@ -39,6 +48,40 @@ impl Manifest {
             name: doc.metadata.name.clone(),
             page_order: doc.pages.iter().map(|p| p.id.uuid()).collect(),
         }
+    }
+
+    /// Validates manifest fields after deserialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - `name` exceeds [`MAX_MANIFEST_NAME_LEN`] bytes
+    /// - `page_order` exceeds [`MAX_PAGES_PER_DOCUMENT`](agent_designer_core::MAX_PAGES_PER_DOCUMENT)
+    /// - `page_order` contains duplicate UUIDs
+    pub fn validate(&self) -> Result<()> {
+        if self.name.len() > MAX_MANIFEST_NAME_LEN {
+            bail!(
+                "manifest name exceeds maximum length ({} > {MAX_MANIFEST_NAME_LEN})",
+                self.name.len()
+            );
+        }
+
+        if self.page_order.len() > agent_designer_core::MAX_PAGES_PER_DOCUMENT {
+            bail!(
+                "manifest page_order exceeds maximum pages ({} > {})",
+                self.page_order.len(),
+                agent_designer_core::MAX_PAGES_PER_DOCUMENT
+            );
+        }
+
+        let mut seen = HashSet::with_capacity(self.page_order.len());
+        for uuid in &self.page_order {
+            if !seen.insert(uuid) {
+                bail!("duplicate UUID in manifest page_order: {uuid}");
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -161,7 +204,8 @@ pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) 
 /// # Errors
 ///
 /// Returns an error if serialization or file writes fail.
-pub async fn save_workfile(doc: &Document, workfile_path: &Path) -> Result<()> {
+#[cfg(test)]
+pub(crate) async fn save_workfile(doc: &Document, workfile_path: &Path) -> Result<()> {
     let prepared = prepare_save(doc)?;
     write_prepared_save(&prepared, workfile_path).await
 }
@@ -169,16 +213,27 @@ pub async fn save_workfile(doc: &Document, workfile_path: &Path) -> Result<()> {
 /// Loads a workfile from a `.sigil/` directory into a [`Document`].
 ///
 /// Reads `manifest.json` for metadata, then loads each page from `pages/`.
-/// Pages are reordered to match the manifest's `page_order`.
+/// Pages are reordered to match the manifest's `page_order`. Pages on disk
+/// whose UUID is not in `page_order` are discarded with a warning.
+///
+/// After all pages are loaded, a fixup pass resolves cross-page transition
+/// `target_node` UUIDs using the global arena.
 ///
 /// # Errors
 ///
-/// Returns an error if the directory doesn't exist, the manifest is invalid,
-/// or any page file fails to parse.
+/// Returns an error if the directory doesn't exist, is a symlink, the manifest
+/// is invalid, file sizes exceed limits, or any page file fails to parse.
 pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
-    let meta = tokio::fs::metadata(workfile_path)
+    // RF-010: use symlink_metadata to detect symlinks — reject symlinked workfile dirs
+    let meta = tokio::fs::symlink_metadata(workfile_path)
         .await
         .with_context(|| format!("workfile path not found: {}", workfile_path.display()))?;
+    if meta.is_symlink() {
+        bail!(
+            "workfile path is a symlink (rejected for safety): {}",
+            workfile_path.display()
+        );
+    }
     if !meta.is_dir() {
         bail!(
             "workfile path is not a directory: {}",
@@ -186,13 +241,26 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
         );
     }
 
-    // Read manifest
+    // RF-006: check manifest file size before reading
     let manifest_path = workfile_path.join("manifest.json");
+    let manifest_meta = tokio::fs::metadata(&manifest_path)
+        .await
+        .context("failed to stat manifest.json")?;
+    if manifest_meta.len() > MAX_MANIFEST_SIZE {
+        bail!(
+            "manifest.json exceeds maximum size ({} > {MAX_MANIFEST_SIZE})",
+            manifest_meta.len()
+        );
+    }
+
     let manifest_json = tokio::fs::read_to_string(&manifest_path)
         .await
         .context("failed to read manifest.json")?;
     let manifest: Manifest =
         serde_json::from_str(&manifest_json).context("failed to parse manifest.json")?;
+
+    // RF-009: validate manifest after deserialization
+    manifest.validate()?;
 
     if manifest.schema_version > agent_designer_core::CURRENT_SCHEMA_VERSION {
         bail!(
@@ -204,6 +272,12 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
 
     let mut doc = Document::new(manifest.name.clone());
 
+    // RF-015: build set of expected page UUIDs from manifest for filtering
+    let expected_pages: HashSet<Uuid> = manifest.page_order.iter().copied().collect();
+
+    // Collect unresolved cross-page transition target_node UUIDs for RF-008 fixup
+    let mut unresolved_targets: Vec<(usize, Uuid)> = Vec::new();
+
     // Load pages from the pages/ directory
     let pages_dir = workfile_path.join("pages");
     if tokio::fs::metadata(&pages_dir).await.is_ok() {
@@ -211,14 +285,49 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
+                // RF-006: check page file size before reading
+                let page_meta = tokio::fs::metadata(&path)
+                    .await
+                    .with_context(|| format!("failed to stat page: {}", path.display()))?;
+                if page_meta.len() > MAX_PAGE_FILE_SIZE {
+                    bail!(
+                        "page file exceeds maximum size ({} > {MAX_PAGE_FILE_SIZE}): {}",
+                        page_meta.len(),
+                        path.display()
+                    );
+                }
+
                 let json = tokio::fs::read_to_string(&path)
                     .await
                     .with_context(|| format!("failed to read page: {}", path.display()))?;
                 let serialized_page = deserialize_page(&json).map_err(|e| {
                     anyhow::anyhow!("failed to deserialize {}: {e}", path.display())
                 })?;
-                load_page_into_document(&mut doc, &serialized_page)?;
+
+                // RF-015: only load pages whose UUID is in manifest.page_order
+                if !expected_pages.contains(&serialized_page.id) {
+                    tracing::warn!(
+                        "ignoring page file not in manifest page_order: {} (uuid={})",
+                        path.display(),
+                        serialized_page.id
+                    );
+                    continue;
+                }
+
+                let page_unresolved = load_page_into_document(&mut doc, &serialized_page)?;
+                unresolved_targets.extend(page_unresolved);
             }
+        }
+    }
+
+    // RF-008: cross-page fixup pass — resolve target_node UUIDs using global arena
+    for (transition_idx, target_uuid) in &unresolved_targets {
+        if let Some(node_id) = doc.arena.id_by_uuid(target_uuid) {
+            doc.transitions[*transition_idx].target_node = Some(node_id);
+        } else {
+            tracing::warn!(
+                "transition target_node UUID {target_uuid} not found in any page — leaving unresolved"
+            );
         }
     }
 
@@ -240,7 +349,14 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
 /// Nodes are deserialized through `Node`'s custom `Deserialize` impl (which
 /// validates on construction). Parent-child relationships and page root nodes
 /// are reconstructed from the UUID references in the serialized data.
-fn load_page_into_document(doc: &mut Document, serialized: &SerializedPage) -> Result<()> {
+///
+/// Returns a list of `(transition_index, target_node_uuid)` pairs for transitions
+/// whose `target_node` UUID could not be resolved within this page's local node map.
+/// These are resolved in a cross-page fixup pass after all pages are loaded.
+fn load_page_into_document(
+    doc: &mut Document,
+    serialized: &SerializedPage,
+) -> Result<Vec<(usize, Uuid)>> {
     let page_id = PageId::new(serialized.id);
     let page = Page::new(page_id, serialized.name.clone());
     doc.add_page(page)
@@ -317,26 +433,40 @@ fn load_page_into_document(doc: &mut Document, serialized: &SerializedPage) -> R
     }
 
     // Load transitions whose source node belongs to this page.
+    // Track unresolved target_node UUIDs for cross-page fixup (RF-008).
+    let mut unresolved = Vec::new();
     for st in &serialized.transitions {
         let Some(&source_id) = uuid_to_id.get(&st.source_node) else {
             continue; // Source not in this page — skip
         };
 
+        // Try to resolve target_node within the page-local map first
+        let resolved_target = st
+            .target_node
+            .and_then(|uuid| uuid_to_id.get(&uuid).copied());
+
         let transition = agent_designer_core::Transition {
             id: st.id,
             source_node: source_id,
             target_page: PageId::new(st.target_page),
-            target_node: st
-                .target_node
-                .and_then(|uuid| uuid_to_id.get(&uuid).copied()),
+            target_node: resolved_target,
             trigger: st.trigger.clone(),
             animation: st.animation.clone(),
         };
         doc.add_transition(transition)
             .map_err(|e| anyhow::anyhow!("failed to add transition: {e}"))?;
+
+        // If there was a target_node UUID but we couldn't resolve it locally,
+        // record it for cross-page fixup.
+        if let Some(target_uuid) = st.target_node
+            && resolved_target.is_none()
+        {
+            let idx = doc.transitions.len() - 1;
+            unresolved.push((idx, target_uuid));
+        }
     }
 
-    Ok(())
+    Ok(unresolved)
 }
 
 /// Reorders pages to match the manifest's `page_order`.
@@ -664,5 +794,149 @@ mod tests {
             tokio::fs::metadata(&expected_path).await.is_ok(),
             "page file should be named by UUID"
         );
+    }
+
+    #[test]
+    fn test_manifest_validate_rejects_name_exceeding_max_length() {
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "x".repeat(MAX_MANIFEST_NAME_LEN + 1),
+            page_order: vec![],
+        };
+        let err = manifest.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum length"),
+            "expected name length error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_validate_rejects_too_many_pages() {
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "Test".to_string(),
+            page_order: (0..=agent_designer_core::MAX_PAGES_PER_DOCUMENT)
+                .map(|_| Uuid::new_v4())
+                .collect(),
+        };
+        let err = manifest.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum pages"),
+            "expected page count error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_validate_rejects_duplicate_uuids() {
+        let dup = Uuid::new_v4();
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "Test".to_string(),
+            page_order: vec![dup, Uuid::new_v4(), dup],
+        };
+        let err = manifest.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate UUID"),
+            "expected duplicate UUID error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_manifest_validate_accepts_valid_manifest() {
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "Valid".to_string(),
+            page_order: vec![Uuid::new_v4(), Uuid::new_v4()],
+        };
+        manifest.validate().expect("valid manifest should pass");
+    }
+
+    #[tokio::test]
+    async fn test_load_workfile_rejects_symlinked_directory() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let real_path = dir.path().join("real.sigil");
+        let link_path = dir.path().join("link.sigil");
+        tokio::fs::create_dir_all(&real_path)
+            .await
+            .expect("create real dir");
+
+        // Create a symlink pointing to the real directory
+        #[cfg(unix)]
+        {
+            tokio::fs::symlink(&real_path, &link_path)
+                .await
+                .expect("create symlink");
+
+            let result = load_workfile(&link_path).await;
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains("symlink"),
+                "expected symlink error, got: {err}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_load_workfile_rejects_oversized_manifest() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("big.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Write an oversized manifest
+        let big_manifest = "x".repeat((MAX_MANIFEST_SIZE + 1) as usize);
+        tokio::fs::write(workfile_path.join("manifest.json"), &big_manifest)
+            .await
+            .expect("write big manifest");
+
+        let result = load_workfile(&workfile_path).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exceeds maximum size"),
+            "expected size error, got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_load_workfile_ignores_pages_not_in_manifest() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("test.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Save a document with one page
+        let mut doc = Document::new("Filter Test".to_string());
+        let page_id = PageId::new(Uuid::new_v4());
+        doc.add_page(Page::new(page_id, "Kept".to_string()))
+            .expect("add page");
+
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("save workfile");
+
+        // Manually add an orphan page file not in manifest
+        let pages_dir = workfile_path.join("pages");
+        let orphan_uuid = Uuid::new_v4();
+        let orphan_json = serde_json::json!({
+            "schema_version": 1,
+            "id": orphan_uuid.to_string(),
+            "name": "Orphan",
+            "nodes": [],
+            "transitions": []
+        });
+        tokio::fs::write(
+            pages_dir.join(format!("{orphan_uuid}.json")),
+            orphan_json.to_string(),
+        )
+        .await
+        .expect("write orphan page");
+
+        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        assert_eq!(loaded.pages.len(), 1);
+        assert_eq!(loaded.pages[0].name, "Kept");
     }
 }

@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 use tokio::time::{Duration, sleep};
 
 use crate::state::SendDocument;
@@ -26,19 +27,22 @@ pub const SAVE_DEBOUNCE_MS: u64 = 500;
 
 /// Spawns the background persistence task.
 ///
-/// Returns an `mpsc::Sender<()>` that callers use to signal that the document
-/// has been modified. The task coalesces rapid signals and writes at most once
-/// per debounce window.
+/// Returns a tuple of:
+/// - `mpsc::Sender<()>` that callers use to signal that the document has been modified.
+/// - `JoinHandle<()>` for the background task, so callers can await its completion
+///   during shutdown.
+///
+/// The task coalesces rapid signals and writes at most once per debounce window.
 ///
 /// When the returned sender (and all its clones) are dropped, the task shuts
-/// down gracefully.
+/// down gracefully, performing a final save if needed.
 pub fn spawn_persistence_task(
     document: Arc<Mutex<SendDocument>>,
     workfile_path: PathBuf,
-) -> mpsc::Sender<()> {
+) -> (mpsc::Sender<()>, JoinHandle<()>) {
     let (tx, mut rx) = mpsc::channel::<()>(16);
 
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         loop {
             // Wait for the first dirty signal.
             if rx.recv().await.is_none() {
@@ -68,7 +72,7 @@ pub fn spawn_persistence_task(
         }
     });
 
-    tx
+    (tx, handle)
 }
 
 /// Serializes the document under the lock, then writes to disk outside it.
@@ -119,7 +123,7 @@ mod tests {
         let workfile_path = dir.path().join("test.sigil");
         tokio::fs::create_dir_all(&workfile_path).await.unwrap();
 
-        let tx = spawn_persistence_task(doc, workfile_path.clone());
+        let (tx, _handle) = spawn_persistence_task(doc, workfile_path.clone());
 
         // Sending a dirty signal should not panic.
         tx.try_send(()).unwrap();
@@ -150,7 +154,7 @@ mod tests {
         let workfile_path = dir.path().join("shutdown.sigil");
         tokio::fs::create_dir_all(&workfile_path).await.unwrap();
 
-        let tx = spawn_persistence_task(doc, workfile_path);
+        let (tx, _handle) = spawn_persistence_task(doc, workfile_path);
 
         // Drop the sender — this should cause the task to shut down.
         drop(tx);
@@ -169,12 +173,15 @@ mod tests {
         let workfile_path = dir.path().join("debounce.sigil");
         tokio::fs::create_dir_all(&workfile_path).await.unwrap();
 
-        let tx = spawn_persistence_task(doc, workfile_path.clone());
+        let (tx, _handle) = spawn_persistence_task(doc, workfile_path.clone());
 
         // Send many rapid signals — only one save should occur after the
         // debounce window.
         for _ in 0..10 {
-            let _ = tx.try_send(());
+            // Drops are expected here — we're testing debouncing behavior.
+            if tx.try_send(()).is_err() {
+                // Channel full — save already pending, which is the point.
+            }
             sleep(Duration::from_millis(50)).await;
         }
 
