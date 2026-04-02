@@ -9,7 +9,15 @@
 
 import type { WebSocketClient } from "../ws/client";
 import type { SerializableCommand } from "../types/commands";
-import type { DocumentInfo, DocumentNode, Page } from "../types/document";
+import type {
+  DocumentInfo,
+  DocumentNode,
+  FullDocumentResponse,
+  NodeKind,
+  Page,
+  SerializedNode,
+  Transform,
+} from "../types/document";
 import type { ServerMessage } from "../types/messages";
 
 /** Callback invoked whenever the store state changes. */
@@ -49,6 +57,24 @@ export interface DocumentStore {
   /** Request redo of the last undone operation. */
   redo(): void;
 
+  /** Get the currently selected node UUID, or null if nothing is selected. */
+  getSelectedNodeId(): string | null;
+
+  /** Select a node by UUID, or pass null to deselect. */
+  select(uuid: string | null): void;
+
+  /** Get the active page (defaults to the first page). */
+  getActivePage(): Page | undefined;
+
+  /**
+   * Create a new node on the server.
+   *
+   * Generates a UUID locally, sends a `create_node_request` to the server,
+   * and returns the UUID. The server will respond with a `node_created`
+   * message containing the assigned NodeId.
+   */
+  createNode(kind: NodeKind, name: string, transform: Transform): string;
+
   /** Subscribe to state changes. Returns an unsubscribe function. */
   subscribe(fn: Subscriber): Unsubscribe;
 
@@ -63,18 +89,43 @@ export interface DocumentStore {
  * Creates a reactive document store backed by a WebSocket client.
  *
  * The store listens for server messages and updates its internal state:
- * - `broadcast`: re-fetches document info from the REST API
+ * - `broadcast`: re-fetches full document state from the REST API
  * - `undo_redo`: updates can_undo/can_redo flags
  * - `document_changed`: updates can_undo/can_redo and re-fetches
+ * - `node_created`: updates the node's server-assigned NodeId
  * - `error`: logged to console
  */
-// TODO(plan-04b): Implement full document state endpoint. Currently only DocumentInfo
-// (name, counts) is fetched. Node and page data will be populated when the server
-// provides a /api/document/full endpoint.
+
+/**
+ * Converts a `SerializedNode` (wire format with UUIDs) into a `DocumentNode`
+ * (runtime format with a placeholder `NodeId`).
+ *
+ * The `NodeId` is set to `{ index: 0, generation: 0 }` as a placeholder
+ * because arena indices are not available on the client. The server may
+ * later send a `node_created` message with the real `NodeId`.
+ */
+function serializedNodeToDocumentNode(sn: SerializedNode): DocumentNode {
+  return {
+    id: { index: 0, generation: 0 },
+    uuid: sn.id,
+    kind: sn.kind,
+    name: sn.name,
+    parent: null,
+    children: [],
+    transform: sn.transform,
+    style: sn.style,
+    constraints: sn.constraints,
+    grid_placement: sn.grid_placement ?? null,
+    visible: sn.visible,
+    locked: sn.locked,
+  };
+}
+
 export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
   let info: DocumentInfo | null = null;
   let nodes: Map<string, DocumentNode> = new Map();
   let pages: Page[] = [];
+  let selectedNodeId: string | null = null;
   let undoAvailable = false;
   let redoAvailable = false;
   let destroyed = false;
@@ -91,16 +142,46 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     }
   }
 
-  async function fetchDocumentInfo(): Promise<void> {
+  async function fetchFullDocument(): Promise<void> {
     try {
-      const response = await fetch("/api/document");
+      const response = await fetch("/api/document/full");
       if (!response.ok) {
         return;
       }
-      const data = (await response.json()) as DocumentInfo;
-      info = data;
-      undoAvailable = data.can_undo;
-      redoAvailable = data.can_redo;
+      let parsed: unknown;
+      try {
+        parsed = await response.json();
+      } catch {
+        return;
+      }
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        !("info" in parsed) ||
+        !("pages" in parsed)
+      ) {
+        return;
+      }
+      const data = parsed as FullDocumentResponse;
+      info = data.info;
+      undoAvailable = data.info.can_undo;
+      redoAvailable = data.info.can_redo;
+
+      const newNodes = new Map<string, DocumentNode>();
+      const newPages: Page[] = [];
+      for (const pageEntry of data.pages) {
+        newPages.push({
+          id: pageEntry.id,
+          name: pageEntry.name,
+          root_nodes: [],
+        });
+        for (const sn of pageEntry.nodes) {
+          newNodes.set(sn.id, serializedNodeToDocumentNode(sn));
+        }
+      }
+      nodes = newNodes;
+      pages = newPages;
+
       notifySubscribers();
     } catch {
       // Network errors are silently ignored; the store remains in its
@@ -108,14 +189,14 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     }
   }
 
-  /** Debounced version of fetchDocumentInfo — collapses rapid calls into one. */
-  function debouncedFetchDocumentInfo(): void {
+  /** Debounced version of fetchFullDocument — collapses rapid calls into one. */
+  function debouncedFetchFullDocument(): void {
     if (fetchDebounceTimer !== null) {
       clearTimeout(fetchDebounceTimer);
     }
     fetchDebounceTimer = setTimeout(() => {
       fetchDebounceTimer = null;
-      void fetchDocumentInfo();
+      void fetchFullDocument();
     }, FETCH_DEBOUNCE_MS);
   }
 
@@ -125,7 +206,7 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     switch (message.type) {
       case "broadcast":
         // Another client made a change; re-fetch full state (debounced)
-        debouncedFetchDocumentInfo();
+        debouncedFetchFullDocument();
         break;
 
       case "undo_redo":
@@ -138,8 +219,18 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
         undoAvailable = message.can_undo;
         redoAvailable = message.can_redo;
         // Also re-fetch since another client changed the document (debounced)
-        debouncedFetchDocumentInfo();
+        debouncedFetchFullDocument();
         break;
+
+      case "node_created": {
+        // Update the node's NodeId from the server-assigned value.
+        const existingNode = nodes.get(message.uuid);
+        if (existingNode) {
+          nodes.set(message.uuid, { ...existingNode, id: message.node_id });
+          notifySubscribers();
+        }
+        break;
+      }
 
       case "error":
         // Server errors are logged but do not update state.
@@ -151,7 +242,7 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
   function handleConnectionChange(connected: boolean): void {
     if (destroyed) return;
     if (connected) {
-      void fetchDocumentInfo();
+      void fetchFullDocument();
     }
     notifySubscribers();
   }
@@ -201,6 +292,36 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
       wsClient.send({ type: "redo" });
     },
 
+    getSelectedNodeId(): string | null {
+      return selectedNodeId;
+    },
+
+    select(uuid: string | null): void {
+      if (selectedNodeId !== uuid) {
+        selectedNodeId = uuid;
+        notifySubscribers();
+      }
+    },
+
+    getActivePage(): Page | undefined {
+      return pages[0];
+    },
+
+    createNode(kind: NodeKind, name: string, transform: Transform): string {
+      const uuid = crypto.randomUUID();
+      const activePage = pages[0];
+      const pageId = activePage ? activePage.id : null;
+      wsClient.send({
+        type: "create_node_request",
+        uuid,
+        kind,
+        name,
+        page_id: pageId,
+        transform,
+      });
+      return uuid;
+    },
+
     subscribe(fn: Subscriber): Unsubscribe {
       subscribers.add(fn);
       return () => {
@@ -209,23 +330,7 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
     },
 
     async loadInitialState(): Promise<void> {
-      try {
-        const response = await fetch("/api/document");
-        if (!response.ok) {
-          return;
-        }
-        const data = (await response.json()) as DocumentInfo;
-        info = data;
-        undoAvailable = data.can_undo;
-        redoAvailable = data.can_redo;
-        // Reset nodes and pages — will be populated when full state
-        // endpoint is available
-        nodes = new Map();
-        pages = [];
-        notifySubscribers();
-      } catch {
-        // Fetch failed — leave state as-is
-      }
+      await fetchFullDocument();
     },
 
     destroy(): void {

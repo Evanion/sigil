@@ -628,6 +628,52 @@ export interface Page {
   readonly root_nodes: readonly NodeId[];
 }
 
+// ── Serialized types (wire format from /api/document/full) ────────────
+
+/**
+ * A serialized node as returned by the server.
+ *
+ * Fields like kind, transform, style, constraints, and grid_placement
+ * are raw JSON values that match the typed interfaces when parsed.
+ */
+export interface SerializedNode {
+  readonly id: string;
+  readonly kind: NodeKind;
+  readonly name: string;
+  readonly parent: string | null;
+  readonly children: readonly string[];
+  readonly transform: Transform;
+  readonly style: Style;
+  readonly constraints: Constraints;
+  readonly grid_placement: GridPlacement | null;
+  readonly visible: boolean;
+  readonly locked: boolean;
+}
+
+/** A serialized transition using UUIDs instead of arena NodeIds. */
+export interface SerializedTransition {
+  readonly id: string;
+  readonly source_node: string;
+  readonly target_page: string;
+  readonly target_node: string | null;
+  readonly trigger: TransitionTrigger;
+  readonly animation: TransitionAnimation;
+}
+
+/** A page entry in the full document response. */
+export interface FullPageEntry {
+  readonly id: string;
+  readonly name: string;
+  readonly nodes: readonly SerializedNode[];
+  readonly transitions: readonly SerializedTransition[];
+}
+
+/** Response from `GET /api/document/full`. */
+export interface FullDocumentResponse {
+  readonly info: DocumentInfo;
+  readonly pages: readonly FullPageEntry[];
+}
+
 // ── DocumentInfo ──────────────────────────────────────────────────────
 
 /** Response from `GET /api/document` (mirrors `crates/server/src/routes/document.rs`). */
