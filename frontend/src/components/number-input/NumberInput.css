@@ -1,0 +1,86 @@
+.sigil-number-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+}
+
+.sigil-number-input__label {
+  color: var(--text-2);
+  font-size: var(--font-size-00);
+  font-weight: var(--font-weight-5);
+  user-select: none;
+}
+
+.sigil-number-input__group {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  height: var(--input-height);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  overflow: hidden;
+  transition: border-color 150ms;
+}
+
+.sigil-number-input__group:focus-within {
+  border-color: var(--input-border-focus);
+}
+
+.sigil-number-input__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--input-padding-x);
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  font-family: inherit;
+}
+
+.sigil-number-input__suffix {
+  color: var(--text-3);
+  font-size: var(--font-size-00);
+  padding-right: var(--size-1);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sigil-number-input__buttons {
+  display: flex;
+  flex-direction: column;
+  width: 18px;
+  height: 100%;
+  border-left: 1px solid var(--input-border);
+  flex-shrink: 0;
+}
+
+.sigil-number-input__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+  line-height: 0;
+}
+
+.sigil-number-input__btn:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sigil-number-input__btn + .sigil-number-input__btn {
+  border-top: 1px solid var(--input-border);
+}
+
+/* Disabled state */
+.sigil-number-input[data-disabled] {
+  opacity: 0.5;
+  pointer-events: none;
+}
