@@ -1,7 +1,7 @@
 // crates/core/src/document.rs
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
 
 use crate::arena::Arena;
@@ -77,8 +77,8 @@ pub struct TokenContext {
 #[derive(Debug)]
 #[allow(clippy::struct_field_names)]
 pub struct History {
-    undo_stack: Vec<Box<dyn Command>>,
-    redo_stack: Vec<Box<dyn Command>>,
+    undo_stack: VecDeque<Box<dyn Command>>,
+    redo_stack: VecDeque<Box<dyn Command>>,
     max_history: usize,
 }
 
@@ -86,8 +86,8 @@ impl History {
     #[must_use]
     pub fn new(max_history: usize) -> Self {
         Self {
-            undo_stack: Vec::new(),
-            redo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
+            redo_stack: VecDeque::new(),
             max_history,
         }
     }
@@ -231,9 +231,9 @@ impl Document {
     pub fn execute(&mut self, cmd: Box<dyn Command>) -> Result<Vec<SideEffect>, CoreError> {
         let effects = cmd.apply(self)?;
         self.history.redo_stack.clear();
-        self.history.undo_stack.push(cmd);
+        self.history.undo_stack.push_back(cmd);
         if self.history.undo_stack.len() > self.history.max_history {
-            self.history.undo_stack.remove(0);
+            self.history.undo_stack.pop_front();
         }
         Ok(effects)
     }
@@ -246,11 +246,18 @@ impl Document {
         let cmd = self
             .history
             .undo_stack
-            .pop()
+            .pop_back()
             .ok_or(CoreError::NothingToUndo)?;
-        let effects = cmd.undo(self)?;
-        self.history.redo_stack.push(cmd);
-        Ok(effects)
+        match cmd.undo(self) {
+            Ok(effects) => {
+                self.history.redo_stack.push_back(cmd);
+                Ok(effects)
+            }
+            Err(e) => {
+                self.history.undo_stack.push_back(cmd);
+                Err(e)
+            }
+        }
     }
 
     /// Redoes the most recently undone command.
@@ -261,11 +268,18 @@ impl Document {
         let cmd = self
             .history
             .redo_stack
-            .pop()
+            .pop_back()
             .ok_or(CoreError::NothingToRedo)?;
-        let effects = cmd.apply(self)?;
-        self.history.undo_stack.push(cmd);
-        Ok(effects)
+        match cmd.apply(self) {
+            Ok(effects) => {
+                self.history.undo_stack.push_back(cmd);
+                Ok(effects)
+            }
+            Err(e) => {
+                self.history.redo_stack.push_back(cmd);
+                Err(e)
+            }
+        }
     }
 
     /// Returns true if there are commands that can be undone.
@@ -605,5 +619,71 @@ mod tests {
         assert!(doc.undo().is_ok()); // undo "Name 2" -> "Name 1"
         assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
         assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
+    }
+
+    #[test]
+    fn test_failed_undo_preserves_command() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Execute a SetVisible command so it lands on the undo stack
+        let cmd = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert!(doc.can_undo());
+
+        // Remove the node from the arena so that undo will fail
+        // (the command tries to get_mut on a node that no longer exists)
+        doc.arena.remove(node_id).expect("remove node");
+
+        // Undo should fail because the node is gone
+        let result = doc.undo();
+        assert!(result.is_err());
+
+        // The command must still be on the undo stack — not lost
+        assert!(doc.can_undo());
+    }
+
+    #[test]
+    fn test_failed_redo_preserves_command() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        // Execute then undo so the command lands on the redo stack
+        let cmd = crate::commands::node_commands::SetVisible {
+            node_id,
+            new_visible: false,
+            old_visible: true,
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        doc.undo().expect("undo");
+        assert!(doc.can_redo());
+
+        // Remove the node from the arena so that redo (apply) will fail
+        doc.arena.remove(node_id).expect("remove node");
+
+        // Redo should fail because the node is gone
+        let result = doc.redo();
+        assert!(result.is_err());
+
+        // The command must still be on the redo stack — not lost
+        assert!(doc.can_redo());
     }
 }
