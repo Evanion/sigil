@@ -12,7 +12,11 @@
     "esModuleInterop": true,
     "outDir": "dist",
     "rootDir": "src",
-    "sourceMap": true
+    "sourceMap": true,
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "noEmit": true,
+    "types": ["vite/client"]
   },
   "include": ["src"]
 }
