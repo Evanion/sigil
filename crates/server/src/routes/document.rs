@@ -14,6 +14,11 @@ pub struct DocumentInfo {
 }
 
 /// Returns basic info about the current document.
+///
+/// # Panics
+///
+/// Panics if the document mutex is poisoned (another thread panicked while
+/// holding the lock). This indicates an unrecoverable internal error.
 pub async fn get_document_info(State(state): State<AppState>) -> Json<DocumentInfo> {
     let doc = state.document.lock().expect("document lock poisoned");
     Json(DocumentInfo {
