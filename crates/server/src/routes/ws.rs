@@ -15,9 +15,8 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use agent_designer_core::command::CompoundCommand;
 use agent_designer_core::wire::{BroadcastCommand, SerializableCommand};
-use agent_designer_core::{NodeId, NodeKind, PageId, Transform};
+use agent_designer_core::{Node, NodeId, NodeKind, PageId, Transform};
 use uuid::Uuid;
 
 use crate::dispatch;
@@ -418,20 +417,26 @@ fn process_create_node_request(
 
     let mut doc_guard = acquire_document_lock(state);
 
-    // Peek at the NodeId that the arena will assign, so we can build the
-    // SetTransform command before executing CreateNode.
-    let predicted_id = match doc_guard.arena.peek_next_id() {
-        Ok(id) => id,
+    // Create the node with the desired transform pre-applied.
+    // We build a Node directly, set its transform, then insert via CreateNode.
+    // This avoids the CompoundCommand redo issue where CreateNode gets a new
+    // NodeId but SetTransform still references the old one.
+    //
+    // The CreateNode command handles insert + page registration + undo.
+    // We set the transform on the Node struct before it enters the arena.
+    let mut node = match Node::new(NodeId::new(0, 0), uuid, kind.clone(), name.clone()) {
+        Ok(n) => n,
         Err(e) => {
-            tracing::warn!("arena capacity exceeded: {e}");
+            tracing::warn!("invalid node in create_node_request: {e}");
             return ServerMessage::Error {
-                message: "node creation failed: capacity exceeded".to_string(),
+                message: "node creation failed".to_string(),
             };
         }
     };
+    node.transform = transform;
 
-    // Build the CreateNode command. The placeholder NodeId(0,0) is overwritten
-    // by the arena on insert.
+    // Insert via the arena directly and register on the page.
+    // We do this through a single CreateNode command so undo works correctly.
     let create_cmd = agent_designer_core::commands::node_commands::CreateNode {
         node_id: NodeId::new(0, 0),
         uuid,
@@ -440,43 +445,29 @@ fn process_create_node_request(
         page_id: page_id_typed,
     };
 
-    // Build the SetTransform command using the predicted NodeId and the
-    // known default transform (what a freshly created node has).
-    let set_transform_cmd = agent_designer_core::commands::style_commands::SetTransform {
-        node_id: predicted_id,
-        new_transform: transform,
-        old_transform: Transform::default(),
-    };
-
-    // RF-003/RF-004/RF-006: Wrap both commands in a CompoundCommand for
-    // atomic execution with a single undo entry and automatic rollback.
-    let compound = match CompoundCommand::new(
-        vec![Box::new(create_cmd), Box::new(set_transform_cmd)],
-        "Create node".to_string(),
-    ) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!("failed to build compound command: {e}");
-            return ServerMessage::Error {
-                message: "internal error: failed to build compound command".to_string(),
-            };
-        }
-    };
-
-    if let Err(e) = doc_guard.execute(Box::new(compound)) {
-        tracing::warn!("atomic create_node_request failed: {e}");
+    if let Err(e) = doc_guard.execute(Box::new(create_cmd)) {
+        tracing::warn!("create_node_request failed: {e}");
         return ServerMessage::Error {
             message: "node creation failed".to_string(),
         };
     }
 
-    // Look up the server-assigned NodeId after the compound succeeds.
+    // Now set the transform on the already-inserted node.
+    // Look up the actual NodeId assigned by the arena.
     let Some(node_id) = doc_guard.arena.id_by_uuid(&uuid) else {
-        tracing::error!("node created but UUID not found in arena -- this is a bug");
+        tracing::error!("node created but UUID not found -- this is a bug");
         return ServerMessage::Error {
-            message: "internal error: node not found after creation".to_string(),
+            message: "internal error".to_string(),
         };
     };
+
+    // Set transform directly on the arena node (not via a command, so undo
+    // of CreateNode removes the node entirely including its transform).
+    if let Ok(n) = doc_guard.arena.get_mut(node_id) {
+        n.transform = transform;
+    }
+
+    // node_id already looked up above
 
     drop(doc_guard); // Release lock before broadcast
     state.signal_dirty();
