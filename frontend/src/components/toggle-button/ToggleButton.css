@@ -26,7 +26,7 @@
 /* Pressed state */
 .sigil-toggle-button--pressed {
   background: var(--accent);
-  color: #ffffff;
+  color: var(--text-on-accent);
 }
 
 /* Hover — pressed */
@@ -45,4 +45,11 @@
 .sigil-toggle-button:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-toggle-button {
+    transition: none;
+  }
 }

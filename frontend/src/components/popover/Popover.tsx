@@ -1,5 +1,5 @@
 import { Popover as KobaltePopover } from "@kobalte/core/popover";
-import type { JSX } from "solid-js";
+import { type JSX, splitProps } from "solid-js";
 import "./Popover.css";
 
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
@@ -16,19 +16,21 @@ export interface PopoverProps {
 }
 
 export function Popover(props: PopoverProps) {
+  const [local, others] = splitProps(props, ["trigger", "children", "placement", "class"]);
+
   const className = () => {
     const classes = ["sigil-popover"];
-    if (props.class) classes.push(props.class);
+    if (local.class) classes.push(local.class);
     return classes.join(" ");
   };
 
   return (
-    <KobaltePopover placement={props.placement ?? "bottom"}>
-      <KobaltePopover.Trigger as="span">{props.trigger}</KobaltePopover.Trigger>
+    <KobaltePopover placement={local.placement ?? "bottom"} {...others}>
+      <KobaltePopover.Trigger>{local.trigger}</KobaltePopover.Trigger>
       <KobaltePopover.Portal>
         <KobaltePopover.Content class={className()}>
           <KobaltePopover.Arrow class="sigil-popover__arrow" />
-          {props.children}
+          {local.children}
         </KobaltePopover.Content>
       </KobaltePopover.Portal>
     </KobaltePopover>

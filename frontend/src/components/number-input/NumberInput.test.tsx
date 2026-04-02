@@ -105,6 +105,18 @@ describe("NumberInput", () => {
     expect(root?.classList.contains("sigil-number-input")).toBe(true);
   });
 
+  it("should not call onValueChange when value is NaN", () => {
+    const handler = vi.fn();
+    render(() => <NumberInput value={10} onValueChange={handler} />);
+    const input = screen.getByRole("spinbutton") as HTMLInputElement;
+    // Clear the input to produce NaN from Kobalte's raw value
+    fireEvent.input(input, { target: { value: "" } });
+    // The handler should not have been called with NaN
+    for (const call of handler.mock.calls) {
+      expect(Number.isFinite(call[0])).toBe(true);
+    }
+  });
+
   it("should forward aria-label to the number field", () => {
     render(() => <NumberInput value={10} onValueChange={() => {}} aria-label="X position" />);
     // The aria-label should be associated with the input

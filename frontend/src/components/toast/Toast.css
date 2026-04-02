@@ -3,7 +3,7 @@
   position: fixed;
   bottom: var(--size-3);
   right: var(--size-3);
-  z-index: 100;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
   gap: var(--size-2);
@@ -106,6 +106,18 @@
 }
 
 /* Animations */
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-toast,
+  .sigil-toast[data-opened],
+  .sigil-toast[data-closed],
+  .sigil-toast[data-swipe="cancel"],
+  .sigil-toast[data-swipe="end"] {
+    animation: none;
+    transition: none;
+  }
+}
+
 @keyframes sigil-toast-slide-in {
   from {
     transform: translateX(calc(100% + var(--size-3)));

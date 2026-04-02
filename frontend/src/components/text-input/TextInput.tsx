@@ -20,6 +20,7 @@ export function TextInput(props: TextInputProps) {
     "placeholder",
     "disabled",
     "class",
+    "aria-label",
   ]);
 
   const className = (): string => {
@@ -39,7 +40,11 @@ export function TextInput(props: TextInputProps) {
       <Show when={local.label}>
         <TextField.Label class="sigil-text-input__label">{local.label}</TextField.Label>
       </Show>
-      <TextField.Input class="sigil-text-input__input" placeholder={local.placeholder} />
+      <TextField.Input
+        class="sigil-text-input__input"
+        placeholder={local.placeholder}
+        aria-label={!local.label ? local["aria-label"] : undefined}
+      />
     </TextField>
   );
 }

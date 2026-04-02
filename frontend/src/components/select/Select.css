@@ -54,7 +54,7 @@
   border: 1px solid var(--border-2);
   border-radius: var(--select-content-radius);
   box-shadow: var(--shadow-3);
-  z-index: 50;
+  z-index: var(--z-dropdown);
   overflow: hidden;
 }
 
@@ -91,4 +91,11 @@
   display: flex;
   align-items: center;
   color: var(--accent);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-select__trigger {
+    transition: none;
+  }
 }

@@ -57,7 +57,21 @@
   /* Divider */
   --divider-color: var(--border-1);
 
+  /* Overlay */
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+
+  /* Text on accent / danger backgrounds */
+  --text-on-accent: #ffffff;
+
   /* Focus ring */
   --focus-ring: 2px solid var(--accent);
   --focus-offset: 2px;
+
+  /* Z-index scale */
+  --z-dropdown: 50;
+  --z-popover: 50;
+  --z-dialog-overlay: 60;
+  --z-dialog: 61;
+  --z-toast: 80;
+  --z-tooltip: 100;
 }

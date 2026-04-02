@@ -44,7 +44,7 @@
   box-shadow: var(--shadow-3);
   padding: var(--size-1) 0;
   min-width: 180px;
-  z-index: 50;
+  z-index: var(--z-dropdown);
 }
 
 /* Menu item — matches dropdown menu item style */

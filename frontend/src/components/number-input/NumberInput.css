@@ -79,8 +79,26 @@
   border-top: 1px solid var(--input-border);
 }
 
+/* Focus-visible */
+.sigil-number-input__btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-number-input__input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
 /* Disabled state */
 .sigil-number-input[data-disabled] {
   opacity: 0.5;
   pointer-events: none;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-number-input__group {
+    transition: none;
+  }
 }

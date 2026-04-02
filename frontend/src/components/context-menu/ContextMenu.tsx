@@ -1,5 +1,5 @@
 import { ContextMenu as KobalteContextMenu } from "@kobalte/core/context-menu";
-import { type JSX, For } from "solid-js";
+import { type JSX, For, splitProps } from "solid-js";
 import "./ContextMenu.css";
 
 export interface ContextMenuItem {
@@ -21,25 +21,27 @@ export interface ContextMenuProps {
 }
 
 export function ContextMenu(props: ContextMenuProps) {
+  const [local, others] = splitProps(props, ["children", "items", "onSelect", "class"]);
+
   const className = () => {
     const classes = ["sigil-context-menu"];
-    if (props.class) classes.push(props.class);
+    if (local.class) classes.push(local.class);
     return classes.join(" ");
   };
 
   return (
-    <KobalteContextMenu>
-      <KobalteContextMenu.Trigger as="div" class="sigil-context-menu__trigger">
-        {props.children}
+    <KobalteContextMenu {...others}>
+      <KobalteContextMenu.Trigger class="sigil-context-menu__trigger">
+        {local.children}
       </KobalteContextMenu.Trigger>
       <KobalteContextMenu.Portal>
         <KobalteContextMenu.Content class={className()} role="menu">
-          <For each={props.items}>
+          <For each={local.items}>
             {(item) => (
               <KobalteContextMenu.Item
                 class="sigil-context-menu__item"
                 disabled={item.disabled}
-                onSelect={() => props.onSelect(item.key)}
+                onSelect={() => local.onSelect(item.key)}
               >
                 <span>{item.label}</span>
                 {item.shortcut && <span class="sigil-context-menu__shortcut">{item.shortcut}</span>}

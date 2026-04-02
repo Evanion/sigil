@@ -1,5 +1,5 @@
 import { DropdownMenu as KobalteDropdownMenu } from "@kobalte/core/dropdown-menu";
-import { type JSX, For } from "solid-js";
+import { type JSX, For, splitProps } from "solid-js";
 import "./DropdownMenu.css";
 
 export interface DropdownMenuItem {
@@ -21,25 +21,27 @@ export interface DropdownMenuProps {
 }
 
 export function DropdownMenu(props: DropdownMenuProps) {
+  const [local, others] = splitProps(props, ["trigger", "items", "onSelect", "class"]);
+
   const className = () => {
     const classes = ["sigil-dropdown-menu"];
-    if (props.class) classes.push(props.class);
+    if (local.class) classes.push(local.class);
     return classes.join(" ");
   };
 
   return (
-    <KobalteDropdownMenu>
-      <KobalteDropdownMenu.Trigger as="div" class="sigil-dropdown-menu__trigger">
-        {props.trigger}
+    <KobalteDropdownMenu {...others}>
+      <KobalteDropdownMenu.Trigger class="sigil-dropdown-menu__trigger">
+        {local.trigger}
       </KobalteDropdownMenu.Trigger>
       <KobalteDropdownMenu.Portal>
         <KobalteDropdownMenu.Content class={className()} role="menu">
-          <For each={props.items}>
+          <For each={local.items}>
             {(item) => (
               <KobalteDropdownMenu.Item
                 class="sigil-dropdown-menu__item"
                 disabled={item.disabled}
-                onSelect={() => props.onSelect(item.key)}
+                onSelect={() => local.onSelect(item.key)}
               >
                 <span>{item.label}</span>
                 {item.shortcut && (

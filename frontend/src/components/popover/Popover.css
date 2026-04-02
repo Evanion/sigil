@@ -3,15 +3,22 @@
   color: var(--text-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-2);
-  box-shadow: 0 4px 16px rgb(0 0 0 / 0.35);
+  box-shadow: var(--shadow-3);
   padding: var(--size-3);
-  z-index: 50;
+  z-index: var(--z-popover);
   transform-origin: var(--kb-popover-content-transform-origin);
   animation: sigil-popover-fade-in 150ms ease-out;
 }
 
 .sigil-popover__arrow {
   fill: var(--surface-3);
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-popover {
+    animation: none;
+  }
 }
 
 @keyframes sigil-popover-fade-in {

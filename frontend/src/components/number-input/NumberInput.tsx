@@ -27,7 +27,6 @@ export function NumberInput(props: NumberInputProps) {
     "suffix",
     "disabled",
     "class",
-    "aria-label",
   ]);
 
   const step = (): number => local.step ?? 1;
@@ -42,12 +41,15 @@ export function NumberInput(props: NumberInputProps) {
     <NumberField
       class={className()}
       rawValue={local.value}
-      onRawValueChange={local.onValueChange}
+      onRawValueChange={(val) => {
+        if (Number.isFinite(val)) {
+          local.onValueChange(val);
+        }
+      }}
       step={step()}
       minValue={local.min}
       maxValue={local.max}
       disabled={local.disabled}
-      aria-label={local["aria-label"]}
       {...others}
     >
       <Show when={local.label}>

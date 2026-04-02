@@ -1,5 +1,5 @@
 import { Menubar as KobalteMenubar } from "@kobalte/core/menubar";
-import { For } from "solid-js";
+import { For, splitProps } from "solid-js";
 import "./Menubar.css";
 
 export interface MenubarItem {
@@ -21,15 +21,17 @@ export interface MenubarProps {
 }
 
 export function Menubar(props: MenubarProps) {
+  const [local, others] = splitProps(props, ["menus", "onSelect", "class"]);
+
   const className = () => {
     const classes = ["sigil-menubar"];
-    if (props.class) classes.push(props.class);
+    if (local.class) classes.push(local.class);
     return classes.join(" ");
   };
 
   return (
-    <KobalteMenubar class={className()}>
-      <For each={props.menus}>
+    <KobalteMenubar class={className()} {...others}>
+      <For each={local.menus}>
         {(menu) => (
           <KobalteMenubar.Menu>
             <KobalteMenubar.Trigger class="sigil-menubar__trigger">
@@ -42,7 +44,7 @@ export function Menubar(props: MenubarProps) {
                     <KobalteMenubar.Item
                       class="sigil-menubar__item"
                       disabled={item.disabled}
-                      onSelect={() => props.onSelect(menu.label, item.key)}
+                      onSelect={() => local.onSelect(menu.label, item.key)}
                     >
                       <span>{item.label}</span>
                       {item.shortcut && (

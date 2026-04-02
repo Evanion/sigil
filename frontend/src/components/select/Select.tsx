@@ -28,6 +28,7 @@ export function Select(props: SelectProps) {
     "placeholder",
     "disabled",
     "class",
+    "aria-label",
   ]);
 
   const className = (): string => {
@@ -66,9 +67,12 @@ export function Select(props: SelectProps) {
       <Show when={local.label}>
         <KobalteSelect.Label class="sigil-select__label">{local.label}</KobalteSelect.Label>
       </Show>
-      <KobalteSelect.Trigger class="sigil-select__trigger" aria-label={others["aria-label"]}>
+      <KobalteSelect.Trigger
+        class="sigil-select__trigger"
+        aria-label={!local.label ? local["aria-label"] : undefined}
+      >
         <KobalteSelect.Value<SelectOption>>
-          {(state) => state.selectedOption().label}
+          {(state) => state.selectedOption()?.label ?? local.placeholder ?? ""}
         </KobalteSelect.Value>
         <KobalteSelect.Icon class="sigil-select__icon">
           <ChevronDown size={14} />
