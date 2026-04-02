@@ -53,6 +53,8 @@ impl Command for CreateNode {
         {
             page.root_nodes.retain(|nid| *nid != id);
         }
+        // Detach from parent before removing from arena (fixes RF-008)
+        crate::tree::remove_child(&mut doc.arena, id)?;
         doc.arena.remove(id)?;
         Ok(vec![])
     }
@@ -74,6 +76,10 @@ pub struct DeleteNode {
     pub page_id: Option<PageId>,
     /// The index within the page's `root_nodes` list (for restoring position on undo).
     pub page_root_index: Option<usize>,
+    /// The parent `NodeId` before deletion (for restoring the parent-child link on undo).
+    pub parent_id: Option<NodeId>,
+    /// The index within the parent's `children` list (for restoring position on undo).
+    pub parent_child_index: Option<usize>,
 }
 
 impl Command for DeleteNode {
@@ -94,14 +100,26 @@ impl Command for DeleteNode {
         let snapshot = self.snapshot.as_ref().ok_or(CoreError::ValidationError(
             "cannot undo DeleteNode: no snapshot captured".to_string(),
         ))?;
-        let actual_id = doc.arena.insert(snapshot.clone())?;
+
+        // Reinsert at the exact original slot to preserve NodeId stability
+        doc.arena.reinsert(self.node_id, snapshot.clone())?;
+
+        // Restore parent-child link
+        if let Some(parent_id) = self.parent_id {
+            let parent = doc.arena.get_mut(parent_id)?;
+            let idx = self.parent_child_index.unwrap_or(parent.children.len());
+            let clamped = idx.min(parent.children.len());
+            parent.children.insert(clamped, self.node_id);
+            doc.arena.get_mut(self.node_id)?.parent = Some(parent_id);
+        }
+
         // Restore page root position
         if let Some(page_id) = self.page_id
             && let Ok(page) = doc.page_mut(page_id)
         {
             let idx = self.page_root_index.unwrap_or(page.root_nodes.len());
             let clamped = idx.min(page.root_nodes.len());
-            page.root_nodes.insert(clamped, actual_id);
+            page.root_nodes.insert(clamped, self.node_id);
         }
         Ok(vec![])
     }
@@ -344,6 +362,8 @@ mod tests {
             snapshot: Some(snapshot),
             page_id: Some(page_id),
             page_root_index: Some(0),
+            parent_id: None,
+            parent_child_index: None,
         };
 
         cmd.apply(&mut doc).expect("apply delete");
@@ -351,9 +371,158 @@ mod tests {
         assert!(doc.page(page_id).unwrap().root_nodes.is_empty());
 
         cmd.undo(&mut doc).expect("undo delete");
-        let restored_id = doc.arena.id_by_uuid(&make_uuid(1)).expect("find restored");
-        assert_eq!(doc.arena.get(restored_id).unwrap().name, "Frame");
-        assert!(doc.page(page_id).unwrap().root_nodes.contains(&restored_id));
+        // NodeId must be exactly the same after undo (reinsert preserves slot+generation)
+        let restored = doc.arena.get(node_id).expect("get by original NodeId after undo");
+        assert_eq!(restored.name, "Frame");
+        assert!(doc.page(page_id).unwrap().root_nodes.contains(&node_id));
+    }
+
+    #[test]
+    fn test_delete_node_undo_restores_parent_child_link() {
+        let mut doc = Document::new("Test".to_string());
+        let parent_node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Parent".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent_node).expect("insert parent");
+
+        let child_node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            "Child".to_string(),
+        )
+        .expect("create child");
+        let child_id = doc.arena.insert(child_node).expect("insert child");
+
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
+        assert_eq!(doc.arena.get(parent_id).unwrap().children, vec![child_id]);
+
+        // Capture snapshot before delete (includes parent field)
+        let snapshot = doc.arena.get(child_id).unwrap().clone();
+        let child_index = doc
+            .arena
+            .get(parent_id)
+            .unwrap()
+            .children
+            .iter()
+            .position(|&id| id == child_id);
+
+        let cmd = DeleteNode {
+            node_id: child_id,
+            snapshot: Some(snapshot),
+            page_id: None,
+            page_root_index: None,
+            parent_id: Some(parent_id),
+            parent_child_index: child_index,
+        };
+
+        cmd.apply(&mut doc).expect("apply delete");
+        assert!(doc.arena.get(child_id).is_err());
+        assert!(doc.arena.get(parent_id).unwrap().children.is_empty());
+
+        cmd.undo(&mut doc).expect("undo delete");
+        // Child is back at exact NodeId
+        let restored = doc.arena.get(child_id).expect("child restored at same NodeId");
+        assert_eq!(restored.name, "Child");
+        assert_eq!(restored.parent, Some(parent_id));
+        // Parent's children list is restored
+        assert_eq!(doc.arena.get(parent_id).unwrap().children, vec![child_id]);
+    }
+
+    #[test]
+    fn test_delete_node_undo_restores_child_at_correct_position() {
+        let mut doc = Document::new("Test".to_string());
+        let parent_node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Parent".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent_node).expect("insert parent");
+
+        // Add three children
+        let mut child_ids = Vec::new();
+        for i in 2..=4u8 {
+            let child = Node::new(
+                NodeId::new(0, 0),
+                make_uuid(i),
+                NodeKind::Group,
+                format!("Child {i}"),
+            )
+            .expect("create child");
+            let cid = doc.arena.insert(child).expect("insert child");
+            crate::tree::add_child(&mut doc.arena, parent_id, cid).expect("add child");
+            child_ids.push(cid);
+        }
+
+        // Delete the middle child (index 1)
+        let middle_id = child_ids[1];
+        let snapshot = doc.arena.get(middle_id).unwrap().clone();
+        let cmd = DeleteNode {
+            node_id: middle_id,
+            snapshot: Some(snapshot),
+            page_id: None,
+            page_root_index: None,
+            parent_id: Some(parent_id),
+            parent_child_index: Some(1),
+        };
+
+        cmd.apply(&mut doc).expect("apply delete");
+        assert_eq!(
+            doc.arena.get(parent_id).unwrap().children,
+            vec![child_ids[0], child_ids[2]]
+        );
+
+        cmd.undo(&mut doc).expect("undo delete");
+        assert_eq!(
+            doc.arena.get(parent_id).unwrap().children,
+            vec![child_ids[0], middle_id, child_ids[2]]
+        );
+    }
+
+    #[test]
+    fn test_create_node_undo_detaches_from_parent() {
+        let mut doc = Document::new("Test".to_string());
+
+        // Create a parent node first
+        let parent_node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Parent".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent_node).expect("insert parent");
+
+        // Create a child node via command
+        let cmd = CreateNode {
+            node_id: NodeId::new(0, 0),
+            uuid: make_uuid(2),
+            kind: NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            name: "Child".to_string(),
+            page_id: None,
+        };
+        cmd.apply(&mut doc).expect("apply create");
+        let child_id = doc.arena.id_by_uuid(&make_uuid(2)).expect("find child");
+
+        // Manually add as child of parent (simulating a reparent command)
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
+        assert_eq!(doc.arena.get(parent_id).unwrap().children, vec![child_id]);
+
+        // Undo create should detach from parent before removing
+        cmd.undo(&mut doc).expect("undo create");
+        assert!(doc.arena.id_by_uuid(&make_uuid(2)).is_none());
+        // Parent's children list must be cleaned up
+        assert!(doc.arena.get(parent_id).unwrap().children.is_empty());
     }
 
     // ── RenameNode ──────────────────────────────────────────────────
