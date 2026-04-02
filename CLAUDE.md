@@ -23,6 +23,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Frontend: Vitest for unit tests.
 - Tests verify behavior, not implementation — no mocking internal details.
 - If you can't write a test for it, the interface needs redesign.
+- Every command added to `crates/core/` MUST have at least one integration test that exercises the full `execute -> undo -> redo` cycle through `Document::execute`, `Document::undo`, and `Document::redo` (not just direct calls to `apply`/`undo` on the command struct). The test must verify: (1) state after execute matches expectations, (2) state after undo matches the original state, (3) state after redo matches post-execute state. Test naming convention: `test_<command_name>_execute_undo_redo_cycle`.
 
 ### User Experience Consistency
 

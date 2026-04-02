@@ -216,4 +216,35 @@ mod tests {
 
         assert!(cmd.apply(&mut doc).is_err());
     }
+
+    // ── Integration: execute / undo / redo ────────────────────────────
+
+    #[test]
+    fn test_reparent_node_execute_undo_redo_round_trip() {
+        let mut doc = Document::new("Test".to_string());
+        let parent_a = insert_frame(&mut doc, 1, "Parent A");
+        let parent_b = insert_frame(&mut doc, 2, "Parent B");
+        let child = insert_frame(&mut doc, 3, "Child");
+
+        crate::tree::add_child(&mut doc.arena, parent_a, child).expect("add child");
+
+        let cmd = ReparentNode {
+            node_id: child,
+            new_parent_id: parent_b,
+            new_position: 0,
+            old_parent_id: Some(parent_a),
+            old_position: Some(0),
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        assert_eq!(doc.arena.get(parent_b).expect("get").children, vec![child]);
+        assert!(doc.arena.get(parent_a).expect("get").children.is_empty());
+
+        doc.undo().expect("undo");
+        assert_eq!(doc.arena.get(parent_a).expect("get").children, vec![child]);
+        assert!(doc.arena.get(parent_b).expect("get").children.is_empty());
+
+        doc.redo().expect("redo");
+        assert_eq!(doc.arena.get(parent_b).expect("get").children, vec![child]);
+        assert!(doc.arena.get(parent_a).expect("get").children.is_empty());
+    }
 }
