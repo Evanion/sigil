@@ -38,6 +38,11 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# GraphQL
+async-graphql = "7.2"
+async-graphql-axum = "7.2"
+async-stream = "0.3"
+
 # Streaming
 futures-util = "0.3"
 

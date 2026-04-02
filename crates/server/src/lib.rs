@@ -6,13 +6,17 @@
 //! integration tests can spin up test servers without duplicating setup.
 
 pub mod dispatch;
+pub mod graphql;
 pub mod persistence;
 pub mod routes;
 pub mod state;
 pub mod workfile;
 
+use async_graphql::http::GraphiQLSource;
+use async_graphql_axum::{GraphQL, GraphQLSubscription};
 use axum::Router;
 use axum::http::{HeaderValue, Method};
+use axum::response::Html;
 use axum::routing::get;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
@@ -44,6 +48,8 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
             .allow_headers(tower_http::cors::Any)
     };
 
+    let schema = graphql::build_schema(state.clone());
+
     let app = Router::new()
         .route("/health", get(routes::health::health))
         .route("/api/document", get(routes::document::get_document_info))
@@ -52,6 +58,11 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
             get(routes::document::get_document_full),
         )
         .route("/ws", get(routes::ws::ws_handler))
+        .route(
+            "/graphql",
+            get(graphiql).post_service(GraphQL::new(schema.clone())),
+        )
+        .route_service("/graphql/ws", GraphQLSubscription::new(schema))
         .layer(cors)
         .with_state(state);
 
@@ -61,4 +72,14 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
     } else {
         app
     }
+}
+
+/// Serves the `GraphiQL` interactive IDE for development.
+async fn graphiql() -> Html<String> {
+    Html(
+        GraphiQLSource::build()
+            .endpoint("/graphql")
+            .subscription_endpoint("/graphql/ws")
+            .finish(),
+    )
 }
