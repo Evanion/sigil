@@ -717,6 +717,11 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
             if let Some(v) = variant {
                 crate::validate::validate_node_name(v)?;
             }
+            crate::validate::validate_collection_size(
+                "property_values",
+                property_values.len(),
+                crate::validate::MAX_PROPERTIES_PER_COMPONENT,
+            )?;
             for key in property_values.keys() {
                 crate::validate::validate_node_name(key)?;
             }
@@ -2001,5 +2006,35 @@ mod tests {
             result.is_err(),
             "negative corner radius should be rejected on deserialize"
         );
+    }
+
+    // ── RF-004: property_values size limit in validate_node_kind ─────
+
+    #[test]
+    fn test_component_instance_rejects_too_many_property_values() {
+        use crate::component::OverrideValue;
+        use crate::id::ComponentId;
+
+        let mut props = HashMap::new();
+        for i in 0..=crate::validate::MAX_PROPERTIES_PER_COMPONENT {
+            props.insert(
+                format!("prop{i}"),
+                OverrideValue::String {
+                    value: "v".to_string(),
+                },
+            );
+        }
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
+        );
+        assert!(result.is_err());
     }
 }

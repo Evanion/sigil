@@ -164,6 +164,23 @@ impl Document {
         Ok(())
     }
 
+    /// Adds a component definition to the document.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the document already has the maximum
+    /// number of components.
+    pub fn add_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
+        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(format!(
+                "document already has {} components (maximum {})",
+                self.components.len(),
+                crate::validate::MAX_COMPONENTS_PER_DOCUMENT
+            )));
+        }
+        self.components.insert(def.id(), def);
+        Ok(())
+    }
+
     /// Finds a page by its ID.
     ///
     /// # Errors
@@ -725,5 +742,58 @@ mod tests {
 
         let h3 = History::new(100);
         assert_eq!(h3.max_history(), 100);
+    }
+
+    // ── RF-006: add_component ─────────────────────────────────────────
+
+    #[test]
+    fn test_add_component_succeeds() {
+        use crate::component::ComponentDef;
+        use crate::id::ComponentId;
+
+        let mut doc = Document::new("Test".to_string());
+        let def = ComponentDef::new(
+            ComponentId::new(make_uuid(1)),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+        doc.add_component(def).expect("add component");
+        assert_eq!(doc.components.len(), 1);
+    }
+
+    #[test]
+    fn test_add_component_enforces_max_limit() {
+        use crate::component::ComponentDef;
+        use crate::id::ComponentId;
+
+        let mut doc = Document::new("Test".to_string());
+        for i in 0..crate::validate::MAX_COMPONENTS_PER_DOCUMENT {
+            let uuid = Uuid::from_u128(i as u128);
+            let def = ComponentDef::new(
+                ComponentId::new(uuid),
+                format!("C{i}"),
+                NodeId::new(0, 0),
+                vec![],
+                vec![],
+            )
+            .expect("valid");
+            doc.add_component(def).expect("add component");
+        }
+        assert_eq!(
+            doc.components.len(),
+            crate::validate::MAX_COMPONENTS_PER_DOCUMENT
+        );
+        let overflow = ComponentDef::new(
+            ComponentId::new(Uuid::from_u128(999_999)),
+            "Overflow".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+        assert!(doc.add_component(overflow).is_err());
     }
 }

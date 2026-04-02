@@ -64,7 +64,8 @@ pub use command::{Command, CompoundCommand, SideEffect};
 // ── Re-exports: Component ───────────────────────────────────────────────
 pub use component::{
     ComponentDef, ComponentProperty, ComponentPropertyType, OverrideKey, OverrideMap,
-    OverrideSource, OverrideValue, PropertyPath, Variant,
+    OverrideSource, OverrideValue, PropertyPath, Variant, validate_override_value,
+    validate_property_path,
 };
 
 // ── Re-exports: Validation ─────────────────────────────────────────────

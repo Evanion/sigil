@@ -1,7 +1,7 @@
 // crates/core/src/component.rs
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::CoreError;
@@ -548,6 +548,30 @@ impl ComponentDef {
             properties.len(),
             validate::MAX_PROPERTIES_PER_COMPONENT,
         )?;
+        // RF-007: detect duplicate variant names
+        {
+            let mut seen = HashSet::with_capacity(variants.len());
+            for v in &variants {
+                if !seen.insert(v.name()) {
+                    return Err(CoreError::ValidationError(format!(
+                        "duplicate variant name: {}",
+                        v.name()
+                    )));
+                }
+            }
+        }
+        // RF-007: detect duplicate property names
+        {
+            let mut seen = HashSet::with_capacity(properties.len());
+            for p in &properties {
+                if !seen.insert(p.name()) {
+                    return Err(CoreError::ValidationError(format!(
+                        "duplicate property name: {}",
+                        p.name()
+                    )));
+                }
+            }
+        }
         Ok(Self {
             id,
             name,
@@ -1416,5 +1440,159 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    // ── RF-005: string length check in validate_override_value ────────
+
+    #[test]
+    fn test_validate_override_value_rejects_too_long_string() {
+        let long = "a".repeat(validate::MAX_TEXT_CONTENT_LEN + 1);
+        let val = OverrideValue::String { value: long };
+        assert!(validate_override_value(&val).is_err());
+    }
+
+    #[test]
+    fn test_validate_override_value_accepts_max_length_string() {
+        let max = "a".repeat(validate::MAX_TEXT_CONTENT_LEN);
+        let val = OverrideValue::String { value: max };
+        assert!(validate_override_value(&val).is_ok());
+    }
+
+    // ── RF-007: duplicate variant/property names ──────────────────────
+
+    #[test]
+    fn test_component_def_rejects_duplicate_variant_names() {
+        let v1 = Variant::new("Hover".to_string(), OverrideMap::new()).expect("valid");
+        let v2 = Variant::new("Hover".to_string(), OverrideMap::new()).expect("valid");
+        let result = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![v1, v2],
+            vec![],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_def_rejects_duplicate_property_names() {
+        let p1 = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::String {
+                value: "A".to_string(),
+            },
+        )
+        .expect("valid");
+        let p2 = ComponentProperty::new(
+            "label".to_string(),
+            ComponentPropertyType::Text,
+            OverrideValue::String {
+                value: "B".to_string(),
+            },
+        )
+        .expect("valid");
+        let result = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![p1, p2],
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_def_accepts_unique_variant_names() {
+        let v1 = Variant::new("Hover".to_string(), OverrideMap::new()).expect("valid");
+        let v2 = Variant::new("Active".to_string(), OverrideMap::new()).expect("valid");
+        let result = ComponentDef::new(
+            ComponentId::new(Uuid::nil()),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![v1, v2],
+            vec![],
+        );
+        assert!(result.is_ok());
+    }
+
+    // ── RF-008: property path index bounds ────────────────────────────
+
+    #[test]
+    fn test_validate_property_path_rejects_fill_index_out_of_bounds() {
+        let path = PropertyPath::Fill {
+            index: validate::MAX_FILLS_PER_STYLE,
+        };
+        assert!(validate_property_path(&path).is_err());
+    }
+
+    #[test]
+    fn test_validate_property_path_rejects_stroke_index_out_of_bounds() {
+        let path = PropertyPath::Stroke {
+            index: validate::MAX_STROKES_PER_STYLE,
+        };
+        assert!(validate_property_path(&path).is_err());
+    }
+
+    #[test]
+    fn test_validate_property_path_rejects_effect_index_out_of_bounds() {
+        let path = PropertyPath::Effect {
+            index: validate::MAX_EFFECTS_PER_STYLE,
+        };
+        assert!(validate_property_path(&path).is_err());
+    }
+
+    #[test]
+    fn test_validate_property_path_accepts_valid_fill_index() {
+        let path = PropertyPath::Fill {
+            index: validate::MAX_FILLS_PER_STYLE - 1,
+        };
+        assert!(validate_property_path(&path).is_ok());
+    }
+
+    #[test]
+    fn test_override_map_set_rejects_out_of_bounds_fill_index() {
+        let mut map = OverrideMap::new();
+        let key = OverrideKey::new(
+            Uuid::nil(),
+            PropertyPath::Fill {
+                index: validate::MAX_FILLS_PER_STYLE,
+            },
+        );
+        let result = map.set(
+            key,
+            OverrideValue::Fill {
+                value: Fill::Solid {
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                },
+            },
+            OverrideSource::User,
+        );
+        assert!(result.is_err());
+    }
+
+    // ── RF-009: duplicate keys in OverrideMap deserialization ──────────
+
+    #[test]
+    fn test_override_map_deserialize_rejects_duplicate_keys() {
+        let entries = serde_json::json!([
+            {
+                "node_uuid": Uuid::nil(),
+                "path": { "type": "visible" },
+                "value": { "type": "bool", "value": true },
+                "source": "user"
+            },
+            {
+                "node_uuid": Uuid::nil(),
+                "path": { "type": "visible" },
+                "value": { "type": "bool", "value": false },
+                "source": "variant"
+            }
+        ]);
+        let json = serde_json::to_string(&entries).expect("serialize");
+        let result: Result<OverrideMap, _> = serde_json::from_str(&json);
+        assert!(result.is_err(), "duplicate keys should be rejected");
     }
 }
