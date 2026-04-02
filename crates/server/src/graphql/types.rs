@@ -1,5 +1,20 @@
 use async_graphql::SimpleObject;
 
+/// A real-time event emitted when the document changes.
+///
+/// Sent to GraphQL subscription clients via the `documentChanged` stream.
+/// The `event_type` field discriminates the kind of change, while `uuid` and
+/// `data` carry optional context about the affected node.
+#[derive(Clone, Debug, SimpleObject)]
+pub struct DocumentEvent {
+    /// Discriminator: `"node_created"`, `"node_updated"`, `"node_deleted"`, `"undo_redo"`.
+    pub event_type: String,
+    /// UUID of the affected node, if applicable.
+    pub uuid: Option<String>,
+    /// Additional structured data about the event (e.g., changed fields).
+    pub data: Option<async_graphql::Json<serde_json::Value>>,
+}
+
 /// GraphQL representation of document metadata.
 #[derive(SimpleObject)]
 pub struct DocumentInfoGql {

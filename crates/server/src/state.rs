@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex};
 use agent_designer_core::Document;
 use agent_designer_core::wire::BroadcastCommand;
 use tokio::sync::{broadcast, mpsc};
+
+use crate::graphql::types::DocumentEvent;
 use tokio::task::JoinHandle;
 
 /// Maximum WebSocket message size in bytes (1 MiB).
@@ -15,6 +17,9 @@ pub const MAX_WS_MESSAGE_SIZE: usize = 1_048_576;
 
 /// Capacity of the broadcast channel for WebSocket command fan-out.
 pub const BROADCAST_CHANNEL_CAPACITY: usize = 256;
+
+/// Capacity of the broadcast channel for GraphQL subscription events.
+pub const GRAPHQL_BROADCAST_CAPACITY: usize = 256;
 
 /// Payload carried inside a [`BroadcastEnvelope`].
 #[derive(Clone, Debug)]
@@ -92,6 +97,11 @@ pub struct AppState {
     /// Broadcast channel for sending envelopes (command + sender ID) to all
     /// connected WebSocket clients.
     pub broadcast_tx: broadcast::Sender<BroadcastEnvelope>,
+    /// Broadcast channel for GraphQL subscription events.
+    ///
+    /// Mutations publish [`DocumentEvent`] values here; the `documentChanged`
+    /// subscription stream reads from a receiver obtained via `.subscribe()`.
+    pub graphql_tx: broadcast::Sender<DocumentEvent>,
     /// Monotonically increasing client ID counter.
     next_client_id: Arc<AtomicU64>,
     /// Path to the loaded `.sigil/` workfile directory.
@@ -114,11 +124,13 @@ impl AppState {
     #[must_use]
     pub fn new() -> Self {
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document: Arc::new(Mutex::new(SendDocument(Document::new(
                 "Untitled".to_string(),
             )))),
             broadcast_tx,
+            graphql_tx,
             next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: None,
             dirty_tx: None,
@@ -140,9 +152,11 @@ impl AppState {
             workfile_path.clone(),
         );
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document,
             broadcast_tx,
+            graphql_tx,
             next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: Some(workfile_path),
             dirty_tx: Some(dirty_tx),
@@ -161,9 +175,11 @@ impl AppState {
             workfile_path.clone(),
         );
         let (broadcast_tx, _) = broadcast::channel(BROADCAST_CHANNEL_CAPACITY);
+        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
         Self {
             document,
             broadcast_tx,
+            graphql_tx,
             next_client_id: Arc::new(AtomicU64::new(0)),
             workfile_path: Some(workfile_path),
             dirty_tx: Some(dirty_tx),
