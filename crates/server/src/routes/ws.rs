@@ -443,6 +443,7 @@ fn process_create_node_request(
         kind: kind.clone(),
         name: name.clone(),
         page_id: page_id_typed,
+        initial_transform: Some(transform),
     };
 
     if let Err(e) = doc_guard.execute(Box::new(create_cmd)) {
@@ -461,11 +462,8 @@ fn process_create_node_request(
         };
     };
 
-    // Set transform directly on the arena node (not via a command, so undo
-    // of CreateNode removes the node entirely including its transform).
-    if let Ok(n) = doc_guard.arena.get_mut(node_id) {
-        n.transform = transform;
-    }
+    // Transform is set by CreateNode via initial_transform field.
+    // No separate SetTransform needed — redo will preserve the transform.
 
     // node_id already looked up above
 

@@ -49,6 +49,7 @@ pub fn dispatch(cmd: SerializableCommand) -> anyhow::Result<Box<dyn Command>> {
             kind,
             name,
             page_id,
+            initial_transform: None,
         }),
 
         SerializableCommand::DeleteNode {
