@@ -102,6 +102,9 @@ This project uses Rust Edition 2024. Be aware of:
 - Both `apply` and `undo` must validate inputs — asymmetric validation allows undo to corrupt state.
 - Every `f64` field from external input must be checked for NaN/infinity and domain range.
 - Prefer `VecDeque` over `Vec` for FIFO queues. `Vec::remove(0)` is O(n). Consider access patterns during review.
+- Never `#[derive(Deserialize)]` on types with validating constructors — implement `Deserialize` manually through the constructor. Fields must be private.
+- Every `MAX_*`/`LIMIT_*` constant must have a `test_<constant>_enforced` test.
+- Never serialize arena-local IDs (`NodeId`) — use UUIDs in all persisted formats.
 
 ## Before You Start
 
