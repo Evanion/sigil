@@ -25,13 +25,16 @@ name = "agent-designer-mcp"
 version = "0.1.0"
 dependencies = [
  "agent-designer-core",
+ "agent-designer-server",
  "assert_matches",
  "rmcp",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
