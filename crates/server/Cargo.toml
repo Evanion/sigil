@@ -16,6 +16,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 uuid = { workspace = true }
 futures-util = { workspace = true }
+async-graphql = { workspace = true }
+async-graphql-axum = { workspace = true }
+async-stream = { workspace = true }
 
 
 [dev-dependencies]

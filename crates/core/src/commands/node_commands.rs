@@ -40,6 +40,7 @@ impl Command for CreateNode {
             self.name.clone(),
         )?;
         if let Some(ref t) = self.initial_transform {
+            crate::commands::style_commands::validate_transform(t)?;
             node.transform = *t;
         }
         let actual_id = doc.arena.insert(node)?;

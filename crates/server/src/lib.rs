@@ -6,17 +6,25 @@
 //! integration tests can spin up test servers without duplicating setup.
 
 pub mod dispatch;
+pub mod graphql;
 pub mod persistence;
 pub mod routes;
 pub mod state;
 pub mod workfile;
 
+use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, GraphiQLSource};
+use async_graphql_axum::{GraphQL, GraphQLProtocol, GraphQLWebSocket};
+use axum::Extension;
 use axum::Router;
-use axum::http::{HeaderValue, Method};
+use axum::extract::WebSocketUpgrade;
+use axum::http::{HeaderMap, HeaderValue, Method};
+use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
+use crate::graphql::SigilSchema;
+use crate::routes::ws::is_allowed_origin;
 use crate::state::AppState;
 
 /// Builds the full application router.
@@ -44,7 +52,9 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
             .allow_headers(tower_http::cors::Any)
     };
 
-    let app = Router::new()
+    let schema = graphql::build_schema(state.clone());
+
+    let mut app = Router::new()
         .route("/health", get(routes::health::health))
         .route("/api/document", get(routes::document::get_document_info))
         .route(
@@ -52,8 +62,25 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
             get(routes::document::get_document_full),
         )
         .route("/ws", get(routes::ws::ws_handler))
-        .layer(cors)
-        .with_state(state);
+        // TODO(RF-011): GraphQLSubscription/GraphQLWebSocket does not expose
+        // max-message-size config easily. When switching to `GraphQLWebSocket`
+        // directly (see RF-002), configure the WS message size limit there.
+        .route("/graphql/ws", get(graphql_ws_handler));
+
+    // RF-004: Only expose GraphiQL IDE in development mode.
+    if std::env::var("SIGIL_DEV_CORS").is_ok() {
+        app = app.route(
+            "/graphql",
+            get(graphiql).post_service(GraphQL::new(schema.clone())),
+        );
+    } else {
+        app = app.route(
+            "/graphql",
+            axum::routing::post_service(GraphQL::new(schema.clone())),
+        );
+    }
+
+    let app = app.layer(Extension(schema)).layer(cors).with_state(state);
 
     if let Some(dir) = static_dir {
         let spa = ServeDir::new(dir).not_found_service(ServeFile::new(format!("{dir}/index.html")));
@@ -61,4 +88,39 @@ pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
     } else {
         app
     }
+}
+
+/// Serves the `GraphiQL` interactive IDE for development.
+async fn graphiql() -> Html<String> {
+    Html(
+        GraphiQLSource::build()
+            .endpoint("/graphql")
+            .subscription_endpoint("/graphql/ws")
+            .finish(),
+    )
+}
+
+/// Handles the GraphQL WebSocket subscription endpoint with origin validation.
+///
+/// RF-002: Validates the `Origin` header before upgrading the connection.
+/// Rejects requests from disallowed origins with HTTP 403.
+async fn graphql_ws_handler(
+    ws: WebSocketUpgrade,
+    headers: HeaderMap,
+    protocol: GraphQLProtocol,
+    Extension(schema): Extension<SigilSchema>,
+) -> impl IntoResponse {
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok())
+        && !is_allowed_origin(origin)
+    {
+        tracing::warn!(
+            origin,
+            "rejected GraphQL WebSocket connection from disallowed origin"
+        );
+        return axum::http::StatusCode::FORBIDDEN.into_response();
+    }
+
+    ws.protocols(ALL_WEBSOCKET_PROTOCOLS)
+        .on_upgrade(move |stream| GraphQLWebSocket::new(stream, schema, protocol).serve())
+        .into_response()
 }
