@@ -28,11 +28,11 @@ pub async fn get_document_info(State(state): State<AppState>) -> Response {
         }
     };
     let info = DocumentInfo {
-        name: doc_guard.0.metadata.name.clone(),
-        page_count: doc_guard.0.pages.len(),
-        node_count: doc_guard.0.arena.len(),
-        can_undo: doc_guard.0.can_undo(),
-        can_redo: doc_guard.0.can_redo(),
+        name: doc_guard.metadata.name.clone(),
+        page_count: doc_guard.pages.len(),
+        node_count: doc_guard.arena.len(),
+        can_undo: doc_guard.can_undo(),
+        can_redo: doc_guard.can_redo(),
     };
     drop(doc_guard);
     (StatusCode::OK, Json(info)).into_response()
