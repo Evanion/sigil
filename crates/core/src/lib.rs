@@ -41,8 +41,8 @@ pub use prototype::{
 
 // ── Re-exports: Token ──────────────────────────────────────────────────
 pub use token::{
-    DimensionUnit, GradientValue, ShadowValue, Token, TokenContext, TokenType, TokenValue,
-    TypographyValue, validate_token_value,
+    DimensionUnit, ShadowValue, Token, TokenContext, TokenType, TokenValue, TypographyValue,
+    validate_token_value,
 };
 
 // ── Re-exports: Arena ──────────────────────────────────────────────────
@@ -68,10 +68,11 @@ pub use validate::{
     MAX_ASSET_REF_LEN, MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILE_SIZE,
     MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MAX_GRADIENT_STOPS, MAX_GRID_TRACKS,
     MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN, MAX_PAGES_PER_DOCUMENT, MAX_SEGMENTS_PER_SUBPATH,
-    MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TOKEN_NAME_LEN,
-    MAX_TRANSITION_DURATION, MAX_TRANSITIONS_PER_DOCUMENT, MIN_FONT_WEIGHT, validate_asset_ref,
-    validate_collection_size, validate_finite, validate_floats_in_value, validate_grid_track,
-    validate_node_name, validate_text_content, validate_token_name,
+    MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TOKEN_DESCRIPTION_LEN,
+    MAX_TOKEN_FONT_FAMILIES, MAX_TOKEN_NAME_LEN, MAX_TOKENS_PER_CONTEXT, MAX_TRANSITION_DURATION,
+    MAX_TRANSITIONS_PER_DOCUMENT, MIN_FONT_WEIGHT, validate_asset_ref, validate_collection_size,
+    validate_finite, validate_floats_in_value, validate_grid_track, validate_node_name,
+    validate_text_content, validate_token_name,
 };
 
 #[must_use]

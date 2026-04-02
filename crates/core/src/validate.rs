@@ -61,6 +61,15 @@ pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 /// Default maximum history size (undo/redo).
 pub const DEFAULT_MAX_HISTORY: usize = 500;
 
+/// Maximum number of tokens per document.
+pub const MAX_TOKENS_PER_CONTEXT: usize = 50_000;
+
+/// Maximum description length for a token.
+pub const MAX_TOKEN_DESCRIPTION_LEN: usize = 1_024;
+
+/// Maximum number of font families in a `FontFamily` token.
+pub const MAX_TOKEN_FONT_FAMILIES: usize = 32;
+
 /// Maximum root nodes per page.
 pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
 

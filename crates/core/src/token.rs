@@ -7,7 +7,10 @@ use serde::{Deserialize, Serialize};
 use crate::error::CoreError;
 use crate::id::TokenId;
 use crate::node::{Color, GradientDef, Point};
-use crate::validate::{MAX_FONT_FAMILY_LEN, validate_token_name};
+use crate::validate::{
+    MAX_FONT_FAMILY_LEN, MAX_TOKEN_DESCRIPTION_LEN, MAX_TOKEN_FONT_FAMILIES,
+    MAX_TOKENS_PER_CONTEXT, validate_token_name,
+};
 
 /// Dimension units for design tokens (W3C Design Tokens Format).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,12 +29,6 @@ pub struct ShadowValue {
     pub offset: Point,
     pub blur: f64,
     pub spread: f64,
-}
-
-/// Gradient token value -- wraps the existing `GradientDef`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct GradientValue {
-    pub gradient: GradientDef,
 }
 
 /// Typography composite token value.
@@ -72,13 +69,13 @@ pub enum TokenValue {
     CubicBezier { values: [f64; 4] },
     Number { value: f64 },
     Shadow { value: ShadowValue },
-    Gradient { value: GradientValue },
+    Gradient { gradient: GradientDef },
     Typography { value: TypographyValue },
     Alias { name: String },
 }
 
 /// A design token.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[allow(clippy::struct_field_names)]
 pub struct Token {
     id: TokenId,
@@ -86,6 +83,22 @@ pub struct Token {
     value: TokenValue,
     token_type: TokenType,
     description: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for Token {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct TokenRaw {
+            id: TokenId,
+            name: String,
+            value: TokenValue,
+            token_type: TokenType,
+            description: Option<String>,
+        }
+        let raw = TokenRaw::deserialize(deserializer)?;
+        Token::new(raw.id, raw.name, raw.value, raw.token_type, raw.description)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 impl Token {
@@ -103,6 +116,19 @@ impl Token {
     ) -> Result<Self, CoreError> {
         validate_token_name(&name)?;
         validate_token_value(&value)?;
+        if let Some(ref desc) = description
+            && desc.len() > MAX_TOKEN_DESCRIPTION_LEN
+        {
+            return Err(CoreError::ValidationError(format!(
+                "token description too long: {} (max {MAX_TOKEN_DESCRIPTION_LEN})",
+                desc.len()
+            )));
+        }
+        if !token_type_matches_value(token_type, &value) {
+            return Err(CoreError::ValidationError(format!(
+                "token type {token_type:?} does not match value variant"
+            )));
+        }
         Ok(Self {
             id,
             name,
@@ -143,19 +169,56 @@ impl Token {
     }
 }
 
-/// Maximum number of tokens per document.
-pub const MAX_TOKENS_PER_CONTEXT: usize = 50_000;
+/// Returns `true` if the token type is compatible with the value variant.
+///
+/// Aliases are compatible with any declared type.
+fn token_type_matches_value(token_type: TokenType, value: &TokenValue) -> bool {
+    matches!(
+        (token_type, value),
+        (TokenType::Color, TokenValue::Color { .. })
+            | (TokenType::Dimension, TokenValue::Dimension { .. })
+            | (TokenType::FontFamily, TokenValue::FontFamily { .. })
+            | (TokenType::FontWeight, TokenValue::FontWeight { .. })
+            | (TokenType::Duration, TokenValue::Duration { .. })
+            | (TokenType::CubicBezier, TokenValue::CubicBezier { .. })
+            | (TokenType::Number, TokenValue::Number { .. })
+            | (TokenType::Shadow, TokenValue::Shadow { .. })
+            | (TokenType::Gradient, TokenValue::Gradient { .. })
+            | (TokenType::Typography, TokenValue::Typography { .. })
+            | (_, TokenValue::Alias { .. }) // Aliases can have any declared type
+    )
+}
 
-/// Maximum description length for a token.
-pub const MAX_TOKEN_DESCRIPTION_LEN: usize = 1_024;
-
-/// Maximum number of font families in a `FontFamily` token.
-pub const MAX_TOKEN_FONT_FAMILIES: usize = 32;
+/// Validates Color channel fields are all finite.
+fn validate_color_channels(color: &Color) -> Result<(), CoreError> {
+    match color {
+        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+            crate::validate::validate_finite("color r", *r)?;
+            crate::validate::validate_finite("color g", *g)?;
+            crate::validate::validate_finite("color b", *b)?;
+            crate::validate::validate_finite("color a", *a)?;
+        }
+        Color::Oklch { l, c, h, a } => {
+            crate::validate::validate_finite("color l", *l)?;
+            crate::validate::validate_finite("color c", *c)?;
+            crate::validate::validate_finite("color h", *h)?;
+            crate::validate::validate_finite("color a", *a)?;
+        }
+        Color::Oklab { l, a, b, alpha } => {
+            crate::validate::validate_finite("color l", *l)?;
+            crate::validate::validate_finite("color a", *a)?;
+            crate::validate::validate_finite("color b", *b)?;
+            crate::validate::validate_finite("color alpha", *alpha)?;
+        }
+    }
+    Ok(())
+}
 
 /// Validates a token value's fields.
 ///
 /// # Errors
 /// Returns `CoreError::ValidationError` for invalid values.
+#[allow(clippy::too_many_lines)]
 pub fn validate_token_value(value: &TokenValue) -> Result<(), CoreError> {
     match value {
         TokenValue::Dimension { value: v, .. } => {
@@ -227,11 +290,29 @@ pub fn validate_token_value(value: &TokenValue) -> Result<(), CoreError> {
             crate::validate::validate_finite("shadow spread", shadow.spread)?;
             crate::validate::validate_finite("shadow offset x", shadow.offset.x)?;
             crate::validate::validate_finite("shadow offset y", shadow.offset.y)?;
+            if shadow.blur < 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "shadow blur must be non-negative, got {}",
+                    shadow.blur
+                )));
+            }
         }
         TokenValue::Typography { value: typo } => {
             crate::validate::validate_finite("font size", typo.font_size)?;
             crate::validate::validate_finite("line height", typo.line_height)?;
             crate::validate::validate_finite("letter spacing", typo.letter_spacing)?;
+            if typo.font_size <= 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "font size must be positive, got {}",
+                    typo.font_size
+                )));
+            }
+            if typo.line_height <= 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "line height must be positive, got {}",
+                    typo.line_height
+                )));
+            }
             if typo.font_family.len() > MAX_FONT_FAMILY_LEN {
                 return Err(CoreError::ValidationError(format!(
                     "font family name too long: {} (max {MAX_FONT_FAMILY_LEN})",
@@ -252,9 +333,33 @@ pub fn validate_token_value(value: &TokenValue) -> Result<(), CoreError> {
         TokenValue::Alias { name } => {
             validate_token_name(name)?;
         }
-        TokenValue::Color { .. } | TokenValue::Gradient { .. } => {
-            // Color validation handled by the Color type
-            // Gradient validation handled by GradientDef
+        TokenValue::Color { value: color } => {
+            validate_color_channels(color)?;
+        }
+        TokenValue::Gradient { gradient: def } => {
+            if def.stops.len() > crate::validate::MAX_GRADIENT_STOPS {
+                return Err(CoreError::ValidationError(format!(
+                    "too many gradient stops: {} (max {})",
+                    def.stops.len(),
+                    crate::validate::MAX_GRADIENT_STOPS
+                )));
+            }
+            crate::validate::validate_finite("gradient start x", def.start.x)?;
+            crate::validate::validate_finite("gradient start y", def.start.y)?;
+            crate::validate::validate_finite("gradient end x", def.end.x)?;
+            crate::validate::validate_finite("gradient end y", def.end.y)?;
+            for (i, stop) in def.stops.iter().enumerate() {
+                crate::validate::validate_finite(
+                    &format!("gradient stop[{i}] position"),
+                    stop.position,
+                )?;
+                if stop.position < 0.0 || stop.position > 1.0 {
+                    return Err(CoreError::ValidationError(format!(
+                        "gradient stop[{i}] position must be in [0.0, 1.0], got {}",
+                        stop.position
+                    )));
+                }
+            }
         }
     }
     Ok(())
@@ -322,43 +427,35 @@ impl TokenContext {
 
     /// Resolves a token name to its final non-alias value, following alias chains.
     ///
+    /// Uses an iterative loop instead of recursion. Detects cycles via a visited
+    /// set and enforces `MAX_ALIAS_CHAIN_DEPTH`.
+    ///
     /// # Errors
     /// - `CoreError::TokenNotFound` if a token in the chain doesn't exist.
     /// - `CoreError::TokenCycleDetected` if a cycle or depth limit is hit.
     pub fn resolve(&self, name: &str) -> Result<&TokenValue, CoreError> {
+        let mut current = name;
         let mut visited = HashSet::new();
-        self.resolve_inner(name, &mut visited, 0)
-    }
-
-    fn resolve_inner<'a>(
-        &'a self,
-        name: &str,
-        visited: &mut HashSet<String>,
-        depth: usize,
-    ) -> Result<&'a TokenValue, CoreError> {
-        if depth > crate::validate::MAX_ALIAS_CHAIN_DEPTH {
-            return Err(CoreError::TokenCycleDetected(format!(
-                "alias chain depth exceeded {}: {name}",
-                crate::validate::MAX_ALIAS_CHAIN_DEPTH,
-            )));
-        }
-
-        if !visited.insert(name.to_string()) {
-            return Err(CoreError::TokenCycleDetected(format!(
-                "cycle detected at token: {name}"
-            )));
-        }
-
-        let token = self
-            .tokens
-            .get(name)
-            .ok_or_else(|| CoreError::TokenNotFound(name.to_string()))?;
-
-        match &token.value {
-            TokenValue::Alias { name: alias_target } => {
-                self.resolve_inner(alias_target, visited, depth + 1)
+        loop {
+            if !visited.insert(current.to_string()) {
+                return Err(CoreError::TokenCycleDetected(format!(
+                    "cycle detected at token: {current}"
+                )));
             }
-            other => Ok(other),
+            if visited.len() > crate::validate::MAX_ALIAS_CHAIN_DEPTH {
+                return Err(CoreError::TokenCycleDetected(format!(
+                    "alias chain depth exceeded {}: {current}",
+                    crate::validate::MAX_ALIAS_CHAIN_DEPTH
+                )));
+            }
+            let token = self
+                .tokens
+                .get(current)
+                .ok_or_else(|| CoreError::TokenNotFound(current.to_string()))?;
+            match &token.value {
+                TokenValue::Alias { name: target } => current = target,
+                other => return Ok(other),
+            }
         }
     }
 }
@@ -575,30 +672,28 @@ mod tests {
     fn test_token_value_gradient_serde() {
         use crate::node::{GradientStop, Point, StyleValue};
         let val = TokenValue::Gradient {
-            value: GradientValue {
-                gradient: GradientDef {
-                    stops: vec![
-                        GradientStop {
-                            position: 0.0,
-                            color: StyleValue::Literal {
-                                value: Color::default(),
+            gradient: GradientDef {
+                stops: vec![
+                    GradientStop {
+                        position: 0.0,
+                        color: StyleValue::Literal {
+                            value: Color::default(),
+                        },
+                    },
+                    GradientStop {
+                        position: 1.0,
+                        color: StyleValue::Literal {
+                            value: Color::Srgb {
+                                r: 1.0,
+                                g: 1.0,
+                                b: 1.0,
+                                a: 1.0,
                             },
                         },
-                        GradientStop {
-                            position: 1.0,
-                            color: StyleValue::Literal {
-                                value: Color::Srgb {
-                                    r: 1.0,
-                                    g: 1.0,
-                                    b: 1.0,
-                                    a: 1.0,
-                                },
-                            },
-                        },
-                    ],
-                    start: Point::zero(),
-                    end: Point::new(1.0, 1.0),
-                },
+                    },
+                ],
+                start: Point::zero(),
+                end: Point::new(1.0, 1.0),
             },
         };
         let json = serde_json::to_string(&val).expect("serialize");
@@ -1300,10 +1395,11 @@ mod tests {
     fn test_token_context_resolve_deep_alias_chain() {
         let mut ctx = TokenContext::new();
 
-        // Create a chain of 16 aliases (depth 0..15 are aliases, 15 resolves at depth 15)
-        for i in 0..16u8 {
+        // Create a chain of 15 tokens (t0..t13 are aliases, t14 is literal = 14 hops)
+        // With >= guard, visited.len() reaches 15 which is < MAX_ALIAS_CHAIN_DEPTH (16)
+        for i in 0..15u8 {
             let name = format!("t{i}");
-            let target = if i < 15 {
+            let target = if i < 14 {
                 TokenValue::Alias {
                     name: format!("t{}", i + 1),
                 }
@@ -1315,7 +1411,7 @@ mod tests {
             ctx.insert(token).expect("insert");
         }
 
-        // Should resolve through all 16 levels
+        // Should resolve through all 15 levels
         let resolved = ctx.resolve("t0").expect("resolve");
         assert!(
             matches!(resolved, TokenValue::Number { value } if (*value - 42.0).abs() < f64::EPSILON)
@@ -1326,10 +1422,11 @@ mod tests {
     fn test_token_context_resolve_exceeds_max_depth() {
         let mut ctx = TokenContext::new();
 
-        // Create a chain of 18 aliases (exceeds MAX_ALIAS_CHAIN_DEPTH=16)
-        for i in 0..18u8 {
+        // Create a chain of 17 tokens (t0..t15 are aliases, t16 is literal = 16 hops)
+        // With >= guard, visited.len() reaches 16 == MAX_ALIAS_CHAIN_DEPTH, triggering error
+        for i in 0..17u8 {
             let name = format!("t{i}");
-            let target = if i < 17 {
+            let target = if i < 16 {
                 TokenValue::Alias {
                     name: format!("t{}", i + 1),
                 }
@@ -1343,6 +1440,64 @@ mod tests {
 
         let result = ctx.resolve("t0");
         assert!(matches!(result, Err(CoreError::TokenCycleDetected(_))));
+    }
+
+    #[test]
+    fn test_token_context_resolve_at_exact_depth_boundary() {
+        use crate::validate::MAX_ALIAS_CHAIN_DEPTH;
+
+        // Chain of exactly MAX_ALIAS_CHAIN_DEPTH aliases should fail:
+        // t0 -> t1 -> ... -> t{MAX-1} -> t{MAX} (literal)
+        // After inserting t{MAX} into visited, visited.len() == MAX+1 > MAX.
+        {
+            let mut ctx = TokenContext::new();
+            for i in 0..=MAX_ALIAS_CHAIN_DEPTH {
+                let name = format!("t{i}");
+                let value = if i < MAX_ALIAS_CHAIN_DEPTH {
+                    TokenValue::Alias {
+                        name: format!("t{}", i + 1),
+                    }
+                } else {
+                    TokenValue::Number { value: 1.0 }
+                };
+                let id = u8::try_from(i + 1).expect("test index fits u8");
+                let token = Token::new(make_token_id(id), name, value, TokenType::Number, None)
+                    .expect("valid");
+                ctx.insert(token).expect("insert");
+            }
+            let result = ctx.resolve("t0");
+            assert!(
+                matches!(result, Err(CoreError::TokenCycleDetected(_))),
+                "chain of exactly MAX_ALIAS_CHAIN_DEPTH aliases should fail"
+            );
+        }
+
+        // Chain of MAX_ALIAS_CHAIN_DEPTH - 2 aliases should succeed:
+        // t0 -> t1 -> ... -> t{MAX-3} -> t{MAX-2} (literal)
+        // visited.len() reaches MAX-1 which is < MAX (>= guard).
+        {
+            let mut ctx = TokenContext::new();
+            let alias_count = MAX_ALIAS_CHAIN_DEPTH - 2;
+            for i in 0..=alias_count {
+                let name = format!("t{i}");
+                let value = if i < alias_count {
+                    TokenValue::Alias {
+                        name: format!("t{}", i + 1),
+                    }
+                } else {
+                    TokenValue::Number { value: 42.0 }
+                };
+                let id = u8::try_from(i + 1).expect("test index fits u8");
+                let token = Token::new(make_token_id(id), name, value, TokenType::Number, None)
+                    .expect("valid");
+                ctx.insert(token).expect("insert");
+            }
+            let resolved = ctx.resolve("t0").expect("should succeed");
+            assert!(
+                matches!(resolved, TokenValue::Number { value } if (*value - 42.0).abs() < f64::EPSILON),
+                "chain of MAX_ALIAS_CHAIN_DEPTH - 2 aliases should resolve"
+            );
+        }
     }
 
     #[test]
@@ -1367,9 +1522,7 @@ mod tests {
 
         let json = serde_json::to_string(&ctx).expect("serialize");
         let deserialized: TokenContext = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(ctx.len(), deserialized.len());
-        assert!(deserialized.get("color.primary").is_some());
-        assert!(deserialized.get("spacing.sm").is_some());
+        assert_eq!(ctx, deserialized);
     }
 
     #[test]
