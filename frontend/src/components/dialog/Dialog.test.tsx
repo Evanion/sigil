@@ -5,13 +5,7 @@
  */
 
 import { describe, it, expect, vi, afterEach } from "vitest";
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  cleanup,
-} from "@solidjs/testing-library";
+import { render, screen, fireEvent, waitFor, cleanup } from "@solidjs/testing-library";
 import { Dialog } from "./Dialog";
 
 afterEach(() => {
@@ -75,9 +69,7 @@ describe("Dialog", () => {
       </Dialog>
     ));
     expect(screen.getByText("Child content here")).toBeTruthy();
-    const body = screen
-      .getByText("Child content here")
-      .closest(".sigil-dialog__body");
+    const body = screen.getByText("Child content here").closest(".sigil-dialog__body");
     expect(body).toBeTruthy();
   });
 
@@ -92,12 +84,7 @@ describe("Dialog", () => {
 
   it("should apply custom class on content", () => {
     render(() => (
-      <Dialog
-        open={true}
-        onOpenChange={() => {}}
-        title="Custom Class"
-        class="my-custom-dialog"
-      >
+      <Dialog open={true} onOpenChange={() => {}} title="Custom Class" class="my-custom-dialog">
         <p>Content</p>
       </Dialog>
     ));

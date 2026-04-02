@@ -52,9 +52,7 @@ describe("Menubar", () => {
 
   it("should append a custom class to the root element", () => {
     const handler = vi.fn();
-    render(() => (
-      <Menubar menus={sampleMenus} onSelect={handler} class="my-custom" />
-    ));
+    render(() => <Menubar menus={sampleMenus} onSelect={handler} class="my-custom" />);
     const menubar = screen.getByRole("menubar");
     expect(menubar.classList.contains("my-custom")).toBe(true);
     expect(menubar.classList.contains("sigil-menubar")).toBe(true);

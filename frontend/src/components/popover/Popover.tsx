@@ -24,9 +24,7 @@ export function Popover(props: PopoverProps) {
 
   return (
     <KobaltePopover placement={props.placement ?? "bottom"}>
-      <KobaltePopover.Trigger as="span">
-        {props.trigger}
-      </KobaltePopover.Trigger>
+      <KobaltePopover.Trigger as="span">{props.trigger}</KobaltePopover.Trigger>
       <KobaltePopover.Portal>
         <KobaltePopover.Content class={className()}>
           <KobaltePopover.Arrow class="sigil-popover__arrow" />

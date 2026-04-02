@@ -26,13 +26,8 @@ export function Dialog(props: DialogProps) {
         <KobalteDialog.Overlay class="sigil-dialog__overlay" />
         <KobalteDialog.Content class={className()}>
           <div class="sigil-dialog__header">
-            <KobalteDialog.Title class="sigil-dialog__title">
-              {props.title}
-            </KobalteDialog.Title>
-            <KobalteDialog.CloseButton
-              class="sigil-dialog__close"
-              aria-label="Close"
-            >
+            <KobalteDialog.Title class="sigil-dialog__title">{props.title}</KobalteDialog.Title>
+            <KobalteDialog.CloseButton class="sigil-dialog__close" aria-label="Close">
               <X size={16} />
             </KobalteDialog.CloseButton>
           </div>

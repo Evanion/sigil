@@ -25,22 +25,14 @@ const defaultItems: readonly DropdownMenuItem[] = [
 describe("DropdownMenu", () => {
   it("should render the trigger element", () => {
     render(() => (
-      <DropdownMenu
-        trigger={<button>Actions</button>}
-        items={defaultItems}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Actions</button>} items={defaultItems} onSelect={vi.fn()} />
     ));
     expect(screen.getByText("Actions")).toBeTruthy();
   });
 
   it("should render the trigger as a clickable button", () => {
     render(() => (
-      <DropdownMenu
-        trigger={<button>Open Menu</button>}
-        items={defaultItems}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Open Menu</button>} items={defaultItems} onSelect={vi.fn()} />
     ));
     const trigger = screen.getByText("Open Menu");
     expect(trigger.tagName.toLowerCase()).toBe("button");
@@ -51,11 +43,7 @@ describe("DropdownMenu", () => {
     // testable in jsdom without full browser APIs. We verify the component
     // renders without error when given multiple items.
     render(() => (
-      <DropdownMenu
-        trigger={<button>Actions</button>}
-        items={defaultItems}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Actions</button>} items={defaultItems} onSelect={vi.fn()} />
     ));
     expect(screen.getByText("Actions")).toBeTruthy();
   });
@@ -78,11 +66,7 @@ describe("DropdownMenu", () => {
       { key: "paste", label: "Paste", disabled: true },
     ];
     render(() => (
-      <DropdownMenu
-        trigger={<button>Disabled test</button>}
-        items={items}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Disabled test</button>} items={items} onSelect={vi.fn()} />
     ));
     expect(screen.getByText("Disabled test")).toBeTruthy();
   });
@@ -93,11 +77,7 @@ describe("DropdownMenu", () => {
       { key: "delete", label: "Delete", shortcut: "Del" },
     ];
     render(() => (
-      <DropdownMenu
-        trigger={<button>Shortcut test</button>}
-        items={items}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Shortcut test</button>} items={items} onSelect={vi.fn()} />
     ));
     expect(screen.getByText("Shortcut test")).toBeTruthy();
   });
@@ -121,11 +101,7 @@ describe("DropdownMenu", () => {
     ];
     // Verify the component renders without error when items have combined props
     render(() => (
-      <DropdownMenu
-        trigger={<button>Combined test</button>}
-        items={items}
-        onSelect={vi.fn()}
-      />
+      <DropdownMenu trigger={<button>Combined test</button>} items={items} onSelect={vi.fn()} />
     ));
     expect(screen.getByText("Combined test")).toBeTruthy();
   });

@@ -46,9 +46,7 @@ export function Menubar(props: MenubarProps) {
                     >
                       <span>{item.label}</span>
                       {item.shortcut && (
-                        <span class="sigil-menubar__shortcut">
-                          {item.shortcut}
-                        </span>
+                        <span class="sigil-menubar__shortcut">{item.shortcut}</span>
                       )}
                     </KobalteMenubar.Item>
                   )}

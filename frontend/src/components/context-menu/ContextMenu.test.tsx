@@ -47,11 +47,7 @@ describe("ContextMenu", () => {
 
   it("should append custom class names alongside the base class", () => {
     render(() => (
-      <ContextMenu
-        items={defaultItems}
-        onSelect={vi.fn()}
-        class="layer-menu"
-      >
+      <ContextMenu items={defaultItems} onSelect={vi.fn()} class="layer-menu">
         <div>Custom trigger</div>
       </ContextMenu>
     ));

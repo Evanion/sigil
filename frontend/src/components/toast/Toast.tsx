@@ -20,9 +20,7 @@ export function showToast(data: ToastData): void {
     >
       <Toast.Title class="sigil-toast__title">{data.title}</Toast.Title>
       {data.description && (
-        <Toast.Description class="sigil-toast__description">
-          {data.description}
-        </Toast.Description>
+        <Toast.Description class="sigil-toast__description">{data.description}</Toast.Description>
       )}
       <Toast.CloseButton class="sigil-toast__close" aria-label="Close">
         <X size={14} />

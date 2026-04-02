@@ -42,11 +42,7 @@ export function ContextMenu(props: ContextMenuProps) {
                 onSelect={() => props.onSelect(item.key)}
               >
                 <span>{item.label}</span>
-                {item.shortcut && (
-                  <span class="sigil-context-menu__shortcut">
-                    {item.shortcut}
-                  </span>
-                )}
+                {item.shortcut && <span class="sigil-context-menu__shortcut">{item.shortcut}</span>}
               </KobalteContextMenu.Item>
             )}
           </For>

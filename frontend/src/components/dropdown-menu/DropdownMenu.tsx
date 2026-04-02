@@ -43,9 +43,7 @@ export function DropdownMenu(props: DropdownMenuProps) {
               >
                 <span>{item.label}</span>
                 {item.shortcut && (
-                  <span class="sigil-dropdown-menu__shortcut">
-                    {item.shortcut}
-                  </span>
+                  <span class="sigil-dropdown-menu__shortcut">{item.shortcut}</span>
                 )}
               </KobalteDropdownMenu.Item>
             )}

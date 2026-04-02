@@ -53,9 +53,7 @@ describe("Toast", () => {
     it("should accept each variant without throwing", () => {
       const variants = ["info", "success", "error", "warning"] as const;
       for (const variant of variants) {
-        expect(() =>
-          showToast({ title: `${variant} toast`, variant }),
-        ).not.toThrow();
+        expect(() => showToast({ title: `${variant} toast`, variant })).not.toThrow();
       }
     });
   });

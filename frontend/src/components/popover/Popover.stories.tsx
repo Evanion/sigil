@@ -31,9 +31,7 @@ export const Top: Story = {
   render: () => (
     <div style={{ "padding-top": "120px" }}>
       <Popover trigger={<Button>Top Popover</Button>} placement="top">
-        <p style={{ margin: "0", color: "var(--text-1)" }}>
-          Popover placed above the trigger.
-        </p>
+        <p style={{ margin: "0", color: "var(--text-1)" }}>Popover placed above the trigger.</p>
       </Popover>
     </div>
   ),
@@ -43,9 +41,7 @@ export const Left: Story = {
   render: () => (
     <div style={{ "padding-left": "240px" }}>
       <Popover trigger={<Button>Left Popover</Button>} placement="left">
-        <p style={{ margin: "0", color: "var(--text-1)" }}>
-          Popover placed to the left.
-        </p>
+        <p style={{ margin: "0", color: "var(--text-1)" }}>Popover placed to the left.</p>
       </Popover>
     </div>
   ),
@@ -54,9 +50,7 @@ export const Left: Story = {
 export const Right: Story = {
   render: () => (
     <Popover trigger={<Button>Right Popover</Button>} placement="right">
-      <p style={{ margin: "0", color: "var(--text-1)" }}>
-        Popover placed to the right.
-      </p>
+      <p style={{ margin: "0", color: "var(--text-1)" }}>Popover placed to the right.</p>
     </Popover>
   ),
 };
