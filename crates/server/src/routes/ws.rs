@@ -68,7 +68,7 @@ pub enum ServerMessage {
 ///
 /// When `SIGIL_DEV_CORS` is set, all origins are accepted (development mode).
 /// Otherwise, only `localhost` origins (any port, http or https) are permitted.
-fn is_allowed_origin(origin: &str) -> bool {
+pub(crate) fn is_allowed_origin(origin: &str) -> bool {
     if std::env::var("SIGIL_DEV_CORS").is_ok() {
         return true;
     }

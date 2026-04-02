@@ -10,9 +10,10 @@
 //! 5. Read old state for undo
 //! 6. Construct the appropriate `Command` struct from core
 //! 7. Call `doc_guard.execute(Box::new(cmd))`
-//! 8. Drop the lock
-//! 9. Signal dirty for persistence
-//! 10. Return the result
+//! 8. Build the GraphQL response INSIDE the lock scope (RF-005)
+//! 9. Drop the lock
+//! 10. Signal dirty for persistence
+//! 11. Publish event and return result
 
 use async_graphql::{Context, Json, Object, Result};
 
@@ -23,9 +24,19 @@ use agent_designer_core::commands::style_commands::SetTransform;
 use agent_designer_core::node::Transform;
 use agent_designer_core::{NodeId, NodeKind, PageId};
 
-use crate::state::AppState;
+use crate::state::{AppState, BroadcastEnvelope, BroadcastPayload};
 
-use super::types::{CreateNodeResult, DocumentEvent, NodeGql, UndoRedoResult};
+use super::types::{
+    node_to_gql, CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult,
+};
+
+/// Dedicated sender ID for mutations originating from GraphQL.
+///
+/// GraphQL mutations are not associated with a specific WebSocket client, so
+/// we use a reserved ID that will never collide with real client IDs (which
+/// start at 0 and increment). This ensures WS clients always receive the
+/// broadcast and never filter it as self-originated.
+const GRAPHQL_SENDER_ID: u64 = u64::MAX;
 
 pub struct MutationRoot;
 
@@ -42,51 +53,6 @@ fn acquire_document_lock(
     }
 }
 
-/// Reads a node from the arena and converts it to a `NodeGql` representation.
-///
-/// Requires that the node has already been verified to exist. Returns a
-/// sanitized GraphQL error if any lookup fails.
-fn node_to_gql(
-    doc: &agent_designer_core::Document,
-    node_id: NodeId,
-    node_uuid: uuid::Uuid,
-) -> Result<NodeGql> {
-    let node = doc
-        .arena
-        .get(node_id)
-        .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
-
-    // Resolve parent UUID
-    let parent_uuid = match node.parent {
-        Some(pid) => doc.arena.uuid_of(pid).ok().map(|u| u.to_string()),
-        None => None,
-    };
-
-    // Resolve children UUIDs
-    let children_uuids: Vec<String> = node
-        .children
-        .iter()
-        .filter_map(|cid| doc.arena.uuid_of(*cid).ok())
-        .map(|u| u.to_string())
-        .collect();
-
-    let kind_json = serde_json::to_value(&node.kind).unwrap_or_default();
-    let transform_json = serde_json::to_value(node.transform).unwrap_or_default();
-    let style_json = serde_json::to_value(&node.style).unwrap_or_default();
-
-    Ok(NodeGql {
-        uuid: node_uuid.to_string(),
-        name: node.name.clone(),
-        kind: async_graphql::Json(kind_json),
-        parent: parent_uuid,
-        children: children_uuids,
-        transform: async_graphql::Json(transform_json),
-        style: async_graphql::Json(style_json),
-        visible: node.visible,
-        locked: node.locked,
-    })
-}
-
 /// Publishes a [`DocumentEvent`] to the GraphQL subscription broadcast channel.
 ///
 /// If no subscription clients are listening the send will fail silently -- this
@@ -94,6 +60,34 @@ fn node_to_gql(
 pub fn publish_event(state: &AppState, event: DocumentEvent) {
     if state.graphql_tx.send(event).is_err() {
         tracing::debug!("no GraphQL subscription listeners");
+    }
+}
+
+/// RF-003: Publishes a document-changed envelope to the WS broadcast channel
+/// so that legacy WebSocket clients see changes made via GraphQL mutations.
+///
+/// Uses [`GRAPHQL_SENDER_ID`] so no WS client filters this as self-originated.
+fn publish_ws_document_changed(state: &AppState) {
+    let doc_guard = match state.document.lock() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            tracing::error!("document mutex poisoned in publish_ws_document_changed");
+            poisoned.into_inner()
+        }
+    };
+    let can_undo = doc_guard.can_undo();
+    let can_redo = doc_guard.can_redo();
+    drop(doc_guard);
+
+    if state
+        .broadcast_tx
+        .send(BroadcastEnvelope {
+            sender_id: GRAPHQL_SENDER_ID,
+            payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
+        })
+        .is_err()
+    {
+        tracing::debug!("no WS broadcast receivers connected");
     }
 }
 
@@ -154,32 +148,33 @@ impl MutationRoot {
             initial_transform,
         };
 
-        {
+        // RF-005: build the response inside the lock scope to avoid TOCTOU
+        let node_gql = {
             let mut doc_guard = acquire_document_lock(state);
             doc_guard.execute(Box::new(cmd)).map_err(|e| {
                 tracing::warn!("createNode failed: {e}");
                 async_graphql::Error::new("node creation failed")
             })?;
-        }
+
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&node_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node created but UUID not found"))?;
+
+            node_to_gql(&doc_guard, node_id, node_uuid)?
+        };
 
         state.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_created".to_string(),
+                event_type: DocumentEventType::NodeCreated,
                 uuid: Some(node_uuid.to_string()),
                 data: None,
+                sender_id: None,
             },
         );
-
-        // Re-acquire lock to read the created node
-        let doc_guard = acquire_document_lock(state);
-        let node_id = doc_guard
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| async_graphql::Error::new("node created but UUID not found"))?;
-
-        let node_gql = node_to_gql(&doc_guard, node_id, node_uuid)?;
+        publish_ws_document_changed(state);
 
         Ok(CreateNodeResult {
             uuid: node_uuid.to_string(),
@@ -249,11 +244,13 @@ impl MutationRoot {
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_deleted".to_string(),
+                event_type: DocumentEventType::NodeDeleted,
                 uuid: Some(parsed_uuid.to_string()),
                 data: None,
+                sender_id: None,
             },
         );
+        publish_ws_document_changed(state);
 
         Ok(true)
     }
@@ -270,7 +267,8 @@ impl MutationRoot {
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
 
-        {
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
             let mut doc_guard = acquire_document_lock(state);
             let node_id = doc_guard
                 .arena
@@ -294,26 +292,23 @@ impl MutationRoot {
                 tracing::warn!("renameNode failed: {e}");
                 async_graphql::Error::new("rename failed")
             })?;
-        }
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
 
         state.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_updated".to_string(),
+                event_type: DocumentEventType::NodeUpdated,
                 uuid: Some(parsed_uuid.to_string()),
                 data: Some(async_graphql::Json(serde_json::json!({"field": "name"}))),
+                sender_id: None,
             },
         );
+        publish_ws_document_changed(state);
 
-        // Re-acquire lock to read the updated node
-        let doc_guard = acquire_document_lock(state);
-        let node_id = doc_guard
-            .arena
-            .id_by_uuid(&parsed_uuid)
-            .ok_or_else(|| async_graphql::Error::new("node not found after rename"))?;
-
-        node_to_gql(&doc_guard, node_id, parsed_uuid)
+        Ok(node_gql)
     }
 
     /// Set the transform of a node by UUID.
@@ -333,7 +328,8 @@ impl MutationRoot {
             async_graphql::Error::new("invalid transform")
         })?;
 
-        {
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
             let mut doc_guard = acquire_document_lock(state);
             let node_id = doc_guard
                 .arena
@@ -356,27 +352,25 @@ impl MutationRoot {
                 tracing::warn!("setTransform failed: {e}");
                 async_graphql::Error::new("set transform failed")
             })?;
-        }
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
 
         state.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_updated".to_string(),
+                event_type: DocumentEventType::NodeUpdated,
                 uuid: Some(parsed_uuid.to_string()),
                 data: Some(async_graphql::Json(
                     serde_json::json!({"field": "transform"}),
                 )),
+                sender_id: None,
             },
         );
+        publish_ws_document_changed(state);
 
-        let doc_guard = acquire_document_lock(state);
-        let node_id = doc_guard
-            .arena
-            .id_by_uuid(&parsed_uuid)
-            .ok_or_else(|| async_graphql::Error::new("node not found after transform"))?;
-
-        node_to_gql(&doc_guard, node_id, parsed_uuid)
+        Ok(node_gql)
     }
 
     /// Set the visibility of a node by UUID.
@@ -386,7 +380,8 @@ impl MutationRoot {
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
 
-        {
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
             let mut doc_guard = acquire_document_lock(state);
             let node_id = doc_guard
                 .arena
@@ -409,25 +404,23 @@ impl MutationRoot {
                 tracing::warn!("setVisible failed: {e}");
                 async_graphql::Error::new("set visible failed")
             })?;
-        }
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
 
         state.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_updated".to_string(),
+                event_type: DocumentEventType::NodeUpdated,
                 uuid: Some(parsed_uuid.to_string()),
                 data: Some(async_graphql::Json(serde_json::json!({"field": "visible"}))),
+                sender_id: None,
             },
         );
+        publish_ws_document_changed(state);
 
-        let doc_guard = acquire_document_lock(state);
-        let node_id = doc_guard
-            .arena
-            .id_by_uuid(&parsed_uuid)
-            .ok_or_else(|| async_graphql::Error::new("node not found after setVisible"))?;
-
-        node_to_gql(&doc_guard, node_id, parsed_uuid)
+        Ok(node_gql)
     }
 
     /// Set the locked state of a node by UUID.
@@ -437,7 +430,8 @@ impl MutationRoot {
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
 
-        {
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
             let mut doc_guard = acquire_document_lock(state);
             let node_id = doc_guard
                 .arena
@@ -460,25 +454,23 @@ impl MutationRoot {
                 tracing::warn!("setLocked failed: {e}");
                 async_graphql::Error::new("set locked failed")
             })?;
-        }
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
 
         state.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
-                event_type: "node_updated".to_string(),
+                event_type: DocumentEventType::NodeUpdated,
                 uuid: Some(parsed_uuid.to_string()),
                 data: Some(async_graphql::Json(serde_json::json!({"field": "locked"}))),
+                sender_id: None,
             },
         );
+        publish_ws_document_changed(state);
 
-        let doc_guard = acquire_document_lock(state);
-        let node_id = doc_guard
-            .arena
-            .id_by_uuid(&parsed_uuid)
-            .ok_or_else(|| async_graphql::Error::new("node not found after setLocked"))?;
-
-        node_to_gql(&doc_guard, node_id, parsed_uuid)
+        Ok(node_gql)
     }
 
     /// Undo the last command.
@@ -498,13 +490,25 @@ impl MutationRoot {
         publish_event(
             state,
             DocumentEvent {
-                event_type: "undo_redo".to_string(),
+                event_type: DocumentEventType::UndoRedo,
                 uuid: None,
                 data: Some(async_graphql::Json(
                     serde_json::json!({"can_undo": can_undo, "can_redo": can_redo}),
                 )),
+                sender_id: None,
             },
         );
+        // RF-003: Also broadcast to WS clients.
+        if state
+            .broadcast_tx
+            .send(BroadcastEnvelope {
+                sender_id: GRAPHQL_SENDER_ID,
+                payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
+            })
+            .is_err()
+        {
+            tracing::debug!("no WS broadcast receivers connected");
+        }
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
@@ -526,13 +530,25 @@ impl MutationRoot {
         publish_event(
             state,
             DocumentEvent {
-                event_type: "undo_redo".to_string(),
+                event_type: DocumentEventType::UndoRedo,
                 uuid: None,
                 data: Some(async_graphql::Json(
                     serde_json::json!({"can_undo": can_undo, "can_redo": can_redo}),
                 )),
+                sender_id: None,
             },
         );
+        // RF-003: Also broadcast to WS clients.
+        if state
+            .broadcast_tx
+            .send(BroadcastEnvelope {
+                sender_id: GRAPHQL_SENDER_ID,
+                payload: BroadcastPayload::DocumentChanged { can_undo, can_redo },
+            })
+            .is_err()
+        {
+            tracing::debug!("no WS broadcast receivers connected");
+        }
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }

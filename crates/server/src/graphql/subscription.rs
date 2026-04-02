@@ -35,6 +35,7 @@ impl SubscriptionRoot {
 mod tests {
     use super::*;
     use crate::graphql::mutation::publish_event;
+    use crate::graphql::types::DocumentEventType;
 
     #[tokio::test]
     async fn test_publish_event_delivers_to_subscriber() {
@@ -42,15 +43,16 @@ mod tests {
         let mut rx = state.graphql_tx.subscribe();
 
         let event = DocumentEvent {
-            event_type: "node_created".to_string(),
+            event_type: DocumentEventType::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
+            sender_id: None,
         };
 
         publish_event(&state, event);
 
         let received = rx.recv().await.expect("should receive event");
-        assert_eq!(received.event_type, "node_created");
+        assert_eq!(received.event_type, DocumentEventType::NodeCreated);
         assert_eq!(received.uuid.as_deref(), Some("abc-123"));
         assert!(received.data.is_none());
     }
@@ -60,9 +62,10 @@ mod tests {
         let state = AppState::new();
         // No subscribers — publish_event should not panic.
         let event = DocumentEvent {
-            event_type: "node_deleted".to_string(),
+            event_type: DocumentEventType::NodeDeleted,
             uuid: Some("def-456".to_string()),
             data: None,
+            sender_id: None,
         };
         publish_event(&state, event);
     }
@@ -74,19 +77,20 @@ mod tests {
         let mut rx2 = state.graphql_tx.subscribe();
 
         let event = DocumentEvent {
-            event_type: "node_updated".to_string(),
+            event_type: DocumentEventType::NodeUpdated,
             uuid: Some("ghi-789".to_string()),
             data: Some(async_graphql::Json(
                 serde_json::json!({"field": "transform"}),
             )),
+            sender_id: None,
         };
 
         publish_event(&state, event);
 
         let r1 = rx1.recv().await.expect("subscriber 1 should receive");
         let r2 = rx2.recv().await.expect("subscriber 2 should receive");
-        assert_eq!(r1.event_type, "node_updated");
-        assert_eq!(r2.event_type, "node_updated");
+        assert_eq!(r1.event_type, DocumentEventType::NodeUpdated);
+        assert_eq!(r2.event_type, DocumentEventType::NodeUpdated);
         assert_eq!(r1.uuid, r2.uuid);
     }
 
@@ -102,36 +106,47 @@ mod tests {
         let state = AppState::new();
         let mut rx = state.graphql_tx.subscribe();
 
-        for i in 0..5 {
+        let event_types = [
+            DocumentEventType::NodeCreated,
+            DocumentEventType::NodeUpdated,
+            DocumentEventType::NodeDeleted,
+            DocumentEventType::UndoRedo,
+            DocumentEventType::NodeCreated,
+        ];
+
+        for event_type in &event_types {
             publish_event(
                 &state,
                 DocumentEvent {
-                    event_type: format!("event_{i}"),
+                    event_type: *event_type,
                     uuid: None,
                     data: None,
+                    sender_id: None,
                 },
             );
         }
 
-        for i in 0..5 {
+        for event_type in &event_types {
             let received = rx.recv().await.expect("should receive event");
-            assert_eq!(received.event_type, format!("event_{i}"));
+            assert_eq!(received.event_type, *event_type);
         }
     }
 
     #[tokio::test]
     async fn test_document_event_clone_preserves_fields() {
         let event = DocumentEvent {
-            event_type: "undo_redo".to_string(),
+            event_type: DocumentEventType::UndoRedo,
             uuid: None,
             data: Some(async_graphql::Json(
                 serde_json::json!({"can_undo": true, "can_redo": false}),
             )),
+            sender_id: Some(42),
         };
 
         let cloned = event.clone();
-        assert_eq!(cloned.event_type, "undo_redo");
+        assert_eq!(cloned.event_type, DocumentEventType::UndoRedo);
         assert!(cloned.uuid.is_none());
         assert!(cloned.data.is_some());
+        assert_eq!(cloned.sender_id, Some(42));
     }
 }
