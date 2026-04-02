@@ -38,7 +38,9 @@ Before committing changes to `.github/workflows/`, verify:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions
+**MANDATORY — do this FIRST, before making any changes:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Identify all rules that apply to the files you are about to modify — CI reproducibility, version pinning, and other conventions are spread across multiple sections.
 2. Read the relevant spec in `docs/superpowers/specs/`
 3. Verify `docker build .` works before making changes
 4. Use `./dev.sh` prefix for all commands — it routes to the dev container from the host

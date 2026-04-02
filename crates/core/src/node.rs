@@ -4,19 +4,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::component::OverrideValue;
 use crate::id::{ComponentId, NodeId};
 
 // Re-export path types for backwards compatibility
 pub use crate::path::{FillRule, PathData};
 
-// ── Forward declarations / stubs for Plan 01d types ────────────────────
-
-/// Stub for the override map used in component instances.
-/// Plan 01d will replace this with a full implementation.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct OverrideMap {
-    pub entries: HashMap<String, serde_json::Value>,
-}
+// Re-export OverrideMap from the component module (replaces the former stub).
+pub use crate::component::OverrideMap;
 
 /// Layout mode for a frame's children.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -558,12 +553,14 @@ pub enum NodeKind {
     Group,
     ComponentInstance {
         component_id: ComponentId,
+        variant: Option<String>,
         overrides: OverrideMap,
+        property_values: HashMap<String, OverrideValue>,
     },
 }
 
 /// A node in the design document.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Node {
     pub id: NodeId,
     pub uuid: Uuid,
@@ -615,6 +612,43 @@ impl Node {
     }
 }
 
+impl<'de> Deserialize<'de> for Node {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct NodeRaw {
+            id: NodeId,
+            uuid: Uuid,
+            kind: NodeKind,
+            name: String,
+            parent: Option<NodeId>,
+            children: Vec<NodeId>,
+            transform: Transform,
+            style: Style,
+            constraints: Constraints,
+            grid_placement: Option<GridPlacement>,
+            visible: bool,
+            locked: bool,
+        }
+        let raw = NodeRaw::deserialize(deserializer)?;
+        crate::validate::validate_node_name(&raw.name).map_err(serde::de::Error::custom)?;
+        validate_node_kind(&raw.kind).map_err(serde::de::Error::custom)?;
+        Ok(Node {
+            id: raw.id,
+            uuid: raw.uuid,
+            kind: raw.kind,
+            name: raw.name,
+            parent: raw.parent,
+            children: raw.children,
+            transform: raw.transform,
+            style: raw.style,
+            constraints: raw.constraints,
+            grid_placement: raw.grid_placement,
+            visible: raw.visible,
+            locked: raw.locked,
+        })
+    }
+}
+
 /// Validates kind-specific invariants for a `NodeKind`.
 ///
 /// Called from `Node::new` to ensure all node kinds pass validation
@@ -622,7 +656,7 @@ impl Node {
 ///
 /// # Errors
 /// Returns `CoreError::ValidationError` if any kind-specific validation fails.
-fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
+pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
     use crate::validate::{
         MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MIN_FONT_WEIGHT, validate_finite,
         validate_text_content,
@@ -674,6 +708,23 @@ fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
             layout: Some(LayoutMode::Grid(grid)),
         } => {
             validate_grid_layout(grid)?;
+        }
+        NodeKind::ComponentInstance {
+            variant,
+            property_values,
+            ..
+        } => {
+            if let Some(v) = variant {
+                crate::validate::validate_node_name(v)?;
+            }
+            crate::validate::validate_collection_size(
+                "property_values",
+                property_values.len(),
+                crate::validate::MAX_PROPERTIES_PER_COMPONENT,
+            )?;
+            for key in property_values.keys() {
+                crate::validate::validate_node_name(key)?;
+            }
         }
         _ => {}
     }
@@ -905,7 +956,9 @@ mod tests {
             uuid,
             NodeKind::ComponentInstance {
                 component_id,
+                variant: None,
                 overrides: OverrideMap::default(),
+                property_values: HashMap::new(),
             },
             "Instance 1".to_string(),
         )
@@ -913,13 +966,133 @@ mod tests {
         match &node.kind {
             NodeKind::ComponentInstance {
                 component_id: cid,
+                variant,
                 overrides,
+                property_values,
             } => {
                 assert_eq!(*cid, component_id);
-                assert!(overrides.entries.is_empty());
+                assert!(variant.is_none());
+                assert!(overrides.is_empty());
+                assert!(property_values.is_empty());
             }
             other => panic!("expected ComponentInstance, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn test_component_instance_with_variant() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some("Hover".to_string()),
+                overrides: OverrideMap::new(),
+                property_values: HashMap::new(),
+            },
+            "Button 1".to_string(),
+        )
+        .expect("valid");
+        match &node.kind {
+            NodeKind::ComponentInstance { variant, .. } => {
+                assert_eq!(variant.as_deref(), Some("Hover"));
+            }
+            other => panic!("expected ComponentInstance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_component_instance_with_property_values() {
+        let mut props = HashMap::new();
+        props.insert(
+            "label".to_string(),
+            OverrideValue::String {
+                value: "Click".to_string(),
+            },
+        );
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Button 1".to_string(),
+        )
+        .expect("valid");
+        match &node.kind {
+            NodeKind::ComponentInstance {
+                property_values, ..
+            } => {
+                assert_eq!(property_values.len(), 1);
+            }
+            other => panic!("expected ComponentInstance, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_component_instance_invalid_variant_name_rejected() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some(String::new()),
+                overrides: OverrideMap::new(),
+                property_values: HashMap::new(),
+            },
+            "Instance".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_instance_invalid_property_key_rejected() {
+        let mut props = HashMap::new();
+        props.insert(String::new(), OverrideValue::Bool { value: true });
+
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_component_instance_serde_round_trip() {
+        let mut props = HashMap::new();
+        props.insert(
+            "label".to_string(),
+            OverrideValue::String {
+                value: "Hi".to_string(),
+            },
+        );
+
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: Some("Active".to_string()),
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
+        )
+        .expect("valid");
+        let json = serde_json::to_string(&node).expect("serialize");
+        let deserialized: Node = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(node, deserialized);
     }
 
     // ── Transform ──────────────────────────────────────────────────────
@@ -1771,6 +1944,96 @@ mod tests {
                 })),
             },
             "Frame".to_string(),
+        );
+        assert!(result.is_err());
+    }
+
+    // ── RF-001: Node deserialization validates via Node::new logic ───
+
+    #[test]
+    fn test_node_deserialize_rejects_empty_name() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Group,
+            "Valid".to_string(),
+        )
+        .expect("create node");
+        let mut json: serde_json::Value = serde_json::to_value(&node).expect("serialize");
+        json["name"] = serde_json::json!("");
+        let result: Result<Node, _> = serde_json::from_value(json);
+        assert!(
+            result.is_err(),
+            "empty name should be rejected on deserialize"
+        );
+    }
+
+    #[test]
+    fn test_node_deserialize_rejects_invalid_asset_ref() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Image {
+                asset_ref: "valid/path.png".to_string(),
+            },
+            "Img".to_string(),
+        )
+        .expect("create node");
+        let mut json: serde_json::Value = serde_json::to_value(&node).expect("serialize");
+        json["kind"]["asset_ref"] = serde_json::json!("/absolute/path.png");
+        let result: Result<Node, _> = serde_json::from_value(json);
+        assert!(
+            result.is_err(),
+            "absolute asset_ref should be rejected on deserialize"
+        );
+    }
+
+    #[test]
+    fn test_node_deserialize_rejects_negative_corner_radius() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Rectangle {
+                corner_radii: [4.0, 4.0, 4.0, 4.0],
+            },
+            "Rect".to_string(),
+        )
+        .expect("create node");
+        let mut json: serde_json::Value = serde_json::to_value(&node).expect("serialize");
+        json["kind"]["corner_radii"] = serde_json::json!([-1.0, 0.0, 0.0, 0.0]);
+        let result: Result<Node, _> = serde_json::from_value(json);
+        assert!(
+            result.is_err(),
+            "negative corner radius should be rejected on deserialize"
+        );
+    }
+
+    // ── RF-004: property_values size limit in validate_node_kind ─────
+
+    #[test]
+    fn test_component_instance_rejects_too_many_property_values() {
+        use crate::component::OverrideValue;
+        use crate::id::ComponentId;
+
+        let mut props = HashMap::new();
+        for i in 0..=crate::validate::MAX_PROPERTIES_PER_COMPONENT {
+            props.insert(
+                format!("prop{i}"),
+                OverrideValue::String {
+                    value: "v".to_string(),
+                },
+            );
+        }
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::ComponentInstance {
+                component_id: ComponentId::new(Uuid::nil()),
+                variant: None,
+                overrides: OverrideMap::new(),
+                property_values: props,
+            },
+            "Instance".to_string(),
         );
         assert!(result.is_err());
     }

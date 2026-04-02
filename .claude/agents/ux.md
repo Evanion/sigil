@@ -30,6 +30,8 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions
+**MANDATORY — do this FIRST:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution — it contains UX consistency requirements (Section 1) that directly inform your review.
 2. Read the PDR overview to understand the product vision
 3. Consider both human and agent workflows — the tool serves both equally

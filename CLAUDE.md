@@ -272,6 +272,8 @@ When validation rules are added or changed in `validate.rs` (or equivalent), the
 - Every field validated in `validate.rs` must also be validated during deserialization.
 - When adding a new validation rule, search for all `deserialize_*` and `from_json` functions and update them.
 
+Custom `Deserialize` implementations MUST reject duplicate keys in map/struct inputs. Serde's default behavior silently resolves duplicates via last-writer-wins, which can mask data corruption. When implementing custom deserializers that collect into maps, track seen keys and return an error on the first duplicate.
+
 ### Arena Operations Must Preserve Identity on Undo
 
 When using generational arenas, removing and re-inserting an entity produces a NEW key. Any operation that needs to restore a previous state (undo, rollback) MUST use `reinsert(key, value)` or equivalent to preserve the original key. Never use `insert()` in an undo path for arena-managed entities — this silently breaks all external references to that entity.
@@ -311,3 +313,7 @@ Every `MAX_*` or `LIMIT_*` constant MUST have at least one test that verifies en
 ### Arena-Local IDs Must Not Be Serialized
 
 Types that represent arena indices or generational IDs (e.g., `NodeId`) MUST NOT appear in serialized or persisted data formats. Serialized document formats MUST use stable, globally-unique identifiers (UUIDs). Arena-keyed types must be mapped to their stable ID at the serialization boundary. Arena indices are meaningless outside a running session — serializing them produces corrupt references on reload.
+
+### Uniqueness Constraints on Named Collections
+
+When a collection contains entities with a name or identifier field that must be unique within that collection (e.g., component names in a document, property names in a component, variant names in a component), the insertion point MUST reject duplicates with a typed error. Do not rely on the collection type (HashMap vs Vec) to enforce this implicitly — validate explicitly and return an error that identifies the conflicting name.

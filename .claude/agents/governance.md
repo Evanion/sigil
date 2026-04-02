@@ -34,6 +34,8 @@ You modify `CLAUDE.md`, files in `.claude/agents/`, and documentation. You do no
 
 ## Before You Start
 
-1. Read current `CLAUDE.md` to avoid duplicating existing rules
+**MANDATORY — do this FIRST:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. You must know every existing rule before proposing new ones — duplicates waste governance budget and dilute enforcement.
 2. Read all agent prompts in `.claude/agents/` to understand current guidance
 3. Read the review findings you've been given

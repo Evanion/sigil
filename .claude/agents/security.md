@@ -83,6 +83,7 @@ For every deserialization entry point:
 - For every `f32`/`f64` field in a deserialized type, verify NaN/infinity rejection exists at the deserialization boundary.
 - For every `#[derive(Deserialize)]` in `crates/core/`, verify the type has no validating constructor. If it does, the derive must be replaced with a custom impl.
 - For every `MAX_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.
+- For every custom `Deserialize` that collects into a map, verify duplicate keys are rejected (serde default is silent last-writer-wins).
 
 ## Output Format
 
@@ -95,7 +96,9 @@ For each finding, report:
 
 ## Before You Start
 
-1. Read `CLAUDE.md` for project conventions — especially Section 10 (Spec Authoring Requirements)
+**MANDATORY — do this FIRST, before any review work:**
+
+1. **Read `CLAUDE.md` in full** using the Read tool. This is the project constitution. Every section contains security-relevant rules — not just Section 11. Validation rules, crate boundaries, testing standards, defensive coding — all sections inform your review.
 2. Read the relevant spec to understand intended behavior
 3. Focus on high-confidence findings — do not report speculative or low-probability issues
 4. For every new data type in the spec, ask: "What happens if this is maxed out, empty, cyclic, or malformed?"
