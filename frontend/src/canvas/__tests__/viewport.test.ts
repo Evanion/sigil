@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  createViewport,
-  screenToWorld,
-  worldToScreen,
-  zoomAt,
-  type Viewport,
-} from "../viewport";
+import { createViewport, screenToWorld, worldToScreen, zoomAt, type Viewport } from "../viewport";
 
 describe("createViewport", () => {
   it("should return default viewport at origin with zoom 1", () => {

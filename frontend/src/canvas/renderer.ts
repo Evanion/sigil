@@ -71,15 +71,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode): void {
     case "ellipse": {
       ctx.fillStyle = resolveFillColor(node);
       ctx.beginPath();
-      ctx.ellipse(
-        x + width / 2,
-        y + height / 2,
-        width / 2,
-        height / 2,
-        0,
-        0,
-        Math.PI * 2,
-      );
+      ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       break;
     }
@@ -122,15 +114,7 @@ function drawSelectionHighlight(
 
   if (node.kind.type === "ellipse") {
     ctx.beginPath();
-    ctx.ellipse(
-      x + width / 2,
-      y + height / 2,
-      width / 2,
-      height / 2,
-      0,
-      0,
-      Math.PI * 2,
-    );
+    ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
     ctx.stroke();
   } else {
     ctx.strokeRect(x, y, width, height);
@@ -142,11 +126,7 @@ function drawSelectionHighlight(
  *
  * Label is rendered in screen-space size so it does not scale with zoom.
  */
-function drawNameLabel(
-  ctx: CanvasRenderingContext2D,
-  node: DocumentNode,
-  zoom: number,
-): void {
+function drawNameLabel(ctx: CanvasRenderingContext2D, node: DocumentNode, zoom: number): void {
   const { x, y } = node.transform;
   const fontSize = LABEL_FONT_SIZE / zoom;
 

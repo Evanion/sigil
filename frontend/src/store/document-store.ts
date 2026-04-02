@@ -138,9 +138,7 @@ export function createDocumentStore(wsClient: WebSocketClient): DocumentStore {
 
   // Wire up WebSocket handlers
   const unsubscribeMessage = wsClient.onMessage(handleServerMessage);
-  const unsubscribeConnection = wsClient.onConnectionChange(
-    handleConnectionChange,
-  );
+  const unsubscribeConnection = wsClient.onConnectionChange(handleConnectionChange);
 
   return {
     getInfo(): DocumentInfo | null {

@@ -30,11 +30,7 @@ export function createViewport(): Viewport {
  *
  * worldX = (screenX - offsetX) / zoom
  */
-export function screenToWorld(
-  vp: Viewport,
-  sx: number,
-  sy: number,
-): [number, number] {
+export function screenToWorld(vp: Viewport, sx: number, sy: number): [number, number] {
   return [(sx - vp.x) / vp.zoom, (sy - vp.y) / vp.zoom];
 }
 
@@ -43,11 +39,7 @@ export function screenToWorld(
  *
  * screenX = worldX * zoom + offsetX
  */
-export function worldToScreen(
-  vp: Viewport,
-  wx: number,
-  wy: number,
-): [number, number] {
+export function worldToScreen(vp: Viewport, wx: number, wy: number): [number, number] {
   return [wx * vp.zoom + vp.x, wy * vp.zoom + vp.y];
 }
 
@@ -56,10 +48,7 @@ export function worldToScreen(
  *
  * After calling this, draw operations use world coordinates.
  */
-export function applyViewport(
-  ctx: CanvasRenderingContext2D,
-  vp: Viewport,
-): void {
+export function applyViewport(ctx: CanvasRenderingContext2D, vp: Viewport): void {
   ctx.setTransform(vp.zoom, 0, 0, vp.zoom, vp.x, vp.y);
 }
 
@@ -70,12 +59,7 @@ export function applyViewport(
  * Delta > 0 zooms in, delta < 0 zooms out.
  * Zoom is clamped to [0.1, 10].
  */
-export function zoomAt(
-  vp: Viewport,
-  sx: number,
-  sy: number,
-  delta: number,
-): Viewport {
+export function zoomAt(vp: Viewport, sx: number, sy: number, delta: number): Viewport {
   const factor = Math.exp(delta * ZOOM_SENSITIVITY);
   const newZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, vp.zoom * factor));
 
