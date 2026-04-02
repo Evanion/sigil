@@ -310,12 +310,21 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
     use crate::validate::{
         MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
-        MAX_GRADIENT_STOPS, MAX_STROKES_PER_STYLE, MAX_TEXT_CONTENT_LEN, validate_asset_ref,
-        validate_collection_size, validate_node_name,
+        MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
+        MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT,
+        validate_asset_ref, validate_collection_size, validate_floats_in_value,
+        validate_node_name,
     };
 
     // Validate page name
     validate_node_name(&page.name)?;
+
+    // Validate transition count
+    validate_collection_size(
+        "transitions",
+        page.transitions.len(),
+        MAX_TRANSITIONS_PER_DOCUMENT,
+    )?;
 
     for node in &page.nodes {
         validate_node_name(&node.name)?;
@@ -367,6 +376,26 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         // Validate token ref names in style values
         validate_token_refs_in_value(&node.style)?;
         validate_token_refs_in_value(&node.kind)?;
+
+        // RF-003: Validate all float values are finite (no NaN/Infinity)
+        validate_floats_in_value(&node.transform)?;
+        validate_floats_in_value(&node.style)?;
+        validate_floats_in_value(&node.kind)?;
+
+        // Validate path subpaths and segments counts
+        if node.kind.get("type").and_then(|v| v.as_str()) == Some("path")
+            && let Some(path_data) = node.kind.get("path_data")
+        {
+            validate_path_data_limits(path_data, MAX_SUBPATHS_PER_PATH, MAX_SEGMENTS_PER_SUBPATH)?;
+        }
+
+        // Validate grid track counts and values for frame nodes with grid layout
+        if node.kind.get("type").and_then(|v| v.as_str()) == Some("frame")
+            && let Some(layout) = node.kind.get("layout")
+            && layout.get("mode").and_then(|v| v.as_str()) == Some("grid")
+        {
+            validate_grid_layout_limits(layout, MAX_GRID_TRACKS)?;
+        }
     }
 
     Ok(())
@@ -455,6 +484,63 @@ fn validate_gradient_stops_in_value(
                 }
             }
             _ => {}
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates path data collection limits from a `serde_json::Value`.
+///
+/// Checks that the number of subpaths does not exceed `max_subpaths` and
+/// each subpath's segment count does not exceed `max_segments`.
+fn validate_path_data_limits(
+    path_data: &serde_json::Value,
+    max_subpaths: usize,
+    max_segments: usize,
+) -> Result<(), CoreError> {
+    use crate::validate::validate_collection_size;
+
+    if let Some(subpaths) = path_data.get("subpaths").and_then(|v| v.as_array()) {
+        validate_collection_size("subpaths", subpaths.len(), max_subpaths)?;
+
+        for (i, subpath) in subpaths.iter().enumerate() {
+            if let Some(segments) = subpath.get("segments").and_then(|v| v.as_array()) {
+                validate_collection_size(
+                    &format!("subpath[{i}].segments"),
+                    segments.len(),
+                    max_segments,
+                )?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Validates grid layout track counts and individual track values from a `serde_json::Value`.
+///
+/// Checks that column and row track arrays do not exceed `max_tracks` and
+/// that each track value passes `validate_grid_track`.
+fn validate_grid_layout_limits(
+    layout: &serde_json::Value,
+    max_tracks: usize,
+) -> Result<(), CoreError> {
+    use crate::node::GridTrack;
+    use crate::validate::{validate_collection_size, validate_grid_track};
+
+    for field_name in &["columns", "rows"] {
+        if let Some(tracks_arr) = layout.get(*field_name).and_then(|v| v.as_array()) {
+            validate_collection_size(field_name, tracks_arr.len(), max_tracks)?;
+
+            for (i, track_val) in tracks_arr.iter().enumerate() {
+                let track: GridTrack = serde_json::from_value(track_val.clone()).map_err(|e| {
+                    CoreError::SerializationError(format!(
+                        "invalid grid track at {field_name}[{i}]: {e}"
+                    ))
+                })?;
+                validate_grid_track(&track)?;
+            }
         }
     }
 
@@ -958,5 +1044,248 @@ mod tests {
             deserialized.transitions[0].target_node,
             Some(make_uuid(11))
         );
+    }
+
+    // ── RF-002: Transition count limit ──────────────────────────────────
+
+    #[test]
+    fn test_deserialize_rejects_too_many_transitions() {
+        use crate::validate::MAX_TRANSITIONS_PER_DOCUMENT;
+
+        let transitions_json: Vec<String> = (0..MAX_TRANSITIONS_PER_DOCUMENT + 1)
+            .map(|i| {
+                format!(
+                    r#"{{"id": "{}", "source_node": "{}", "target_page": "{}", "target_node": null, "trigger": {{"type": "on_click"}}, "animation": {{"type": "instant"}}}}"#,
+                    Uuid::from_u128(i as u128),
+                    Uuid::nil(),
+                    Uuid::nil()
+                )
+            })
+            .collect();
+
+        let json = format!(
+            r#"{{"schema_version": {}, "id": "{}", "name": "Page", "nodes": [], "transitions": [{}]}}"#,
+            CURRENT_SCHEMA_VERSION,
+            Uuid::nil(),
+            transitions_json.join(",")
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("transitions")),
+            "expected transitions limit error, got: {result:?}"
+        );
+    }
+
+    // ── RF-002: Path subpath/segment limits ─────────────────────────────
+
+    #[test]
+    fn test_deserialize_rejects_too_many_subpaths() {
+        use crate::validate::MAX_SUBPATHS_PER_PATH;
+
+        // Build a path node with too many subpaths
+        let subpaths_json: Vec<String> = (0..MAX_SUBPATHS_PER_PATH + 1)
+            .map(|_| r#"{"segments": [], "closed": false}"#.to_string())
+            .collect();
+
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "path", "path_data": {{"subpaths": [{}], "fill_rule": "even_odd"}}}},
+                    "name": "BigPath",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+            subpaths_json.join(",")
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("subpaths")),
+            "expected subpaths limit error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_rejects_too_many_segments_in_subpath() {
+        use crate::validate::MAX_SEGMENTS_PER_SUBPATH;
+
+        // Build a single subpath with too many segments
+        let segments_json: Vec<String> = (0..MAX_SEGMENTS_PER_SUBPATH + 1)
+            .map(|_| {
+                r#"{"type":"line","end_point":{"x":0,"y":0},"corner_mode":"none","corner_radius":0}"#.to_string()
+            })
+            .collect();
+
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "path", "path_data": {{"subpaths": [{{"segments": [{}], "closed": false}}], "fill_rule": "even_odd"}}}},
+                    "name": "HugePath",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+            segments_json.join(",")
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("segments")),
+            "expected segments limit error, got: {result:?}"
+        );
+    }
+
+    // ── RF-004: Grid track limits ───────────────────────────────────────
+
+    #[test]
+    fn test_deserialize_rejects_too_many_grid_columns() {
+        use crate::validate::MAX_GRID_TRACKS;
+
+        let tracks_json: Vec<String> = (0..MAX_GRID_TRACKS + 1)
+            .map(|_| r#"{"type": "fixed", "size": 100.0}"#.to_string())
+            .collect();
+
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "frame", "layout": {{"mode": "grid", "columns": [{}], "rows": [], "column_gap": 0, "row_gap": 0, "padding": {{"top": 0, "right": 0, "bottom": 0, "left": 0}}, "align_items": "start", "justify_items": "start"}}}},
+                    "name": "GridFrame",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+            tracks_json.join(",")
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("columns")),
+            "expected columns limit error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_rejects_too_many_grid_rows() {
+        use crate::validate::MAX_GRID_TRACKS;
+
+        let tracks_json: Vec<String> = (0..MAX_GRID_TRACKS + 1)
+            .map(|_| r#"{"type": "auto"}"#.to_string())
+            .collect();
+
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "frame", "layout": {{"mode": "grid", "columns": [], "rows": [{}], "column_gap": 0, "row_gap": 0, "padding": {{"top": 0, "right": 0, "bottom": 0, "left": 0}}, "align_items": "start", "justify_items": "start"}}}},
+                    "name": "GridFrame",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+            tracks_json.join(",")
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref msg)) if msg.contains("rows")),
+            "expected rows limit error, got: {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_rejects_invalid_grid_track_value() {
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "frame", "layout": {{"mode": "grid", "columns": [{{"type": "fixed", "size": -10.0}}], "rows": [], "column_gap": 0, "row_gap": 0, "padding": {{"top": 0, "right": 0, "bottom": 0, "left": 0}}, "align_items": "start", "justify_items": "start"}}}},
+                    "name": "BadGrid",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            result.is_err(),
+            "expected grid track validation error for negative size"
+        );
+    }
+
+    #[test]
+    fn test_deserialize_accepts_valid_grid_layout() {
+        let json = format!(
+            r#"{{
+                "schema_version": {},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{"type": "frame", "layout": {{"mode": "grid", "columns": [{{"type": "fixed", "size": 100.0}}, {{"type": "fractional", "fraction": 1.0}}, {{"type": "auto"}}], "rows": [{{"type": "min_max", "min": 50.0, "max": 200.0}}], "column_gap": 10, "row_gap": 10, "padding": {{"top": 0, "right": 0, "bottom": 0, "left": 0}}, "align_items": "start", "justify_items": "start"}}}},
+                    "name": "GoodGrid",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#,
+            CURRENT_SCHEMA_VERSION,
+        );
+        let result = deserialize_page(&json);
+        assert!(result.is_ok(), "valid grid layout should be accepted: {result:?}");
     }
 }
