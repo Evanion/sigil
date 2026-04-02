@@ -6,7 +6,7 @@ use uuid::Uuid;
 use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::Node;
-use crate::prototype::Transition;
+use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
 /// A serializable representation of a page (file format).
@@ -19,7 +19,21 @@ pub struct SerializedPage {
     pub id: Uuid,
     pub name: String,
     pub nodes: Vec<SerializedNode>,
-    pub transitions: Vec<Transition>,
+    pub transitions: Vec<SerializedTransition>,
+}
+
+/// A serializable representation of a prototype transition (file format).
+///
+/// Uses UUIDs for node and page references instead of `NodeId`/`PageId`,
+/// which are arena indices and not stable across sessions.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SerializedTransition {
+    pub id: Uuid,
+    pub source_node: Uuid,
+    pub target_page: Uuid,
+    pub target_node: Option<Uuid>,
+    pub trigger: TransitionTrigger,
+    pub animation: TransitionAnimation,
 }
 
 /// A serializable representation of a node (file format).
@@ -96,9 +110,9 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
     // Validate collection sizes
     validate_deserialized_page(&page)?;
 
-    // Validate transitions
+    // Validate transition timing values
     for transition in &page.transitions {
-        crate::prototype::validate_transition(transition)?;
+        validate_serialized_transition(transition)?;
     }
 
     Ok(page)
@@ -192,17 +206,28 @@ pub fn page_to_serialized(
         page_node_uuids.insert(arena.uuid_of(node.id)?);
     }
 
-    // Filter transitions whose source_node belongs to this page
-    let page_transitions: Vec<Transition> = transitions
-        .iter()
-        .filter(|t| {
-            arena
-                .uuid_of(t.source_node)
-                .ok()
-                .is_some_and(|uuid| page_node_uuids.contains(&uuid))
-        })
-        .cloned()
-        .collect();
+    // Filter transitions whose source_node belongs to this page and convert to serialized form
+    let mut page_transitions = Vec::new();
+    for t in transitions {
+        let source_uuid = match arena.uuid_of(t.source_node) {
+            Ok(uuid) if page_node_uuids.contains(&uuid) => uuid,
+            _ => continue,
+        };
+
+        let target_node_uuid = match t.target_node {
+            Some(nid) => Some(arena.uuid_of(nid)?),
+            None => None,
+        };
+
+        page_transitions.push(SerializedTransition {
+            id: t.id,
+            source_node: source_uuid,
+            target_page: t.target_page.uuid(),
+            target_node: target_node_uuid,
+            trigger: t.trigger.clone(),
+            animation: t.animation.clone(),
+        });
+    }
 
     let node_refs: Vec<&Node> = all_nodes.iter().collect();
     let serialized_nodes = nodes_to_serialized(&node_refs, arena)?;
@@ -342,6 +367,28 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         // Validate token ref names in style values
         validate_token_refs_in_value(&node.style)?;
         validate_token_refs_in_value(&node.kind)?;
+    }
+
+    Ok(())
+}
+
+/// Validates a serialized transition's timing values.
+///
+/// This mirrors `prototype::validate_transition` but operates on the serialized
+/// (UUID-based) representation.
+fn validate_serialized_transition(transition: &SerializedTransition) -> Result<(), CoreError> {
+    if let TransitionTrigger::AfterDelay { seconds } = &transition.trigger {
+        crate::prototype::validate_duration(*seconds)?;
+    }
+
+    match &transition.animation {
+        TransitionAnimation::Instant => {}
+        TransitionAnimation::Dissolve { duration }
+        | TransitionAnimation::SlideIn { duration, .. }
+        | TransitionAnimation::SlideOut { duration, .. }
+        | TransitionAnimation::Push { duration, .. } => {
+            crate::prototype::validate_duration(*duration)?;
+        }
     }
 
     Ok(())
@@ -742,7 +789,12 @@ mod tests {
 
         let mut arena = Arena::new(100);
         let root_uuid = make_uuid(10);
+        let target_node_uuid = make_uuid(11);
         let root_id = insert_frame(&mut arena, root_uuid, "Root");
+        let target_node_id = insert_frame(&mut arena, target_node_uuid, "Target");
+
+        // Add target_node as child so it belongs to the page subtree
+        crate::tree::add_child(&mut arena, root_id, target_node_id).expect("add_child");
 
         let page_id = PageId::new(make_uuid(1));
         let mut page = Page::new(page_id, "Home".to_string());
@@ -761,7 +813,7 @@ mod tests {
                 id: make_uuid(51),
                 source_node: root_id,
                 target_page: PageId::new(make_uuid(3)),
-                target_node: Some(NodeId::new(0, 0)),
+                target_node: Some(target_node_id),
                 trigger: TransitionTrigger::AfterDelay { seconds: 2.0 },
                 animation: TransitionAnimation::SlideIn {
                     direction: SlideDirection::Right,
@@ -774,6 +826,16 @@ mod tests {
             page_to_serialized(&page, &arena, &transitions).expect("page_to_serialized");
         assert_eq!(serialized.transitions.len(), 2);
 
+        // Verify UUIDs are used instead of NodeIds
+        assert_eq!(serialized.transitions[0].source_node, root_uuid);
+        assert_eq!(serialized.transitions[0].target_page, make_uuid(2));
+        assert_eq!(serialized.transitions[0].target_node, None);
+        assert_eq!(serialized.transitions[1].source_node, root_uuid);
+        assert_eq!(
+            serialized.transitions[1].target_node,
+            Some(target_node_uuid)
+        );
+
         let json = serialize_page(&serialized).expect("serialize_page");
         let deserialized = deserialize_page(&json).expect("deserialize_page");
 
@@ -784,6 +846,7 @@ mod tests {
             .zip(deserialized.transitions.iter())
         {
             assert_eq!(orig.id, deser.id);
+            assert_eq!(orig.source_node, deser.source_node);
             assert_eq!(orig.trigger, deser.trigger);
             assert_eq!(orig.animation, deser.animation);
             assert_eq!(orig.target_page, deser.target_page);
@@ -844,7 +907,7 @@ mod tests {
                 "nodes": [],
                 "transitions": [{{
                     "id": "00000000-0000-0000-0000-000000000050",
-                    "source_node": {{"index": 0, "generation": 0}},
+                    "source_node": "00000000-0000-0000-0000-00000000000a",
                     "target_page": "00000000-0000-0000-0000-000000000002",
                     "target_node": null,
                     "trigger": {{"type": "on_click"}},
@@ -855,5 +918,45 @@ mod tests {
         );
         let result = deserialize_page(&json);
         assert!(result.is_err(), "should reject negative duration");
+    }
+
+    #[test]
+    fn test_serialized_transition_uses_uuids_not_node_ids() {
+        // Verify that the file format contains UUIDs, not arena indices
+        let page = SerializedPage {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            id: make_uuid(1),
+            name: "Page".to_string(),
+            nodes: Vec::new(),
+            transitions: vec![SerializedTransition {
+                id: make_uuid(50),
+                source_node: make_uuid(10),
+                target_page: make_uuid(2),
+                target_node: Some(make_uuid(11)),
+                trigger: TransitionTrigger::OnClick,
+                animation: TransitionAnimation::Instant,
+            }],
+        };
+
+        let json = serialize_page(&page).expect("serialize");
+        // JSON must NOT contain "index" or "generation" (NodeId fields)
+        assert!(
+            !json.contains("\"index\""),
+            "transitions must not contain NodeId index"
+        );
+        assert!(
+            !json.contains("\"generation\""),
+            "transitions must not contain NodeId generation"
+        );
+        // JSON must contain UUIDs
+        assert!(json.contains("0a000000-0000-0000-0000-000000000000"));
+
+        let deserialized = deserialize_page(&json).expect("deserialize");
+        assert_eq!(deserialized.transitions[0].source_node, make_uuid(10));
+        assert_eq!(deserialized.transitions[0].target_page, make_uuid(2));
+        assert_eq!(
+            deserialized.transitions[0].target_node,
+            Some(make_uuid(11))
+        );
     }
 }

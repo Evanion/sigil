@@ -48,8 +48,8 @@ pub use document::{
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
-    SerializedNode, SerializedPage, deserialize_page, nodes_to_serialized, page_to_serialized,
-    serialize_page,
+    SerializedNode, SerializedPage, SerializedTransition, deserialize_page, nodes_to_serialized,
+    page_to_serialized, serialize_page,
 };
 
 // ── Re-exports: Command ──────────────────────────────────────────────
