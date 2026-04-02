@@ -11,6 +11,7 @@ serde_json = { workspace = true }
 # Core must use `default-features = false` with only `serde`.
 uuid = { version = "1.23.0", default-features = false, features = ["serde"] }
 thiserror = { workspace = true }
+i_overlay = { version = "4", default-features = false }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
