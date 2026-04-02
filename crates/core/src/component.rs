@@ -1,8 +1,12 @@
 // crates/core/src/component.rs
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use uuid::Uuid;
 
+use crate::error::CoreError;
 use crate::node::{BlendMode, Constraints, Effect, Fill, Stroke, StyleValue, Transform};
+use crate::validate;
 
 #[cfg(test)]
 use crate::node::Color;
@@ -83,6 +87,137 @@ pub enum OverrideSource {
     Variant,
     /// Override was applied directly by user or agent.
     User,
+}
+
+/// A composite key for identifying an override: which node (by UUID within the component
+/// definition's subtree) and which property.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OverrideKey {
+    /// The UUID of the node within the component definition's subtree.
+    pub node_uuid: Uuid,
+    /// The property being overridden.
+    pub path: PropertyPath,
+}
+
+/// A map of property overrides applied to a component instance.
+///
+/// Keys are composite (node UUID + property path). Values carry the override
+/// value and its source (variant vs user).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OverrideMap {
+    entries: HashMap<OverrideKey, (OverrideValue, OverrideSource)>,
+}
+
+impl OverrideMap {
+    /// Creates a new empty override map.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Sets an override, returning the previous value if any.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the map exceeds capacity.
+    pub fn set(
+        &mut self,
+        key: OverrideKey,
+        value: OverrideValue,
+        source: OverrideSource,
+    ) -> Result<Option<(OverrideValue, OverrideSource)>, CoreError> {
+        if !self.entries.contains_key(&key)
+            && self.entries.len() >= validate::MAX_OVERRIDES_PER_INSTANCE
+        {
+            return Err(CoreError::ValidationError(format!(
+                "override map has {} entries (max {})",
+                self.entries.len(),
+                validate::MAX_OVERRIDES_PER_INSTANCE
+            )));
+        }
+        Ok(self.entries.insert(key, (value, source)))
+    }
+
+    /// Gets an override value and source by key.
+    #[must_use]
+    pub fn get(&self, key: &OverrideKey) -> Option<&(OverrideValue, OverrideSource)> {
+        self.entries.get(key)
+    }
+
+    /// Removes an override by key.
+    pub fn remove(&mut self, key: &OverrideKey) -> Option<(OverrideValue, OverrideSource)> {
+        self.entries.remove(key)
+    }
+
+    /// Returns the number of overrides.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns true if there are no overrides.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterates over all overrides.
+    pub fn iter(&self) -> impl Iterator<Item = (&OverrideKey, &(OverrideValue, OverrideSource))> {
+        self.entries.iter()
+    }
+}
+
+impl Serialize for OverrideMap {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(self.entries.len()))?;
+        for (key, (value, source)) in &self.entries {
+            #[derive(Serialize)]
+            struct Entry<'a> {
+                node_uuid: &'a Uuid,
+                path: &'a PropertyPath,
+                value: &'a OverrideValue,
+                source: &'a OverrideSource,
+            }
+            seq.serialize_element(&Entry {
+                node_uuid: &key.node_uuid,
+                path: &key.path,
+                value,
+                source,
+            })?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for OverrideMap {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Entry {
+            node_uuid: Uuid,
+            path: PropertyPath,
+            value: OverrideValue,
+            source: OverrideSource,
+        }
+        let entries: Vec<Entry> = Vec::deserialize(deserializer)?;
+        if entries.len() > validate::MAX_OVERRIDES_PER_INSTANCE {
+            return Err(serde::de::Error::custom(format!(
+                "too many overrides: {} (max {})",
+                entries.len(),
+                validate::MAX_OVERRIDES_PER_INSTANCE
+            )));
+        }
+        let mut map = HashMap::with_capacity(entries.len());
+        for entry in entries {
+            let key = OverrideKey {
+                node_uuid: entry.node_uuid,
+                path: entry.path,
+            };
+            map.insert(key, (entry.value, entry.source));
+        }
+        Ok(Self { entries: map })
+    }
 }
 
 #[cfg(test)]
@@ -167,5 +302,163 @@ mod tests {
         set.insert(PropertyPath::Fill { index: 1 });
         set.insert(PropertyPath::Name);
         assert_eq!(set.len(), 3);
+    }
+
+    // ── OverrideMap ─────────────────────────────────────────────────────
+
+    #[test]
+    fn test_override_map_set_and_get() {
+        let mut map = OverrideMap::new();
+        let key = OverrideKey {
+            node_uuid: Uuid::nil(),
+            path: PropertyPath::Visible,
+        };
+        map.set(
+            key.clone(),
+            OverrideValue::Bool { value: false },
+            OverrideSource::User,
+        )
+        .expect("set");
+        let (val, src) = map.get(&key).expect("get");
+        assert_eq!(*val, OverrideValue::Bool { value: false });
+        assert_eq!(*src, OverrideSource::User);
+    }
+
+    #[test]
+    fn test_override_map_remove() {
+        let mut map = OverrideMap::new();
+        let key = OverrideKey {
+            node_uuid: Uuid::nil(),
+            path: PropertyPath::Name,
+        };
+        map.set(
+            key.clone(),
+            OverrideValue::String {
+                value: "New".to_string(),
+            },
+            OverrideSource::Variant,
+        )
+        .expect("set");
+        assert_eq!(map.len(), 1);
+        map.remove(&key);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_override_map_serde_round_trip() {
+        let mut map = OverrideMap::new();
+        map.set(
+            OverrideKey {
+                node_uuid: Uuid::nil(),
+                path: PropertyPath::Visible,
+            },
+            OverrideValue::Bool { value: false },
+            OverrideSource::User,
+        )
+        .expect("set");
+        map.set(
+            OverrideKey {
+                node_uuid: Uuid::nil(),
+                path: PropertyPath::TransformX,
+            },
+            OverrideValue::Number { value: 100.0 },
+            OverrideSource::Variant,
+        )
+        .expect("set");
+
+        let json = serde_json::to_string(&map).expect("serialize");
+        let deserialized: OverrideMap = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(map.len(), deserialized.len());
+        // Verify individual entries survived the round trip
+        for (key, (value, source)) in map.iter() {
+            let (deser_val, deser_src) = deserialized.get(key).expect("key should exist");
+            assert_eq!(value, deser_val);
+            assert_eq!(source, deser_src);
+        }
+    }
+
+    #[test]
+    fn test_override_map_capacity_limit() {
+        let mut map = OverrideMap::new();
+        assert!(map.is_empty());
+        map.set(
+            OverrideKey {
+                node_uuid: Uuid::nil(),
+                path: PropertyPath::Name,
+            },
+            OverrideValue::String {
+                value: "test".to_string(),
+            },
+            OverrideSource::User,
+        )
+        .expect("first insert should work");
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn test_override_map_set_replaces_existing_key() {
+        let mut map = OverrideMap::new();
+        let key = OverrideKey {
+            node_uuid: Uuid::nil(),
+            path: PropertyPath::Width,
+        };
+        map.set(
+            key.clone(),
+            OverrideValue::Number { value: 100.0 },
+            OverrideSource::User,
+        )
+        .expect("set");
+        let prev = map
+            .set(
+                key.clone(),
+                OverrideValue::Number { value: 200.0 },
+                OverrideSource::Variant,
+            )
+            .expect("replace");
+        assert!(prev.is_some());
+        let (val, src) = map.get(&key).expect("get");
+        assert_eq!(*val, OverrideValue::Number { value: 200.0 });
+        assert_eq!(*src, OverrideSource::Variant);
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn test_override_map_deserialize_rejects_too_many_entries() {
+        // Build a JSON array with MAX_OVERRIDES_PER_INSTANCE + 1 entries
+        let mut entries = Vec::new();
+        for i in 0..=validate::MAX_OVERRIDES_PER_INSTANCE {
+            entries.push(serde_json::json!({
+                "node_uuid": Uuid::nil(),
+                "path": { "type": "fill", "index": i },
+                "value": { "type": "number", "value": 1.0 },
+                "source": "user"
+            }));
+        }
+        let json = serde_json::to_string(&entries).expect("serialize array");
+        let result: Result<OverrideMap, _> = serde_json::from_str(&json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_override_map_default_is_empty() {
+        let map = OverrideMap::default();
+        assert!(map.is_empty());
+        assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn test_override_map_iter() {
+        let mut map = OverrideMap::new();
+        map.set(
+            OverrideKey {
+                node_uuid: Uuid::nil(),
+                path: PropertyPath::Locked,
+            },
+            OverrideValue::Bool { value: true },
+            OverrideSource::User,
+        )
+        .expect("set");
+        let entries: Vec<_> = map.iter().collect();
+        assert_eq!(entries.len(), 1);
     }
 }

@@ -27,8 +27,8 @@ pub use id::{ComponentId, NodeId, PageId, TokenId};
 pub use node::{
     AlignItems, BlendMode, Color, Constraints, Effect, Fill, FillRule, FlexLayout, GradientDef,
     GradientStop, GridLayout, GridPlacement, GridSpan, GridTrack, JustifyContent, JustifyItems,
-    LayoutDirection, LayoutMode, Node, NodeKind, OverrideMap, Padding, PathData, PinConstraint,
-    Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap, StrokeJoin, Style, StyleValue, TextAlign,
+    LayoutDirection, LayoutMode, Node, NodeKind, Padding, PathData, PinConstraint, Point,
+    ScaleMode, Stroke, StrokeAlignment, StrokeCap, StrokeJoin, Style, StyleValue, TextAlign,
     TextStyle, Transform,
 };
 
@@ -64,7 +64,7 @@ pub use serialize::{
 pub use command::{Command, CompoundCommand, SideEffect};
 
 // ── Re-exports: Component ───────────────────────────────────────────────
-pub use component::{OverrideSource, OverrideValue, PropertyPath};
+pub use component::{OverrideKey, OverrideMap, OverrideSource, OverrideValue, PropertyPath};
 
 // ── Re-exports: Validation ─────────────────────────────────────────────
 pub use validate::{

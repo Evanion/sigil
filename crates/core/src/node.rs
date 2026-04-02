@@ -1,7 +1,6 @@
 // crates/core/src/node.rs
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::id::{ComponentId, NodeId};
@@ -9,14 +8,8 @@ use crate::id::{ComponentId, NodeId};
 // Re-export path types for backwards compatibility
 pub use crate::path::{FillRule, PathData};
 
-// ── Forward declarations / stubs for Plan 01d types ────────────────────
-
-/// Stub for the override map used in component instances.
-/// Plan 01d will replace this with a full implementation.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct OverrideMap {
-    pub entries: HashMap<String, serde_json::Value>,
-}
+// Re-export OverrideMap from the component module (replaces the former stub).
+pub use crate::component::OverrideMap;
 
 /// Layout mode for a frame's children.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -916,7 +909,7 @@ mod tests {
                 overrides,
             } => {
                 assert_eq!(*cid, component_id);
-                assert!(overrides.entries.is_empty());
+                assert!(overrides.is_empty());
             }
             other => panic!("expected ComponentInstance, got {other:?}"),
         }
