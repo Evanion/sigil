@@ -1,4 +1,5 @@
 // crates/core/src/commands/tree_commands.rs
+#![allow(clippy::unnecessary_literal_bound)]
 
 use crate::command::{Command, SideEffect};
 use crate::document::Document;
@@ -36,12 +37,11 @@ impl Command for ReparentNode {
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
         match self.old_parent_id {
             Some(old_parent) => {
-                tree::rearrange(
-                    &mut doc.arena,
-                    self.node_id,
-                    old_parent,
-                    self.old_position.unwrap_or(0),
-                )?;
+                let pos = self.old_position.ok_or(CoreError::ValidationError(
+                    "ReparentNode undo: old_position is required when old_parent_id is set"
+                        .to_string(),
+                ))?;
+                tree::rearrange(&mut doc.arena, self.node_id, old_parent, pos)?;
             }
             None => {
                 // Was a root node — detach from current parent
@@ -51,7 +51,6 @@ impl Command for ReparentNode {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Reparent node"
     }
@@ -94,7 +93,6 @@ impl Command for ReorderChildren {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Reorder children"
     }

@@ -1,4 +1,5 @@
 // crates/core/src/commands/style_commands.rs
+#![allow(clippy::unnecessary_literal_bound)]
 
 use crate::command::{Command, SideEffect};
 use crate::document::Document;
@@ -6,6 +7,26 @@ use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::{BlendMode, Constraints, Effect, Fill, Stroke, StyleValue, Transform};
 use crate::validate::{MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE};
+
+fn validate_transform(t: &Transform) -> Result<(), CoreError> {
+    let fields = [
+        t.x, t.y, t.width, t.height, t.rotation, t.scale_x, t.scale_y,
+    ];
+    for f in fields {
+        if !f.is_finite() {
+            return Err(CoreError::ValidationError(
+                "transform fields must be finite (no NaN or infinity)".to_string(),
+            ));
+        }
+    }
+    if t.width < 0.0 || t.height < 0.0 {
+        return Err(CoreError::ValidationError(format!(
+            "transform dimensions must be non-negative, got width={}, height={}",
+            t.width, t.height
+        )));
+    }
+    Ok(())
+}
 
 /// Sets a node's transform (position, size, rotation, scale).
 #[derive(Debug)]
@@ -20,6 +41,7 @@ pub struct SetTransform {
 
 impl Command for SetTransform {
     fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_transform(&self.new_transform)?;
         doc.arena.get_mut(self.node_id)?.transform = self.new_transform;
         Ok(vec![])
     }
@@ -29,7 +51,6 @@ impl Command for SetTransform {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set transform"
     }
@@ -71,7 +92,6 @@ impl Command for SetFills {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set fills"
     }
@@ -113,7 +133,6 @@ impl Command for SetStrokes {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set strokes"
     }
@@ -132,6 +151,13 @@ pub struct SetOpacity {
 
 impl Command for SetOpacity {
     fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        if let StyleValue::Literal { value } = &self.new_opacity
+            && (!value.is_finite() || *value < 0.0 || *value > 1.0)
+        {
+            return Err(CoreError::ValidationError(format!(
+                "opacity must be in [0.0, 1.0], got {value}"
+            )));
+        }
         doc.arena.get_mut(self.node_id)?.style.opacity = self.new_opacity.clone();
         Ok(vec![])
     }
@@ -141,7 +167,6 @@ impl Command for SetOpacity {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set opacity"
     }
@@ -169,7 +194,6 @@ impl Command for SetBlendMode {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set blend mode"
     }
@@ -211,7 +235,6 @@ impl Command for SetEffects {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set effects"
     }
@@ -239,7 +262,6 @@ impl Command for SetConstraints {
         Ok(vec![])
     }
 
-    #[allow(clippy::unnecessary_literal_bound)]
     fn description(&self) -> &str {
         "Set constraints"
     }
@@ -490,5 +512,88 @@ mod tests {
             doc.arena.get(node_id).unwrap().constraints.horizontal,
             PinConstraint::Start
         );
+    }
+
+    // ── SetOpacity validation ──────────────────────────────────────
+
+    #[test]
+    fn test_set_opacity_validates_range() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+
+        let cmd = SetOpacity {
+            node_id,
+            new_opacity: StyleValue::Literal { value: 1.5 },
+            old_opacity: StyleValue::Literal { value: 1.0 },
+        };
+        assert!(cmd.apply(&mut doc).is_err());
+
+        let cmd_neg = SetOpacity {
+            node_id,
+            new_opacity: StyleValue::Literal { value: -0.1 },
+            old_opacity: StyleValue::Literal { value: 1.0 },
+        };
+        assert!(cmd_neg.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_set_opacity_rejects_nan() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+
+        let cmd = SetOpacity {
+            node_id,
+            new_opacity: StyleValue::Literal { value: f64::NAN },
+            old_opacity: StyleValue::Literal { value: 1.0 },
+        };
+        assert!(cmd.apply(&mut doc).is_err());
+    }
+
+    // ── SetTransform validation ────────────────────────────────────
+
+    #[test]
+    fn test_set_transform_rejects_nan() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+        let old = doc.arena.get(node_id).unwrap().transform;
+
+        let mut bad = old;
+        bad.x = f64::NAN;
+        let cmd = SetTransform {
+            node_id,
+            new_transform: bad,
+            old_transform: old,
+        };
+        assert!(cmd.apply(&mut doc).is_err());
+
+        let mut bad_inf = old;
+        bad_inf.y = f64::INFINITY;
+        let cmd_inf = SetTransform {
+            node_id,
+            new_transform: bad_inf,
+            old_transform: old,
+        };
+        assert!(cmd_inf.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_set_transform_rejects_negative_dimensions() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+        let old = doc.arena.get(node_id).unwrap().transform;
+
+        let mut bad = old;
+        bad.width = -10.0;
+        let cmd = SetTransform {
+            node_id,
+            new_transform: bad,
+            old_transform: old,
+        };
+        assert!(cmd.apply(&mut doc).is_err());
+
+        let mut bad_h = old;
+        bad_h.height = -1.0;
+        let cmd_h = SetTransform {
+            node_id,
+            new_transform: bad_h,
+            old_transform: old,
+        };
+        assert!(cmd_h.apply(&mut doc).is_err());
     }
 }
