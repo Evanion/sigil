@@ -16,6 +16,8 @@ use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
 use agent_designer_core::wire::{BroadcastCommand, SerializableCommand};
+use agent_designer_core::{NodeId, NodeKind, PageId, Transform};
+use uuid::Uuid;
 
 use crate::dispatch;
 use crate::state::{AppState, BroadcastEnvelope, BroadcastPayload, MAX_WS_MESSAGE_SIZE};
@@ -30,6 +32,18 @@ pub enum ClientMessage {
     Undo,
     /// Request redo of the last undone command.
     Redo,
+    /// Client requests node creation. The server assigns the `NodeId`.
+    ///
+    /// The client provides a UUID, kind, name, optional page, and transform
+    /// as JSON values. The server deserializes them, creates the node via
+    /// `Document::execute`, and returns the assigned `NodeId`.
+    CreateNodeRequest {
+        uuid: Uuid,
+        kind: serde_json::Value,
+        name: String,
+        page_id: Option<Uuid>,
+        transform: serde_json::Value,
+    },
 }
 
 /// Messages sent from the server to connected clients over WebSocket.
@@ -45,6 +59,9 @@ pub enum ServerMessage {
     /// The document state changed (e.g. via another client's undo/redo).
     /// Receiving clients should update their undo/redo UI state.
     DocumentChanged { can_undo: bool, can_redo: bool },
+    /// A node was created in response to a `CreateNodeRequest`.
+    /// Sent only to the originating client with the server-assigned `NodeId`.
+    NodeCreated { uuid: Uuid, node_id: NodeId },
 }
 
 /// Returns `true` if the given origin is acceptable for WebSocket connections.
@@ -346,5 +363,126 @@ fn process_client_message(text: &str, state: &AppState, client_id: u64) -> Optio
                 }
             }
         }
+        ClientMessage::CreateNodeRequest {
+            uuid,
+            kind,
+            name,
+            page_id,
+            transform,
+        } => Some(process_create_node_request(
+            state, client_id, uuid, kind, name, page_id, transform,
+        )),
     }
+}
+
+/// Handles a `CreateNodeRequest`: deserializes kind/transform, creates the node
+/// via the core engine, optionally adds it to a page, sets its transform,
+/// broadcasts to other clients, and returns `NodeCreated` to the originator.
+fn process_create_node_request(
+    state: &AppState,
+    client_id: u64,
+    uuid: Uuid,
+    kind_value: serde_json::Value,
+    name: String,
+    page_id: Option<Uuid>,
+    transform_value: serde_json::Value,
+) -> ServerMessage {
+    // Deserialize kind from JSON.
+    let kind: NodeKind = match serde_json::from_value(kind_value) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!("invalid node kind in create_node_request: {e}");
+            return ServerMessage::Error {
+                message: format!("invalid node kind: {e}"),
+            };
+        }
+    };
+
+    // Deserialize transform from JSON.
+    let transform: Transform = match serde_json::from_value(transform_value) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("invalid transform in create_node_request: {e}");
+            return ServerMessage::Error {
+                message: format!("invalid transform: {e}"),
+            };
+        }
+    };
+
+    let page_id_typed = page_id.map(PageId::new);
+
+    // Build the CreateNode command. Use a placeholder NodeId(0,0) — the arena
+    // assigns the real index on insert.
+    let create_cmd = agent_designer_core::commands::node_commands::CreateNode {
+        node_id: NodeId::new(0, 0),
+        uuid,
+        kind: kind.clone(),
+        name: name.clone(),
+        page_id: page_id_typed,
+    };
+
+    let mut doc_guard = acquire_document_lock(state);
+
+    // Execute CreateNode through Document::execute for undo support.
+    if let Err(e) = doc_guard.execute(Box::new(create_cmd)) {
+        tracing::warn!("create_node_request failed: {e}");
+        return ServerMessage::Error {
+            message: format!("node creation failed: {e}"),
+        };
+    }
+
+    // Look up the server-assigned NodeId.
+    let Some(node_id) = doc_guard.arena.id_by_uuid(&uuid) else {
+        tracing::error!("node created but UUID not found in arena — this is a bug");
+        return ServerMessage::Error {
+            message: "internal error: node UUID not found after creation".to_string(),
+        };
+    };
+
+    // Set the transform via a SetTransform command for undo support.
+    let old_transform = match doc_guard.arena.get(node_id) {
+        Ok(node) => node.transform,
+        Err(e) => {
+            tracing::error!("failed to read newly created node: {e}");
+            return ServerMessage::Error {
+                message: "internal error: cannot read created node".to_string(),
+            };
+        }
+    };
+
+    let set_transform_cmd = agent_designer_core::commands::style_commands::SetTransform {
+        node_id,
+        new_transform: transform,
+        old_transform,
+    };
+
+    if let Err(e) = doc_guard.execute(Box::new(set_transform_cmd)) {
+        tracing::warn!("set transform after create_node_request failed: {e}");
+        return ServerMessage::Error {
+            message: format!("transform failed: {e}"),
+        };
+    }
+
+    drop(doc_guard); // Release lock before broadcast
+    state.signal_dirty();
+
+    // Broadcast the creation to other clients.
+    let broadcast = BroadcastCommand::CreateNode {
+        uuid,
+        kind,
+        name,
+        page_id: page_id_typed,
+    };
+    if state
+        .broadcast_tx
+        .send(BroadcastEnvelope {
+            sender_id: client_id,
+            payload: BroadcastPayload::Command(Box::new(broadcast)),
+        })
+        .is_err()
+    {
+        tracing::debug!("no broadcast receivers connected");
+    }
+
+    ServerMessage::NodeCreated { uuid, node_id }
 }
