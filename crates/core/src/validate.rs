@@ -209,6 +209,45 @@ pub fn validate_collection_size(
     Ok(())
 }
 
+/// Validates a grid track value.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if values are non-finite, negative,
+/// or `MinMax` has min > max.
+pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreError> {
+    use crate::node::GridTrack;
+    match track {
+        GridTrack::Fixed { size } => {
+            if !size.is_finite() || *size < 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track fixed size must be non-negative and finite, got {size}"
+                )));
+            }
+        }
+        GridTrack::Fractional { fraction } => {
+            if !fraction.is_finite() || *fraction < 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track fraction must be non-negative and finite, got {fraction}"
+                )));
+            }
+        }
+        GridTrack::Auto => {}
+        GridTrack::MinMax { min, max } => {
+            if !min.is_finite() || !max.is_finite() || *min < 0.0 || *max < 0.0 {
+                return Err(CoreError::ValidationError(
+                    "grid track min/max must be non-negative and finite".to_string(),
+                ));
+            }
+            if min > max {
+                return Err(CoreError::ValidationError(format!(
+                    "grid track min ({min}) must be <= max ({max})"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -440,5 +479,102 @@ mod tests {
     #[test]
     fn test_validate_collection_size_zero() {
         assert!(validate_collection_size("fills", 0, MAX_FILLS_PER_STYLE).is_ok());
+    }
+
+    // ── Grid track validation ─────────────────────────────────────────
+
+    #[test]
+    fn test_validate_grid_track_fixed_valid() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: 100.0 }).is_ok());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fixed_negative() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: -1.0 }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fixed_nan() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fixed { size: f64::NAN }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_valid() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fractional { fraction: 1.0 }).is_ok());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_negative() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Fractional { fraction: -0.5 }).is_err());
+    }
+
+    #[test]
+    fn test_validate_grid_track_fractional_infinity() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::Fractional {
+                fraction: f64::INFINITY
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_valid() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: 50.0,
+                max: 200.0,
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_inverted() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: 200.0,
+                max: 50.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_nan() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: f64::NAN,
+                max: 100.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_minmax_negative() {
+        use crate::node::GridTrack;
+        assert!(
+            validate_grid_track(&GridTrack::MinMax {
+                min: -10.0,
+                max: 100.0,
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_validate_grid_track_auto() {
+        use crate::node::GridTrack;
+        assert!(validate_grid_track(&GridTrack::Auto).is_ok());
     }
 }
