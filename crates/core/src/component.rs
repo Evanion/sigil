@@ -228,7 +228,7 @@ pub enum OverrideSource {
 
 /// A composite key for identifying an override: which node (by UUID within the component
 /// definition's subtree) and which property.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct OverrideKey {
     node_uuid: Uuid,
     path: PropertyPath,
