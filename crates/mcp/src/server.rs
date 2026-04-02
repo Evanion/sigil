@@ -17,8 +17,9 @@ use std::sync::MutexGuard;
 use rmcp::{
     ServerHandler,
     handler::server::router::tool::ToolRouter,
+    handler::server::wrapper::Json,
     model::{Implementation, ServerCapabilities, ServerInfo},
-    tool_router,
+    tool, tool_router,
 };
 
 use agent_designer_server::state::{AppState, SendDocument};
@@ -48,25 +49,46 @@ impl SigilMcpServer {
             tool_router: Self::tool_router(),
         }
     }
+}
 
-    /// Acquires the document mutex, recovering from poisoning.
-    ///
-    /// Mirrors the same helper in `crates/server/src/graphql/mutation.rs`.
-    /// The lock must **never** be held across an `.await` point.
-    pub fn acquire_document_lock(&self) -> MutexGuard<'_, SendDocument> {
-        match self.state.document.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                tracing::error!("document mutex poisoned in MCP handler, recovering");
-                poisoned.into_inner()
-            }
+/// Acquires the document lock from an `AppState`, recovering from mutex poisoning.
+///
+/// This is a free function (not a method) so tool implementation modules can
+/// call it without needing a reference to the full `SigilMcpServer`.
+/// The lock must **never** be held across an `.await` point.
+pub fn acquire_document_lock(state: &AppState) -> MutexGuard<'_, SendDocument> {
+    match state.document.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => {
+            tracing::error!("document mutex poisoned in MCP handler, recovering");
+            poisoned.into_inner()
         }
     }
 }
 
-// Empty tool router for now — tools are added in later tasks.
 #[tool_router]
-impl SigilMcpServer {}
+impl SigilMcpServer {
+    /// Returns a compact summary of the document: name, page count, node count,
+    /// and undo/redo availability.
+    #[tool(
+        name = "get_document_info",
+        description = "Get document summary: name, page count, node count, undo/redo availability"
+    )]
+    fn get_document_info(&self) -> Json<crate::types::DocumentInfo> {
+        Json(crate::tools::document::get_document_info_impl(&self.state))
+    }
+
+    /// Returns the full document tree: all pages with their node hierarchies in
+    /// a flattened, depth-first list. Use the `children` field to reconstruct the
+    /// hierarchy.
+    #[tool(
+        name = "get_document_tree",
+        description = "Get the full document tree: all pages with their node hierarchies"
+    )]
+    fn get_document_tree(&self) -> Json<crate::types::DocumentTree> {
+        Json(crate::tools::document::get_document_tree_impl(&self.state))
+    }
+}
 
 impl ServerHandler for SigilMcpServer {
     fn get_info(&self) -> ServerInfo {
