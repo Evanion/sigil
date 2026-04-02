@@ -1,5 +1,7 @@
 // crates/core/src/token.rs
 
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::CoreError;
@@ -256,6 +258,133 @@ pub fn validate_token_value(value: &TokenValue) -> Result<(), CoreError> {
         }
     }
     Ok(())
+}
+
+/// The document's design token collection.
+///
+/// Stores tokens keyed by validated name. Supports alias resolution
+/// with cycle detection (max depth 16).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TokenContext {
+    tokens: HashMap<String, Token>,
+}
+
+impl TokenContext {
+    /// Creates a new empty token context.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            tokens: HashMap::new(),
+        }
+    }
+
+    /// Adds or replaces a token.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the context is at capacity.
+    pub fn insert(&mut self, token: Token) -> Result<(), CoreError> {
+        if !self.tokens.contains_key(token.name()) && self.tokens.len() >= MAX_TOKENS_PER_CONTEXT {
+            return Err(CoreError::ValidationError(format!(
+                "token context already has {MAX_TOKENS_PER_CONTEXT} tokens (maximum)"
+            )));
+        }
+        self.tokens.insert(token.name().to_string(), token);
+        Ok(())
+    }
+
+    /// Removes a token by name. Returns the removed token if found.
+    pub fn remove(&mut self, name: &str) -> Option<Token> {
+        self.tokens.remove(name)
+    }
+
+    /// Gets a token by name.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<&Token> {
+        self.tokens.get(name)
+    }
+
+    /// Returns the number of tokens.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.tokens.len()
+    }
+
+    /// Returns true if there are no tokens.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tokens.is_empty()
+    }
+
+    /// Iterates over all tokens.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &Token)> {
+        self.tokens.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Resolves a token name to its final non-alias value, following alias chains.
+    ///
+    /// # Errors
+    /// - `CoreError::TokenNotFound` if a token in the chain doesn't exist.
+    /// - `CoreError::TokenCycleDetected` if a cycle or depth limit is hit.
+    pub fn resolve(&self, name: &str) -> Result<&TokenValue, CoreError> {
+        let mut visited = HashSet::new();
+        self.resolve_inner(name, &mut visited, 0)
+    }
+
+    fn resolve_inner<'a>(
+        &'a self,
+        name: &str,
+        visited: &mut HashSet<String>,
+        depth: usize,
+    ) -> Result<&'a TokenValue, CoreError> {
+        if depth > crate::validate::MAX_ALIAS_CHAIN_DEPTH {
+            return Err(CoreError::TokenCycleDetected(format!(
+                "alias chain depth exceeded {}: {name}",
+                crate::validate::MAX_ALIAS_CHAIN_DEPTH,
+            )));
+        }
+
+        if !visited.insert(name.to_string()) {
+            return Err(CoreError::TokenCycleDetected(format!(
+                "cycle detected at token: {name}"
+            )));
+        }
+
+        let token = self
+            .tokens
+            .get(name)
+            .ok_or_else(|| CoreError::TokenNotFound(name.to_string()))?;
+
+        match &token.value {
+            TokenValue::Alias { name: alias_target } => {
+                self.resolve_inner(alias_target, visited, depth + 1)
+            }
+            other => Ok(other),
+        }
+    }
+}
+
+// Custom Serialize/Deserialize for TokenContext (GOV-010: route through validation)
+impl Serialize for TokenContext {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.tokens.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TokenContext {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let tokens: HashMap<String, Token> = HashMap::deserialize(deserializer)?;
+        if tokens.len() > MAX_TOKENS_PER_CONTEXT {
+            return Err(serde::de::Error::custom(format!(
+                "too many tokens: {} (max {MAX_TOKENS_PER_CONTEXT})",
+                tokens.len()
+            )));
+        }
+        // Validate all token names
+        for name in tokens.keys() {
+            validate_token_name(name).map_err(serde::de::Error::custom)?;
+        }
+        Ok(Self { tokens })
+    }
 }
 
 #[cfg(test)]
@@ -941,5 +1070,328 @@ mod tests {
             let deserialized: TokenType = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(tt, deserialized);
         }
+    }
+
+    // ── TokenContext ────────────────────────────────────────────────
+
+    #[test]
+    fn test_token_context_insert_and_get() {
+        let mut ctx = TokenContext::new();
+        let token = make_color_token("color.primary");
+        ctx.insert(token).expect("insert");
+        assert_eq!(ctx.len(), 1);
+        assert!(ctx.get("color.primary").is_some());
+    }
+
+    #[test]
+    fn test_token_context_insert_replaces_existing() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.primary"))
+            .expect("insert");
+
+        let replacement = Token::new(
+            make_token_id(2),
+            "color.primary".to_string(),
+            TokenValue::Number { value: 99.0 },
+            TokenType::Number,
+            None,
+        )
+        .expect("valid");
+        ctx.insert(replacement).expect("insert replacement");
+
+        assert_eq!(ctx.len(), 1);
+        assert!(matches!(
+            ctx.get("color.primary").expect("get").value(),
+            TokenValue::Number { .. }
+        ));
+    }
+
+    #[test]
+    fn test_token_context_remove() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.primary"))
+            .expect("insert");
+        let removed = ctx.remove("color.primary");
+        assert!(removed.is_some());
+        assert!(ctx.is_empty());
+    }
+
+    #[test]
+    fn test_token_context_remove_nonexistent() {
+        let mut ctx = TokenContext::new();
+        assert!(ctx.remove("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_token_context_is_empty() {
+        let ctx = TokenContext::new();
+        assert!(ctx.is_empty());
+        assert_eq!(ctx.len(), 0);
+    }
+
+    #[test]
+    fn test_token_context_iter() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.primary"))
+            .expect("insert");
+        ctx.insert(
+            Token::new(
+                make_token_id(2),
+                "spacing.sm".to_string(),
+                TokenValue::Dimension {
+                    value: 8.0,
+                    unit: DimensionUnit::Px,
+                },
+                TokenType::Dimension,
+                None,
+            )
+            .expect("valid"),
+        )
+        .expect("insert");
+
+        let names: Vec<&str> = ctx.iter().map(|(k, _)| k).collect();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"color.primary"));
+        assert!(names.contains(&"spacing.sm"));
+    }
+
+    #[test]
+    fn test_token_context_resolve_literal() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.primary"))
+            .expect("insert");
+        let resolved = ctx.resolve("color.primary").expect("resolve");
+        assert!(matches!(resolved, TokenValue::Color { .. }));
+    }
+
+    #[test]
+    fn test_token_context_resolve_alias_chain() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.brand")).expect("insert");
+
+        let alias = Token::new(
+            make_token_id(2),
+            "color.primary".to_string(),
+            TokenValue::Alias {
+                name: "color.brand".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid alias");
+        ctx.insert(alias).expect("insert alias");
+
+        let resolved = ctx.resolve("color.primary").expect("resolve");
+        assert!(matches!(resolved, TokenValue::Color { .. }));
+    }
+
+    #[test]
+    fn test_token_context_resolve_multi_hop_alias() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.base")).expect("insert");
+
+        let alias1 = Token::new(
+            make_token_id(2),
+            "color.brand".to_string(),
+            TokenValue::Alias {
+                name: "color.base".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+        ctx.insert(alias1).expect("insert");
+
+        let alias2 = Token::new(
+            make_token_id(3),
+            "color.primary".to_string(),
+            TokenValue::Alias {
+                name: "color.brand".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+        ctx.insert(alias2).expect("insert");
+
+        let resolved = ctx.resolve("color.primary").expect("resolve");
+        assert!(matches!(resolved, TokenValue::Color { .. }));
+    }
+
+    #[test]
+    fn test_token_context_resolve_cycle_detected() {
+        let mut ctx = TokenContext::new();
+
+        let a = Token::new(
+            make_token_id(1),
+            "a".to_string(),
+            TokenValue::Alias {
+                name: "b".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+        let b = Token::new(
+            make_token_id(2),
+            "b".to_string(),
+            TokenValue::Alias {
+                name: "a".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+
+        ctx.insert(a).expect("insert");
+        ctx.insert(b).expect("insert");
+
+        let result = ctx.resolve("a");
+        assert!(matches!(result, Err(CoreError::TokenCycleDetected(_))));
+    }
+
+    #[test]
+    fn test_token_context_resolve_self_cycle() {
+        let mut ctx = TokenContext::new();
+
+        let self_ref = Token::new(
+            make_token_id(1),
+            "a".to_string(),
+            TokenValue::Alias {
+                name: "a".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+        ctx.insert(self_ref).expect("insert");
+
+        let result = ctx.resolve("a");
+        assert!(matches!(result, Err(CoreError::TokenCycleDetected(_))));
+    }
+
+    #[test]
+    fn test_token_context_resolve_not_found() {
+        let ctx = TokenContext::new();
+        let result = ctx.resolve("nonexistent");
+        assert!(matches!(result, Err(CoreError::TokenNotFound(_))));
+    }
+
+    #[test]
+    fn test_token_context_resolve_alias_target_not_found() {
+        let mut ctx = TokenContext::new();
+        let alias = Token::new(
+            make_token_id(1),
+            "color.primary".to_string(),
+            TokenValue::Alias {
+                name: "color.missing".to_string(),
+            },
+            TokenType::Color,
+            None,
+        )
+        .expect("valid");
+        ctx.insert(alias).expect("insert");
+
+        let result = ctx.resolve("color.primary");
+        assert!(matches!(result, Err(CoreError::TokenNotFound(ref s)) if s == "color.missing"));
+    }
+
+    #[test]
+    fn test_token_context_resolve_deep_alias_chain() {
+        let mut ctx = TokenContext::new();
+
+        // Create a chain of 16 aliases (depth 0..15 are aliases, 15 resolves at depth 15)
+        for i in 0..16u8 {
+            let name = format!("t{i}");
+            let target = if i < 15 {
+                TokenValue::Alias {
+                    name: format!("t{}", i + 1),
+                }
+            } else {
+                TokenValue::Number { value: 42.0 }
+            };
+            let token = Token::new(make_token_id(i + 1), name, target, TokenType::Number, None)
+                .expect("valid");
+            ctx.insert(token).expect("insert");
+        }
+
+        // Should resolve through all 16 levels
+        let resolved = ctx.resolve("t0").expect("resolve");
+        assert!(
+            matches!(resolved, TokenValue::Number { value } if (*value - 42.0).abs() < f64::EPSILON)
+        );
+    }
+
+    #[test]
+    fn test_token_context_resolve_exceeds_max_depth() {
+        let mut ctx = TokenContext::new();
+
+        // Create a chain of 18 aliases (exceeds MAX_ALIAS_CHAIN_DEPTH=16)
+        for i in 0..18u8 {
+            let name = format!("t{i}");
+            let target = if i < 17 {
+                TokenValue::Alias {
+                    name: format!("t{}", i + 1),
+                }
+            } else {
+                TokenValue::Number { value: 42.0 }
+            };
+            let token = Token::new(make_token_id(i + 1), name, target, TokenType::Number, None)
+                .expect("valid");
+            ctx.insert(token).expect("insert");
+        }
+
+        let result = ctx.resolve("t0");
+        assert!(matches!(result, Err(CoreError::TokenCycleDetected(_))));
+    }
+
+    #[test]
+    fn test_token_context_serde_round_trip() {
+        let mut ctx = TokenContext::new();
+        ctx.insert(make_color_token("color.primary"))
+            .expect("insert");
+        ctx.insert(
+            Token::new(
+                make_token_id(2),
+                "spacing.sm".to_string(),
+                TokenValue::Dimension {
+                    value: 8.0,
+                    unit: DimensionUnit::Px,
+                },
+                TokenType::Dimension,
+                None,
+            )
+            .expect("valid"),
+        )
+        .expect("insert");
+
+        let json = serde_json::to_string(&ctx).expect("serialize");
+        let deserialized: TokenContext = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(ctx.len(), deserialized.len());
+        assert!(deserialized.get("color.primary").is_some());
+        assert!(deserialized.get("spacing.sm").is_some());
+    }
+
+    #[test]
+    fn test_token_context_serde_empty_round_trip() {
+        let ctx = TokenContext::new();
+        let json = serde_json::to_string(&ctx).expect("serialize");
+        let deserialized: TokenContext = serde_json::from_str(&json).expect("deserialize");
+        assert!(deserialized.is_empty());
+    }
+
+    #[test]
+    fn test_token_context_deserialize_rejects_invalid_name() {
+        // A map with a key that starts with a digit (invalid token name)
+        let json = r#"{"123bad":{"id":"00000001-0000-0000-0000-000000000000","name":"123bad","value":{"type":"number","value":1.0},"token_type":"number","description":null}}"#;
+        let result: Result<TokenContext, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_token_context_default_is_empty() {
+        let ctx = TokenContext::default();
+        assert!(ctx.is_empty());
+        assert_eq!(ctx.len(), 0);
     }
 }

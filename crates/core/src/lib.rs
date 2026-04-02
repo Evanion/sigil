@@ -41,8 +41,8 @@ pub use prototype::{
 
 // ── Re-exports: Token ──────────────────────────────────────────────────
 pub use token::{
-    DimensionUnit, GradientValue, ShadowValue, Token, TokenType, TokenValue, TypographyValue,
-    validate_token_value,
+    DimensionUnit, GradientValue, ShadowValue, Token, TokenContext, TokenType, TokenValue,
+    TypographyValue, validate_token_value,
 };
 
 // ── Re-exports: Arena ──────────────────────────────────────────────────
@@ -50,7 +50,7 @@ pub use arena::Arena;
 
 // ── Re-exports: Document ───────────────────────────────────────────────
 pub use document::{
-    ComponentDef, Document, DocumentMetadata, History, LayoutEngine, Page, TokenContext, Transition,
+    ComponentDef, Document, DocumentMetadata, History, LayoutEngine, Page, Transition,
 };
 
 // ── Re-exports: Serialization ──────────────────────────────────────────

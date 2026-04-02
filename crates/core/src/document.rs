@@ -56,11 +56,7 @@ pub struct ComponentDef {
     pub root_node: NodeId,
 }
 
-/// Stub for token context — Plan 01c will fill this in.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
-pub struct TokenContext {
-    pub tokens: HashMap<String, serde_json::Value>,
-}
+pub use crate::token::TokenContext;
 
 /// Undo/redo history for the document.
 ///
