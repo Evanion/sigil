@@ -1,12 +1,23 @@
 import { INDENT_WIDTH, type DropPosition, type TreeDropTarget } from "./types";
 
+/** Discriminant values for node kinds used in the design engine. */
+export type NodeKindType =
+  | "frame"
+  | "group"
+  | "rectangle"
+  | "ellipse"
+  | "text"
+  | "image"
+  | "path"
+  | "component_instance";
+
 /** Node kinds that can contain children. */
-const CONTAINER_KINDS = new Set(["frame", "group"]);
+const CONTAINER_KINDS: ReadonlySet<NodeKindType> = new Set<NodeKindType>(["frame", "group"]);
 
 /**
  * Returns whether a node of the given kind can accept children.
  */
-export function canDropInside(kindType: string): boolean {
+export function canDropInside(kindType: NodeKindType): boolean {
   return CONTAINER_KINDS.has(kindType);
 }
 
@@ -45,6 +56,15 @@ export function computeDropTarget(input: DropTargetInput): TreeDropTarget {
     treeLeftEdge,
   } = input;
 
+  // Guard: non-finite or non-positive rowHeight would cause division-by-zero or NaN propagation.
+  if (!Number.isFinite(rowHeight) || rowHeight <= 0) {
+    return { targetUuid, position: "after" as const, depth: Math.max(0, targetDepth) };
+  }
+  // Guard: non-finite cursor coordinates cannot produce meaningful zone detection.
+  if (!Number.isFinite(cursorY) || !Number.isFinite(cursorX)) {
+    return { targetUuid, position: "after" as const, depth: Math.max(0, targetDepth) };
+  }
+
   // Vertical zone detection
   const relativeY = cursorY / rowHeight;
   let position: DropPosition;
@@ -70,7 +90,10 @@ export function computeDropTarget(input: DropTargetInput): TreeDropTarget {
     // Calculate depth from horizontal cursor position
     const rawDepth = Math.floor((cursorX - treeLeftEdge) / INDENT_WIDTH);
 
-    // Clamp based on position
+    // Clamp based on position.
+    // NOTE: This depth is a hint based on cursor indentation. Consumers (e.g., the layers panel)
+    // MUST validate the computed depth against the actual tree structure to prevent reparenting
+    // into non-container nodes. The depth here may exceed what the tree allows at a given position.
     const maxDepth =
       position === "before"
         ? targetDepth // Can't be deeper than what we're inserting before

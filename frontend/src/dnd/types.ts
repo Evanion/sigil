@@ -24,9 +24,24 @@ export interface TreeDropTarget {
    * 0 = page root, 1 = direct child of a root frame, etc.
    */
   readonly depth: number;
+  /**
+   * Optional parent UUID resolved by the consumer from the flat list context.
+   *
+   * `computeDropTarget` does NOT populate this field -- it only computes
+   * targetUuid, position, and depth from cursor geometry. The consumer
+   * (e.g., the layers panel) must resolve the actual parent UUID from
+   * the tree structure based on the computed position and depth.
+   */
+  readonly parentUuid?: string;
 }
 
-/** Data attached to a draggable layer node. */
+/**
+ * Data attached to a draggable layer node.
+ *
+ * Consumer requirement: The drag handle element MUST be an interactive element
+ * ({@link HTMLButtonElement} or `role="button"`) with `tabindex="0"` and
+ * `aria-label` describing the node and its drag affordance.
+ */
 export interface LayerDragData {
   readonly type: "layer";
   readonly uuid: string;

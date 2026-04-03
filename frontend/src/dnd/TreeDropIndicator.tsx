@@ -41,7 +41,10 @@ export const TreeDropIndicator: Component<TreeDropIndicatorProps> = (props) => {
 
         return (
           <div
-            class={`sigil-drop-indicator ${isInside() ? "sigil-drop-indicator--inside" : ""}`}
+            classList={{
+              "sigil-drop-indicator": true,
+              "sigil-drop-indicator--inside": isInside(),
+            }}
             style={style()}
             aria-hidden="true"
           />

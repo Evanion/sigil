@@ -154,6 +154,137 @@ describe("computeDropTarget", () => {
     });
     expect(result.position).toBe("after");
   });
+
+  // --- RF-001: NaN/zero guard tests ---
+
+  it("should return safe default when rowHeight is zero", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 2,
+      targetCanHaveChildren: true,
+      cursorY: 14,
+      rowHeight: 0,
+      cursorX: 60,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).toBe("after");
+    expect(result.depth).toBe(2);
+    expect(result.targetUuid).toBe("node-1");
+  });
+
+  it("should return safe default when cursorY is NaN", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 1,
+      targetCanHaveChildren: false,
+      cursorY: NaN,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 40,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).toBe("after");
+    expect(result.depth).toBe(1);
+  });
+
+  it("should return safe default when cursorX is Infinity", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 3,
+      targetCanHaveChildren: true,
+      cursorY: 14,
+      rowHeight: ROW_HEIGHT,
+      cursorX: Infinity,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).toBe("after");
+    expect(result.depth).toBe(3);
+  });
+
+  it("should return safe default when rowHeight is negative", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 0,
+      targetCanHaveChildren: false,
+      cursorY: 10,
+      rowHeight: -28,
+      cursorX: 20,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).toBe("after");
+    expect(result.depth).toBe(0);
+  });
+
+  // --- RF-006: Edge case tests ---
+
+  it("should handle exact 0.25 boundary (not 'before' -- falls to middle zone)", () => {
+    // relativeY = 7 / 28 = 0.25 exactly; 0.25 is NOT < 0.25
+    const result = computeDropTarget({
+      targetUuid: "frame-1",
+      targetDepth: 1,
+      targetCanHaveChildren: true,
+      cursorY: 7,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 40,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).not.toBe("before");
+  });
+
+  it("should handle exact 0.75 boundary (not 'after' -- falls to middle zone)", () => {
+    // relativeY = 21 / 28 = 0.75 exactly; 0.75 is NOT > 0.75
+    const result = computeDropTarget({
+      targetUuid: "frame-1",
+      targetDepth: 1,
+      targetCanHaveChildren: true,
+      cursorY: 21,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 40,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).not.toBe("after");
+  });
+
+  it("should handle root-level target (depth 0)", () => {
+    const result = computeDropTarget({
+      targetUuid: "root-node",
+      targetDepth: 0,
+      targetCanHaveChildren: true,
+      cursorY: 14,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 10,
+      treeLeftEdge: 0,
+    });
+    expect(result.position).toBe("inside");
+    expect(result.depth).toBe(1);
+  });
+
+  it("should handle cursor outside row bounds (negative cursorY)", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 2,
+      targetCanHaveChildren: true,
+      cursorY: -10,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 40,
+      treeLeftEdge: 0,
+    });
+    // Negative cursorY -> relativeY < 0 < 0.25 -> "before"
+    expect(result.position).toBe("before");
+  });
+
+  it("should handle cursor outside row bounds (cursorY > rowHeight)", () => {
+    const result = computeDropTarget({
+      targetUuid: "node-1",
+      targetDepth: 2,
+      targetCanHaveChildren: true,
+      cursorY: 50,
+      rowHeight: ROW_HEIGHT,
+      cursorX: 40,
+      treeLeftEdge: 0,
+    });
+    // cursorY=50, relativeY = 50/28 ~= 1.78 > 0.75 -> "after"
+    expect(result.position).toBe("after");
+  });
 });
 
 describe("canDropInside", () => {
