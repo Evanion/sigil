@@ -1,6 +1,6 @@
 import { type Component } from "solid-js";
-import { PlaceholderPanel } from "./PlaceholderPanel";
+import { LayersTree } from "./LayersTree";
 
-export const LayersPanel: Component = () => (
-  <PlaceholderPanel title="Layers" message="Layer tree -- Spec 10" />
-);
+export const LayersPanel: Component = () => {
+  return <LayersTree />;
+};
