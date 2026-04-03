@@ -5,10 +5,13 @@ import { Toolbar } from "./shell/Toolbar";
 import { Canvas } from "./shell/Canvas";
 import { StatusBar } from "./shell/StatusBar";
 import { AnnounceProvider } from "./shell/AnnounceProvider";
+import { TabRegion } from "./panels/TabRegion";
+import { registerDefaultPanels } from "./panels/register-panels";
 import "./App.css";
 
 const App: Component = () => {
   const store = createDocumentStoreSolid();
+  registerDefaultPanels(store);
   const [announcement, setAnnouncement] = createSignal("");
 
   /** Push a message into the ARIA live region for screen readers. */
@@ -26,19 +29,15 @@ const App: Component = () => {
           <div class="app-shell__toolbar">
             <Toolbar />
           </div>
-          <div class="app-shell__left" role="complementary" aria-label="Left panel" tabindex={0}>
-            <div class="placeholder-panel">
-              <h2 class="placeholder-panel__heading">Layers</h2>
-            </div>
+          <div class="app-shell__left" role="complementary" aria-label="Left panel">
+            <TabRegion region="left" />
           </div>
           {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
           <div class="app-shell__canvas" role="main">
             <Canvas />
           </div>
-          <div class="app-shell__right" role="complementary" aria-label="Right panel" tabindex={0}>
-            <div class="placeholder-panel">
-              <h2 class="placeholder-panel__heading">Properties</h2>
-            </div>
+          <div class="app-shell__right" role="complementary" aria-label="Right panel">
+            <TabRegion region="right" />
           </div>
           {/* RF-018: Wrap StatusBar in grid-placed div */}
           <div class="app-shell__status">
