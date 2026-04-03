@@ -4,9 +4,9 @@ import {
   createEffect,
   For,
   Show,
-  Dynamic,
   type Component,
 } from "solid-js";
+import { Dynamic } from "solid-js/web";
 import { panels, type PanelRegistration } from "./registry";
 import "./TabRegion.css";
 
