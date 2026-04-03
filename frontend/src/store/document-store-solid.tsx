@@ -14,6 +14,8 @@ import {
   SET_LOCKED_MUTATION,
   UNDO_MUTATION,
   REDO_MUTATION,
+  REPARENT_NODE_MUTATION,
+  REORDER_CHILDREN_MUTATION,
 } from "../graphql/mutations";
 import { DOCUMENT_CHANGED_SUBSCRIPTION } from "../graphql/subscriptions";
 
@@ -31,6 +33,11 @@ interface MutableDocumentInfo {
 /** Mutable version of DocumentNode for use inside createStore. */
 type MutableDocumentNode = {
   -readonly [K in keyof DocumentNode]: DocumentNode[K];
+} & {
+  /** Parent UUID from GraphQL (string, not arena NodeId). */
+  parentUuid: string | null;
+  /** Children UUIDs from GraphQL (strings, not arena NodeIds). */
+  childrenUuids: string[];
 };
 
 export interface DocumentState {
@@ -65,6 +72,8 @@ export interface DocumentStoreAPI {
   deleteNode(uuid: string): void;
   setVisible(uuid: string, visible: boolean): void;
   setLocked(uuid: string, locked: boolean): void;
+  reparentNode(uuid: string, newParentUuid: string, position: number): void;
+  reorderChildren(uuid: string, newPosition: number): void;
   undo(): void;
   redo(): void;
 
@@ -95,6 +104,18 @@ function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
   const rawName = raw["name"] as string;
   const name = typeof rawName === "string" ? rawName.slice(0, MAX_NODE_NAME_LENGTH) : "";
 
+  // GraphQL returns parent as a UUID string (or null) and children as UUID string array.
+  // Preserve these for tree rendering.
+  const rawParent = raw["parent"];
+  const parentUuid = typeof rawParent === "string" && UUID_REGEX.test(rawParent) ? rawParent : null;
+
+  const rawChildren = raw["children"];
+  const childrenUuids: string[] = Array.isArray(rawChildren)
+    ? (rawChildren as unknown[]).filter(
+        (c): c is string => typeof c === "string" && UUID_REGEX.test(c),
+      )
+    : [];
+
   return {
     id: PLACEHOLDER_NODE_ID,
     uuid: raw["uuid"] as string,
@@ -108,6 +129,8 @@ function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
     grid_placement: null,
     visible: raw["visible"] as boolean,
     locked: raw["locked"] as boolean,
+    parentUuid,
+    childrenUuids,
   };
 }
 
@@ -289,6 +312,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       grid_placement: null,
       visible: true,
       locked: false,
+      parentUuid: null,
+      childrenUuids: [],
     } satisfies MutableDocumentNode);
 
     client
@@ -491,6 +516,52 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  function reparentNode(uuid: string, newParentUuid: string, position: number): void {
+    if (!Number.isFinite(position)) return;
+
+    client
+      .mutation(gql(REPARENT_NODE_MUTATION), {
+        uuid,
+        newParentUuid,
+        position: Math.max(0, Math.round(position)),
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("reparentNode error:", r.error.message);
+        }
+        // Refresh tree structure regardless of success/error
+        // since we don't do optimistic reparenting (too complex for tree structure).
+        void fetchPages();
+      })
+      .catch((err: unknown) => {
+        console.error("reparentNode exception:", err);
+        void fetchPages();
+      });
+  }
+
+  function reorderChildren(uuid: string, newPosition: number): void {
+    if (!Number.isFinite(newPosition)) return;
+
+    client
+      .mutation(gql(REORDER_CHILDREN_MUTATION), {
+        uuid,
+        newPosition: Math.max(0, Math.round(newPosition)),
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("reorderChildren error:", r.error.message);
+        }
+        // Refresh tree structure regardless of success/error
+        void fetchPages();
+      })
+      .catch((err: unknown) => {
+        console.error("reorderChildren exception:", err);
+        void fetchPages();
+      });
+  }
+
   function undo(): void {
     client
       .mutation(gql(UNDO_MUTATION), {})
@@ -559,6 +630,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     deleteNode,
     setVisible,
     setLocked,
+    reparentNode,
+    reorderChildren,
     undo,
     redo,
     destroy,

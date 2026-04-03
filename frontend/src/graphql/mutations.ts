@@ -54,3 +54,27 @@ export const UNDO_MUTATION = `
 export const REDO_MUTATION = `
   mutation Redo { redo { canUndo canRedo } }
 `;
+
+export const REPARENT_NODE_MUTATION = `
+  mutation ReparentNode($uuid: String!, $newParentUuid: String!, $position: Int!) {
+    reparentNode(uuid: $uuid, newParentUuid: $newParentUuid, position: $position) {
+      uuid
+      name
+      kind
+      parent
+      children
+      transform
+      style
+      visible
+      locked
+    }
+  }
+`;
+
+export const REORDER_CHILDREN_MUTATION = `
+  mutation ReorderChildren($uuid: String!, $newPosition: Int!) {
+    reorderChildren(uuid: $uuid, newPosition: $newPosition) {
+      uuid
+    }
+  }
+`;
