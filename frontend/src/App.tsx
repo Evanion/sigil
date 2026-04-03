@@ -29,14 +29,14 @@ const App: Component = () => {
           <div class="app-shell__toolbar">
             <Toolbar />
           </div>
-          <div class="app-shell__left" role="complementary" aria-label="Left panel" tabindex={0}>
+          <div class="app-shell__left" role="complementary" aria-label="Left panel">
             <TabRegion region="left" />
           </div>
           {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
           <div class="app-shell__canvas" role="main">
             <Canvas />
           </div>
-          <div class="app-shell__right" role="complementary" aria-label="Right panel" tabindex={0}>
+          <div class="app-shell__right" role="complementary" aria-label="Right panel">
             <TabRegion region="right" />
           </div>
           {/* RF-018: Wrap StatusBar in grid-placed div */}

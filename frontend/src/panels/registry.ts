@@ -28,5 +28,6 @@ export const panels: PanelRegistration[] = [];
 
 /** Register a panel. Call at module scope. */
 export function registerPanel(reg: PanelRegistration): void {
+  if (panels.some((p) => p.id === reg.id)) return;
   panels.push(reg);
 }
