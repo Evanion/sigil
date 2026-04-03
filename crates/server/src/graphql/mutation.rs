@@ -21,6 +21,7 @@ use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
 };
 use agent_designer_core::commands::style_commands::SetTransform;
+use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::node::Transform;
 use agent_designer_core::{NodeId, NodeKind, PageId};
 use agent_designer_state::{MutationEvent, MutationEventKind};
@@ -389,6 +390,134 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "locked"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Move a node to a new parent at a specific position.
+    async fn reparent_node(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        new_parent_uuid: String,
+        position: i32,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+        let parent_uuid: uuid::Uuid = new_parent_uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid parent UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+            let parent_id = doc_guard
+                .arena
+                .id_by_uuid(&parent_uuid)
+                .ok_or_else(|| async_graphql::Error::new("parent not found"))?;
+
+            let old_parent_id = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .parent;
+            let old_position = old_parent_id.and_then(|pid| {
+                doc_guard
+                    .arena
+                    .get(pid)
+                    .ok()
+                    .and_then(|p| p.children.iter().position(|&c| c == node_id))
+            });
+
+            let cmd = ReparentNode {
+                node_id,
+                new_parent_id: parent_id,
+                new_position: usize::try_from(position.max(0)).unwrap_or(0),
+                old_parent_id,
+                old_position,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("reparentNode failed: {e}");
+                async_graphql::Error::new("reparent failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "parent"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Reorder a node within its parent's children list.
+    async fn reorder_children(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        new_position: i32,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            // Find the node's current parent and position within it
+            let parent_id = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .parent
+                .ok_or_else(|| async_graphql::Error::new("node has no parent"))?;
+
+            let old_position = doc_guard
+                .arena
+                .get(parent_id)
+                .map_err(|_| async_graphql::Error::new("parent lookup failed"))?
+                .children
+                .iter()
+                .position(|&c| c == node_id)
+                .ok_or_else(|| async_graphql::Error::new("node not found in parent's children"))?;
+
+            let cmd = ReorderChildren {
+                node_id,
+                new_position: usize::try_from(new_position.max(0)).unwrap_or(0),
+                old_position,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("reorderChildren failed: {e}");
+                async_graphql::Error::new("reorder failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "order"})),
         });
 
         Ok(node_gql)
@@ -771,5 +900,136 @@ mod tests {
         assert_eq!(t["y"], 84.0);
         assert_eq!(t["width"], 100.0);
         assert_eq!(t["height"], 200.0);
+    }
+
+    /// Helper: creates a frame node via GraphQL and returns its UUID string.
+    async fn create_frame(
+        schema: &Schema<super::super::query::QueryRoot, MutationRoot, EmptySubscription>,
+        name: &str,
+    ) -> String {
+        let query = format!(
+            r#"mutation {{ createNode(kind: {{ type: "frame" }}, name: "{name}") {{ uuid }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            res.errors.is_empty(),
+            "create_frame errors: {:?}",
+            res.errors
+        );
+        res.data.into_json().unwrap()["createNode"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    /// Helper: reparents `child_uuid` under `parent_uuid` at `position` and
+    /// returns the parent UUID from the GraphQL response.
+    async fn reparent(
+        schema: &Schema<super::super::query::QueryRoot, MutationRoot, EmptySubscription>,
+        child_uuid: &str,
+        parent_uuid: &str,
+        position: i32,
+    ) -> serde_json::Value {
+        let query = format!(
+            r#"mutation {{ reparentNode(uuid: "{child_uuid}", newParentUuid: "{parent_uuid}", position: {position}) {{ uuid parent children }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "reparent errors: {:?}", res.errors);
+        res.data.into_json().unwrap()["reparentNode"].clone()
+    }
+
+    #[tokio::test]
+    async fn test_reparent_node_mutation_moves_node_to_new_parent() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let parent_uuid = create_frame(&schema, "Parent").await;
+        let child_uuid = create_frame(&schema, "Child").await;
+
+        let result = reparent(&schema, &child_uuid, &parent_uuid, 0).await;
+        assert_eq!(result["parent"].as_str().unwrap(), parent_uuid);
+
+        // Verify parent now lists child
+        let parent_query = format!(r#"{{ node(uuid: "{parent_uuid}") {{ children }} }}"#,);
+        let parent_res = schema.execute(&*parent_query).await;
+        assert!(parent_res.errors.is_empty());
+        let children = &parent_res.data.into_json().unwrap()["node"]["children"];
+        assert!(
+            children
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c.as_str().unwrap() == child_uuid)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reparent_node_with_invalid_uuid_returns_error() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let parent_uuid = create_frame(&schema, "Parent").await;
+
+        let query = format!(
+            r#"mutation {{ reparentNode(uuid: "not-valid", newParentUuid: "{parent_uuid}", position: 0) {{ uuid }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(!res.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_reorder_children_mutation_changes_position() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let parent_uuid = create_frame(&schema, "Parent").await;
+        let child_a = create_frame(&schema, "A").await;
+        let child_b = create_frame(&schema, "B").await;
+        let child_c = create_frame(&schema, "C").await;
+
+        // Reparent all children under parent
+        reparent(&schema, &child_a, &parent_uuid, 0).await;
+        reparent(&schema, &child_b, &parent_uuid, 1).await;
+        reparent(&schema, &child_c, &parent_uuid, 2).await;
+
+        // Move A from position 0 to position 2
+        let reorder_query = format!(
+            r#"mutation {{ reorderChildren(uuid: "{child_a}", newPosition: 2) {{ uuid }} }}"#,
+        );
+        let reorder_res = schema.execute(&*reorder_query).await;
+        assert!(
+            reorder_res.errors.is_empty(),
+            "errors: {:?}",
+            reorder_res.errors
+        );
+
+        // Verify new order: B, C, A
+        let parent_query = format!(r#"{{ node(uuid: "{parent_uuid}") {{ children }} }}"#,);
+        let parent_res = schema.execute(&*parent_query).await;
+        assert!(parent_res.errors.is_empty());
+        let children: Vec<String> = parent_res.data.into_json().unwrap()["node"]["children"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(children, vec![child_b, child_c, child_a]);
+    }
+
+    #[tokio::test]
+    async fn test_reorder_children_on_root_node_returns_error() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let root_uuid = create_frame(&schema, "Root").await;
+
+        let query = format!(
+            r#"mutation {{ reorderChildren(uuid: "{root_uuid}", newPosition: 0) {{ uuid }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "root node has no parent, should fail"
+        );
     }
 }
