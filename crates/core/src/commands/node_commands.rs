@@ -303,7 +303,7 @@ mod tests {
     fn test_create_node_apply() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(10));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let cmd = CreateNode {
@@ -327,7 +327,7 @@ mod tests {
     fn test_create_node_undo() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(10));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let cmd = CreateNode {
@@ -351,7 +351,7 @@ mod tests {
     fn test_delete_node_apply_and_undo() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(10));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let node = Node::new(

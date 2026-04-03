@@ -23,12 +23,11 @@ use agent_designer_core::commands::node_commands::{
 use agent_designer_core::commands::style_commands::SetTransform;
 use agent_designer_core::node::Transform;
 use agent_designer_core::{NodeId, NodeKind, PageId};
+use agent_designer_state::{MutationEvent, MutationEventKind};
 
 use crate::state::ServerState;
 
-use super::types::{
-    CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult, node_to_gql,
-};
+use super::types::{CreateNodeResult, NodeGql, UndoRedoResult, node_to_gql};
 
 pub struct MutationRoot;
 
@@ -42,16 +41,6 @@ fn acquire_document_lock(
             tracing::error!("document mutex poisoned, recovering");
             poisoned.into_inner()
         }
-    }
-}
-
-/// Publishes a [`DocumentEvent`] to the GraphQL subscription broadcast channel.
-///
-/// If no subscription clients are listening the send will fail silently -- this
-/// is expected and logged at `debug` level.
-pub fn publish_event(state: &ServerState, event: DocumentEvent) {
-    if state.graphql_tx.send(event).is_err() {
-        tracing::debug!("no GraphQL subscription listeners");
     }
 }
 
@@ -129,15 +118,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeCreated,
-                uuid: Some(node_uuid.to_string()),
-                data: None,
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeCreated,
+            uuid: Some(node_uuid.to_string()),
+            data: None,
+        });
 
         Ok(CreateNodeResult {
             uuid: node_uuid.to_string(),
@@ -204,15 +189,11 @@ impl MutationRoot {
         }
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeDeleted,
-                uuid: Some(parsed_uuid.to_string()),
-                data: None,
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeDeleted,
+            uuid: Some(parsed_uuid.to_string()),
+            data: None,
+        });
 
         Ok(true)
     }
@@ -259,15 +240,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeUpdated,
-                uuid: Some(parsed_uuid.to_string()),
-                data: Some(async_graphql::Json(serde_json::json!({"field": "name"}))),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "name"})),
+        });
 
         Ok(node_gql)
     }
@@ -318,17 +295,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeUpdated,
-                uuid: Some(parsed_uuid.to_string()),
-                data: Some(async_graphql::Json(
-                    serde_json::json!({"field": "transform"}),
-                )),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "transform"})),
+        });
 
         Ok(node_gql)
     }
@@ -369,15 +340,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeUpdated,
-                uuid: Some(parsed_uuid.to_string()),
-                data: Some(async_graphql::Json(serde_json::json!({"field": "visible"}))),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "visible"})),
+        });
 
         Ok(node_gql)
     }
@@ -418,15 +385,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::NodeUpdated,
-                uuid: Some(parsed_uuid.to_string()),
-                data: Some(async_graphql::Json(serde_json::json!({"field": "locked"}))),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "locked"})),
+        });
 
         Ok(node_gql)
     }
@@ -445,17 +408,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::UndoRedo,
-                uuid: None,
-                data: Some(async_graphql::Json(
-                    serde_json::json!({"can_undo": can_undo, "can_redo": can_redo}),
-                )),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::UndoRedo,
+            uuid: None,
+            data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+        });
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
@@ -474,17 +431,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        publish_event(
-            state,
-            DocumentEvent {
-                event_type: DocumentEventType::UndoRedo,
-                uuid: None,
-                data: Some(async_graphql::Json(
-                    serde_json::json!({"can_undo": can_undo, "can_redo": can_redo}),
-                )),
-                sender_id: None,
-            },
-        );
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::UndoRedo,
+            uuid: None,
+            data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+        });
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
@@ -519,7 +470,8 @@ mod tests {
             let page = agent_designer_core::document::Page::new(
                 PageId::new(page_uuid),
                 "Home".to_string(),
-            );
+            )
+            .unwrap();
             doc.add_page(page).unwrap();
         }
 

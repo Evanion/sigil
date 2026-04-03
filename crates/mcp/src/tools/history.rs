@@ -7,7 +7,7 @@
 //! Errors from the core engine (e.g. `NothingToUndo`, `NothingToRedo`) are
 //! propagated as `McpToolError::CoreError`.
 
-use agent_designer_state::AppState;
+use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -32,6 +32,14 @@ pub fn undo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::UndoRedo,
+        uuid: None,
+        data: Some(serde_json::json!({
+            "can_undo": result.can_undo,
+            "can_redo": result.can_redo,
+        })),
+    });
     Ok(result)
 }
 
@@ -53,6 +61,14 @@ pub fn redo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::UndoRedo,
+        uuid: None,
+        data: Some(serde_json::json!({
+            "can_undo": result.can_undo,
+            "can_redo": result.can_redo,
+        })),
+    });
     Ok(result)
 }
 
@@ -96,13 +112,12 @@ mod tests {
     fn test_undo_redo_round_trip() {
         let state = AppState::new();
 
-        // Create a page via the direct API (does not push to undo stack),
-        // then create a node via execute (pushes to undo stack).
+        // Both create_page and create_node go through doc.execute(),
+        // so the undo stack has two entries after setup.
         let page = create_page_impl(&state, "Page 1").expect("create page");
         create_node_impl(&state, "frame", "My Frame", Some(&page.id), None, None)
             .expect("create node");
 
-        // Only create_node went through doc.execute(); the undo stack has one entry.
         {
             let doc = crate::server::acquire_document_lock(&state);
             assert!(
@@ -112,18 +127,18 @@ mod tests {
             assert!(!doc.can_redo(), "expected redo to be empty before any undo");
         }
 
-        // Undo the create_node command — stack is now empty.
+        // Undo create_node — CreatePage still on the undo stack.
         let after_undo = undo_impl(&state).expect("undo create_node");
         assert!(
-            !after_undo.can_undo,
-            "undo stack should be empty after undoing the only command"
+            after_undo.can_undo,
+            "undo stack should still have create_page command"
         );
         assert!(
             after_undo.can_redo,
             "create_node should be on the redo stack after undo"
         );
 
-        // Redo the create_node command — undo stack has one entry again.
+        // Redo the create_node command.
         let after_redo = redo_impl(&state).expect("redo create_node");
         assert!(
             after_redo.can_undo,

@@ -61,7 +61,8 @@ async fn main() -> anyhow::Result<()> {
         {
             let mut doc = state.app.document.lock().expect("lock for default page");
             let page_id = agent_designer_core::PageId::new(uuid::Uuid::new_v4());
-            let page = agent_designer_core::Page::new(page_id, "Page 1".to_string());
+            let page = agent_designer_core::Page::new(page_id, "Page 1".to_string())
+                .expect("create default page");
             doc.add_page(page).expect("add default page");
         }
         state
@@ -77,21 +78,7 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        let mcp_state = state.app.clone();
-        Some(tokio::spawn(async move {
-            let mcp_server = agent_designer_mcp::server::SigilMcpServer::new(mcp_state);
-            let (stdin, stdout) = rmcp::transport::io::stdio();
-            match rmcp::serve_server(mcp_server, (stdin, stdout)).await {
-                Ok(running) => {
-                    if let Err(e) = running.waiting().await {
-                        tracing::error!("MCP server error: {e}");
-                    }
-                }
-                Err(e) => {
-                    tracing::error!("MCP server failed to start: {e}");
-                }
-            }
-        }))
+        Some(agent_designer_mcp::server::start_stdio(state.app.clone()))
     } else {
         None
     };

@@ -157,7 +157,7 @@ mod tests {
         let state = AppState::new();
         {
             let mut doc = state.document.lock().unwrap();
-            let page = Page::new(PageId::new(uuid::Uuid::new_v4()), "Page 1".to_string());
+            let page = Page::new(PageId::new(uuid::Uuid::new_v4()), "Page 1".to_string()).unwrap();
             doc.add_page(page).unwrap();
         }
         let info = get_document_info_impl(&state);
@@ -174,7 +174,7 @@ mod tests {
         let page_uuid = uuid::Uuid::new_v4();
         {
             let mut doc = state.document.lock().unwrap();
-            let page = Page::new(PageId::new(page_uuid), "Home".to_string());
+            let page = Page::new(PageId::new(page_uuid), "Home".to_string()).unwrap();
             doc.add_page(page).unwrap();
 
             // Node::new requires a valid NodeId; arena.insert will stamp the real id.
@@ -207,7 +207,7 @@ mod tests {
         let page_uuid = uuid::Uuid::new_v4();
         {
             let mut doc = state.document.lock().unwrap();
-            let page = Page::new(PageId::new(page_uuid), "Deep".to_string());
+            let page = Page::new(PageId::new(page_uuid), "Deep".to_string()).unwrap();
             doc.add_page(page).unwrap();
 
             // Insert MAX_TREE_DEPTH + 5 nodes in a chain.

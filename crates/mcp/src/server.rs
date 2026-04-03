@@ -226,10 +226,10 @@ impl SigilMcpServer {
         name = "list_tokens",
         description = "List all design tokens in the document, sorted by name"
     )]
-    fn list_tokens(&self) -> Json<crate::types::TokenListResult> {
-        Json(crate::types::TokenListResult {
-            tokens: crate::tools::tokens::list_tokens_impl(&self.state),
-        })
+    fn list_tokens(&self) -> Result<Json<crate::types::TokenListResult>, rmcp::ErrorData> {
+        let tokens =
+            crate::tools::tokens::list_tokens_impl(&self.state).map_err(|e| e.to_mcp_error())?;
+        Ok(Json(crate::types::TokenListResult { tokens }))
     }
 
     /// Creates a new design token.
@@ -306,6 +306,31 @@ impl SigilMcpServer {
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }
+}
+
+/// Spawns the MCP server on stdio in a background task.
+///
+/// This is a convenience function for `main.rs` that encapsulates all MCP
+/// transport setup. The caller only needs to provide the shared `AppState`.
+///
+/// Returns a `JoinHandle` that resolves when the MCP server exits (either
+/// because the stdio transport closed or an error occurred).
+#[must_use]
+pub fn start_stdio(state: AppState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let server = SigilMcpServer::new(state);
+        let (stdin, stdout) = rmcp::transport::io::stdio();
+        match rmcp::serve_server(server, (stdin, stdout)).await {
+            Ok(running) => {
+                if let Err(e) = running.waiting().await {
+                    tracing::error!("MCP server error: {e}");
+                }
+            }
+            Err(e) => {
+                tracing::error!("MCP server failed to start: {e}");
+            }
+        }
+    })
 }
 
 impl ServerHandler for SigilMcpServer {

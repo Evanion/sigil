@@ -313,10 +313,11 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
         MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT,
         validate_asset_ref, validate_collection_size, validate_floats_in_value, validate_node_name,
+        validate_page_name,
     };
 
     // Validate page name
-    validate_node_name(&page.name)?;
+    validate_page_name(&page.name)?;
 
     // Validate transition count
     validate_collection_size(
@@ -706,7 +707,7 @@ mod tests {
     #[test]
     fn test_page_to_serialized_empty_page() {
         let arena = Arena::new(100);
-        let page = Page::new(PageId::new(make_uuid(1)), "Empty".to_string());
+        let page = Page::new(PageId::new(make_uuid(1)), "Empty".to_string()).expect("create page");
 
         let serialized = page_to_serialized(&page, &arena, &[]).expect("serialize");
         assert_eq!(serialized.name, "Empty");
@@ -727,7 +728,7 @@ mod tests {
         crate::tree::add_child(&mut arena, root_id, child_id).expect("add_child");
 
         let page_id = PageId::new(make_uuid(1));
-        let mut page = Page::new(page_id, "Home".to_string());
+        let mut page = Page::new(page_id, "Home".to_string()).expect("create page");
         page.root_nodes.push(root_id);
 
         let serialized = page_to_serialized(&page, &arena, &[]).expect("serialize");
@@ -764,7 +765,7 @@ mod tests {
         crate::tree::add_child(&mut arena, root_id, child_id).expect("add_child");
 
         let page_id = PageId::new(make_uuid(1));
-        let mut page = Page::new(page_id, "Home".to_string());
+        let mut page = Page::new(page_id, "Home".to_string()).expect("create page");
         page.root_nodes.push(root_id);
 
         // Serialize
@@ -882,7 +883,7 @@ mod tests {
         crate::tree::add_child(&mut arena, root_id, target_node_id).expect("add_child");
 
         let page_id = PageId::new(make_uuid(1));
-        let mut page = Page::new(page_id, "Home".to_string());
+        let mut page = Page::new(page_id, "Home".to_string()).expect("create page");
         page.root_nodes.push(root_id);
 
         let transitions = vec![
@@ -951,7 +952,7 @@ mod tests {
 
         // Page only contains node_a
         let page_id = PageId::new(make_uuid(1));
-        let mut page = Page::new(page_id, "PageA".to_string());
+        let mut page = Page::new(page_id, "PageA".to_string()).expect("create page");
         page.root_nodes.push(node_a_id);
 
         let transitions = vec![

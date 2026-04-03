@@ -1,7 +1,12 @@
 //! Page operation tools — list, create, rename, delete.
+//!
+//! All mutations follow the pattern:
+//!   lock -> capture old state -> construct command ->
+//!   `doc.execute(Box::new(cmd))` -> build response -> drop lock -> `signal_dirty`
 
-use agent_designer_core::{Page, PageId};
-use agent_designer_state::AppState;
+use agent_designer_core::PageId;
+use agent_designer_core::commands::page_commands::{CreatePage, DeletePage, RenamePage};
+use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -32,24 +37,32 @@ pub fn list_pages_impl(state: &AppState) -> Vec<PageInfo> {
 
 /// Creates a new page with the given name and adds it to the document.
 ///
-/// Generates a fresh UUID for the page, signals the persistence layer, and
-/// returns a `PageInfo` describing the newly created page.
+/// Routes through `Document::execute` so the operation participates in
+/// undo/redo history.
 ///
 /// # Errors
 ///
-/// Returns `McpToolError::CoreError` if the document has reached its maximum
-/// page count.
+/// Returns `McpToolError::CoreError` if validation fails or the document
+/// has reached its maximum page count.
 pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToolError> {
     let page_uuid = uuid::Uuid::new_v4();
     let page_id = PageId::new(page_uuid);
-    let page = Page::new(page_id, name.to_string());
 
     {
         let mut doc = acquire_document_lock(state);
-        doc.add_page(page)?;
+        let cmd = CreatePage {
+            page_id,
+            name: name.to_string(),
+        };
+        doc.execute(Box::new(cmd))?;
     }
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::PageCreated,
+        uuid: Some(page_uuid.to_string()),
+        data: None,
+    });
 
     Ok(PageInfo {
         id: page_uuid.to_string(),
@@ -60,8 +73,8 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
 
 /// Deletes a page by UUID.
 ///
-/// Finds the page by its UUID string, removes it from the document's page
-/// list, and signals persistence.
+/// Captures the page snapshot before deletion so undo can restore it at
+/// the correct position.
 ///
 /// # Errors
 ///
@@ -78,15 +91,29 @@ pub fn delete_page_impl(
 
     {
         let mut doc = acquire_document_lock(state);
+
+        // Capture snapshot and position before deletion for undo support.
         let pos = doc
             .pages
             .iter()
             .position(|p| p.id == page_id)
             .ok_or_else(|| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-        doc.pages.remove(pos);
+        let snapshot = doc.pages[pos].clone();
+
+        let cmd = DeletePage {
+            page_id,
+            snapshot: Some(snapshot),
+            page_index: Some(pos),
+        };
+        doc.execute(Box::new(cmd))?;
     }
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::PageDeleted,
+        uuid: Some(page_uuid_str.to_string()),
+        data: None,
+    });
 
     Ok(MutationResult {
         success: true,
@@ -96,13 +123,13 @@ pub fn delete_page_impl(
 
 /// Renames a page identified by UUID.
 ///
-/// Finds the page, updates its name in-place, and returns a `PageInfo`
-/// reflecting the new state.
+/// Captures the old name before rename so undo can restore it.
 ///
 /// # Errors
 ///
 /// - `McpToolError::InvalidUuid` if `page_uuid_str` is not a valid UUID.
 /// - `McpToolError::PageNotFound` if no page with the given UUID exists.
+/// - `McpToolError::CoreError` if the new name fails validation.
 pub fn rename_page_impl(
     state: &AppState,
     page_uuid_str: &str,
@@ -113,22 +140,24 @@ pub fn rename_page_impl(
         .map_err(|_| McpToolError::InvalidUuid(page_uuid_str.to_string()))?;
     let page_id = PageId::new(page_uuid);
 
-    // Collect root node IDs before taking the mutable borrow so we can call
-    // `arena.uuid_of` without holding two borrows on `doc` simultaneously.
     let root_uuids = {
         let mut doc = acquire_document_lock(state);
 
-        // Verify page exists and update its name.
-        let root_node_ids: Vec<agent_designer_core::NodeId> = {
-            let page = doc
-                .page_mut(page_id)
-                .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-            page.name = new_name.to_string();
-            page.root_nodes.clone()
-        };
+        // Capture old name for undo.
+        let page = doc
+            .page(page_id)
+            .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
+        let old_name = page.name.clone();
+        let root_node_ids: Vec<agent_designer_core::NodeId> = page.root_nodes.clone();
 
-        // Now that the mutable borrow on `page` is released, resolve NodeIds
-        // to UUIDs through the arena.
+        let cmd = RenamePage {
+            page_id,
+            new_name: new_name.to_string(),
+            old_name,
+        };
+        doc.execute(Box::new(cmd))?;
+
+        // Resolve NodeIds to UUIDs.
         root_node_ids
             .iter()
             .filter_map(|&nid| doc.arena.uuid_of(nid).ok().map(|u| u.to_string()))
@@ -136,6 +165,11 @@ pub fn rename_page_impl(
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::PageUpdated,
+        uuid: Some(page_uuid_str.to_string()),
+        data: Some(serde_json::json!({"field": "name"})),
+    });
 
     Ok(PageInfo {
         id: page_uuid_str.to_string(),
@@ -168,12 +202,41 @@ mod tests {
     }
 
     #[test]
+    fn test_create_page_participates_in_undo() {
+        let state = AppState::new();
+        create_page_impl(&state, "Home").expect("create");
+        {
+            let doc = acquire_document_lock(&state);
+            assert!(doc.can_undo());
+        }
+    }
+
+    #[test]
+    fn test_create_page_rejects_empty_name() {
+        let state = AppState::new();
+        let result = create_page_impl(&state, "");
+        assert!(result.is_err());
+        assert!(list_pages_impl(&state).is_empty());
+    }
+
+    #[test]
     fn test_delete_page_removes_page() {
         let state = AppState::new();
         let page = create_page_impl(&state, "Temp").unwrap();
         let result = delete_page_impl(&state, &page.id);
         assert!(result.is_ok());
         assert!(list_pages_impl(&state).is_empty());
+    }
+
+    #[test]
+    fn test_delete_page_participates_in_undo() {
+        let state = AppState::new();
+        let page = create_page_impl(&state, "Temp").unwrap();
+        delete_page_impl(&state, &page.id).expect("delete");
+        {
+            let doc = acquire_document_lock(&state);
+            assert!(doc.can_undo());
+        }
     }
 
     #[test]
@@ -194,5 +257,27 @@ mod tests {
         // Verify the document state was actually updated.
         let pages = list_pages_impl(&state);
         assert_eq!(pages[0].name, "New Name");
+    }
+
+    #[test]
+    fn test_rename_page_participates_in_undo() {
+        let state = AppState::new();
+        let page = create_page_impl(&state, "Home").unwrap();
+        rename_page_impl(&state, &page.id, "New Name").expect("rename");
+        {
+            let doc = acquire_document_lock(&state);
+            assert!(doc.can_undo());
+        }
+    }
+
+    #[test]
+    fn test_rename_page_rejects_empty_name() {
+        let state = AppState::new();
+        let page = create_page_impl(&state, "Home").unwrap();
+        let result = rename_page_impl(&state, &page.id, "");
+        assert!(result.is_err());
+        // Original name should be preserved.
+        let pages = list_pages_impl(&state);
+        assert_eq!(pages[0].name, "Home");
     }
 }
