@@ -5,7 +5,9 @@ type AnnounceFn = (message: string) => void;
 const AnnounceContext = createContext<AnnounceFn>();
 
 export const AnnounceProvider: ParentComponent<{ announce: AnnounceFn }> = (props) => {
-  return <AnnounceContext.Provider value={props.announce}>{props.children}</AnnounceContext.Provider>;
+  return (
+    <AnnounceContext.Provider value={props.announce}>{props.children}</AnnounceContext.Provider>
+  );
 };
 
 /**

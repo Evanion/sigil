@@ -26,12 +26,7 @@ const App: Component = () => {
           <div class="app-shell__toolbar">
             <Toolbar />
           </div>
-          <div
-            class="app-shell__left"
-            role="complementary"
-            aria-label="Left panel"
-            tabindex={0}
-          >
+          <div class="app-shell__left" role="complementary" aria-label="Left panel" tabindex={0}>
             <div class="placeholder-panel">
               <h2 class="placeholder-panel__heading">Layers</h2>
             </div>
@@ -40,12 +35,7 @@ const App: Component = () => {
           <div class="app-shell__canvas" role="main">
             <Canvas />
           </div>
-          <div
-            class="app-shell__right"
-            role="complementary"
-            aria-label="Right panel"
-            tabindex={0}
-          >
+          <div class="app-shell__right" role="complementary" aria-label="Right panel" tabindex={0}>
             <div class="placeholder-panel">
               <h2 class="placeholder-panel__heading">Properties</h2>
             </div>
@@ -55,11 +45,7 @@ const App: Component = () => {
             <StatusBar />
           </div>
           {/* RF-001: Visually-hidden ARIA live region for screen reader announcements */}
-          <div
-            aria-live="polite"
-            role="log"
-            class="sr-only"
-          >
+          <div aria-live="polite" role="log" class="sr-only">
             {announcement()}
           </div>
         </div>

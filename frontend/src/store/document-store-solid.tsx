@@ -1,12 +1,6 @@
 import { createSignal, batch } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
-import {
-  createClient,
-  cacheExchange,
-  fetchExchange,
-  subscriptionExchange,
-  gql,
-} from "@urql/solid";
+import { createClient, cacheExchange, fetchExchange, subscriptionExchange, gql } from "@urql/solid";
 import { createClient as createWSClient } from "graphql-ws";
 import type { DocumentNode, Page, Transform, NodeKind, NodeId } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
@@ -99,8 +93,7 @@ function debounce(fn: () => void, ms: number): () => void {
 
 function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
   const rawName = raw["name"] as string;
-  const name =
-    typeof rawName === "string" ? rawName.slice(0, MAX_NODE_NAME_LENGTH) : "";
+  const name = typeof rawName === "string" ? rawName.slice(0, MAX_NODE_NAME_LENGTH) : "";
 
   return {
     id: PLACEHOLDER_NODE_ID,
@@ -255,9 +248,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }
 
       // RF-004: Self-echo suppression
-      const senderId = (
-        result.data as Record<string, Record<string, unknown>> | undefined
-      )?.documentChanged?.senderId as string | null | undefined;
+      const senderId = (result.data as Record<string, Record<string, unknown>> | undefined)
+        ?.documentChanged?.senderId as string | null | undefined;
 
       // If senderId matches our session, skip re-fetch (we already applied optimistically).
       // If senderId is null/undefined (server doesn't populate yet), always re-fetch.
@@ -415,9 +407,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function deleteNode(uuid: string): void {
     // RF-003: Capture full node and selection for rollback
-    const previousNode = state.nodes[uuid]
-      ? structuredClone(state.nodes[uuid])
-      : undefined;
+    const previousNode = state.nodes[uuid] ? structuredClone(state.nodes[uuid]) : undefined;
     const previousSelectedId = selectedNodeId();
 
     setState(

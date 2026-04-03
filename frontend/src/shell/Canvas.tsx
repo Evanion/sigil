@@ -11,7 +11,14 @@
  * store signals to that interface.
  */
 
-import { createEffect, createMemo, createSignal, onMount, onCleanup, type Component } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  onMount,
+  onCleanup,
+  type Component,
+} from "solid-js";
 import { useDocument } from "../store/document-context";
 import { render as renderCanvas } from "../canvas/renderer";
 import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
