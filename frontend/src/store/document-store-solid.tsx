@@ -6,7 +6,6 @@ import {
   fetchExchange,
   subscriptionExchange,
   gql,
-  type Client,
 } from "@urql/solid";
 import { createClient as createWSClient } from "graphql-ws";
 import type { DocumentNode, Page, Transform, NodeKind, NodeId } from "../types/document";
@@ -76,16 +75,17 @@ export interface DocumentStoreAPI {
   redo(): void;
 
   // Lifecycle
-  readonly client: Client;
+  destroy(): void;
 }
 
-// ── Placeholder NodeId ─────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────
 
 const PLACEHOLDER_NODE_ID: NodeId = { index: 0, generation: 0 };
+const DEBOUNCE_MS = 100;
+const MAX_NODE_NAME_LENGTH = 1024;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ── Debounce helper ────────────────────────────────────────────────────
-
-const DEBOUNCE_MS = 100;
 
 function debounce(fn: () => void, ms: number): () => void {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -98,11 +98,15 @@ function debounce(fn: () => void, ms: number): () => void {
 // ── Parse GraphQL response ────────────────────────────────────────────
 
 function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
+  const rawName = raw["name"] as string;
+  const name =
+    typeof rawName === "string" ? rawName.slice(0, MAX_NODE_NAME_LENGTH) : "";
+
   return {
     id: PLACEHOLDER_NODE_ID,
     uuid: raw["uuid"] as string,
     kind: raw["kind"] as NodeKind,
-    name: raw["name"] as string,
+    name,
     parent: null,
     children: [],
     transform: raw["transform"] as Transform,
@@ -135,7 +139,7 @@ function parsePagesResponse(data: unknown): {
       if (!nodeRaw || typeof nodeRaw !== "object") continue;
       const n = nodeRaw as Record<string, unknown>;
       const uuid = n["uuid"] as string;
-      if (!uuid) continue;
+      if (!uuid || typeof uuid !== "string" || !UUID_REGEX.test(uuid)) continue;
       nodes[uuid] = parseNode(n);
       rootNodeIds.push(PLACEHOLDER_NODE_ID);
     }
@@ -153,31 +157,13 @@ function parsePagesResponse(data: unknown): {
 // ── Store factory ─────────────────────────────────────────────────────
 
 export function createDocumentStoreSolid(): DocumentStoreAPI {
+  // Client session ID for self-echo suppression (RF-004)
+  const clientSessionId = crypto.randomUUID();
+
   // urql client
   const httpUrl = `${window.location.origin}/graphql`;
   const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${wsProtocol}//${window.location.host}/graphql/ws`;
-
-  const wsClient = createWSClient({ url: wsUrl });
-
-  const client = createClient({
-    url: httpUrl,
-    exchanges: [
-      cacheExchange,
-      subscriptionExchange({
-        forwardSubscription(request) {
-          const input = { ...request, query: request.query || "" };
-          return {
-            subscribe(sink) {
-              const unsubscribe = wsClient.subscribe(input, sink);
-              return { unsubscribe };
-            },
-          };
-        },
-      }),
-      fetchExchange,
-    ],
-  });
 
   // Document state
   const [state, setState] = createStore<DocumentState>({
@@ -199,6 +185,39 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // Derived
   const canUndo = () => state.info.can_undo;
   const canRedo = () => state.info.can_redo;
+
+  // ── WebSocket client with connection tracking (RF-025) ──────────────
+
+  const wsClient = createWSClient({
+    url: wsUrl,
+    on: {
+      connected: () => {
+        setConnected(true);
+      },
+      closed: () => {
+        setConnected(false);
+      },
+    },
+  });
+
+  const client = createClient({
+    url: httpUrl,
+    exchanges: [
+      cacheExchange,
+      subscriptionExchange({
+        forwardSubscription(request) {
+          const input = { ...request, query: request.query || "" };
+          return {
+            subscribe(sink) {
+              const unsubscribe = wsClient.subscribe(input, sink);
+              return { unsubscribe };
+            },
+          };
+        },
+      }),
+      fetchExchange,
+    ],
+  });
 
   // ── Fetch pages ──────────────────────────────────────────────────────
 
@@ -225,19 +244,32 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   const debouncedFetchPages = debounce(fetchPages, DEBOUNCE_MS);
 
-  // ── Subscription ─────────────────────────────────────────────────────
+  // ── Subscription (RF-002: capture for cleanup, RF-004: self-echo) ───
 
-  client.subscription(gql(DOCUMENT_CHANGED_SUBSCRIPTION), {}).subscribe((result) => {
-    if (result.error) {
-      console.error("subscription error:", result.error.message);
-      return;
-    }
-    setConnected(true);
-    debouncedFetchPages();
-  });
+  const subscriptionHandle = client
+    .subscription(gql(DOCUMENT_CHANGED_SUBSCRIPTION), {})
+    .subscribe((result) => {
+      if (result.error) {
+        console.error("subscription error:", result.error.message);
+        return;
+      }
+
+      // RF-004: Self-echo suppression
+      const senderId = (
+        result.data as Record<string, Record<string, unknown>> | undefined
+      )?.documentChanged?.senderId as string | null | undefined;
+
+      // If senderId matches our session, skip re-fetch (we already applied optimistically).
+      // If senderId is null/undefined (server doesn't populate yet), always re-fetch.
+      if (senderId != null && senderId === clientSessionId) {
+        return;
+      }
+
+      debouncedFetchPages();
+    });
 
   // Initial load
-  void fetchPages().then(() => setConnected(true));
+  void fetchPages();
 
   // ── Mutations ────────────────────────────────────────────────────────
 
@@ -250,7 +282,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       id: PLACEHOLDER_NODE_ID,
       uuid: optimisticUuid,
       kind,
-      name,
+      name: name.slice(0, MAX_NODE_NAME_LENGTH),
       parent: null,
       children: [],
       transform,
@@ -269,10 +301,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     client
       .mutation(gql(CREATE_NODE_MUTATION), {
-        kind: JSON.parse(JSON.stringify(kind)),
+        kind: structuredClone(kind),
         name,
         pageId,
-        transform: JSON.parse(JSON.stringify(transform)),
+        transform: structuredClone(transform),
       })
       .toPromise()
       .then((result) => {
@@ -284,6 +316,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               Reflect.deleteProperty(s.nodes, optimisticUuid);
             }),
           );
+          if (selectedNodeId() === optimisticUuid) {
+            setSelectedNodeId(null);
+          }
           return;
         }
         const serverUuid = result.data?.createNode?.uuid as string | undefined;
@@ -294,16 +329,29 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             if (node) {
               setState(
                 produce((s) => {
-                  // Remap optimistic entry to server-assigned UUID
                   Reflect.deleteProperty(s.nodes, optimisticUuid);
                   s.nodes[serverUuid] = { ...node, uuid: serverUuid };
                 }),
               );
-              if (selectedNodeId() === optimisticUuid) {
-                setSelectedNodeId(serverUuid);
-              }
+            }
+            // RF-005: Always remap selectedNodeId regardless of whether
+            // the optimistic node still exists in state (fetch may have arrived first)
+            if (selectedNodeId() === optimisticUuid) {
+              setSelectedNodeId(serverUuid);
             }
           });
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("createNode exception:", err);
+        // Revert optimistic state
+        setState(
+          produce((s) => {
+            Reflect.deleteProperty(s.nodes, optimisticUuid);
+          }),
+        );
+        if (selectedNodeId() === optimisticUuid) {
+          setSelectedNodeId(null);
         }
       });
 
@@ -311,61 +359,145 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   }
 
   function setTransform(uuid: string, transform: Transform): void {
+    // RF-003: Capture previous value for rollback
+    const previousTransform = state.nodes[uuid]?.transform
+      ? structuredClone(state.nodes[uuid].transform)
+      : undefined;
+
     // Optimistic update
     setState("nodes", uuid, "transform", transform);
     client
       .mutation(gql(SET_TRANSFORM_MUTATION), {
         uuid,
-        transform: JSON.parse(JSON.stringify(transform)),
+        transform: structuredClone(transform),
       })
       .toPromise()
       .then((r) => {
-        if (r.error) console.error("setTransform error:", r.error.message);
+        if (r.error) {
+          console.error("setTransform error:", r.error.message);
+          // RF-003: Revert optimistic update
+          if (previousTransform && state.nodes[uuid]) {
+            setState("nodes", uuid, "transform", previousTransform);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setTransform exception:", err);
+        if (previousTransform && state.nodes[uuid]) {
+          setState("nodes", uuid, "transform", previousTransform);
+        }
       });
   }
 
   function renameNode(uuid: string, newName: string): void {
+    // RF-003: Capture previous value for rollback
+    const previousName = state.nodes[uuid]?.name;
+
     setState("nodes", uuid, "name", newName);
     client
       .mutation(gql(RENAME_NODE_MUTATION), { uuid, newName })
       .toPromise()
       .then((r) => {
-        if (r.error) console.error("renameNode error:", r.error.message);
+        if (r.error) {
+          console.error("renameNode error:", r.error.message);
+          if (previousName !== undefined && state.nodes[uuid]) {
+            setState("nodes", uuid, "name", previousName);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("renameNode exception:", err);
+        if (previousName !== undefined && state.nodes[uuid]) {
+          setState("nodes", uuid, "name", previousName);
+        }
       });
   }
 
   function deleteNode(uuid: string): void {
+    // RF-003: Capture full node and selection for rollback
+    const previousNode = state.nodes[uuid]
+      ? structuredClone(state.nodes[uuid])
+      : undefined;
+    const previousSelectedId = selectedNodeId();
+
     setState(
       produce((s) => {
         Reflect.deleteProperty(s.nodes, uuid);
       }),
     );
     if (selectedNodeId() === uuid) setSelectedNodeId(null);
+
     client
       .mutation(gql(DELETE_NODE_MUTATION), { uuid })
       .toPromise()
       .then((r) => {
-        if (r.error) console.error("deleteNode error:", r.error.message);
+        if (r.error) {
+          console.error("deleteNode error:", r.error.message);
+          // RF-003: Restore deleted node
+          if (previousNode) {
+            setState("nodes", uuid, previousNode);
+            if (previousSelectedId === uuid) {
+              setSelectedNodeId(previousSelectedId);
+            }
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("deleteNode exception:", err);
+        if (previousNode) {
+          setState("nodes", uuid, previousNode);
+          if (previousSelectedId === uuid) {
+            setSelectedNodeId(previousSelectedId);
+          }
+        }
       });
   }
 
   function setVisible(uuid: string, visible: boolean): void {
+    // RF-003: Capture previous value for rollback
+    const previousVisible = state.nodes[uuid]?.visible;
+
     setState("nodes", uuid, "visible", visible);
     client
       .mutation(gql(SET_VISIBLE_MUTATION), { uuid, visible })
       .toPromise()
       .then((r) => {
-        if (r.error) console.error("setVisible error:", r.error.message);
+        if (r.error) {
+          console.error("setVisible error:", r.error.message);
+          if (previousVisible !== undefined && state.nodes[uuid]) {
+            setState("nodes", uuid, "visible", previousVisible);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setVisible exception:", err);
+        if (previousVisible !== undefined && state.nodes[uuid]) {
+          setState("nodes", uuid, "visible", previousVisible);
+        }
       });
   }
 
   function setLocked(uuid: string, locked: boolean): void {
+    // RF-003: Capture previous value for rollback
+    const previousLocked = state.nodes[uuid]?.locked;
+
     setState("nodes", uuid, "locked", locked);
     client
       .mutation(gql(SET_LOCKED_MUTATION), { uuid, locked })
       .toPromise()
       .then((r) => {
-        if (r.error) console.error("setLocked error:", r.error.message);
+        if (r.error) {
+          console.error("setLocked error:", r.error.message);
+          if (previousLocked !== undefined && state.nodes[uuid]) {
+            setState("nodes", uuid, "locked", previousLocked);
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setLocked exception:", err);
+        if (previousLocked !== undefined && state.nodes[uuid]) {
+          setState("nodes", uuid, "locked", previousLocked);
+        }
       });
   }
 
@@ -383,7 +515,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           setState("info", "can_undo", data.canUndo);
           setState("info", "can_redo", data.canRedo);
         }
-        debouncedFetchPages();
+        // RF-017: Use direct fetch, not debounced, for undo
+        void fetchPages();
+      })
+      .catch((err: unknown) => {
+        console.error("undo exception:", err);
       });
   }
 
@@ -401,8 +537,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           setState("info", "can_undo", data.canUndo);
           setState("info", "can_redo", data.canRedo);
         }
-        debouncedFetchPages();
+        // RF-017: Use direct fetch, not debounced, for redo
+        void fetchPages();
+      })
+      .catch((err: unknown) => {
+        console.error("redo exception:", err);
       });
+  }
+
+  // ── Lifecycle (RF-002) ──────────────────────────────────────────────
+
+  function destroy(): void {
+    subscriptionHandle.unsubscribe();
+    void wsClient.dispose();
   }
 
   return {
@@ -424,6 +571,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setLocked,
     undo,
     redo,
-    client,
+    destroy,
   };
 }

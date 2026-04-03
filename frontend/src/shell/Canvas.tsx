@@ -19,7 +19,7 @@ import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-mana
 import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
-import type { DocumentStore } from "../store/document-store-types";
+import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";
@@ -35,7 +35,7 @@ const WHEEL_ZOOM_SENSITIVITY = 1;
  * We cast this to `DocumentStore` because the tools type-check against
  * the full interface, but only use these four methods at runtime.
  */
-function createStoreAdapter(store: ReturnType<typeof useDocument>): DocumentStore {
+function createStoreAdapter(store: ReturnType<typeof useDocument>): ToolStore {
   return {
     getAllNodes(): ReadonlyMap<string, DocumentNode> {
       const nodesObj = store.state.nodes;
@@ -57,24 +57,6 @@ function createStoreAdapter(store: ReturnType<typeof useDocument>): DocumentStor
     createNode(kind: NodeKind, name: string, transform: Transform): string {
       return store.createNode(kind, name, transform);
     },
-    // The remaining methods are not called by tools at runtime.
-    // Provide no-op stubs to satisfy the type.
-    getInfo: () => null,
-    getNodeByUuid: () => undefined,
-    getPages: () => [],
-    isConnected: () => false,
-    canUndo: () => false,
-    canRedo: () => false,
-    undo: () => {},
-    redo: () => {},
-    getActivePage: () => undefined,
-    renameNode: () => {},
-    deleteNode: () => {},
-    setVisible: () => {},
-    setLocked: () => {},
-    subscribe: () => () => {},
-    loadInitialState: () => Promise.resolve(),
-    destroy: () => {},
   };
 }
 

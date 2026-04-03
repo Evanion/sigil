@@ -32,7 +32,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setLocked: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
-    client: {} as DocumentStoreAPI["client"],
+    destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;
 }
