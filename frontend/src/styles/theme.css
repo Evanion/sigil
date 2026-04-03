@@ -68,6 +68,7 @@
   --focus-offset: 2px;
 
   /* Z-index scale */
+  --z-drop-indicator: 10;
   --z-dropdown: 50;
   --z-popover: 50;
   --z-dialog-overlay: 60;
