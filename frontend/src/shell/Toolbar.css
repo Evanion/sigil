@@ -1,0 +1,56 @@
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 8px 0;
+  gap: 4px;
+  background: var(--surface-2, #181825);
+  border-right: 1px solid var(--surface-3, #313244);
+}
+
+.toolbar__logo {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--accent, #cba6f7);
+  margin-bottom: 8px;
+}
+
+.toolbar__btn {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2, #a6adc8);
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toolbar__btn {
+    transition: none;
+  }
+}
+
+.toolbar__btn:hover {
+  background: var(--surface-3, #313244);
+}
+
+.toolbar__btn:focus-visible {
+  outline: 2px solid var(--accent, #cba6f7);
+  outline-offset: -2px;
+}
+
+.toolbar__btn[aria-pressed="true"] {
+  background: var(--accent, #cba6f7);
+  color: var(--surface-1, #1e1e2e);
+}

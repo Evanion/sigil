@@ -44,10 +44,14 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 
 ### Optimistic Update Safety
 
-When implementing optimistic updates (updating local state before the server responds):
-- If the client generates a temporary ID (e.g., UUID) for the new entity, the mutation response handler MUST remap the temporary ID to the server-assigned ID. Failing to remap leaves orphaned entries in local state under the wrong key.
-- If the mutation fails, the optimistic state change MUST be rolled back — remove the optimistic entry, restore previous values.
-- Never assume the client-generated ID will match the server-generated ID unless the API contract explicitly guarantees it.
+When implementing optimistic updates (updating local state before the server responds), you MUST complete ALL of the following before the code is done:
+1. Snapshot the pre-mutation local state before applying the optimistic change.
+2. Apply the optimistic change immediately.
+3. Await the mutation response.
+4. On success: if the server returns a canonical ID or updated fields, apply them — do not assume client-generated values match server values.
+5. On error: restore the snapshotted pre-mutation state, then display a visible error notification to the user.
+
+A mutation that applies optimistic state without a corresponding rollback on error is a bug. If rollback is genuinely impossible (e.g., the mutation is idempotent and the state is already correct), document why in a comment at the call site. Never silently suppress a mutation error.
 
 ### urql Exchange Ordering
 
@@ -61,6 +65,12 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - Wrap Kobalte primitives for all interactive components (Button, Tooltip, Popover, Select, etc.)
 - Never use `innerHTML` in JSX — use `textContent` or children
 - Components go in `src/components/<name>/` with `.tsx`, `.css`, `.stories.tsx`, `.test.tsx`
+
+#### Solid.js Reactivity Pitfalls
+
+- `createStore` uses plain objects (Record), not Map/Set — iterating a store with `Object.keys()` is reactive; iterating a Map is not. If you need a reactive map, use a `Record<string, V>` store field.
+- `createEffect` tracks only the signals read in its synchronous body during the current execution. Signals read inside a callback, setTimeout, or Promise `.then()` are not tracked. If the effect must re-run when a nested value changes, read the signal before the async boundary.
+- `window.devicePixelRatio` is NOT a Solid signal — changes to DPR (e.g., moving a window to a high-DPI monitor) will not trigger reactive updates. Listen for DPR changes via `matchMedia('(resolution: 1dppx)').addEventListener('change', ...)` and store the result in a signal.
 
 ### Styling Conventions
 

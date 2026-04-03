@@ -55,3 +55,9 @@
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-icon-button {
+    transition: none;
+  }
+}

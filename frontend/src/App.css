@@ -1,0 +1,71 @@
+.app-shell {
+  display: grid;
+  grid-template-columns: 48px 240px 1fr 280px;
+  grid-template-rows: 1fr auto;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--surface-1, #1e1e2e);
+  color: var(--text-1, #cdd6f4);
+  font-family:
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+
+.app-shell__toolbar {
+  grid-row: 1 / -1;
+  grid-column: 1;
+}
+
+.app-shell__left {
+  grid-row: 1;
+  grid-column: 2;
+  border-right: 1px solid var(--surface-3, #313244);
+  overflow-y: auto;
+}
+
+.app-shell__canvas {
+  grid-row: 1;
+  grid-column: 3;
+  overflow: hidden;
+  position: relative;
+}
+
+.app-shell__right {
+  grid-row: 1;
+  grid-column: 4;
+  border-left: 1px solid var(--surface-3, #313244);
+  overflow-y: auto;
+}
+
+.app-shell__status {
+  grid-column: 2 / -1;
+  grid-row: 2;
+}
+
+/* Placeholder panel styling */
+.placeholder-panel {
+  padding: 12px;
+}
+
+.placeholder-panel__heading {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-2, #a6adc8);
+  margin: 0;
+}
+
+/* Visually hidden but accessible to screen readers (RF-001) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

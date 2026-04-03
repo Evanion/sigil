@@ -1,0 +1,37 @@
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--text-2, #a6adc8);
+  background: var(--surface-2, #181825);
+  border-top: 1px solid var(--surface-3, #313244);
+  user-select: none;
+}
+
+.status-bar__left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-bar__right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-bar__indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-bar__indicator--connected {
+  background: var(--success, #a6e3a1);
+}
+
+.status-bar__indicator--disconnected {
+  background: var(--danger, #f38ba8);
+}

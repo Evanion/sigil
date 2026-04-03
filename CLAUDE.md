@@ -338,6 +338,14 @@ Every `f32`/`f64` field arriving from external input (deserialization, API param
 
 Every CSS `transition`, `animation`, or `@keyframes` rule in component stylesheets MUST have a corresponding `@media (prefers-reduced-motion: reduce)` block that disables or shortens the animation. This applies to all frontend CSS files. Omitting this causes vestibular discomfort for users with motion sensitivity (WCAG 2.3.3). When adding a transition or animation, add the media query in the same file, in the same commit.
 
+### Accessibility Behavior Must Be Audited During UI Rewrites
+
+When rewriting or replacing a frontend module (framework migration, component refactor, full-page reimplementation), the implementer MUST produce an explicit a11y audit of the module being replaced before writing new code. The audit must enumerate: (1) all `aria-live` regions and their announcement triggers, (2) all focus management calls (`focus()`, `FocusScope`, trap logic), (3) all keyboard event handlers. Each item from the outgoing code must be either preserved in the new implementation or documented as intentionally removed with rationale. A rewrite that loses accessibility behavior without documentation is incomplete, regardless of visual parity.
+
+### `aria-live` Regions Must Be Scoped to Discrete Status Changes
+
+Never place `aria-live="polite"` or `aria-live="assertive"` on a container whose content updates more frequently than once per user action (e.g., a zoom percentage that updates on every wheel event, a cursor coordinate display). Each update to an `aria-live` region interrupts or queues a screen reader announcement — high-frequency updates flood the announcement queue and make the application unusable for screen reader users. Pattern: use a dedicated, visually-hidden `<span role="status">` element and update it only on discrete events (tool change, selection change, operation completion). For continuously-updating values, omit `aria-live` and provide the value in context only (e.g., as a label on the containing toolbar region).
+
 ### Symmetric Validation for Reversible Operations
 
 For any operation with an apply/undo pair (commands, transactions), both directions MUST validate their inputs. If `apply` validates a field before modifying it, `undo` must validate before reverting. Asymmetric validation means undo can corrupt state when applied to a document that has diverged.
@@ -382,7 +390,7 @@ Never split a read-then-write into two separate lock acquisitions. Acquiring a r
 
 When migrating from one protocol, library, or API to another (e.g., WebSocket to GraphQL, REST to gRPC), the migration PR MUST include deletion of ALL superseded artifacts. Before marking a migration complete, search for:
 1. Dead route/proxy configuration (e.g., Vite proxy entries, nginx routes, reverse proxy rules).
-2. Dead type definitions that only served the old protocol's wire format.
+2. Dead type definitions that only served the old protocol's wire format, and over-wide interfaces carried forward from the old implementation that expose more surface area than the new code requires — trim to the actually-used subset.
 3. Dead handler/endpoint code that is no longer reachable.
 4. Dead test fixtures or mocks for the old protocol.
 5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.

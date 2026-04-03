@@ -11,6 +11,9 @@ importers:
       '@kobalte/core':
         specifier: ^0.13.11
         version: 0.13.11(solid-js@1.9.12)
+      '@urql/solid':
+        specifier: ^1.0.1
+        version: 1.0.1(@urql/core@6.0.1(graphql@16.13.2))(solid-js@1.9.12)
       graphql:
         specifier: ^16.13.2
         version: 16.13.2
@@ -29,9 +32,6 @@ importers:
       tinykeys:
         specifier: ^3.0.0
         version: 3.0.0
-      urql:
-        specifier: ^5.0.1
-        version: 5.0.1(@urql/core@6.0.1(graphql@16.13.2))(react@19.2.4)
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -840,6 +840,12 @@ packages:
 
   '@urql/core@6.0.1':
     resolution: {integrity: sha512-FZDiQk6jxbj5hixf2rEPv0jI+IZz0EqqGW8mJBEug68/zHTtT+f34guZDmyjJZyiWbj0vL165LoMr/TkeDHaug==}
+
+  '@urql/solid@1.0.1':
+    resolution: {integrity: sha512-sShJ9c3N/e+OGaE6RyjwLLDjp7d9G4Lgoqwlzaspdve6LljVTFj4vB02khecEDn7G27PFRnxhZjLmqvzeCogjw==}
+    peerDependencies:
+      '@urql/core': ^6.0.0
+      solid-js: ^1.7.7
 
   '@vitest/expect@3.2.4':
     resolution: {integrity: sha512-Io0yyORnB6sikFlt8QW5K7slY4OjqNX9jmJQ02QDda8lyM6B5oNgVWoSoKPac8/kgnCUzuHQKrSLtu/uOqqrig==}
@@ -1734,12 +1740,6 @@ packages:
   uri-js@4.4.1:
     resolution: {integrity: sha512-7rKUyy33Q1yc98pQ1DAmLtwX109F7TIfWlW1Ydo8Wl1ii1SeHieeh0HHfPeL2fMXK6z0s8ecKs9frCuLJvndBg==}
 
-  urql@5.0.1:
-    resolution: {integrity: sha512-r58gYlWvCTC19QvkTaARaCLV9/bp870byH/qbLaw3S7f8i/bC6x2Szub8RVXptiMxWmqq5dyVBjUL9G+xPEuqg==}
-    peerDependencies:
-      '@urql/core': ^6.0.0
-      react: '>= 16.8.0'
-
   use-sync-external-store@1.6.0:
     resolution: {integrity: sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==}
     peerDependencies:
@@ -2622,6 +2622,13 @@ snapshots:
     transitivePeerDependencies:
       - graphql
 
+  '@urql/solid@1.0.1(@urql/core@6.0.1(graphql@16.13.2))(solid-js@1.9.12)':
+    dependencies:
+      '@solid-primitives/utils': 6.4.0(solid-js@1.9.12)
+      '@urql/core': 6.0.1(graphql@16.13.2)
+      solid-js: 1.9.12
+      wonka: 6.3.6
+
   '@vitest/expect@3.2.4':
     dependencies:
       '@types/chai': 5.2.3
@@ -3485,12 +3492,6 @@ snapshots:
   uri-js@4.4.1:
     dependencies:
       punycode: 2.3.1
-
-  urql@5.0.1(@urql/core@6.0.1(graphql@16.13.2))(react@19.2.4):
-    dependencies:
-      '@urql/core': 6.0.1(graphql@16.13.2)
-      react: 19.2.4
-      wonka: 6.3.6
 
   use-sync-external-store@1.6.0(react@19.2.4):
     dependencies:

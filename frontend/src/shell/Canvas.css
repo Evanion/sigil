@@ -1,0 +1,11 @@
+.sigil-canvas-container {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
+.sigil-canvas-container__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
