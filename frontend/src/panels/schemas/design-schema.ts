@@ -55,39 +55,6 @@ export const designSchema: PropertySchema = {
         },
       ],
     },
-    {
-      name: "Corner Radius",
-      when: "rectangle",
-      fields: [
-        {
-          key: "kind.corner_radii.0",
-          label: "TL",
-          type: "number",
-          step: 1,
-          min: 0,
-        },
-        {
-          key: "kind.corner_radii.1",
-          label: "TR",
-          type: "number",
-          step: 1,
-          min: 0,
-        },
-        {
-          key: "kind.corner_radii.2",
-          label: "BR",
-          type: "number",
-          step: 1,
-          min: 0,
-        },
-        {
-          key: "kind.corner_radii.3",
-          label: "BL",
-          type: "number",
-          step: 1,
-          min: 0,
-        },
-      ],
-    },
+    // Corner Radius editing deferred — requires server-side corner_radii mutation (Spec 09)
   ],
 };

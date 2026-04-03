@@ -1,12 +1,5 @@
 /** Field editor types supported by the SchemaPanel renderer. */
-export type FieldType =
-  | "number"
-  | "slider"
-  | "select"
-  | "toggle"
-  | "text"
-  | "corners"
-  | "token-ref";
+export type FieldType = "number" | "slider" | "select" | "toggle" | "text" | "color" | "list";
 
 /** A single editable field definition. */
 export interface FieldDef {
@@ -46,6 +39,12 @@ export interface SectionDef {
   readonly fields: readonly FieldDef[];
   /** Whether the section starts collapsed. Default: false. */
   readonly collapsed?: boolean;
+  /** When set to "list", the section renders as a repeatable list of items. */
+  readonly type?: "list";
+  /** Dot-path key for the list data source (used when type is "list"). */
+  readonly key?: string;
+  /** Schema for each item in the list (used when type is "list"). */
+  readonly itemSchema?: readonly FieldDef[];
 }
 
 /** A complete property schema for a panel. */

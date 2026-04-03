@@ -1,5 +1,6 @@
 import { createMemo, For, Show, type Component } from "solid-js";
 import { useDocument } from "../store/document-context";
+import type { DocumentStoreAPI } from "../store/document-store-solid";
 import type { PropertySchema } from "./schema/types";
 import { SchemaSection } from "./SchemaSection";
 import type { DocumentNode } from "../types/document";
@@ -22,6 +23,59 @@ function matchesNodeKind(
   return when.includes(kind);
 }
 
+/** Whitelist of valid transform sub-fields to prevent dynamic key injection. */
+const VALID_TRANSFORM_FIELDS = new Set([
+  "x",
+  "y",
+  "width",
+  "height",
+  "rotation",
+  "scale_x",
+  "scale_y",
+]);
+
+type MutationHandler = (
+  store: DocumentStoreAPI,
+  uuid: string,
+  key: string,
+  value: unknown,
+  node: DocumentNode,
+) => void;
+
+/**
+ * Maps field key prefixes to their corresponding store mutation.
+ * Extensible: add new entries for style.opacity, style.fills, etc.
+ */
+const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> = [
+  {
+    prefix: "transform.",
+    handler: (store, uuid, key, value, node) => {
+      const field = key.slice("transform.".length);
+      if (!VALID_TRANSFORM_FIELDS.has(field)) return;
+      store.setTransform(uuid, { ...node.transform, [field]: value as number });
+    },
+  },
+  {
+    prefix: "name",
+    handler: (store, uuid, _key, value) => {
+      if (typeof value === "string") store.renameNode(uuid, value);
+    },
+  },
+  {
+    prefix: "visible",
+    handler: (store, uuid, _key, value) => {
+      if (typeof value === "boolean") store.setVisible(uuid, value);
+    },
+  },
+  {
+    prefix: "locked",
+    handler: (store, uuid, _key, value) => {
+      if (typeof value === "boolean") store.setLocked(uuid, value);
+    },
+  },
+  // Future: style.opacity, style.fills, style.blend_mode, etc.
+];
+
 export const SchemaPanel: Component<SchemaPanelProps> = (props) => {
   const store = useDocument();
 
@@ -38,23 +92,8 @@ export const SchemaPanel: Component<SchemaPanelProps> = (props) => {
     const node = selectedNode();
     if (!node) return;
 
-    // Route field changes to the appropriate store mutation
-    if (key.startsWith("transform.")) {
-      const field = key.split(".")[1];
-      if (!field) return;
-      const currentTransform = node.transform;
-      store.setTransform(uuid, {
-        ...currentTransform,
-        [field]: value,
-      });
-    } else if (key === "name") {
-      if (typeof value === "string") store.renameNode(uuid, value);
-    } else if (key === "visible") {
-      if (typeof value === "boolean") store.setVisible(uuid, value);
-    } else if (key === "locked") {
-      if (typeof value === "boolean") store.setLocked(uuid, value);
-    }
-    // Future: style.opacity, style.fills, style.blend_mode, etc.
+    const entry = MUTATION_MAP.find((e) => key === e.prefix || key.startsWith(e.prefix));
+    if (entry) entry.handler(store, uuid, key, value, node);
   }
 
   return (
@@ -62,7 +101,9 @@ export const SchemaPanel: Component<SchemaPanelProps> = (props) => {
       <Show
         when={selectedNode()}
         fallback={
-          <div class="sigil-schema-panel__empty">Select a layer to view its properties</div>
+          <div class="sigil-schema-panel__empty" role="status">
+            Select a layer to view its properties
+          </div>
         }
       >
         {(node) => (

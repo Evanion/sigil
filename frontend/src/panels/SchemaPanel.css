@@ -16,9 +16,6 @@
 .sigil-schema-section__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 4px 0;
-  cursor: pointer;
   user-select: none;
 }
 
@@ -32,17 +29,24 @@
 }
 
 .sigil-schema-section__toggle {
-  font-size: 10px;
-  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
   background: none;
   border: none;
   cursor: pointer;
-  padding: 2px;
+  padding: 4px 0;
 }
 
 .sigil-schema-section__toggle:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
+}
+
+.sigil-schema-section__chevron {
+  font-size: 10px;
+  color: var(--text-2);
 }
 
 .sigil-schema-section__fields {

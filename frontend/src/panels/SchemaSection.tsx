@@ -23,7 +23,13 @@ function resolveValue(node: DocumentNode, key: string): unknown {
   let current: unknown = node;
   for (const part of parts) {
     if (current == null || typeof current !== "object") return undefined;
-    current = (current as Record<string, unknown>)[part];
+    if (Array.isArray(current)) {
+      const idx = parseInt(part, 10);
+      if (Number.isNaN(idx) || idx < 0 || idx >= current.length) return undefined;
+      current = current[idx];
+    } else {
+      current = (current as Record<string, unknown>)[part];
+    }
   }
   return current;
 }
@@ -33,14 +39,15 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
 
   return (
     <div class="sigil-schema-section">
-      <div class="sigil-schema-section__header" onClick={() => setCollapsed(!collapsed())}>
-        <h3 class="sigil-schema-section__name">{props.section.name}</h3>
+      <div class="sigil-schema-section__header">
         <button
           class="sigil-schema-section__toggle"
           aria-expanded={!collapsed()}
           aria-label={`${collapsed() ? "Expand" : "Collapse"} ${props.section.name}`}
+          onClick={() => setCollapsed(!collapsed())}
         >
-          {collapsed() ? "\u25B8" : "\u25BE"}
+          <h3 class="sigil-schema-section__name">{props.section.name}</h3>
+          <span class="sigil-schema-section__chevron">{collapsed() ? "\u25B8" : "\u25BE"}</span>
         </button>
       </div>
       <Show when={!collapsed()}>
@@ -50,6 +57,9 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
               <div
                 class={`sigil-schema-field ${field.span === 2 ? "sigil-schema-field--span-2" : ""}`}
               >
+                {/* RF-017: Field labels use aria-label on inputs rather than
+                    programmatic <label> association. This is acceptable per
+                    WCAG 4.1.2 since each input carries its own aria-label. */}
                 <span class="sigil-schema-field__label">{field.label}</span>
                 <FieldRenderer
                   field={field}

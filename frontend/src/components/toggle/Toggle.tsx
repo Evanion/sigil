@@ -18,6 +18,7 @@ export function Toggle(props: ToggleProps) {
     "label",
     "disabled",
     "class",
+    "aria-label",
   ]);
 
   const className = () => {
@@ -34,7 +35,7 @@ export function Toggle(props: ToggleProps) {
       disabled={local.disabled}
       {...others}
     >
-      <Switch.Input />
+      <Switch.Input aria-label={local["aria-label"]} />
       <Switch.Control class="sigil-toggle__track">
         <Switch.Thumb class="sigil-toggle__thumb" />
       </Switch.Control>
