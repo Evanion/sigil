@@ -11,11 +11,29 @@ use tracing_subscriber::EnvFilter;
 /// during shutdown.
 const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Maximum time to wait for the MCP stdio task to drain on shutdown.
+const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
+    // Detect MCP_STDIO *before* initialising the tracing subscriber so that
+    // we can redirect log output to stderr.  Writing tracing events to stdout
+    // while MCP stdio transport is active corrupts the JSON-RPC framing.
+    let use_mcp_stdio = std::env::var("MCP_STDIO").is_ok();
+
+    let subscriber = tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env());
+    if use_mcp_stdio {
+        subscriber.with_writer(std::io::stderr).init();
+    } else {
+        subscriber.init();
+    }
+
+    if use_mcp_stdio {
+        tracing::warn!(
+            "MCP_STDIO is set — stdio transport requires stdin to be connected \
+             (e.g., docker run -i)"
+        );
+    }
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
     let port = std::env::var("PORT")
@@ -57,7 +75,7 @@ async fn main() -> anyhow::Result<()> {
     // Spawn MCP server on stdio if requested.
     // This allows agents to connect via stdin/stdout while the HTTP server
     // runs on the configured port for human users.
-    let mcp_handle = if std::env::var("MCP_STDIO").is_ok() {
+    let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
         let mcp_state = state.app.clone();
         Some(tokio::spawn(async move {
@@ -86,8 +104,24 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
-    // Graceful shutdown: drop the dirty sender to signal the persistence task
-    // to perform a final save, then await the task with a timeout.
+    // Graceful shutdown: drain the MCP task first so any final dirty signal
+    // it might send is captured before we drop dirty_tx.
+    if let Some(handle) = mcp_handle {
+        tracing::info!("waiting for MCP task to drain...");
+        match tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, handle).await {
+            Ok(Ok(())) => tracing::info!("MCP task completed"),
+            Ok(Err(e)) => tracing::error!("MCP task panicked: {e}"),
+            Err(_) => {
+                tracing::warn!(
+                    "MCP task did not complete within {:?} — aborting",
+                    MCP_SHUTDOWN_TIMEOUT
+                );
+            }
+        }
+    }
+
+    // Drop the dirty sender to signal the persistence task to perform a final
+    // save, then await the task with a timeout.
     drop(dirty_tx);
     if let Some(handle) = persistence_handle {
         tracing::info!("waiting for persistence task to flush...");
@@ -101,17 +135,24 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Clean up MCP server if running
-    if let Some(handle) = mcp_handle {
-        handle.abort();
-    }
-
     Ok(())
 }
 
 async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("install ctrl+c handler");
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+        let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = sigterm.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("install ctrl+c handler");
+    }
     tracing::info!("shutdown signal received");
 }
