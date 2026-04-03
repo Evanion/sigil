@@ -15,7 +15,7 @@ importers:
         specifier: ^1.0.1
         version: 1.0.1(@urql/core@6.0.1(graphql@16.13.2))(solid-js@1.9.12)
       dnd-kit-solid:
-        specifier: ^0.1.0
+        specifier: 0.1.0
         version: 0.1.0(@dnd-kit/dom@0.0.10)(solid-js@1.9.12)
       graphql:
         specifier: ^16.13.2
