@@ -24,6 +24,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Tests verify behavior, not implementation — no mocking internal details.
 - If you can't write a test for it, the interface needs redesign.
 - Every command added to `crates/core/` MUST have at least one integration test that exercises the full `execute -> undo -> redo` cycle through `Document::execute`, `Document::undo`, and `Document::redo` (not just direct calls to `apply`/`undo` on the command struct). The test must verify: (1) state after execute matches expectations, (2) state after undo matches the original state, (3) state after redo matches post-execute state. Test naming convention: `test_<command_name>_execute_undo_redo_cycle`.
+- Every new first-class entity type introduced to `crates/core/` (pages, components, layers, tokens, etc.) MUST ship with a complete command set covering at minimum: create, rename, delete, and any reorder or reparent operations the entity supports. A PR that adds an entity type without commands for it is incomplete — the entity is not usable by agents or clients without them.
 
 ### User Experience Consistency
 
@@ -46,11 +47,13 @@ These principles are the governing rules of this project. They explain the _why_
 
 ## 2. Project Structure
 
+When a new crate is added to the workspace, the PR that creates it MUST update this section (§2) to include it in the directory tree and MUST add a §4 entry describing the crate's responsibilities, boundaries, and any non-obvious constraints. A crate present in the workspace but absent from CLAUDE.md is undocumented and will be misused.
+
 ```
 sigil/
 ├── crates/
 │   ├── core/          # Design engine — pure logic, no I/O, WASM-compatible
-│   ├── state/         # Shared application state — AppState, SendDocument
+│   ├── state/         # Shared in-memory state — document store, broadcast channel
 │   ├── server/        # Axum HTTP server, WebSocket, file I/O
 │   └── mcp/           # MCP server for agent interaction
 ├── frontend/          # TypeScript + Vite SPA (Canvas editor)
@@ -110,10 +113,10 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 
 ### `agent-designer-state`
 
-- Shared application state (`AppState`, `SendDocument`), used by both server and MCP crates.
-- Owns the document mutex, persistence signaling, and event broadcasting.
-- No file I/O — persistence is triggered via signaling, implemented in the server crate.
-- Intentionally server-only (not WASM-compatible) — uses `tokio`, `std::sync::Mutex`.
+- Owns shared in-memory state: the document store and the broadcast channel that all connected clients subscribe to.
+- Depended upon by both `agent-designer-server` and `agent-designer-mcp` — it is the single source of truth for live session state.
+- Contains no HTTP, WebSocket, or MCP protocol code — it is transport-agnostic.
+- Must remain free of I/O; persistence is the server's responsibility.
 
 ### `agent-designer-server`
 
@@ -127,7 +130,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - WebSocket upgrade handlers must validate the `Origin` header against the CORS allowlist before accepting the connection.
 - WebSocket connections must enforce a maximum message size (define as a named constant). Reject oversized frames before buffering.
 
-#### Broadcast Semantics
+#### Broadcast Semantics (applies to server and MCP — both must follow these rules)
 
 - WebSocket broadcasts must exclude the originating client. The originator already applied the mutation locally; echoing it causes duplicate application.
 - All state-mutating operations (execute, undo, redo) must broadcast to non-originating clients. If execute broadcasts, undo and redo must also broadcast — asymmetric broadcasting desynchronizes clients.
@@ -147,8 +150,10 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 ### `agent-designer-mcp`
 
 - Owns the MCP tool/resource definitions.
-- Shares in-memory state with the server (same process).
+- Shares in-memory state with the server (same process) via `agent-designer-state`.
 - Keep tool interfaces token-efficient for agent consumption.
+- All state-mutating MCP tool calls MUST trigger both persistence (signal_dirty) AND real-time broadcast to all connected clients. Calling only signal_dirty without broadcasting leaves human clients and other agents desynchronized — they will not see the MCP agent's changes until the next reconnect or poll. The broadcast obligation for MCP is identical to the obligation for server-originated mutations in the Broadcast Semantics section above.
+- When running over stdio transport, all diagnostic output MUST go to stderr, never stdout. Writing tracing or log output to stdout corrupts the protocol framing — the MCP client interprets any stdout bytes as protocol messages. Configure the `tracing` subscriber to write exclusively to stderr when the transport is stdio. The transport mode must be detectable at startup (e.g., via a `--stdio` flag or env var) to apply the correct subscriber configuration.
 
 ---
 
@@ -368,6 +373,10 @@ Every file write in the server crate must use the write-to-temp-then-rename patt
 ### No Fire-and-Forget Mutations
 
 Every mutation call (GraphQL mutation, REST POST/PUT/DELETE, WebSocket command) that modifies server state MUST handle the response or rejection. Calling a mutation without awaiting the result or attaching an error handler is a bug — it silently drops failures and leaves the UI in a state that diverges from the server. At minimum: log the error AND revert any optimistic local state change. For user-initiated operations: display a visible error notification. This applies to both frontend TypeScript and any future backend-to-backend calls.
+
+### Hold Locks for the Full Read-Modify-Write Sequence
+
+Never split a read-then-write into two separate lock acquisitions. Acquiring a read lock, releasing it, and then acquiring a write lock is a TOCTOU race — another thread can mutate the value between the two acquisitions. Any logic of the form "read to check a condition, then write based on that condition" MUST hold a single write lock (or upgradeable read lock) for the entire sequence. This applies to `RwLock`, `Mutex`, and any wrapper around them. If the write lock scope is too coarse, redesign the data structure rather than splitting the lock.
 
 ### Migrations Must Remove All Superseded Code
 

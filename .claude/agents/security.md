@@ -80,6 +80,8 @@ For every deserialization entry point:
 ## Review Checklist Additions
 
 - For every `let _ =` in the codebase, verify the suppressed return is not a `Result`. Silent error suppression in rollback/cleanup paths is a data corruption vector.
+- For every shared-state access (RwLock, Mutex, or wrapper), verify that any read-then-write sequence holds a single write lock for the entire operation. Two separate lock acquisitions (read lock dropped, then write lock acquired) is a TOCTOU race — report as High.
+- For every MCP tool that runs over stdio transport, verify that tracing/logging is directed to stderr, not stdout. stdout writes corrupt the protocol framing — report as High.
 - For every `f32`/`f64` field in a deserialized type, verify NaN/infinity rejection exists at the deserialization boundary.
 - For every `#[derive(Deserialize)]` in `crates/core/`, verify the type has no validating constructor. If it does, the derive must be replaced with a custom impl.
 - For every `MAX_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.

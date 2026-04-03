@@ -109,6 +109,9 @@ This project uses Rust Edition 2024. Be aware of:
 - Depth guard comparisons: use `>=` (not `>`) against the limit constant.
 - Named collections must reject duplicate names/identifiers at the insertion point — do not rely on HashMap deduplication silently.
 - Every command must have an integration test through `Document::execute` -> `undo` -> `redo`, not just direct `apply`/`undo` calls on the command struct.
+- Every new first-class entity type added to `crates/core/` (pages, layers, tokens, etc.) MUST ship with a complete command set: at minimum create, rename, delete, and any reorder/reparent operations. An entity without commands is not usable.
+- Never split a read-then-write into two separate lock acquisitions (lock/read/drop then lock/write). This is a TOCTOU race. Hold a single write lock (or upgradeable read lock) for the entire read-modify-write sequence.
+- When implementing MCP tools that run over stdio transport, all tracing/logging MUST go to stderr. Any output to stdout corrupts the MCP protocol framing.
 - Never write blanket `unsafe impl Send/Sync` on wrapper types. Wrap the non-Send inner type in a newtype with a SAFETY comment. Add compile-time assertions that verify the invariant.
 
 ## Before You Start

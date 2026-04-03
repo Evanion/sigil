@@ -42,6 +42,17 @@ For every spec that introduces mutation operations:
 2. Verify that tree/graph invariants are specified and enforced.
 3. Verify that history/eviction policies are defined for any bounded collection.
 
+### Entity Command Completeness Check
+For every new first-class entity type introduced in the spec (pages, layers, components, tokens, etc.):
+1. Verify the spec includes commands for at minimum: create, rename, delete, and any reorder/reparent operations.
+2. If any of these operations are absent without an explicit deferral, report as Major — an entity without a full command set cannot be used by agents or the frontend.
+
+### New Crate Documentation Check
+For every PR that introduces a new crate:
+1. Verify CLAUDE.md §2 has been updated to include the crate in the directory tree.
+2. Verify CLAUDE.md §4 has been updated with a responsibilities entry for the crate.
+3. If either is missing, report as Major.
+
 ## Output Format
 
 For each finding, report:
