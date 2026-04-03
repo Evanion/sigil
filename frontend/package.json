@@ -40,6 +40,7 @@
   "dependencies": {
     "@kobalte/core": "^0.13.11",
     "@urql/solid": "^1.0.1",
+    "dnd-kit-solid": "^0.1.0",
     "graphql": "^16.13.2",
     "graphql-ws": "^6.0.8",
     "lucide-solid": "^1.7.0",
