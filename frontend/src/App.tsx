@@ -1,4 +1,5 @@
 import { createSignal, type Component } from "solid-js";
+import { DragDropProvider } from "dnd-kit-solid";
 import { DocumentProvider } from "./store/document-context";
 import { createDocumentStoreSolid } from "./store/document-store-solid";
 import { Toolbar } from "./shell/Toolbar";
@@ -24,30 +25,32 @@ const App: Component = () => {
   return (
     <DocumentProvider store={store}>
       <AnnounceProvider announce={announce}>
-        <div class="app-shell">
-          {/* RF-018: Wrap Toolbar in grid-placed div */}
-          <div class="app-shell__toolbar">
-            <Toolbar />
+        <DragDropProvider>
+          <div class="app-shell">
+            {/* RF-018: Wrap Toolbar in grid-placed div */}
+            <div class="app-shell__toolbar">
+              <Toolbar />
+            </div>
+            <div class="app-shell__left" role="complementary" aria-label="Left panel">
+              <TabRegion region="left" />
+            </div>
+            {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
+            <div class="app-shell__canvas" role="main">
+              <Canvas />
+            </div>
+            <div class="app-shell__right" role="complementary" aria-label="Right panel">
+              <TabRegion region="right" />
+            </div>
+            {/* RF-018: Wrap StatusBar in grid-placed div */}
+            <div class="app-shell__status">
+              <StatusBar />
+            </div>
+            {/* RF-001: Visually-hidden ARIA live region for screen reader announcements */}
+            <div aria-live="polite" role="log" class="sr-only">
+              {announcement()}
+            </div>
           </div>
-          <div class="app-shell__left" role="complementary" aria-label="Left panel">
-            <TabRegion region="left" />
-          </div>
-          {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
-          <div class="app-shell__canvas" role="main">
-            <Canvas />
-          </div>
-          <div class="app-shell__right" role="complementary" aria-label="Right panel">
-            <TabRegion region="right" />
-          </div>
-          {/* RF-018: Wrap StatusBar in grid-placed div */}
-          <div class="app-shell__status">
-            <StatusBar />
-          </div>
-          {/* RF-001: Visually-hidden ARIA live region for screen reader announcements */}
-          <div aria-live="polite" role="log" class="sr-only">
-            {announcement()}
-          </div>
-        </div>
+        </DragDropProvider>
       </AnnounceProvider>
     </DocumentProvider>
   );
