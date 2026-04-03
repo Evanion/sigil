@@ -10,7 +10,7 @@ use agent_designer_core::{
     commands::style_commands::SetTransform,
     commands::tree_commands::ReparentNode,
 };
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 use uuid::Uuid;
 
 use crate::error::McpToolError;
@@ -500,7 +500,7 @@ pub fn set_locked_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
 
     use super::*;
     use crate::tools::pages::create_page_impl;

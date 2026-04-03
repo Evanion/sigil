@@ -1,7 +1,7 @@
 use async_graphql::{Context, Result, Subscription};
 use futures_util::Stream;
 
-use crate::state::AppState;
+use crate::state::ServerState;
 
 use super::types::DocumentEvent;
 
@@ -25,7 +25,7 @@ impl SubscriptionRoot {
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = DocumentEvent>> {
         // RF-013: use fallible `data()` instead of `data_unchecked()`
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let mut rx = state.graphql_tx.subscribe();
         Ok(async_stream::stream! {
             loop {
@@ -49,7 +49,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_event_delivers_to_subscriber() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let mut rx = state.graphql_tx.subscribe();
 
         let event = DocumentEvent {
@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_publish_event_without_listeners_does_not_panic() {
-        let state = AppState::new();
+        let state = ServerState::new();
         // No subscribers -- publish_event should not panic.
         let event = DocumentEvent {
             event_type: DocumentEventType::NodeDeleted,
@@ -83,7 +83,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_multiple_subscribers_each_receive_event() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let mut rx1 = state.graphql_tx.subscribe();
         let mut rx2 = state.graphql_tx.subscribe();
 
@@ -114,7 +114,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscriber_receives_events_in_order() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let mut rx = state.graphql_tx.subscribe();
 
         let event_types = [

@@ -1,0 +1,9 @@
+[package]
+name = "agent-designer-state"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+agent-designer-core = { path = "../core" }
+tokio = { workspace = true }
+tracing = { workspace = true }

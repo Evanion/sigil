@@ -24,7 +24,7 @@ use agent_designer_core::commands::style_commands::SetTransform;
 use agent_designer_core::node::Transform;
 use agent_designer_core::{NodeId, NodeKind, PageId};
 
-use crate::state::AppState;
+use crate::state::ServerState;
 
 use super::types::{
     CreateNodeResult, DocumentEvent, DocumentEventType, NodeGql, UndoRedoResult, node_to_gql,
@@ -34,9 +34,9 @@ pub struct MutationRoot;
 
 /// Acquires the document lock, recovering from mutex poisoning.
 fn acquire_document_lock(
-    state: &AppState,
+    state: &ServerState,
 ) -> std::sync::MutexGuard<'_, crate::state::SendDocument> {
-    match state.document.lock() {
+    match state.app.document.lock() {
         Ok(guard) => guard,
         Err(poisoned) => {
             tracing::error!("document mutex poisoned, recovering");
@@ -49,7 +49,7 @@ fn acquire_document_lock(
 ///
 /// If no subscription clients are listening the send will fail silently -- this
 /// is expected and logged at `debug` level.
-pub fn publish_event(state: &AppState, event: DocumentEvent) {
+pub fn publish_event(state: &ServerState, event: DocumentEvent) {
     if state.graphql_tx.send(event).is_err() {
         tracing::debug!("no GraphQL subscription listeners");
     }
@@ -70,7 +70,7 @@ impl MutationRoot {
         page_id: Option<String>,
         transform: Option<Json<serde_json::Value>>,
     ) -> Result<CreateNodeResult> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
 
         // Deserialize kind from JSON
         let node_kind: NodeKind = serde_json::from_value(kind.0).map_err(|e| {
@@ -128,7 +128,7 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, node_uuid)?
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -147,7 +147,7 @@ impl MutationRoot {
 
     /// Delete a node by UUID.
     async fn delete_node(&self, ctx: &Context<'_>, uuid: String) -> Result<bool> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -203,7 +203,7 @@ impl MutationRoot {
             })?;
         }
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -224,7 +224,7 @@ impl MutationRoot {
         uuid: String,
         new_name: String,
     ) -> Result<NodeGql> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -258,7 +258,7 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, parsed_uuid)?
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -279,7 +279,7 @@ impl MutationRoot {
         uuid: String,
         transform: Json<serde_json::Value>,
     ) -> Result<NodeGql> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -317,7 +317,7 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, parsed_uuid)?
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -335,7 +335,7 @@ impl MutationRoot {
 
     /// Set the visibility of a node by UUID.
     async fn set_visible(&self, ctx: &Context<'_>, uuid: String, visible: bool) -> Result<NodeGql> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -368,7 +368,7 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, parsed_uuid)?
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -384,7 +384,7 @@ impl MutationRoot {
 
     /// Set the locked state of a node by UUID.
     async fn set_locked(&self, ctx: &Context<'_>, uuid: String, locked: bool) -> Result<NodeGql> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -417,7 +417,7 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, parsed_uuid)?
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -433,7 +433,7 @@ impl MutationRoot {
 
     /// Undo the last command.
     async fn undo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
 
         let (can_undo, can_redo) = {
             let mut doc_guard = acquire_document_lock(state);
@@ -444,7 +444,7 @@ impl MutationRoot {
             (doc_guard.can_undo(), doc_guard.can_redo())
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -462,7 +462,7 @@ impl MutationRoot {
 
     /// Redo the last undone command.
     async fn redo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
 
         let (can_undo, can_redo) = {
             let mut doc_guard = acquire_document_lock(state);
@@ -473,7 +473,7 @@ impl MutationRoot {
             (doc_guard.can_undo(), doc_guard.can_redo())
         };
 
-        state.signal_dirty();
+        state.app.signal_dirty();
         publish_event(
             state,
             DocumentEvent {
@@ -495,9 +495,9 @@ mod tests {
     use super::*;
     use async_graphql::{EmptySubscription, Schema};
 
-    /// Builds a test schema with the given `AppState`.
+    /// Builds a test schema with the given `ServerState`.
     fn test_schema(
-        state: AppState,
+        state: ServerState,
     ) -> Schema<super::super::query::QueryRoot, MutationRoot, EmptySubscription> {
         Schema::build(
             super::super::query::QueryRoot,
@@ -510,11 +510,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_node_mutation_returns_uuid_and_node() {
-        let state = AppState::new();
+        let state = ServerState::new();
 
         // Add a page so we can test page placement
         {
-            let mut doc = state.document.lock().unwrap();
+            let mut doc = state.app.document.lock().unwrap();
             let page_uuid = uuid::Uuid::new_v4();
             let page = agent_designer_core::document::Page::new(
                 PageId::new(page_uuid),
@@ -554,7 +554,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_node_mutation_removes_node() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         // Create a node first
@@ -597,7 +597,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_rename_node_mutation_updates_name() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let create_res = schema
@@ -631,7 +631,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_visible_mutation_toggles_visibility() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let create_res = schema
@@ -658,7 +658,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_locked_mutation_toggles_lock() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let create_res = schema
@@ -684,7 +684,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_set_transform_mutation_updates_position() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let create_res = schema
@@ -721,7 +721,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_undo_redo_mutations_round_trip() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         // Create a node (pushes to undo stack)
@@ -772,7 +772,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_node_with_invalid_uuid_returns_error() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let res = schema
@@ -783,7 +783,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_undo_on_empty_history_returns_error() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let res = schema
@@ -794,7 +794,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_node_with_transform_applies_transform() {
-        let state = AppState::new();
+        let state = ServerState::new();
         let schema = test_schema(state);
 
         let query = r#"

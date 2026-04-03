@@ -4,7 +4,7 @@
 //! return token-efficient summaries for MCP agent consumption.
 
 use agent_designer_core::NodeKind;
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 
 use crate::server::acquire_document_lock;
 use crate::types::{DocumentInfo, DocumentTree, NodeInfo, PageTree, TransformInfo};
@@ -145,7 +145,7 @@ pub fn node_kind_to_string(kind: &NodeKind) -> String {
 #[cfg(test)]
 mod tests {
     use agent_designer_core::{Node, NodeId, NodeKind, Page, PageId};
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
 
     use super::*;
 

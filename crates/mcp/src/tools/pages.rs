@@ -1,7 +1,7 @@
 //! Page operation tools — list, create, rename, delete.
 
 use agent_designer_core::{Page, PageId};
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -146,7 +146,7 @@ pub fn rename_page_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
 
     use super::*;
 

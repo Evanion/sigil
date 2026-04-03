@@ -4,7 +4,7 @@
 //! Mutation commands (add, remove, update component) are out of scope for this
 //! plan and will be added in a later task.
 
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 
 use crate::server::acquire_document_lock;
 use crate::types::ComponentInfo;
@@ -37,7 +37,7 @@ pub fn list_components_impl(state: &AppState) -> Vec<ComponentInfo> {
 mod tests {
     use agent_designer_core::id::ComponentId;
     use agent_designer_core::{ComponentDef, NodeId};
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
     use uuid::Uuid;
 
     use super::*;

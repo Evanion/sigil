@@ -5,6 +5,9 @@ edition.workspace = true
 
 [dependencies]
 agent-designer-core = { path = "../core" }
+agent-designer-state = { path = "../state" }
+agent-designer-mcp = { path = "../mcp" }
+rmcp = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }

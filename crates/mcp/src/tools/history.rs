@@ -7,7 +7,7 @@
 //! Errors from the core engine (e.g. `NothingToUndo`, `NothingToRedo`) are
 //! propagated as `McpToolError::CoreError`.
 
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -61,7 +61,7 @@ pub fn redo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
 #[cfg(test)]
 mod tests {
     use agent_designer_core::CoreError;
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
 
     use super::*;
     use crate::error::McpToolError;

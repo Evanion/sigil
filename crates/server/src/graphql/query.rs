@@ -1,6 +1,6 @@
 use async_graphql::{Context, Object, Result};
 
-use crate::state::AppState;
+use crate::state::ServerState;
 
 use super::types::{DocumentInfoGql, NodeGql, PageGql, node_to_gql};
 
@@ -11,8 +11,12 @@ pub struct QueryRoot;
 impl QueryRoot {
     /// Get document metadata.
     async fn document(&self, ctx: &Context<'_>) -> Result<DocumentInfoGql> {
-        let state = ctx.data::<AppState>()?;
-        let doc = state.document.lock().map_err(|_| "document lock error")?;
+        let state = ctx.data::<ServerState>()?;
+        let doc = state
+            .app
+            .document
+            .lock()
+            .map_err(|_| "document lock error")?;
         Ok(DocumentInfoGql {
             name: doc.metadata.name.clone(),
             page_count: doc.pages.len(),
@@ -27,11 +31,15 @@ impl QueryRoot {
     /// RF-010: clone serialized data under the lock, drop the lock, then build
     /// the GraphQL response types outside the lock scope.
     async fn pages(&self, ctx: &Context<'_>) -> Result<Vec<PageGql>> {
-        let state = ctx.data::<AppState>()?;
+        let state = ctx.data::<ServerState>()?;
 
         // Collect serialized page data under the lock, then drop it.
         let pages_data = {
-            let doc = state.document.lock().map_err(|_| "document lock error")?;
+            let doc = state
+                .app
+                .document
+                .lock()
+                .map_err(|_| "document lock error")?;
             doc.pages
                 .iter()
                 .map(|page| {
@@ -83,8 +91,12 @@ impl QueryRoot {
     ///
     /// RF-012: delegates to the shared `node_to_gql` function in types.rs.
     async fn node(&self, ctx: &Context<'_>, uuid: String) -> Result<Option<NodeGql>> {
-        let state = ctx.data::<AppState>()?;
-        let doc = state.document.lock().map_err(|_| "document lock error")?;
+        let state = ctx.data::<ServerState>()?;
+        let doc = state
+            .app
+            .document
+            .lock()
+            .map_err(|_| "document lock error")?;
 
         let parsed_uuid: uuid::Uuid = uuid.parse().map_err(|_| "invalid UUID")?;
         let Some(node_id) = doc.arena.id_by_uuid(&parsed_uuid) else {

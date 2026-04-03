@@ -12,7 +12,7 @@ use agent_designer_core::{
     Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, UpdateToken},
 };
-use agent_designer_server::state::AppState;
+use agent_designer_state::AppState;
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -218,7 +218,7 @@ pub fn delete_token_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_server::state::AppState;
+    use agent_designer_state::AppState;
 
     use super::*;
 

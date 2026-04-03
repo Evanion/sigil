@@ -23,7 +23,7 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::graphql::SigilSchema;
-use crate::state::AppState;
+use crate::state::ServerState;
 
 /// Builds the full application router.
 ///
@@ -40,7 +40,7 @@ use crate::state::AppState;
 /// Panics if the hard-coded production origin `"http://localhost:4680"` fails
 /// to parse as a `HeaderValue`. This is a compile-time-known string and will
 /// never fail in practice.
-pub fn build_app(state: AppState, static_dir: Option<&str>) -> Router {
+pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
     let cors = if std::env::var("SIGIL_DEV_CORS").is_ok() {
         CorsLayer::permissive()
     } else {

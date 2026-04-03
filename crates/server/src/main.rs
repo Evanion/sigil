@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 
-use agent_designer_server::{build_app, state::AppState};
+use agent_designer_server::{build_app, state::ServerState};
 use tracing_subscriber::EnvFilter;
 
 /// Maximum time to wait for the persistence task to complete a final flush
@@ -35,13 +35,13 @@ async fn main() -> anyhow::Result<()> {
             .await
             .context("failed to load workfile")?;
 
-        AppState::new_with_document_and_workfile(doc, workfile_path)
+        ServerState::new_with_document_and_workfile(doc, workfile_path)
     } else {
         tracing::info!("no WORKFILE configured — running in-memory mode");
         // Create a default page so there's something to draw on
-        let state = AppState::new();
+        let state = ServerState::new();
         {
-            let mut doc = state.document.lock().expect("lock for default page");
+            let mut doc = state.app.document.lock().expect("lock for default page");
             let page_id = agent_designer_core::PageId::new(uuid::Uuid::new_v4());
             let page = agent_designer_core::Page::new(page_id, "Page 1".to_string());
             doc.add_page(page).expect("add default page");
@@ -51,8 +51,32 @@ async fn main() -> anyhow::Result<()> {
 
     // Take the persistence handle and dirty_tx before moving state into the app.
     // We need these for graceful shutdown after the server stops.
-    let persistence_handle = state.take_persistence_handle();
-    let dirty_tx = state.take_dirty_tx();
+    let persistence_handle = state.app.take_persistence_handle();
+    let dirty_tx = state.app.take_dirty_tx();
+
+    // Spawn MCP server on stdio if requested.
+    // This allows agents to connect via stdin/stdout while the HTTP server
+    // runs on the configured port for human users.
+    let mcp_handle = if std::env::var("MCP_STDIO").is_ok() {
+        tracing::info!("starting MCP server on stdio");
+        let mcp_state = state.app.clone();
+        Some(tokio::spawn(async move {
+            let mcp_server = agent_designer_mcp::server::SigilMcpServer::new(mcp_state);
+            let (stdin, stdout) = rmcp::transport::io::stdio();
+            match rmcp::serve_server(mcp_server, (stdin, stdout)).await {
+                Ok(running) => {
+                    if let Err(e) = running.waiting().await {
+                        tracing::error!("MCP server error: {e}");
+                    }
+                }
+                Err(e) => {
+                    tracing::error!("MCP server failed to start: {e}");
+                }
+            }
+        }))
+    } else {
+        None
+    };
 
     let app = build_app(state, Some(&static_dir));
 
@@ -75,6 +99,11 @@ async fn main() -> anyhow::Result<()> {
                 PERSISTENCE_SHUTDOWN_TIMEOUT
             ),
         }
+    }
+
+    // Clean up MCP server if running
+    if let Some(handle) = mcp_handle {
+        handle.abort();
     }
 
     Ok(())
