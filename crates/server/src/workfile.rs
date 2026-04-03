@@ -358,7 +358,8 @@ fn load_page_into_document(
     serialized: &SerializedPage,
 ) -> Result<Vec<(usize, Uuid)>> {
     let page_id = PageId::new(serialized.id);
-    let page = Page::new(page_id, serialized.name.clone());
+    let page = Page::new(page_id, serialized.name.clone())
+        .map_err(|e| anyhow::anyhow!("failed to create page '{}': {e}", serialized.name))?;
     doc.add_page(page)
         .map_err(|e| anyhow::anyhow!("failed to add page '{}': {e}", serialized.name))?;
 
@@ -542,7 +543,7 @@ mod tests {
 
         let mut doc = Document::new("With Page".to_string());
         let page_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         // Add a frame node
@@ -587,9 +588,9 @@ mod tests {
         let mut doc = Document::new("Multi Page".to_string());
         let page_a_id = PageId::new(Uuid::new_v4());
         let page_b_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_a_id, "Alpha".to_string()))
+        doc.add_page(Page::new(page_a_id, "Alpha".to_string()).expect("create page"))
             .expect("add page A");
-        doc.add_page(Page::new(page_b_id, "Beta".to_string()))
+        doc.add_page(Page::new(page_b_id, "Beta".to_string()).expect("create page"))
             .expect("add page B");
 
         save_workfile(&doc, &workfile_path)
@@ -606,7 +607,7 @@ mod tests {
     fn test_prepare_save_uses_uuid_filenames() {
         let mut doc = Document::new("Prepared".to_string());
         let page_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_id, "Page One".to_string()))
+        doc.add_page(Page::new(page_id, "Page One".to_string()).expect("create page"))
             .expect("add page");
 
         let prepared = prepare_save(&doc).expect("prepare save");
@@ -625,7 +626,7 @@ mod tests {
 
         let mut doc = Document::new("Hierarchy".to_string());
         let page_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_id, "Main".to_string()))
+        doc.add_page(Page::new(page_id, "Main".to_string()).expect("create page"))
             .expect("add page");
 
         // Create parent frame
@@ -689,9 +690,9 @@ mod tests {
         let mut doc = Document::new("Stale Test".to_string());
         let page_a_id = PageId::new(Uuid::new_v4());
         let page_b_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_a_id, "Alpha".to_string()))
+        doc.add_page(Page::new(page_a_id, "Alpha".to_string()).expect("create page"))
             .expect("add page A");
-        doc.add_page(Page::new(page_b_id, "Beta".to_string()))
+        doc.add_page(Page::new(page_b_id, "Beta".to_string()).expect("create page"))
             .expect("add page B");
 
         save_workfile(&doc, &workfile_path)
@@ -779,7 +780,7 @@ mod tests {
 
         let mut doc = Document::new("UUID Names".to_string());
         let page_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_id, "My Page!".to_string()))
+        doc.add_page(Page::new(page_id, "My Page!".to_string()).expect("create page"))
             .expect("add page");
 
         save_workfile(&doc, &workfile_path)
@@ -911,7 +912,7 @@ mod tests {
         // Save a document with one page
         let mut doc = Document::new("Filter Test".to_string());
         let page_id = PageId::new(Uuid::new_v4());
-        doc.add_page(Page::new(page_id, "Kept".to_string()))
+        doc.add_page(Page::new(page_id, "Kept".to_string()).expect("create page"))
             .expect("add page");
 
         save_workfile(&doc, &workfile_path)

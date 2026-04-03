@@ -55,6 +55,9 @@ pub const MAX_GRADIENT_STOPS: usize = 256;
 /// Maximum length of a font family name.
 pub const MAX_FONT_FAMILY_LEN: usize = 256;
 
+/// Maximum length of a page name.
+pub const MAX_PAGE_NAME_LEN: usize = 256;
+
 /// Maximum pages per document.
 pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 
@@ -177,6 +180,30 @@ pub fn validate_node_name(name: &str) -> Result<(), CoreError> {
     if let Some(pos) = name.find(|c: char| c.is_control()) {
         return Err(CoreError::ValidationError(format!(
             "node name contains control character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
+/// Validates a page name: max 256 chars, non-empty, no control characters (U+0000-U+001F).
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the name is empty, too long, or contains control characters.
+pub fn validate_page_name(name: &str) -> Result<(), CoreError> {
+    if name.is_empty() {
+        return Err(CoreError::ValidationError(
+            "page name must not be empty".to_string(),
+        ));
+    }
+    if name.len() > MAX_PAGE_NAME_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "page name exceeds max length of {MAX_PAGE_NAME_LEN} characters (got {})",
+            name.len()
+        )));
+    }
+    if let Some(pos) = name.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "page name contains control character at byte position {pos}"
         )));
     }
     Ok(())
@@ -338,6 +365,48 @@ pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreErr
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── Page name validation ───────────────────────────────────────────
+
+    #[test]
+    fn test_validate_page_name_valid() {
+        assert!(validate_page_name("Home").is_ok());
+    }
+
+    #[test]
+    fn test_validate_page_name_empty() {
+        assert!(validate_page_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_page_name_max_length() {
+        let name = "a".repeat(MAX_PAGE_NAME_LEN);
+        assert!(validate_page_name(&name).is_ok());
+    }
+
+    #[test]
+    fn test_validate_page_name_too_long() {
+        let name = "a".repeat(MAX_PAGE_NAME_LEN + 1);
+        assert!(validate_page_name(&name).is_err());
+    }
+
+    #[test]
+    fn test_validate_page_name_control_char() {
+        assert!(validate_page_name("foo\0bar").is_err());
+    }
+
+    #[test]
+    fn test_validate_page_name_newline() {
+        assert!(validate_page_name("foo\nbar").is_err());
+    }
+
+    #[test]
+    fn test_max_page_name_len_enforced() {
+        let at_limit = "a".repeat(MAX_PAGE_NAME_LEN);
+        assert!(validate_page_name(&at_limit).is_ok());
+        let over_limit = "a".repeat(MAX_PAGE_NAME_LEN + 1);
+        assert!(validate_page_name(&over_limit).is_err());
+    }
 
     // ── Node name validation ───────────────────────────────────────────
 

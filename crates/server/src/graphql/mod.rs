@@ -5,7 +5,7 @@ pub mod types;
 
 use async_graphql::Schema;
 
-use crate::state::AppState;
+use crate::state::ServerState;
 
 pub type SigilSchema =
     Schema<query::QueryRoot, mutation::MutationRoot, subscription::SubscriptionRoot>;
@@ -24,7 +24,7 @@ const MAX_QUERY_COMPLEXITY: usize = 500;
 ///
 /// Applies query depth and complexity limits to prevent resource exhaustion.
 #[must_use]
-pub fn build_schema(state: AppState) -> SigilSchema {
+pub fn build_schema(state: ServerState) -> SigilSchema {
     Schema::build(
         query::QueryRoot,
         mutation::MutationRoot,

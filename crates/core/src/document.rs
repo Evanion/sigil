@@ -38,13 +38,17 @@ pub struct Page {
 
 impl Page {
     /// Creates a new empty page.
-    #[must_use]
-    pub fn new(id: PageId, name: String) -> Self {
-        Self {
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if the page name is empty, too long,
+    /// or contains control characters.
+    pub fn new(id: PageId, name: String) -> Result<Self, CoreError> {
+        crate::validate::validate_page_name(&name)?;
+        Ok(Self {
             id,
             name,
             root_nodes: Vec::new(),
-        }
+        })
     }
 }
 
@@ -429,15 +433,27 @@ mod tests {
 
     #[test]
     fn test_page_new() {
-        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string());
+        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string()).expect("create page");
         assert_eq!(page.name, "Home");
         assert!(page.root_nodes.is_empty());
     }
 
     #[test]
+    fn test_page_new_rejects_empty_name() {
+        let result = Page::new(PageId::new(make_uuid(1)), String::new());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_page_new_rejects_control_chars() {
+        let result = Page::new(PageId::new(make_uuid(1)), "foo\0bar".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_add_page() {
         let mut doc = Document::new("Test".to_string());
-        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string());
+        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string()).expect("create page");
         doc.add_page(page).expect("add page");
         assert_eq!(doc.pages.len(), 1);
         assert_eq!(doc.pages[0].name, "Home");
@@ -447,7 +463,7 @@ mod tests {
     fn test_find_page_by_id() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let page = doc.page(page_id).expect("find page");
@@ -466,7 +482,7 @@ mod tests {
     fn test_add_root_node_to_page() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let node = Node::new(
@@ -488,7 +504,7 @@ mod tests {
     fn test_add_root_node_to_page_idempotent() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
 
         let node = Node::new(
@@ -528,7 +544,7 @@ mod tests {
     fn test_add_root_node_nonexistent_node() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
-        doc.add_page(Page::new(page_id, "Home".to_string()))
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
             .expect("add page");
         let fake_node = NodeId::new(99, 0);
         let result = doc.add_root_node_to_page(page_id, fake_node);
@@ -549,7 +565,7 @@ mod tests {
 
     #[test]
     fn test_page_serde_round_trip() {
-        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string());
+        let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string()).expect("create page");
         let json = serde_json::to_string(&page).expect("serialize");
         let deserialized: Page = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(page, deserialized);

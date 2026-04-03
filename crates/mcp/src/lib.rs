@@ -1,4 +1,11 @@
 #![warn(clippy::all, clippy::pedantic)]
+#![allow(clippy::module_name_repetitions)]
+
+pub mod error;
+pub mod resources;
+pub mod server;
+pub mod tools;
+pub mod types;
 
 #[must_use]
 pub fn version() -> &'static str {

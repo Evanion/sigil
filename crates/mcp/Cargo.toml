@@ -5,12 +5,15 @@ edition.workspace = true
 
 [dependencies]
 agent-designer-core = { path = "../core" }
+agent-designer-state = { path = "../state" }
 rmcp = { workspace = true }
+schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
