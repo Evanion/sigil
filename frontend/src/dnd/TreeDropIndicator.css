@@ -1,0 +1,31 @@
+.sigil-drop-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: var(--z-drop-indicator);
+}
+
+.sigil-drop-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.sigil-drop-indicator--inside {
+  height: 100%;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+}
+
+.sigil-drop-indicator--inside::before {
+  display: none;
+}
