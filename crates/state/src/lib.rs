@@ -11,8 +11,56 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use agent_designer_core::Document;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+
+/// Capacity of the broadcast channel for mutation events.
+///
+/// This determines the maximum number of unread events a subscriber can fall
+/// behind before messages are dropped (lagged). The value must be large enough
+/// to handle bursts of rapid mutations without losing events for active
+/// subscribers.
+pub const MUTATION_BROADCAST_CAPACITY: usize = 256;
+
+/// Type-erased mutation event for broadcasting to connected clients.
+///
+/// This lives in the state crate so that both the server (GraphQL subscriptions)
+/// and the MCP crate can publish events without depending on `async_graphql`.
+/// The server converts these into its own `DocumentEvent` type for GraphQL.
+#[derive(Clone, Debug)]
+pub struct MutationEvent {
+    /// The kind of mutation that occurred.
+    pub kind: MutationEventKind,
+    /// UUID of the affected entity, if applicable.
+    pub uuid: Option<String>,
+    /// Additional structured data about the event (JSON-serialized).
+    pub data: Option<serde_json::Value>,
+}
+
+/// Discriminator for mutation events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationEventKind {
+    /// A new node was inserted into the document.
+    NodeCreated,
+    /// An existing node's properties changed.
+    NodeUpdated,
+    /// A node was removed from the document.
+    NodeDeleted,
+    /// An undo or redo operation was performed.
+    UndoRedo,
+    /// A new page was created.
+    PageCreated,
+    /// A page's properties were updated.
+    PageUpdated,
+    /// A page was deleted.
+    PageDeleted,
+    /// A new design token was created.
+    TokenCreated,
+    /// A design token was updated.
+    TokenUpdated,
+    /// A design token was deleted.
+    TokenDeleted,
+}
 
 /// Newtype wrapper around `Document` that allows us to assert `Send` and `Sync`
 /// without placing blanket unsafe impls on the entire `AppState`.
@@ -47,9 +95,10 @@ impl DerefMut for SendDocument {
 
 /// Shared application state.
 ///
-/// Holds the in-memory document and persistence signaling. Does NOT include
-/// any broadcast channel — that is owned by the server crate, which extends
-/// this type with GraphQL-specific fields.
+/// Holds the in-memory document, persistence signaling, and an optional
+/// broadcast channel for mutation events. The broadcast channel allows both
+/// the server (GraphQL subscriptions) and MCP tools to notify connected
+/// clients of document changes without depending on `async_graphql`.
 ///
 /// Wrapped in `Arc` and passed to all route handlers via Axum's state extractor.
 ///
@@ -80,6 +129,12 @@ pub struct AppState {
     /// while only one caller can take the handle.
     /// `None` when persistence is not configured (in-memory mode).
     persistence_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    /// Optional broadcast sender for mutation events.
+    ///
+    /// When set, `publish_event` sends events to all subscribers (e.g. GraphQL
+    /// subscription streams). `None` when broadcasting is not configured
+    /// (e.g. in MCP-only or test scenarios without a server).
+    event_tx: Option<broadcast::Sender<MutationEvent>>,
 }
 
 impl AppState {
@@ -95,6 +150,7 @@ impl AppState {
             workfile_path: None,
             dirty_tx: None,
             persistence_handle: Arc::new(Mutex::new(None)),
+            event_tx: None,
         }
     }
 
@@ -114,6 +170,38 @@ impl AppState {
             workfile_path: Some(workfile_path),
             dirty_tx: Some(dirty_tx),
             persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
+            event_tx: None,
+        }
+    }
+
+    /// Sets the broadcast sender for mutation events.
+    ///
+    /// Called by the server crate after constructing the broadcast channel.
+    /// This allows MCP tools (which only have access to `AppState`) to publish
+    /// events that reach GraphQL subscribers.
+    pub fn set_event_tx(&mut self, tx: broadcast::Sender<MutationEvent>) {
+        self.event_tx = Some(tx);
+    }
+
+    /// Returns a reference to the event broadcast sender, if configured.
+    ///
+    /// Used by the server crate to subscribe to mutation events (e.g. for
+    /// GraphQL subscriptions).
+    #[must_use]
+    pub fn event_tx(&self) -> Option<&broadcast::Sender<MutationEvent>> {
+        self.event_tx.as_ref()
+    }
+
+    /// Publishes a mutation event to all subscribers.
+    ///
+    /// If no broadcast channel is configured (in-memory-only mode) or no
+    /// subscribers are listening, this is a no-op. Similar fire-and-forget
+    /// semantics to `signal_dirty`.
+    pub fn publish_event(&self, event: MutationEvent) {
+        if let Some(ref tx) = self.event_tx
+            && tx.send(event).is_err()
+        {
+            tracing::debug!("no mutation event listeners");
         }
     }
 
@@ -198,5 +286,57 @@ mod tests {
         let state = AppState::new();
         // Should not panic — no persistence configured
         state.signal_dirty();
+    }
+
+    #[test]
+    fn test_publish_event_without_channel_is_noop() {
+        let state = AppState::new();
+        // Should not panic — no event channel configured
+        state.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeCreated,
+            uuid: Some("test".to_string()),
+            data: None,
+        });
+    }
+
+    #[test]
+    fn test_publish_event_delivers_to_subscriber() {
+        let mut state = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        let mut rx = tx.subscribe();
+        state.set_event_tx(tx);
+
+        state.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeCreated,
+            uuid: Some("abc-123".to_string()),
+            data: None,
+        });
+
+        let received = rx.try_recv().expect("should receive event");
+        assert_eq!(received.kind, MutationEventKind::NodeCreated);
+        assert_eq!(received.uuid.as_deref(), Some("abc-123"));
+    }
+
+    #[test]
+    fn test_mutation_broadcast_capacity_enforced() {
+        // Verify the constant has the expected value. Enforcement occurs at
+        // channel construction in `ServerState` (and in tests above).
+        assert_eq!(MUTATION_BROADCAST_CAPACITY, 256);
+    }
+
+    #[test]
+    fn test_event_tx_returns_sender_when_configured() {
+        let mut state = AppState::new();
+        assert!(
+            state.event_tx().is_none(),
+            "event_tx should be None before configuration"
+        );
+
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        state.set_event_tx(tx);
+        assert!(
+            state.event_tx().is_some(),
+            "event_tx should be Some after configuration"
+        );
     }
 }

@@ -1,6 +1,7 @@
 use async_graphql::SimpleObject;
 
 use agent_designer_core::{Document, NodeId};
+use agent_designer_state::{MutationEvent, MutationEventKind};
 
 /// Discriminator for document change events.
 ///
@@ -16,6 +17,18 @@ pub enum DocumentEventType {
     NodeDeleted,
     /// An undo or redo operation was performed.
     UndoRedo,
+    /// A new page was created.
+    PageCreated,
+    /// A page's properties were updated.
+    PageUpdated,
+    /// A page was deleted.
+    PageDeleted,
+    /// A new design token was created.
+    TokenCreated,
+    /// A design token was updated.
+    TokenUpdated,
+    /// A design token was deleted.
+    TokenDeleted,
 }
 
 /// A real-time event emitted when the document changes.
@@ -38,6 +51,32 @@ pub struct DocumentEvent {
     /// once connection IDs are wired through.
     // TODO(RF-008): assign a per-connection ID from subscription context
     pub sender_id: Option<u64>,
+}
+
+impl DocumentEvent {
+    /// Converts a [`MutationEvent`] from the state crate into a GraphQL
+    /// [`DocumentEvent`].
+    #[must_use]
+    pub fn from_mutation_event(event: MutationEvent) -> Self {
+        let event_type = match event.kind {
+            MutationEventKind::NodeCreated => DocumentEventType::NodeCreated,
+            MutationEventKind::NodeUpdated => DocumentEventType::NodeUpdated,
+            MutationEventKind::NodeDeleted => DocumentEventType::NodeDeleted,
+            MutationEventKind::UndoRedo => DocumentEventType::UndoRedo,
+            MutationEventKind::PageCreated => DocumentEventType::PageCreated,
+            MutationEventKind::PageUpdated => DocumentEventType::PageUpdated,
+            MutationEventKind::PageDeleted => DocumentEventType::PageDeleted,
+            MutationEventKind::TokenCreated => DocumentEventType::TokenCreated,
+            MutationEventKind::TokenUpdated => DocumentEventType::TokenUpdated,
+            MutationEventKind::TokenDeleted => DocumentEventType::TokenDeleted,
+        };
+        Self {
+            event_type,
+            uuid: event.uuid,
+            data: event.data.map(async_graphql::Json),
+            sender_id: None,
+        }
+    }
 }
 
 /// GraphQL representation of document metadata.

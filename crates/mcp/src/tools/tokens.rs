@@ -12,7 +12,7 @@ use agent_designer_core::{
     Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, UpdateToken},
 };
-use agent_designer_state::AppState;
+use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -21,13 +21,18 @@ use crate::types::{CreateTokenInput, MutationResult, TokenInfo, UpdateTokenInput
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 /// Converts a `Token` to a `TokenInfo` for MCP output.
-fn token_to_info(token: &Token) -> TokenInfo {
-    TokenInfo {
+///
+/// # Errors
+///
+/// Returns `McpToolError::SerializationError` if the token value cannot be
+/// serialized to JSON.
+fn token_to_info(token: &Token) -> Result<TokenInfo, McpToolError> {
+    Ok(TokenInfo {
         name: token.name().to_string(),
         token_type: token_type_to_string(token.token_type()),
-        value: serde_json::to_value(token.value()).unwrap_or(serde_json::Value::Null),
+        value: serde_json::to_value(token.value())?,
         description: token.description().map(str::to_string),
-    }
+    })
 }
 
 /// Serializes a `TokenType` to its lowercase string representation.
@@ -74,17 +79,21 @@ pub fn parse_token_type(s: &str) -> Result<TokenType, McpToolError> {
 // ── Tool implementations ─────────────────────────────────────────────────────
 
 /// Lists all tokens in the document's token context.
-#[must_use]
-pub fn list_tokens_impl(state: &AppState) -> Vec<TokenInfo> {
+///
+/// # Errors
+///
+/// Returns `McpToolError::SerializationError` if any token value cannot be
+/// serialized to JSON.
+pub fn list_tokens_impl(state: &AppState) -> Result<Vec<TokenInfo>, McpToolError> {
     let doc = acquire_document_lock(state);
     // Collect into a Vec and sort by name for stable, deterministic output.
     let mut tokens: Vec<TokenInfo> = doc
         .token_context
         .iter()
         .map(|(_, token)| token_to_info(token))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     tokens.sort_by(|a, b| a.name.cmp(&b.name));
-    tokens
+    Ok(tokens)
 }
 
 /// Creates a new design token.
@@ -115,7 +124,7 @@ pub fn create_token_impl(
         input.description.clone(),
     )?;
 
-    let info = token_to_info(&token);
+    let info = token_to_info(&token)?;
 
     {
         let mut doc = acquire_document_lock(state);
@@ -123,6 +132,11 @@ pub fn create_token_impl(
     }
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::TokenCreated,
+        uuid: None,
+        data: Some(serde_json::json!({"name": input.name})),
+    });
     Ok(info)
 }
 
@@ -144,16 +158,16 @@ pub fn update_token_impl(
     let token_type = parse_token_type(&input.token_type)?;
     let token_value: TokenValue = serde_json::from_value(input.value.clone())?;
 
-    // Capture old token snapshot and the new token before entering the lock,
-    // so we can construct them without holding the guard across fallible calls.
-    let (old_token, new_token) = {
-        let doc = acquire_document_lock(state);
+    // RF-004: Single lock scope — snapshot, construct, and execute atomically
+    // to prevent TOCTOU races where the token could be modified or deleted
+    // between the snapshot read and the execute call.
+    let info = {
+        let mut doc = acquire_document_lock(state);
         let old_token = doc
             .token_context
             .get(&input.name)
             .ok_or_else(|| McpToolError::TokenNotFound(input.name.clone()))?
             .clone();
-        drop(doc);
 
         let new_token = Token::new(
             old_token.id(),
@@ -162,20 +176,23 @@ pub fn update_token_impl(
             token_type,
             input.description.clone(),
         )?;
-        (old_token, new_token)
-    };
 
-    let info = token_to_info(&new_token);
+        let info = token_to_info(&new_token)?;
 
-    {
-        let mut doc = acquire_document_lock(state);
         doc.execute(Box::new(UpdateToken {
             new_token,
             old_token,
         }))?;
-    }
+
+        info
+    };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::TokenUpdated,
+        uuid: None,
+        data: Some(serde_json::json!({"name": input.name})),
+    });
     Ok(info)
 }
 
@@ -191,16 +208,17 @@ pub fn delete_token_impl(
     state: &AppState,
     token_name: &str,
 ) -> Result<MutationResult, McpToolError> {
-    let snapshot = {
-        let doc = acquire_document_lock(state);
-        doc.token_context
-            .get(token_name)
-            .ok_or_else(|| McpToolError::TokenNotFound(token_name.to_string()))?
-            .clone()
-    };
-
+    // RF-004: Single lock scope — snapshot and execute atomically to prevent
+    // TOCTOU races where the token could be modified or deleted between the
+    // snapshot read and the execute call.
     {
         let mut doc = acquire_document_lock(state);
+        let snapshot = doc
+            .token_context
+            .get(token_name)
+            .ok_or_else(|| McpToolError::TokenNotFound(token_name.to_string()))?
+            .clone();
+
         doc.execute(Box::new(RemoveToken {
             token_name: token_name.to_string(),
             snapshot,
@@ -208,6 +226,11 @@ pub fn delete_token_impl(
     }
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::TokenDeleted,
+        uuid: None,
+        data: Some(serde_json::json!({"name": token_name})),
+    });
     Ok(MutationResult {
         success: true,
         message: format!("Token '{token_name}' deleted"),
@@ -235,7 +258,7 @@ mod tests {
     #[test]
     fn test_list_tokens_empty() {
         let state = AppState::new();
-        let tokens = list_tokens_impl(&state);
+        let tokens = list_tokens_impl(&state).expect("list tokens");
         assert!(tokens.is_empty(), "expected no tokens in fresh document");
     }
 
@@ -247,7 +270,7 @@ mod tests {
         assert_eq!(created.name, "spacing.md");
         assert_eq!(created.token_type, "number");
 
-        let tokens = list_tokens_impl(&state);
+        let tokens = list_tokens_impl(&state).expect("list tokens");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].name, "spacing.md");
     }
@@ -269,7 +292,7 @@ mod tests {
         assert_eq!(updated.description, Some("Updated spacing".to_string()));
 
         // Verify value changed in the live document.
-        let tokens = list_tokens_impl(&state);
+        let tokens = list_tokens_impl(&state).expect("list tokens");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].description, Some("Updated spacing".to_string()));
     }
@@ -281,7 +304,7 @@ mod tests {
 
         let result = delete_token_impl(&state, "spacing.sm").expect("delete token");
         assert!(result.success);
-        assert!(list_tokens_impl(&state).is_empty());
+        assert!(list_tokens_impl(&state).expect("list tokens").is_empty());
     }
 
     #[test]

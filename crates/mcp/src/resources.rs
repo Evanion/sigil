@@ -84,7 +84,13 @@ pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents
             ])
         }
         URI_DOCUMENT_TOKENS => {
-            let tokens = crate::tools::tokens::list_tokens_impl(state);
+            let tokens = crate::tools::tokens::list_tokens_impl(state).map_err(|e| {
+                ErrorData::new(
+                    rmcp::model::ErrorCode::INTERNAL_ERROR,
+                    format!("token serialization error: {e}"),
+                    None,
+                )
+            })?;
             let result = TokenListResult { tokens };
             let json = serde_json::to_string(&result).map_err(|e| {
                 ErrorData::new(

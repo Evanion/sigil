@@ -10,7 +10,7 @@ use agent_designer_core::{
     commands::style_commands::SetTransform,
     commands::tree_commands::ReparentNode,
 };
-use agent_designer_state::AppState;
+use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 use uuid::Uuid;
 
 use crate::error::McpToolError;
@@ -239,9 +239,7 @@ pub fn create_node_impl(
                 // Restore state before propagating error (CLAUDE.md section 11).
                 // Undo the CreateNode that was already committed.
                 if let Err(undo_err) = doc.undo() {
-                    tracing::error!(
-                        "failed to undo CreateNode after reparent failure: {undo_err}"
-                    );
+                    tracing::error!("failed to undo CreateNode after reparent failure: {undo_err}");
                     // Return a compound-style error that surfaces both failures.
                     return Err(McpToolError::InvalidInput(format!(
                         "reparent failed ({reparent_err}) and rollback also failed ({undo_err})"
@@ -257,6 +255,11 @@ pub fn create_node_impl(
 
     let _ = node_id; // node_id is not used after lock drop; uuid is returned
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeCreated,
+        uuid: Some(node_uuid.to_string()),
+        data: None,
+    });
 
     Ok(CreateNodeResult {
         uuid: node_uuid.to_string(),
@@ -325,6 +328,11 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
     }
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeDeleted,
+        uuid: Some(node_uuid.to_string()),
+        data: None,
+    });
 
     Ok(MutationResult {
         success: true,
@@ -374,6 +382,11 @@ pub fn rename_node_impl(
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "name"})),
+    });
     Ok(node_info)
 }
 
@@ -426,6 +439,11 @@ pub fn set_transform_impl(
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "transform"})),
+    });
     Ok(node_info)
 }
 
@@ -470,6 +488,11 @@ pub fn set_visible_impl(
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "visible"})),
+    });
     Ok(node_info)
 }
 
@@ -514,6 +537,11 @@ pub fn set_locked_impl(
     };
 
     state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "locked"})),
+    });
     Ok(node_info)
 }
 
@@ -657,5 +685,129 @@ mod tests {
         let result = delete_node_impl(&state, &fake_uuid);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::NodeNotFound(_)));
+    }
+
+    // ── RF-010: Float validation tests ────────────────────────────────
+
+    #[test]
+    fn test_set_transform_rejects_nan() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let transform = TransformInput {
+            x: f64::NAN,
+            y: 0.0,
+            width: 100.0,
+            height: 50.0,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        };
+        let result = set_transform_impl(&state, &created.uuid, &transform);
+        assert!(result.is_err(), "NaN should be rejected");
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
+            "error should mention finiteness"
+        );
+    }
+
+    #[test]
+    fn test_set_transform_rejects_infinity() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let transform = TransformInput {
+            x: 0.0,
+            y: f64::INFINITY,
+            width: 100.0,
+            height: 50.0,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        };
+        let result = set_transform_impl(&state, &created.uuid, &transform);
+        assert!(result.is_err(), "infinity should be rejected");
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
+            "error should mention finiteness"
+        );
+    }
+
+    #[test]
+    fn test_create_node_rejects_negative_dimensions() {
+        let (state, page_id) = make_state_with_page();
+        let transform = TransformInput {
+            x: 0.0,
+            y: 0.0,
+            width: -10.0,
+            height: 50.0,
+            rotation: 0.0,
+            scale_x: 1.0,
+            scale_y: 1.0,
+        };
+        let result = create_node_impl(
+            &state,
+            "frame",
+            "Frame",
+            Some(&page_id),
+            None,
+            Some(&transform),
+        );
+        assert!(result.is_err(), "negative width should be rejected");
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("non-negative")),
+            "error should mention non-negative"
+        );
+    }
+
+    // ── RF-012: Image node creation disallowed via MCP ────────────────
+
+    #[test]
+    fn test_create_image_node_returns_error() {
+        let (state, page_id) = make_state_with_page();
+        let result = create_node_impl(&state, "image", "My Image", Some(&page_id), None, None);
+        assert!(result.is_err(), "image node creation should be rejected");
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("asset_ref")),
+            "error should mention asset_ref requirement"
+        );
+    }
+
+    // ── RF-007/RF-008: Atomic create+reparent rollback ────────────────
+
+    #[test]
+    fn test_create_node_with_invalid_parent_rolls_back() {
+        let (state, page_id) = make_state_with_page();
+        let fake_parent = Uuid::new_v4().to_string();
+
+        // Attempt to create a node with a nonexistent parent. The parent UUID
+        // is resolved before CreateNode executes, so this should fail without
+        // leaving a dangling node.
+        let result = create_node_impl(
+            &state,
+            "frame",
+            "Orphan",
+            Some(&page_id),
+            Some(&fake_parent),
+            None,
+        );
+        assert!(result.is_err());
+
+        // Verify no nodes were left in the document.
+        let doc = crate::server::acquire_document_lock(&state);
+        let page = doc
+            .page(
+                page_id
+                    .parse::<Uuid>()
+                    .map(agent_designer_core::PageId::new)
+                    .unwrap(),
+            )
+            .unwrap();
+        assert!(
+            page.root_nodes.is_empty(),
+            "no nodes should remain after failed create+reparent"
+        );
     }
 }

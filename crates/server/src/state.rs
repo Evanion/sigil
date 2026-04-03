@@ -4,7 +4,7 @@
 //!
 //! Re-exports the core `AppState` and `SendDocument` from the `state` crate
 //! and provides convenience constructors that wire up persistence and the
-//! GraphQL broadcast channel.
+//! mutation event broadcast channel.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -13,27 +13,22 @@ use agent_designer_core::Document;
 use tokio::sync::broadcast;
 
 // Re-export the core state types so existing code can use `crate::state::AppState`.
-pub use agent_designer_state::{AppState, SendDocument};
+pub use agent_designer_state::{
+    AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
+};
 
-use crate::graphql::types::DocumentEvent;
-
-/// Capacity of the broadcast channel for GraphQL subscription events.
-pub const GRAPHQL_BROADCAST_CAPACITY: usize = 256;
-
-/// Server-level state that pairs the shared `AppState` with a GraphQL
-/// broadcast channel.
+/// Server-level state that wraps the shared `AppState`.
 ///
 /// This is what gets stored in Axum's state extractor and passed to
-/// GraphQL schema data. The MCP crate only needs `AppState` (no broadcast).
+/// GraphQL schema data. The MCP crate only needs `AppState` (no server-specific
+/// fields). The mutation event broadcast channel lives inside `AppState` so
+/// that both MCP tools and GraphQL mutations can publish events through the
+/// same path.
 #[derive(Clone)]
 pub struct ServerState {
-    /// Core application state (document + persistence), shared with MCP.
+    /// Core application state (document + persistence + event broadcast),
+    /// shared with MCP.
     pub app: AppState,
-    /// Broadcast channel for GraphQL subscription events.
-    ///
-    /// Mutations publish [`DocumentEvent`] values here; the `documentChanged`
-    /// subscription stream reads from a receiver obtained via `.subscribe()`.
-    pub graphql_tx: broadcast::Sender<DocumentEvent>,
 }
 
 impl ServerState {
@@ -42,11 +37,10 @@ impl ServerState {
     /// Suitable for tests and in-memory-only operation.
     #[must_use]
     pub fn new() -> Self {
-        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
-        Self {
-            app: AppState::new(),
-            graphql_tx,
-        }
+        let mut app = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        app.set_event_tx(tx);
+        Self { app }
     }
 
     /// Creates a `ServerState` backed by a workfile on disk.
@@ -62,16 +56,11 @@ impl ServerState {
             Arc::clone(&document),
             workfile_path.clone(),
         );
-        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
-        Self {
-            app: AppState::new_with_persistence(
-                document,
-                workfile_path,
-                dirty_tx,
-                persistence_handle,
-            ),
-            graphql_tx,
-        }
+        let mut app =
+            AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        app.set_event_tx(tx);
+        Self { app }
     }
 
     /// Creates a `ServerState` with a pre-loaded document and workfile persistence.
@@ -84,16 +73,11 @@ impl ServerState {
             Arc::clone(&document),
             workfile_path.clone(),
         );
-        let (graphql_tx, _) = broadcast::channel(GRAPHQL_BROADCAST_CAPACITY);
-        Self {
-            app: AppState::new_with_persistence(
-                document,
-                workfile_path,
-                dirty_tx,
-                persistence_handle,
-            ),
-            graphql_tx,
-        }
+        let mut app =
+            AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        app.set_event_tx(tx);
+        Self { app }
     }
 }
 
@@ -106,14 +90,6 @@ impl Default for ServerState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_graphql_broadcast_capacity_enforced() {
-        // Verify the constant has the expected value. Enforcement occurs at
-        // `ServerState` construction where the channel is created with this
-        // capacity.
-        assert_eq!(GRAPHQL_BROADCAST_CAPACITY, 256);
-    }
 
     #[test]
     fn test_server_state_new_creates_empty_document() {
@@ -129,5 +105,14 @@ mod tests {
         let state = ServerState::new();
         // Should not panic — no persistence configured
         state.app.signal_dirty();
+    }
+
+    #[test]
+    fn test_server_state_has_event_tx_configured() {
+        let state = ServerState::new();
+        assert!(
+            state.app.event_tx().is_some(),
+            "ServerState should configure the event broadcast channel"
+        );
     }
 }

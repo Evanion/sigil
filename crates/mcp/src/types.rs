@@ -71,6 +71,7 @@ pub struct TransformInfo {
     pub scale_y: f64,
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde skip_serializing_if requires &T
 fn is_default_scale(v: &f64) -> bool {
     (*v - 1.0).abs() < f64::EPSILON
 }
