@@ -31,10 +31,7 @@ export const TreeDropIndicator: Component<TreeDropIndicatorProps> = (props) => {
             };
           }
 
-          const y =
-            target().position === "before"
-              ? props.rowTop
-              : props.rowTop + props.rowHeight;
+          const y = target().position === "before" ? props.rowTop : props.rowTop + props.rowHeight;
 
           return {
             top: `${y - 1}px`,
