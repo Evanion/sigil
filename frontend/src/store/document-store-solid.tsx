@@ -9,13 +9,7 @@ import {
   type Client,
 } from "@urql/solid";
 import { createClient as createWSClient } from "graphql-ws";
-import type {
-  DocumentNode,
-  Page,
-  Transform,
-  NodeKind,
-  NodeId,
-} from "../types/document";
+import type { DocumentNode, Page, Transform, NodeKind, NodeId } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY } from "../graphql/queries";
 import {
@@ -120,9 +114,10 @@ function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
   };
 }
 
-function parsePagesResponse(
-  data: unknown,
-): { pages: Page[]; nodes: Record<string, MutableDocumentNode> } {
+function parsePagesResponse(data: unknown): {
+  pages: Page[];
+  nodes: Record<string, MutableDocumentNode>;
+} {
   const pages: Page[] = [];
   const nodes: Record<string, MutableDocumentNode> = {};
 
@@ -232,16 +227,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // ── Subscription ─────────────────────────────────────────────────────
 
-  client
-    .subscription(gql(DOCUMENT_CHANGED_SUBSCRIPTION), {})
-    .subscribe((result) => {
-      if (result.error) {
-        console.error("subscription error:", result.error.message);
-        return;
-      }
-      setConnected(true);
-      debouncedFetchPages();
-    });
+  client.subscription(gql(DOCUMENT_CHANGED_SUBSCRIPTION), {}).subscribe((result) => {
+    if (result.error) {
+      console.error("subscription error:", result.error.message);
+      return;
+    }
+    setConnected(true);
+    debouncedFetchPages();
+  });
 
   // Initial load
   void fetchPages().then(() => setConnected(true));
@@ -288,7 +281,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           // Remove optimistic node
           setState(
             produce((s) => {
-              delete s.nodes[optimisticUuid];
+              Reflect.deleteProperty(s.nodes, optimisticUuid);
             }),
           );
           return;
@@ -301,7 +294,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             if (node) {
               setState(
                 produce((s) => {
-                  delete s.nodes[optimisticUuid];
+                  // Remap optimistic entry to server-assigned UUID
+                  Reflect.deleteProperty(s.nodes, optimisticUuid);
                   s.nodes[serverUuid] = { ...node, uuid: serverUuid };
                 }),
               );
@@ -343,7 +337,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function deleteNode(uuid: string): void {
     setState(
       produce((s) => {
-        delete s.nodes[uuid];
+        Reflect.deleteProperty(s.nodes, uuid);
       }),
     );
     if (selectedNodeId() === uuid) setSelectedNodeId(null);

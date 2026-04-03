@@ -35,9 +35,7 @@ const WHEEL_ZOOM_SENSITIVITY = 1;
  * We cast this to `DocumentStore` because the tools type-check against
  * the full interface, but only use these four methods at runtime.
  */
-function createStoreAdapter(
-  store: ReturnType<typeof useDocument>,
-): DocumentStore {
+function createStoreAdapter(store: ReturnType<typeof useDocument>): DocumentStore {
   return {
     getAllNodes(): ReadonlyMap<string, DocumentNode> {
       const nodesObj = store.state.nodes;
@@ -83,6 +81,7 @@ function createStoreAdapter(
 export const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   const store = useDocument();
+  // canvasRef is assigned via callback ref below — guaranteed defined inside onMount
 
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
   const [previewTransform, setPreviewTransform] = createSignal<PreviewTransform | null>(null);
@@ -94,7 +93,8 @@ export const Canvas: Component = () => {
 
   onMount(() => {
     if (!canvasRef) return;
-    const ctx = canvasRef.getContext("2d");
+    const canvas = canvasRef;
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     // ── Tool setup ───────────────────────────────────────────────────
@@ -104,9 +104,7 @@ export const Canvas: Component = () => {
     const selectTool = createSelectTool(storeAdapter);
 
     const makeShapeTool = (kindFactory: () => NodeKind, prefix: string) =>
-      createShapeTool(storeAdapter, kindFactory, prefix, () =>
-        store.setActiveTool("select"),
-      );
+      createShapeTool(storeAdapter, kindFactory, prefix, () => store.setActiveTool("select"));
 
     const frameKind = (): NodeKind => ({ type: "frame" as const, layout: null });
     const rectKind = (): NodeKind => ({
@@ -141,7 +139,7 @@ export const Canvas: Component = () => {
     // ── Pointer events ───────────────────────────────────────────────
 
     function makeToolEvent(e: PointerEvent): ToolEvent {
-      const rect = canvasRef!.getBoundingClientRect();
+      const rect = canvas.getBoundingClientRect();
       const vp = store.viewport();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
@@ -169,7 +167,7 @@ export const Canvas: Component = () => {
         panStartX = e.clientX;
         panStartY = e.clientY;
         panStartVp = store.viewport();
-        canvasRef!.setPointerCapture(e.pointerId);
+        canvas.setPointerCapture(e.pointerId);
         setCursor("grabbing");
         return;
       }
@@ -197,9 +195,7 @@ export const Canvas: Component = () => {
       setPreviewTransform(selectTool.getPreviewTransform());
       const activeTool = toolImpls.get(store.activeTool());
       if (activeTool && "getPreviewRect" in activeTool) {
-        setPreviewRect(
-          (activeTool as ReturnType<typeof createShapeTool>).getPreviewRect(),
-        );
+        setPreviewRect((activeTool as ReturnType<typeof createShapeTool>).getPreviewRect());
       }
       setCursor(toolManager.getCursor());
     }
@@ -217,9 +213,9 @@ export const Canvas: Component = () => {
       setCursor(toolManager.getCursor());
     }
 
-    canvasRef.addEventListener("pointerdown", handlePointerDown);
-    canvasRef.addEventListener("pointermove", handlePointerMove);
-    canvasRef.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("pointerdown", handlePointerDown);
+    canvas.addEventListener("pointermove", handlePointerMove);
+    canvas.addEventListener("pointerup", handlePointerUp);
 
     // ── Viewport: zoom via wheel ─────────────────────────────────────
 
@@ -228,7 +224,7 @@ export const Canvas: Component = () => {
       const vp = store.viewport();
       if (e.ctrlKey || e.metaKey) {
         // Zoom at cursor
-        const rect = canvasRef!.getBoundingClientRect();
+        const rect = canvas.getBoundingClientRect();
         const sx = e.clientX - rect.left;
         const sy = e.clientY - rect.top;
         store.setViewport(zoomAt(vp, sx, sy, -e.deltaY * WHEEL_ZOOM_SENSITIVITY));
@@ -238,7 +234,7 @@ export const Canvas: Component = () => {
       }
     }
 
-    canvasRef.addEventListener("wheel", handleWheel, { passive: false });
+    canvas.addEventListener("wheel", handleWheel, { passive: false });
 
     // ── Keyboard shortcuts ───────────────────────────────────────────
 
@@ -277,13 +273,13 @@ export const Canvas: Component = () => {
       "$mod+Equal": (e: KeyboardEvent) => {
         e.preventDefault();
         const vp = store.viewport();
-        const rect = canvasRef!.getBoundingClientRect();
+        const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, 200));
       },
       "$mod+Minus": (e: KeyboardEvent) => {
         e.preventDefault();
         const vp = store.viewport();
-        const rect = canvasRef!.getBoundingClientRect();
+        const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, -200));
       },
     });
@@ -310,10 +306,10 @@ export const Canvas: Component = () => {
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const dpr = window.devicePixelRatio || 1;
-      canvasRef!.width = entry.contentRect.width * dpr;
-      canvasRef!.height = entry.contentRect.height * dpr;
+      canvas.width = entry.contentRect.width * dpr;
+      canvas.height = entry.contentRect.height * dpr;
     });
-    observer.observe(canvasRef);
+    observer.observe(canvas);
 
     // ── THE KEY: createEffect reads ALL signals and triggers render ──
 
@@ -339,16 +335,18 @@ export const Canvas: Component = () => {
       unbindKeys();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
-      canvasRef!.removeEventListener("pointerdown", handlePointerDown);
-      canvasRef!.removeEventListener("pointermove", handlePointerMove);
-      canvasRef!.removeEventListener("pointerup", handlePointerUp);
-      canvasRef!.removeEventListener("wheel", handleWheel);
+      canvas.removeEventListener("pointerdown", handlePointerDown);
+      canvas.removeEventListener("pointermove", handlePointerMove);
+      canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("wheel", handleWheel);
     });
   });
 
   return (
     <canvas
-      ref={canvasRef}
+      ref={(el) => {
+        canvasRef = el;
+      }}
       class="sigil-canvas-container__canvas"
       role="main"
       aria-label="Design canvas"

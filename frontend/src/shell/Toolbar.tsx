@@ -1,11 +1,4 @@
-import {
-  For,
-  createSignal,
-  createEffect,
-  onMount,
-  onCleanup,
-  type Component,
-} from "solid-js";
+import { For, createSignal, createEffect, onMount, onCleanup, type Component } from "solid-js";
 import { useDocument } from "../store/document-context";
 import type { ToolType } from "../store/document-store-solid";
 import { tinykeys } from "tinykeys";
@@ -85,21 +78,25 @@ export const Toolbar: Component = () => {
       e.preventDefault();
       const next = (focusedIndex() + 1) % len;
       setFocusedIndex(next);
-      store.setActiveTool(TOOLS[next]!.id);
+      const nextTool = TOOLS[next];
+      if (nextTool) store.setActiveTool(nextTool.id);
       // +1 for logo element
       (toolbarRef?.children[next + 1] as HTMLElement | undefined)?.focus();
     } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
       e.preventDefault();
       const prev = (focusedIndex() - 1 + len) % len;
       setFocusedIndex(prev);
-      store.setActiveTool(TOOLS[prev]!.id);
+      const prevTool = TOOLS[prev];
+      if (prevTool) store.setActiveTool(prevTool.id);
       (toolbarRef?.children[prev + 1] as HTMLElement | undefined)?.focus();
     }
   }
 
   return (
     <div
-      ref={toolbarRef}
+      ref={(el) => {
+        toolbarRef = el;
+      }}
       class="toolbar"
       role="toolbar"
       aria-label="Design tools"
