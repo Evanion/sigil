@@ -39,12 +39,12 @@
   },
   "dependencies": {
     "@kobalte/core": "^0.13.11",
+    "@urql/solid": "^1.0.1",
     "graphql": "^16.13.2",
     "graphql-ws": "^6.0.8",
     "lucide-solid": "^1.7.0",
     "open-props": "^1.7.23",
     "solid-js": "^1.9.12",
-    "tinykeys": "^3.0.0",
-    "urql": "^5.0.1"
+    "tinykeys": "^3.0.0"
   }
 }
