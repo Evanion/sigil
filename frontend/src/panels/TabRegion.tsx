@@ -1,11 +1,4 @@
-import {
-  createMemo,
-  createSignal,
-  createEffect,
-  For,
-  Show,
-  type Component,
-} from "solid-js";
+import { createMemo, createSignal, createEffect, For, Show, type Component } from "solid-js";
 import { Dynamic } from "solid-js/web";
 import { panels, type PanelRegistration } from "./registry";
 import "./TabRegion.css";
@@ -17,18 +10,13 @@ interface TabRegionProps {
 export const TabRegion: Component<TabRegionProps> = (props) => {
   const visiblePanels = createMemo(() =>
     panels
-      .filter(
-        (p: PanelRegistration) =>
-          p.region === props.region && (p.visible?.() ?? true),
-      )
+      .filter((p: PanelRegistration) => p.region === props.region && (p.visible?.() ?? true))
       .sort((a: PanelRegistration, b: PanelRegistration) => a.order - b.order),
   );
 
   const defaultTab = createMemo(
     () =>
-      visiblePanels().find((p: PanelRegistration) => p.default)?.id ??
-      visiblePanels()[0]?.id ??
-      "",
+      visiblePanels().find((p: PanelRegistration) => p.default)?.id ?? visiblePanels()[0]?.id ?? "",
   );
 
   const [activeTab, setActiveTab] = createSignal(defaultTab());
@@ -49,9 +37,7 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
   // Keyboard navigation between tabs
   function handleTabKeyDown(e: KeyboardEvent) {
     const visible = visiblePanels();
-    const currentIndex = visible.findIndex(
-      (p: PanelRegistration) => p.id === activeTab(),
-    );
+    const currentIndex = visible.findIndex((p: PanelRegistration) => p.id === activeTab());
     let nextIndex = -1;
 
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
@@ -68,8 +54,7 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
         setActiveTab(next.id);
         // Focus the tab button
         const tabBar = e.currentTarget as HTMLElement;
-        const buttons =
-          tabBar.querySelectorAll<HTMLButtonElement>("[role='tab']");
+        const buttons = tabBar.querySelectorAll<HTMLButtonElement>("[role='tab']");
         buttons[nextIndex]?.focus();
       }
     }
@@ -77,11 +62,7 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
 
   return (
     <div class="sigil-tab-region">
-      <div
-        class="sigil-tab-region__bar"
-        role="tablist"
-        onKeyDown={handleTabKeyDown}
-      >
+      <div class="sigil-tab-region__bar" role="tablist" onKeyDown={handleTabKeyDown}>
         <For each={visiblePanels()}>
           {(panel) => (
             <button
@@ -97,9 +78,7 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
         </For>
       </div>
       <div class="sigil-tab-region__content" role="tabpanel">
-        <Show when={activePanel()}>
-          {(panel) => <Dynamic component={panel().component} />}
-        </Show>
+        <Show when={activePanel()}>{(panel) => <Dynamic component={panel().component} />}</Show>
       </div>
     </div>
   );

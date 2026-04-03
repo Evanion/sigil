@@ -29,16 +29,11 @@ function resolveValue(node: DocumentNode, key: string): unknown {
 }
 
 export const SchemaSection: Component<SchemaSectionProps> = (props) => {
-  const [collapsed, setCollapsed] = createSignal(
-    props.section.collapsed ?? false,
-  );
+  const [collapsed, setCollapsed] = createSignal(props.section.collapsed ?? false);
 
   return (
     <div class="sigil-schema-section">
-      <div
-        class="sigil-schema-section__header"
-        onClick={() => setCollapsed(!collapsed())}
-      >
+      <div class="sigil-schema-section__header" onClick={() => setCollapsed(!collapsed())}>
         <h3 class="sigil-schema-section__name">{props.section.name}</h3>
         <button
           class="sigil-schema-section__toggle"

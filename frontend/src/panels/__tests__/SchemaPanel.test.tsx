@@ -3,10 +3,7 @@ import { render, screen, cleanup } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { SchemaPanel } from "../SchemaPanel";
 import { DocumentProvider } from "../../store/document-context";
-import type {
-  DocumentStoreAPI,
-  ToolType,
-} from "../../store/document-store-solid";
+import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { PropertySchema } from "../schema/types";
 
 const testSchema: PropertySchema = {
@@ -21,9 +18,7 @@ const testSchema: PropertySchema = {
     {
       name: "Rectangle Only",
       when: "rectangle",
-      fields: [
-        { key: "kind.corner_radii.0", label: "TL", type: "number" },
-      ],
+      fields: [{ key: "kind.corner_radii.0", label: "TL", type: "number" }],
     },
   ],
 };

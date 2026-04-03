@@ -62,20 +62,14 @@ export const SchemaPanel: Component<SchemaPanelProps> = (props) => {
       <Show
         when={selectedNode()}
         fallback={
-          <div class="sigil-schema-panel__empty">
-            Select a layer to view its properties
-          </div>
+          <div class="sigil-schema-panel__empty">Select a layer to view its properties</div>
         }
       >
         {(node) => (
           <For each={props.schema.sections}>
             {(section) => (
               <Show when={matchesNodeKind(node(), section.when)}>
-                <SchemaSection
-                  section={section}
-                  node={node()}
-                  onFieldChange={handleFieldChange}
-                />
+                <SchemaSection section={section} node={node()} onFieldChange={handleFieldChange} />
               </Show>
             )}
           </For>
