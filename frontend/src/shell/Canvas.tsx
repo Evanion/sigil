@@ -7,11 +7,11 @@
  * guaranteeing the canvas never shows stale state.
  *
  * The existing tools (`createSelectTool`, `createShapeTool`) expect the
- * old `DocumentStore` interface. A lightweight adapter bridges the Solid
+ * `ToolStore` interface. A lightweight adapter bridges the Solid
  * store signals to that interface.
  */
 
-import { createEffect, createSignal, onMount, onCleanup, type Component } from "solid-js";
+import { createEffect, createMemo, createSignal, onMount, onCleanup, type Component } from "solid-js";
 import { useDocument } from "../store/document-context";
 import { render as renderCanvas } from "../canvas/renderer";
 import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
@@ -21,29 +21,26 @@ import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
+import { useAnnounce } from "./AnnounceProvider";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";
 
-/** Wheel zoom sensitivity multiplier — matches the value in viewport.ts. */
+/** Wheel zoom sensitivity multiplier -- matches the value in viewport.ts. */
 const WHEEL_ZOOM_SENSITIVITY = 1;
 
 /**
- * Build a store adapter that satisfies the old `DocumentStore` interface
- * for the subset of methods the tools actually call.
+ * Build a store adapter that satisfies the `ToolStore` interface.
  *
- * Tools call: getAllNodes, select, setTransform, createNode.
- * We cast this to `DocumentStore` because the tools type-check against
- * the full interface, but only use these four methods at runtime.
+ * The `getAllNodes` method receives a pre-built memoized Map so it
+ * does not allocate a new Map on every call (RF-020).
  */
-function createStoreAdapter(store: ReturnType<typeof useDocument>): ToolStore {
+function createStoreAdapter(
+  store: ReturnType<typeof useDocument>,
+  nodesMap: () => ReadonlyMap<string, DocumentNode>,
+): ToolStore {
   return {
     getAllNodes(): ReadonlyMap<string, DocumentNode> {
-      const nodesObj = store.state.nodes;
-      const map = new Map<string, DocumentNode>();
-      for (const [uuid, node] of Object.entries(nodesObj)) {
-        map.set(uuid, node as DocumentNode);
-      }
-      return map;
+      return nodesMap();
     },
     getSelectedNodeId(): string | null {
       return store.selectedNodeId();
@@ -63,7 +60,20 @@ function createStoreAdapter(store: ReturnType<typeof useDocument>): ToolStore {
 export const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   const store = useDocument();
-  // canvasRef is assigned via callback ref below — guaranteed defined inside onMount
+  const announce = useAnnounce();
+
+  // RF-001: Announce selection changes to screen readers
+  createEffect(() => {
+    const selectedId = store.selectedNodeId();
+    if (selectedId === null) {
+      announce("Selection cleared");
+      return;
+    }
+    const node = store.state.nodes[selectedId];
+    if (node) {
+      announce(`Selected ${node.name}`);
+    }
+  });
 
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
   const [previewTransform, setPreviewTransform] = createSignal<PreviewTransform | null>(null);
@@ -73,15 +83,28 @@ export const Canvas: Component = () => {
   // Space key tracking for grab cursor
   const [spaceHeld, setSpaceHeld] = createSignal(false);
 
+  // RF-013: Track canvas size + DPR as a signal so the render effect re-triggers
+  const [canvasSize, setCanvasSize] = createSignal({ w: 0, h: 0, dpr: 1 });
+
+  // RF-020: Memoize the nodes Map so it only recreates when store.state.nodes changes
+  const nodesMap = createMemo((): ReadonlyMap<string, DocumentNode> => {
+    const nodesObj = store.state.nodes;
+    const map = new Map<string, DocumentNode>();
+    for (const [uuid, node] of Object.entries(nodesObj)) {
+      map.set(uuid, node as DocumentNode);
+    }
+    return map;
+  });
+
   onMount(() => {
     if (!canvasRef) return;
     const canvas = canvasRef;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // ── Tool setup ───────────────────────────────────────────────────
+    // -- Tool setup -----------------------------------------------------------
 
-    const storeAdapter = createStoreAdapter(store);
+    const storeAdapter = createStoreAdapter(store, nodesMap);
 
     const selectTool = createSelectTool(storeAdapter);
 
@@ -118,7 +141,7 @@ export const Canvas: Component = () => {
       setCursor(toolManager.getCursor());
     });
 
-    // ── Pointer events ───────────────────────────────────────────────
+    // -- Pointer events -------------------------------------------------------
 
     function makeToolEvent(e: PointerEvent): ToolEvent {
       const rect = canvas.getBoundingClientRect();
@@ -195,11 +218,17 @@ export const Canvas: Component = () => {
       setCursor(toolManager.getCursor());
     }
 
+    // RF-024: Reset isPanning when pointer capture is lost (e.g. window blur)
+    function handleLostPointerCapture(): void {
+      isPanning = false;
+    }
+
     canvas.addEventListener("pointerdown", handlePointerDown);
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerup", handlePointerUp);
+    canvas.addEventListener("lostpointercapture", handleLostPointerCapture);
 
-    // ── Viewport: zoom via wheel ─────────────────────────────────────
+    // -- Viewport: zoom via wheel ---------------------------------------------
 
     function handleWheel(e: WheelEvent): void {
       e.preventDefault();
@@ -218,7 +247,7 @@ export const Canvas: Component = () => {
 
     canvas.addEventListener("wheel", handleWheel, { passive: false });
 
-    // ── Keyboard shortcuts ───────────────────────────────────────────
+    // -- Keyboard shortcuts ---------------------------------------------------
 
     const isTyping = (): boolean => {
       const el = document.activeElement;
@@ -283,17 +312,21 @@ export const Canvas: Component = () => {
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
 
-    // ── Resize observer (DPR-aware) ──────────────────────────────────
+    // -- Resize observer (DPR-aware) ------------------------------------------
 
     const observer = new ResizeObserver(([entry]) => {
       if (!entry) return;
       const dpr = window.devicePixelRatio || 1;
-      canvas.width = entry.contentRect.width * dpr;
-      canvas.height = entry.contentRect.height * dpr;
+      const w = entry.contentRect.width;
+      const h = entry.contentRect.height;
+      canvas.width = w * dpr;
+      canvas.height = h * dpr;
+      // RF-013: Update signal so the render effect re-triggers on resize/DPR change
+      setCanvasSize({ w, h, dpr });
     });
     observer.observe(canvas);
 
-    // ── THE KEY: createEffect reads ALL signals and triggers render ──
+    // -- THE KEY: createEffect reads ALL signals and triggers render -----------
 
     createEffect(() => {
       // Read every signal that affects rendering so Solid tracks them.
@@ -302,7 +335,9 @@ export const Canvas: Component = () => {
       const vp = store.viewport();
       const preview = previewTransform();
       const prevRect = previewRect();
-      const dpr = window.devicePixelRatio || 1;
+      // RF-013: Read canvasSize to track resize/DPR changes as a dependency
+      const size = canvasSize();
+      const dpr = size.dpr;
 
       // Convert nodes Record to array for the renderer
       const nodesArray: DocumentNode[] = Object.values(nodesObj) as DocumentNode[];
@@ -310,7 +345,7 @@ export const Canvas: Component = () => {
       renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview);
     });
 
-    // ── Cleanup ──────────────────────────────────────────────────────
+    // -- Cleanup --------------------------------------------------------------
 
     onCleanup(() => {
       observer.disconnect();
@@ -320,6 +355,7 @@ export const Canvas: Component = () => {
       canvas.removeEventListener("pointerdown", handlePointerDown);
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerUp);
+      canvas.removeEventListener("lostpointercapture", handleLostPointerCapture);
       canvas.removeEventListener("wheel", handleWheel);
     });
   });
@@ -330,7 +366,7 @@ export const Canvas: Component = () => {
         canvasRef = el;
       }}
       class="sigil-canvas-container__canvas"
-      role="main"
+      role="application"
       aria-label="Design canvas"
       tabindex={0}
       style={{ cursor: cursor() }}

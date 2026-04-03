@@ -75,7 +75,7 @@ describe("StatusBar", () => {
     expect(screen.getByText("100%")).toBeTruthy();
   });
 
-  it("has status role with aria-live", () => {
+  it("has status role without aria-live (RF-008: prevents announcement flooding)", () => {
     const store = createMockStore();
     render(() => (
       <DocumentProvider store={store}>
@@ -83,6 +83,6 @@ describe("StatusBar", () => {
       </DocumentProvider>
     ));
     const status = screen.getByRole("status");
-    expect(status.getAttribute("aria-live")).toBe("polite");
+    expect(status.getAttribute("aria-live")).toBeNull();
   });
 });

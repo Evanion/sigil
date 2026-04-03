@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createSelectTool } from "../select-tool";
 import type { ToolEvent } from "../tool-manager";
-import type { DocumentStore } from "../../store/document-store-types";
+import type { ToolStore } from "../../store/document-store-types";
 import type { DocumentNode, Transform } from "../../types/document";
 
 /** Helper to create a minimal ToolEvent. */
@@ -56,8 +56,8 @@ function makeNode(overrides?: Partial<DocumentNode>): DocumentNode {
   };
 }
 
-/** Helper to create a mock DocumentStore with mutable nodes. */
-function makeMockStore(initialNodes?: Map<string, DocumentNode>): DocumentStore & {
+/** Helper to create a mock ToolStore with mutable nodes. */
+function makeMockStore(initialNodes?: Map<string, DocumentNode>): ToolStore & {
   selectCalls: (string | null)[];
   setTransformCalls: Array<{ uuid: string; transform: Transform }>;
   nodes: Map<string, DocumentNode>;
@@ -71,32 +71,16 @@ function makeMockStore(initialNodes?: Map<string, DocumentNode>): DocumentStore 
     selectCalls,
     setTransformCalls,
     nodes,
-    getInfo: () => null,
     getAllNodes: () => nodes,
-    getNodeByUuid: (uuid: string) => nodes.get(uuid),
-    getPages: () => [],
-    isConnected: () => true,
-    canUndo: () => false,
-    canRedo: () => false,
     setTransform: (uuid: string, transform: Transform) => {
       setTransformCalls.push({ uuid, transform });
     },
-    renameNode: () => {},
-    deleteNode: () => {},
-    setVisible: () => {},
-    setLocked: () => {},
-    undo: () => {},
-    redo: () => {},
     getSelectedNodeId: () => selectedNodeId,
     select: (uuid: string | null) => {
       selectedNodeId = uuid;
       selectCalls.push(uuid);
     },
-    getActivePage: () => undefined,
     createNode: () => "mock-uuid",
-    subscribe: () => () => {},
-    loadInitialState: () => Promise.resolve(),
-    destroy: () => {},
   };
 }
 

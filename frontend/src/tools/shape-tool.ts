@@ -7,7 +7,7 @@
  */
 
 import type { Tool, ToolEvent } from "./tool-manager";
-import type { DocumentStore } from "../store/document-store-types";
+import type { ToolStore } from "../store/document-store-types";
 import type { NodeKind, Transform } from "../types/document";
 
 /** The rectangle displayed during a drag operation as a creation preview. */
@@ -39,14 +39,14 @@ function computeRect(startX: number, startY: number, endX: number, endY: number)
 /**
  * Create a shape tool that supports drag-to-create for a given node kind.
  *
- * @param store - The document store used to create nodes on the server.
+ * @param store - The tool store used to create nodes on the server.
  * @param kindFactory - Function returning the NodeKind for each created node.
  * @param namePrefix - Prefix for auto-generated node names (e.g. "Rectangle").
  * @param onComplete - Called after a node is successfully created (e.g. to switch back to select tool).
  * @returns A Tool with an additional `getPreviewRect()` method for rendering the drag preview.
  */
 export function createShapeTool(
-  store: DocumentStore,
+  store: ToolStore,
   kindFactory: () => NodeKind,
   namePrefix: string,
   onComplete: () => void,

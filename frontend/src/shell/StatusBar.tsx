@@ -8,15 +8,16 @@ export const StatusBar: Component = () => {
   const zoomPercent = () => Math.round(store.viewport().zoom * 100);
 
   return (
-    <div class="status-bar" role="status" aria-live="polite">
+    <div class="status-bar" role="status">
       <div class="status-bar__left">
+        {/* RF-009: aria-hidden on indicator dot; adjacent span provides accessible name */}
         <div
           class={`status-bar__indicator ${
             store.connected()
               ? "status-bar__indicator--connected"
               : "status-bar__indicator--disconnected"
           }`}
-          aria-label={store.connected() ? "Connected" : "Disconnected"}
+          aria-hidden="true"
         />
         <span>{store.connected() ? "Connected" : "Disconnected"}</span>
       </div>

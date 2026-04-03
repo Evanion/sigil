@@ -12,7 +12,7 @@
  * the renderer can query for visual feedback.
  */
 
-import type { DocumentStore } from "../store/document-store-types";
+import type { ToolStore } from "../store/document-store-types";
 import type { Transform } from "../types/document";
 import { hitTest } from "../canvas/hit-test";
 import type { Tool, ToolEvent } from "./tool-manager";
@@ -39,11 +39,11 @@ export interface PreviewTransform {
  * Create a select tool that uses the given document store for
  * hit testing, selection, and sending move commands.
  *
- * @param store - The document store providing node data and command dispatch.
+ * @param store - The tool store providing node data and command dispatch.
  * @returns A Tool implementation for selection and movement, with a
  *   getPreviewTransform method for the renderer to show drag feedback.
  */
-export function createSelectTool(store: DocumentStore): Tool & {
+export function createSelectTool(store: ToolStore): Tool & {
   getPreviewTransform(): PreviewTransform | null;
 } {
   let dragState: DragState | null = null;

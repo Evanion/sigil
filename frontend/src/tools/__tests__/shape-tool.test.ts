@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createShapeTool, type PreviewRect } from "../shape-tool";
 import type { ToolEvent } from "../tool-manager";
-import type { DocumentStore } from "../../store/document-store-types";
+import type { ToolStore } from "../../store/document-store-types";
 import type { NodeKind, Transform } from "../../types/document";
 
 /** Helper to create a minimal ToolEvent at given world coordinates. */
@@ -16,8 +16,8 @@ function makeEvent(worldX: number, worldY: number): ToolEvent {
   };
 }
 
-/** Minimal mock of DocumentStore that records createNode and select calls. */
-function makeMockStore(): DocumentStore & {
+/** Minimal mock of ToolStore that records createNode and select calls. */
+function makeMockStore(): ToolStore & {
   createNodeCalls: Array<{ kind: NodeKind; name: string; transform: Transform }>;
   selectCalls: (string | null)[];
 } {
@@ -33,29 +33,12 @@ function makeMockStore(): DocumentStore & {
       callCount++;
       return `uuid-${String(callCount)}`;
     },
-    // Stubs for unused methods
-    getInfo: () => null,
     getAllNodes: () => new Map(),
-    getNodeByUuid: () => undefined,
-    getPages: () => [],
-    isConnected: () => true,
-    canUndo: () => false,
-    canRedo: () => false,
     setTransform: () => undefined,
-    renameNode: () => undefined,
-    deleteNode: () => undefined,
-    setVisible: () => undefined,
-    setLocked: () => undefined,
-    undo: () => undefined,
-    redo: () => undefined,
     getSelectedNodeId: () => null,
     select: (uuid: string | null) => {
       selectCalls.push(uuid);
     },
-    getActivePage: () => undefined,
-    subscribe: () => () => undefined,
-    loadInitialState: () => Promise.resolve(),
-    destroy: () => undefined,
   };
 }
 

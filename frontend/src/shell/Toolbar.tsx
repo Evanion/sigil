@@ -1,5 +1,6 @@
 import { For, createSignal, createEffect, onMount, onCleanup, type Component } from "solid-js";
 import { useDocument } from "../store/document-context";
+import { useAnnounce } from "./AnnounceProvider";
 import type { ToolType } from "../store/document-store-solid";
 import { tinykeys } from "tinykeys";
 import "./Toolbar.css";
@@ -20,7 +21,10 @@ const TOOLS: ToolDef[] = [
 
 export const Toolbar: Component = () => {
   const store = useDocument();
-  let toolbarRef: HTMLDivElement | undefined;
+  const announce = useAnnounce();
+
+  // RF-023: Use a refs array instead of fragile DOM child index
+  const buttonRefs: HTMLButtonElement[] = [];
 
   // Roving tabindex: only active tool button is tabbable
   const [focusedIndex, setFocusedIndex] = createSignal(0);
@@ -29,6 +33,14 @@ export const Toolbar: Component = () => {
   createEffect(() => {
     const idx = TOOLS.findIndex((t) => t.id === store.activeTool());
     if (idx >= 0) setFocusedIndex(idx);
+  });
+
+  // RF-001: Announce active tool changes to screen readers
+  createEffect(() => {
+    const tool = TOOLS.find((t) => t.id === store.activeTool());
+    if (tool) {
+      announce(`${tool.label} tool active`);
+    }
   });
 
   // Keyboard shortcuts for tool selection (skip if user is typing in an input)
@@ -72,31 +84,24 @@ export const Toolbar: Component = () => {
     onCleanup(unsubscribe);
   });
 
+  // RF-007: Arrow keys only move focus, do not activate tool
   function handleToolbarKeydown(e: KeyboardEvent) {
     const len = TOOLS.length;
     if (e.key === "ArrowDown" || e.key === "ArrowRight") {
       e.preventDefault();
       const next = (focusedIndex() + 1) % len;
       setFocusedIndex(next);
-      const nextTool = TOOLS[next];
-      if (nextTool) store.setActiveTool(nextTool.id);
-      // +1 for logo element
-      (toolbarRef?.children[next + 1] as HTMLElement | undefined)?.focus();
+      buttonRefs[next]?.focus();
     } else if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
       e.preventDefault();
       const prev = (focusedIndex() - 1 + len) % len;
       setFocusedIndex(prev);
-      const prevTool = TOOLS[prev];
-      if (prevTool) store.setActiveTool(prevTool.id);
-      (toolbarRef?.children[prev + 1] as HTMLElement | undefined)?.focus();
+      buttonRefs[prev]?.focus();
     }
   }
 
   return (
     <div
-      ref={(el) => {
-        toolbarRef = el;
-      }}
       class="toolbar"
       role="toolbar"
       aria-label="Design tools"
@@ -109,6 +114,9 @@ export const Toolbar: Component = () => {
       <For each={TOOLS}>
         {(tool, index) => (
           <button
+            ref={(el) => {
+              buttonRefs[index()] = el;
+            }}
             class="toolbar__btn"
             aria-pressed={store.activeTool() === tool.id}
             aria-label={`${tool.label} (${tool.shortcut})`}
