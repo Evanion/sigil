@@ -19,7 +19,7 @@ import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-mana
 import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
-import type { DocumentStore } from "../store/document-store";
+import type { DocumentStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";

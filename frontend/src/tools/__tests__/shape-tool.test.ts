@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { createShapeTool, type PreviewRect } from "../shape-tool";
 import type { ToolEvent } from "../tool-manager";
-import type { DocumentStore } from "../../store/document-store";
+import type { DocumentStore } from "../../store/document-store-types";
 import type { NodeKind, Transform } from "../../types/document";
 
 /** Helper to create a minimal ToolEvent at given world coordinates. */

@@ -12,7 +12,7 @@
  * the renderer can query for visual feedback.
  */
 
-import type { DocumentStore } from "../store/document-store";
+import type { DocumentStore } from "../store/document-store-types";
 import type { Transform } from "../types/document";
 import { hitTest } from "../canvas/hit-test";
 import type { Tool, ToolEvent } from "./tool-manager";

@@ -7,7 +7,7 @@
  */
 
 import type { Tool, ToolEvent } from "./tool-manager";
-import type { DocumentStore } from "../store/document-store";
+import type { DocumentStore } from "../store/document-store-types";
 import type { NodeKind, Transform } from "../types/document";
 
 /** The rectangle displayed during a drag operation as a creation preview. */

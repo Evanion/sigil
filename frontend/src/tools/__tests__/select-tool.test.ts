@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createSelectTool } from "../select-tool";
 import type { ToolEvent } from "../tool-manager";
-import type { DocumentStore } from "../../store/document-store";
+import type { DocumentStore } from "../../store/document-store-types";
 import type { DocumentNode, Transform } from "../../types/document";
 
 /** Helper to create a minimal ToolEvent. */
