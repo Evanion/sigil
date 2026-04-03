@@ -40,9 +40,14 @@ pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
             text_style: agent_designer_core::TextStyle::default(),
         }),
         "group" => Ok(NodeKind::Group),
-        "image" => Ok(NodeKind::Image {
-            asset_ref: String::new(),
-        }),
+        // RF-012: Image nodes require an asset_ref which cannot be provided at
+        // creation time through MCP (no asset pipeline yet). Disallow until the
+        // asset upload flow is implemented.
+        "image" => Err(McpToolError::InvalidInput(
+            "image nodes cannot be created via MCP — they require an asset_ref. \
+             Use kind 'frame' and attach the image once the asset pipeline is available."
+                .to_string(),
+        )),
         other => Err(McpToolError::InvalidInput(format!(
             "unknown node kind '{other}': expected one of frame, rectangle, ellipse, text, group, image"
         ))),
@@ -112,7 +117,7 @@ pub fn build_node_info(
     Ok(NodeInfo {
         uuid: uuid.to_string(),
         name: node.name.clone(),
-        kind: node_kind_to_string(&node.kind),
+        kind: node_kind_to_string(&node.kind).to_string(),
         visible: node.visible,
         locked: node.locked,
         children: children_uuids,
@@ -210,6 +215,9 @@ pub fn create_node_impl(
             .ok_or_else(|| McpToolError::NodeNotFound(node_uuid.to_string()))?;
 
         // If a parent was requested, reparent the node.
+        // RF-007/RF-008: If reparent fails, undo the CreateNode to maintain
+        // atomicity. Without CompoundCommand support, create+reparent is two
+        // separate commands; undo requires two steps when a parent is specified.
         if let Some(parent_id) = parent_node_id {
             let new_position = doc.arena.get(parent_id)?.children.len();
             let old_parent_id = doc.arena.get(actual_id)?.parent;
@@ -227,7 +235,20 @@ pub fn create_node_impl(
                 old_parent_id,
                 old_position,
             };
-            doc.execute(Box::new(reparent_cmd))?;
+            if let Err(reparent_err) = doc.execute(Box::new(reparent_cmd)) {
+                // Restore state before propagating error (CLAUDE.md section 11).
+                // Undo the CreateNode that was already committed.
+                if let Err(undo_err) = doc.undo() {
+                    tracing::error!(
+                        "failed to undo CreateNode after reparent failure: {undo_err}"
+                    );
+                    // Return a compound-style error that surfaces both failures.
+                    return Err(McpToolError::InvalidInput(format!(
+                        "reparent failed ({reparent_err}) and rollback also failed ({undo_err})"
+                    )));
+                }
+                return Err(McpToolError::CoreError(reparent_err));
+            }
         }
 
         let info = build_node_info(&doc, actual_id, node_uuid)?;

@@ -11,9 +11,12 @@ use crate::types::{DocumentInfo, DocumentTree, NodeInfo, PageTree, TransformInfo
 
 /// Maximum tree traversal depth to prevent stack overflow on cyclic references.
 ///
+/// This is an MCP-crate-local constant (not in `crates/core/src/validate.rs`)
+/// because it governs MCP response generation, not core engine operations.
+///
 /// Per CLAUDE.md defensive coding rules, this constant MUST be enforced via a
 /// `>=` comparison and MUST have a corresponding test (`test_max_tree_depth_enforced`).
-const MAX_TREE_DEPTH: usize = 100;
+pub const MAX_TREE_DEPTH: usize = 100;
 
 /// Builds a `DocumentInfo` from the current document state.
 ///
@@ -104,7 +107,7 @@ fn collect_node_tree_inner(
     out.push(NodeInfo {
         uuid: node.uuid.to_string(),
         name: node.name.clone(),
-        kind: node_kind_to_string(&node.kind),
+        kind: node_kind_to_string(&node.kind).to_string(),
         visible: node.visible,
         locked: node.locked,
         children: children_uuids,
@@ -129,16 +132,16 @@ fn collect_node_tree_inner(
 /// Public so that other tool modules (e.g., `nodes.rs`) can reuse this mapping
 /// without duplicating the match arm logic.
 #[must_use]
-pub fn node_kind_to_string(kind: &NodeKind) -> String {
+pub fn node_kind_to_string(kind: &NodeKind) -> &'static str {
     match kind {
-        NodeKind::Frame { .. } => "frame".to_string(),
-        NodeKind::Rectangle { .. } => "rectangle".to_string(),
-        NodeKind::Ellipse { .. } => "ellipse".to_string(),
-        NodeKind::Path { .. } => "path".to_string(),
-        NodeKind::Text { .. } => "text".to_string(),
-        NodeKind::Image { .. } => "image".to_string(),
-        NodeKind::Group => "group".to_string(),
-        NodeKind::ComponentInstance { .. } => "component_instance".to_string(),
+        NodeKind::Frame { .. } => "frame",
+        NodeKind::Rectangle { .. } => "rectangle",
+        NodeKind::Ellipse { .. } => "ellipse",
+        NodeKind::Path { .. } => "path",
+        NodeKind::Text { .. } => "text",
+        NodeKind::Image { .. } => "image",
+        NodeKind::Group => "group",
+        NodeKind::ComponentInstance { .. } => "component_instance",
     }
 }
 

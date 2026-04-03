@@ -50,6 +50,7 @@ These principles are the governing rules of this project. They explain the _why_
 sigil/
 ├── crates/
 │   ├── core/          # Design engine — pure logic, no I/O, WASM-compatible
+│   ├── state/         # Shared application state — AppState, SendDocument
 │   ├── server/        # Axum HTTP server, WebSocket, file I/O
 │   └── mcp/           # MCP server for agent interaction
 ├── frontend/          # TypeScript + Vite SPA (Canvas editor)
@@ -106,6 +107,13 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - MUST compile to both native and `wasm32-unknown-unknown`.
 - All operations must be deterministic and side-effect-free.
 - This is the foundation — everything else depends on it.
+
+### `agent-designer-state`
+
+- Shared application state (`AppState`, `SendDocument`), used by both server and MCP crates.
+- Owns the document mutex, persistence signaling, and event broadcasting.
+- No file I/O — persistence is triggered via signaling, implemented in the server crate.
+- Intentionally server-only (not WASM-compatible) — uses `tokio`, `std::sync::Mutex`.
 
 ### `agent-designer-server`
 

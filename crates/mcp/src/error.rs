@@ -31,15 +31,25 @@ pub enum McpToolError {
 
 impl McpToolError {
     /// Convert to an `rmcp::ErrorData` for returning from tool handlers.
+    ///
+    /// For `INTERNAL_ERROR` codes, returns a generic message to avoid leaking
+    /// implementation details. The full error is logged server-side.
     #[must_use]
     pub fn to_mcp_error(&self) -> rmcp::ErrorData {
-        let code = match self {
-            Self::InvalidUuid(_) | Self::InvalidInput(_) => ErrorCode::INVALID_PARAMS,
-            Self::NodeNotFound(_) | Self::PageNotFound(_) | Self::TokenNotFound(_) => {
-                ErrorCode::INVALID_PARAMS
+        let (code, message) = match self {
+            Self::InvalidUuid(_)
+            | Self::InvalidInput(_)
+            | Self::NodeNotFound(_)
+            | Self::PageNotFound(_)
+            | Self::TokenNotFound(_) => (ErrorCode::INVALID_PARAMS, self.to_string()),
+            Self::CoreError(_) | Self::SerializationError(_) => {
+                tracing::error!("MCP internal error: {self}");
+                (
+                    ErrorCode::INTERNAL_ERROR,
+                    "internal error occurred".to_string(),
+                )
             }
-            Self::CoreError(_) | Self::SerializationError(_) => ErrorCode::INTERNAL_ERROR,
         };
-        rmcp::ErrorData::new(code, self.to_string(), None)
+        rmcp::ErrorData::new(code, message, None)
     }
 }

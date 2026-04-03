@@ -63,10 +63,16 @@ pub struct TransformInfo {
     pub height: f64,
     /// Rotation in degrees.
     pub rotation: f64,
-    /// Horizontal scale factor.
+    /// Horizontal scale factor (omitted from output when 1.0).
+    #[serde(skip_serializing_if = "is_default_scale")]
     pub scale_x: f64,
-    /// Vertical scale factor.
+    /// Vertical scale factor (omitted from output when 1.0).
+    #[serde(skip_serializing_if = "is_default_scale")]
     pub scale_y: f64,
+}
+
+fn is_default_scale(v: &f64) -> bool {
+    (*v - 1.0).abs() < f64::EPSILON
 }
 
 /// A page in the document.
