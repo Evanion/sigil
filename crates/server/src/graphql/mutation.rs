@@ -20,10 +20,12 @@ use async_graphql::{Context, Json, Object, Result};
 use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
 };
-use agent_designer_core::commands::style_commands::SetTransform;
+use agent_designer_core::commands::style_commands::{
+    SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+};
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
-use agent_designer_core::node::Transform;
-use agent_designer_core::{NodeId, NodeKind, PageId};
+use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
+use agent_designer_core::{NodeId, PageId};
 use agent_designer_state::{MutationEvent, MutationEventKind};
 
 use crate::state::ServerState;
@@ -553,6 +555,392 @@ impl MutationRoot {
         Ok(node_gql)
     }
 
+    /// Set the opacity of a node by UUID.
+    ///
+    /// Opacity must be a finite f64 in the range [0.0, 1.0].
+    async fn set_opacity(&self, ctx: &Context<'_>, uuid: String, opacity: f64) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Validate input BEFORE lock acquisition (CLAUDE.md: floating-point validation)
+        if !opacity.is_finite() {
+            return Err(async_graphql::Error::new(
+                "opacity must be finite (no NaN or infinity)",
+            ));
+        }
+        if !(0.0..=1.0).contains(&opacity) {
+            return Err(async_graphql::Error::new("opacity must be in [0.0, 1.0]"));
+        }
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let old_opacity = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .style
+                .opacity
+                .clone();
+
+            let cmd = SetOpacity {
+                node_id,
+                new_opacity: StyleValue::Literal { value: opacity },
+                old_opacity,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setOpacity failed: {e}");
+                async_graphql::Error::new("set opacity failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "opacity"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Set the blend mode of a node by UUID.
+    ///
+    /// The blend mode string must be a valid `snake_case` variant name (e.g. "normal", "multiply").
+    async fn set_blend_mode(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        blend_mode: String,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Parse blend mode string before lock acquisition
+        let new_blend_mode: BlendMode =
+            serde_json::from_value(serde_json::Value::String(blend_mode)).map_err(|e| {
+                tracing::warn!("invalid blend mode in setBlendMode: {e}");
+                async_graphql::Error::new("invalid blend mode")
+            })?;
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let old_blend_mode = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .style
+                .blend_mode;
+
+            let cmd = SetBlendMode {
+                node_id,
+                new_blend_mode,
+                old_blend_mode,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setBlendMode failed: {e}");
+                async_graphql::Error::new("set blend mode failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "blend_mode"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Set the fills array of a node by UUID.
+    ///
+    /// Accepts fills as a JSON value (array of Fill objects).
+    async fn set_fills(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        fills: Json<serde_json::Value>,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Deserialize fills before lock acquisition
+        let new_fills: Vec<Fill> = serde_json::from_value(fills.0).map_err(|e| {
+            tracing::warn!("invalid fills in setFills: {e}");
+            async_graphql::Error::new("invalid fills")
+        })?;
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let old_fills = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .style
+                .fills
+                .clone();
+
+            let cmd = SetFills {
+                node_id,
+                new_fills,
+                old_fills,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setFills failed: {e}");
+                async_graphql::Error::new("set fills failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "fills"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Set the strokes array of a node by UUID.
+    ///
+    /// Accepts strokes as a JSON value (array of Stroke objects).
+    async fn set_strokes(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        strokes: Json<serde_json::Value>,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Deserialize strokes before lock acquisition
+        let new_strokes: Vec<Stroke> = serde_json::from_value(strokes.0).map_err(|e| {
+            tracing::warn!("invalid strokes in setStrokes: {e}");
+            async_graphql::Error::new("invalid strokes")
+        })?;
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let old_strokes = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .style
+                .strokes
+                .clone();
+
+            let cmd = SetStrokes {
+                node_id,
+                new_strokes,
+                old_strokes,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setStrokes failed: {e}");
+                async_graphql::Error::new("set strokes failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "strokes"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Set the effects array of a node by UUID.
+    ///
+    /// Accepts effects as a JSON value (array of Effect objects).
+    async fn set_effects(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        effects: Json<serde_json::Value>,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Deserialize effects before lock acquisition
+        let new_effects: Vec<Effect> = serde_json::from_value(effects.0).map_err(|e| {
+            tracing::warn!("invalid effects in setEffects: {e}");
+            async_graphql::Error::new("invalid effects")
+        })?;
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let old_effects = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                .style
+                .effects
+                .clone();
+
+            let cmd = SetEffects {
+                node_id,
+                new_effects,
+                old_effects,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setEffects failed: {e}");
+                async_graphql::Error::new("set effects failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "effects"})),
+        });
+
+        Ok(node_gql)
+    }
+
+    /// Set the corner radii of a rectangle node by UUID.
+    ///
+    /// Requires exactly 4 values (top-left, top-right, bottom-right, bottom-left).
+    /// All values must be finite and non-negative. The target node must be a Rectangle.
+    async fn set_corner_radii(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        radii: Vec<f64>,
+    ) -> Result<NodeGql> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Validate input BEFORE lock acquisition
+        if radii.len() != 4 {
+            return Err(async_graphql::Error::new(
+                "corner radii must have exactly 4 elements",
+            ));
+        }
+        for (i, &r) in radii.iter().enumerate() {
+            if !r.is_finite() {
+                return Err(async_graphql::Error::new(format!(
+                    "corner_radii[{i}] must be finite (no NaN or infinity)"
+                )));
+            }
+            if r < 0.0 {
+                return Err(async_graphql::Error::new(format!(
+                    "corner_radii[{i}] must be non-negative"
+                )));
+            }
+        }
+        let new_radii: [f64; 4] = [radii[0], radii[1], radii[2], radii[3]];
+
+        let parsed_uuid: uuid::Uuid = uuid
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // RF-005: execute and build response in a single lock scope
+        let node_gql = {
+            let mut doc_guard = acquire_document_lock(state);
+            let node_id = doc_guard
+                .arena
+                .id_by_uuid(&parsed_uuid)
+                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+
+            let node = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
+
+            let old_radii = match &node.kind {
+                NodeKind::Rectangle { corner_radii } => *corner_radii,
+                _ => {
+                    return Err(async_graphql::Error::new(
+                        "setCornerRadii requires a Rectangle node",
+                    ));
+                }
+            };
+
+            let cmd = SetCornerRadii {
+                node_id,
+                new_radii,
+                old_radii,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("setCornerRadii failed: {e}");
+                async_graphql::Error::new("set corner radii failed")
+            })?;
+
+            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some(parsed_uuid.to_string()),
+            data: Some(serde_json::json!({"field": "corner_radii"})),
+        });
+
+        Ok(node_gql)
+    }
+
     /// Undo the last command.
     async fn undo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
         let state = ctx.data::<ServerState>()?;
@@ -1061,5 +1449,275 @@ mod tests {
             !res.errors.is_empty(),
             "root node has no parent, should fail"
         );
+    }
+
+    // ── Style mutation tests ──────────────────────────────────────────
+
+    /// Helper: creates a rectangle node via GraphQL and returns its UUID string.
+    async fn create_rect(
+        schema: &Schema<super::super::query::QueryRoot, MutationRoot, EmptySubscription>,
+        name: &str,
+    ) -> String {
+        let query = format!(
+            r#"mutation {{ createNode(kind: {{ type: "rectangle", corner_radii: [0, 0, 0, 0] }}, name: "{name}") {{ uuid }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            res.errors.is_empty(),
+            "create_rect errors: {:?}",
+            res.errors
+        );
+        res.data.into_json().unwrap()["createNode"]["uuid"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn test_set_opacity_mutation_updates_opacity() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query =
+            format!(r#"mutation {{ setOpacity(uuid: "{uuid_str}", opacity: 0.5) {{ style }} }}"#,);
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let style = &res.data.into_json().unwrap()["setOpacity"]["style"];
+        let opacity = &style["opacity"];
+        // StyleValue serializes with #[serde(tag = "type")]: {"type":"literal","value":0.5}
+        assert_eq!(opacity["type"], "literal");
+        assert_eq!(opacity["value"], 0.5);
+    }
+
+    #[tokio::test]
+    async fn test_set_opacity_rejects_out_of_range() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        // GraphQL passes NaN as a float literal — but async_graphql rejects NaN
+        // at the parser level. Test via a non-finite value that we can represent:
+        // use a value out of range instead.
+        let query =
+            format!(r#"mutation {{ setOpacity(uuid: "{uuid_str}", opacity: 1.5) {{ style }} }}"#,);
+        let res = schema.execute(&*query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "opacity 1.5 should be rejected (out of range)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_blend_mode_mutation_updates_blend_mode() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query = format!(
+            r#"mutation {{ setBlendMode(uuid: "{uuid_str}", blendMode: "multiply") {{ style }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let style = &res.data.into_json().unwrap()["setBlendMode"]["style"];
+        assert_eq!(style["blend_mode"], "multiply");
+    }
+
+    #[tokio::test]
+    async fn test_set_blend_mode_rejects_invalid_mode() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query = format!(
+            r#"mutation {{ setBlendMode(uuid: "{uuid_str}", blendMode: "not_a_mode") {{ style }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "invalid blend mode should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_corner_radii_mutation_updates_radii() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query = format!(
+            r#"mutation {{ setCornerRadii(uuid: "{uuid_str}", radii: [4.0, 8.0, 4.0, 8.0]) {{ kind }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let kind = &res.data.into_json().unwrap()["setCornerRadii"]["kind"];
+        let radii = kind["corner_radii"].as_array().unwrap();
+        assert_eq!(radii[0], 4.0);
+        assert_eq!(radii[1], 8.0);
+        assert_eq!(radii[2], 4.0);
+        assert_eq!(radii[3], 8.0);
+    }
+
+    #[tokio::test]
+    async fn test_set_corner_radii_on_non_rectangle_returns_error() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let frame_uuid = create_frame(&schema, "Frame").await;
+
+        let query = format!(
+            r#"mutation {{ setCornerRadii(uuid: "{frame_uuid}", radii: [4.0, 4.0, 4.0, 4.0]) {{ kind }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "setCornerRadii on a frame should return an error"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_corner_radii_rejects_wrong_count() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query = format!(
+            r#"mutation {{ setCornerRadii(uuid: "{uuid_str}", radii: [4.0, 4.0]) {{ kind }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "radii with 2 elements should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_corner_radii_rejects_negative_values() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        let query = format!(
+            r#"mutation {{ setCornerRadii(uuid: "{uuid_str}", radii: [4.0, -1.0, 4.0, 4.0]) {{ kind }} }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(!res.errors.is_empty(), "negative radii should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_set_fills_mutation_updates_fills() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        // Solid red fill: Fill::Solid { color: StyleValue::Literal { value: Color::Srgb } }
+        // Wire format: [{"type":"solid","color":{"type":"literal","value":{"space":"srgb",...}}}]
+        let query = format!(
+            r#"mutation {{
+                setFills(
+                    uuid: "{uuid_str}"
+                    fills: [{{type: "solid", color: {{type: "literal", value: {{space: "srgb", r: 1.0, g: 0.0, b: 0.0, a: 1.0}}}}}}]
+                ) {{
+                    style
+                }}
+            }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let style = &res.data.into_json().unwrap()["setFills"]["style"];
+        let fills = style["fills"].as_array().expect("fills must be an array");
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0]["type"], "solid");
+        assert_eq!(fills[0]["color"]["type"], "literal");
+        assert_eq!(fills[0]["color"]["value"]["space"], "srgb");
+        assert_eq!(fills[0]["color"]["value"]["r"], 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_set_strokes_mutation_updates_strokes() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        // A single blue stroke with width 2.
+        // Stroke wire format: { color, width, alignment, cap, join }
+        // alignment/cap/join use rename_all = "snake_case"
+        let query = format!(
+            r#"mutation {{
+                setStrokes(
+                    uuid: "{uuid_str}"
+                    strokes: [{{
+                        color: {{type: "literal", value: {{space: "srgb", r: 0.0, g: 0.0, b: 1.0, a: 1.0}}}},
+                        width: {{type: "literal", value: 2.0}},
+                        alignment: "outside",
+                        cap: "round",
+                        join: "bevel"
+                    }}]
+                ) {{
+                    style
+                }}
+            }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let style = &res.data.into_json().unwrap()["setStrokes"]["style"];
+        let strokes = style["strokes"]
+            .as_array()
+            .expect("strokes must be an array");
+        assert_eq!(strokes.len(), 1);
+        assert_eq!(strokes[0]["alignment"], "outside");
+        assert_eq!(strokes[0]["cap"], "round");
+        assert_eq!(strokes[0]["join"], "bevel");
+        assert_eq!(strokes[0]["width"]["value"], 2.0);
+        assert_eq!(strokes[0]["color"]["value"]["space"], "srgb");
+        assert_eq!(strokes[0]["color"]["value"]["b"], 1.0);
+    }
+
+    #[tokio::test]
+    async fn test_set_effects_mutation_updates_effects() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+
+        let uuid_str = create_rect(&schema, "Rect").await;
+
+        // A single layer_blur effect.
+        // Effect::LayerBlur { radius: StyleValue<f64> }
+        // Wire format (tag = "type", rename_all = "snake_case"):
+        // {"type":"layer_blur","radius":{"type":"literal","value":4.0}}
+        let query = format!(
+            r#"mutation {{
+                setEffects(
+                    uuid: "{uuid_str}"
+                    effects: [{{type: "layer_blur", radius: {{type: "literal", value: 4.0}}}}]
+                ) {{
+                    style
+                }}
+            }}"#,
+        );
+        let res = schema.execute(&*query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let style = &res.data.into_json().unwrap()["setEffects"]["style"];
+        let effects = style["effects"]
+            .as_array()
+            .expect("effects must be an array");
+        assert_eq!(effects.len(), 1);
+        assert_eq!(effects[0]["type"], "layer_blur");
+        assert_eq!(effects[0]["radius"]["type"], "literal");
+        assert_eq!(effects[0]["radius"]["value"], 4.0);
     }
 }

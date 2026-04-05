@@ -256,6 +256,93 @@ impl SigilMcpServer {
             .map_err(|e| e.to_mcp_error())
     }
 
+    /// Sets a node's opacity (0.0 = fully transparent, 1.0 = fully opaque).
+    #[tool(
+        name = "set_opacity",
+        description = "Set a node's opacity. Value must be in [0.0, 1.0]."
+    )]
+    fn set_opacity(
+        &self,
+        Parameters(input): Parameters<crate::types::SetOpacityInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_opacity_impl(&self.state, &input.uuid, input.opacity)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's blend mode.
+    #[tool(
+        name = "set_blend_mode",
+        description = "Set a node's blend mode (e.g. normal, multiply, screen, overlay, darken, \
+                        lighten, color_dodge, color_burn, hard_light, soft_light, difference, \
+                        exclusion, hue, saturation, color, luminosity)"
+    )]
+    fn set_blend_mode(
+        &self,
+        Parameters(input): Parameters<crate::types::SetBlendModeInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_blend_mode_impl(&self.state, &input.uuid, &input.blend_mode)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's fills array.
+    #[tool(
+        name = "set_fills",
+        description = "Replace a node's fills. Pass an array of fill objects as JSON."
+    )]
+    fn set_fills(
+        &self,
+        Parameters(input): Parameters<crate::types::SetFillsInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_fills_impl(&self.state, &input.uuid, &input.fills)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's strokes array.
+    #[tool(
+        name = "set_strokes",
+        description = "Replace a node's strokes. Pass an array of stroke objects as JSON."
+    )]
+    fn set_strokes(
+        &self,
+        Parameters(input): Parameters<crate::types::SetStrokesInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_strokes_impl(&self.state, &input.uuid, &input.strokes)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a node's effects array.
+    #[tool(
+        name = "set_effects",
+        description = "Replace a node's effects. Pass an array of effect objects as JSON."
+    )]
+    fn set_effects(
+        &self,
+        Parameters(input): Parameters<crate::types::SetEffectsInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_effects_impl(&self.state, &input.uuid, &input.effects)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets a rectangle node's corner radii.
+    #[tool(
+        name = "set_corner_radii",
+        description = "Set corner radii on a rectangle node. Pass exactly 4 values: \
+                        [top-left, top-right, bottom-right, bottom-left]. Each must be >= 0."
+    )]
+    fn set_corner_radii(
+        &self,
+        Parameters(input): Parameters<crate::types::SetCornerRadiiInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::nodes::set_corner_radii_impl(&self.state, &input.uuid, &input.radii)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
     /// Lists all design tokens in the document.
     #[tool(
         name = "list_tokens",

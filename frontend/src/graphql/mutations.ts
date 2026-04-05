@@ -78,3 +78,39 @@ export const REORDER_CHILDREN_MUTATION = `
     }
   }
 `;
+
+export const SET_OPACITY_MUTATION = `
+  mutation SetOpacity($uuid: String!, $opacity: Float!) {
+    setOpacity(uuid: $uuid, opacity: $opacity) { uuid }
+  }
+`;
+
+export const SET_BLEND_MODE_MUTATION = `
+  mutation SetBlendMode($uuid: String!, $blendMode: String!) {
+    setBlendMode(uuid: $uuid, blendMode: $blendMode) { uuid }
+  }
+`;
+
+export const SET_FILLS_MUTATION = `
+  mutation SetFills($uuid: String!, $fills: JSON!) {
+    setFills(uuid: $uuid, fills: $fills) { uuid style }
+  }
+`;
+
+export const SET_STROKES_MUTATION = `
+  mutation SetStrokes($uuid: String!, $strokes: JSON!) {
+    setStrokes(uuid: $uuid, strokes: $strokes) { uuid style }
+  }
+`;
+
+export const SET_EFFECTS_MUTATION = `
+  mutation SetEffects($uuid: String!, $effects: JSON!) {
+    setEffects(uuid: $uuid, effects: $effects) { uuid style }
+  }
+`;
+
+export const SET_CORNER_RADII_MUTATION = `
+  mutation SetCornerRadii($uuid: String!, $radii: [Float!]!) {
+    setCornerRadii(uuid: $uuid, radii: $radii) { uuid kind }
+  }
+`;

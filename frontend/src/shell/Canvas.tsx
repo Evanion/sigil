@@ -346,8 +346,12 @@ export const Canvas: Component = () => {
       const size = canvasSize();
       const dpr = size.dpr;
 
-      // Convert nodes Record to array for the renderer
-      const nodesArray: DocumentNode[] = Object.values(nodesObj) as DocumentNode[];
+      // Convert nodes Record to array for the renderer.
+      // IMPORTANT: Object.keys() must be called to create a reactive dependency
+      // on key additions/deletions in Solid's store. Object.values() alone does
+      // not track new keys being added (e.g., optimistic node creation).
+      const keys = Object.keys(nodesObj);
+      const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
       renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview);
     });

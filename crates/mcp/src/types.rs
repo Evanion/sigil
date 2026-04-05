@@ -310,6 +310,61 @@ pub struct DeleteTokenInput {
     pub name: String,
 }
 
+/// Input for setting a node's opacity.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetOpacityInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// Opacity value in [0.0, 1.0].
+    pub opacity: f64,
+}
+
+/// Input for setting a node's blend mode.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetBlendModeInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// Blend mode name (e.g. "normal", "multiply", "screen", "overlay").
+    pub blend_mode: String,
+}
+
+/// Input for setting a node's fills.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetFillsInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// Array of fill objects. Deserialized to `Vec<Fill>` in the handler.
+    pub fills: serde_json::Value,
+}
+
+/// Input for setting a node's strokes.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetStrokesInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// Array of stroke objects. Deserialized to `Vec<Stroke>` in the handler.
+    pub strokes: serde_json::Value,
+}
+
+/// Input for setting a node's effects.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetEffectsInput {
+    /// UUID of the node to modify.
+    pub uuid: String,
+    /// Array of effect objects. Deserialized to `Vec<Effect>` in the handler.
+    pub effects: serde_json::Value,
+}
+
+/// Input for setting a rectangle node's corner radii.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetCornerRadiiInput {
+    /// UUID of the node to modify (must be a rectangle).
+    pub uuid: String,
+    /// Four corner radii: [top-left, top-right, bottom-right, bottom-left].
+    /// Each must be finite and non-negative.
+    pub radii: Vec<f64>,
+}
+
 // ── Tool output types ─────────────────────────────────────────────────
 
 /// Result of listing pages.

@@ -2,21 +2,21 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 8px 0;
-  gap: 4px;
-  background: var(--surface-2, #181825);
-  border-right: 1px solid var(--surface-3, #313244);
+  padding: 12px 0;
+  gap: 8px;
+  height: 100%;
+  background: var(--surface-2);
+  border-right: 1px solid var(--surface-3);
 }
 
 .toolbar__logo {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 10px;
   font-weight: 700;
-  font-size: 16px;
-  color: var(--accent, #cba6f7);
+  letter-spacing: 2px;
+  color: var(--text-2);
+  writing-mode: vertical-lr;
+  text-orientation: mixed;
+  user-select: none;
   margin-bottom: 8px;
 }
 
@@ -50,7 +50,8 @@
   outline-offset: -2px;
 }
 
+.toolbar__btn--active,
 .toolbar__btn[aria-pressed="true"] {
-  background: var(--accent, #cba6f7);
-  color: var(--surface-1, #1e1e2e);
+  background: var(--accent);
+  color: var(--surface-1);
 }
