@@ -1,4 +1,12 @@
-import { For, createSignal, createEffect, onMount, onCleanup, type Component, type JSX } from "solid-js";
+import {
+  For,
+  createSignal,
+  createEffect,
+  onMount,
+  onCleanup,
+  type Component,
+  type JSX,
+} from "solid-js";
 import { MousePointer2, Frame, Square, Circle } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "./AnnounceProvider";
@@ -57,16 +65,28 @@ export const Toolbar: Component = () => {
 
     const unsubscribe = tinykeys(window, {
       v: (e: KeyboardEvent) => {
-        if (!isTyping()) { e.preventDefault(); store.setActiveTool("select"); }
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("select");
+        }
       },
       f: (e: KeyboardEvent) => {
-        if (!isTyping()) { e.preventDefault(); store.setActiveTool("frame"); }
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("frame");
+        }
       },
       r: (e: KeyboardEvent) => {
-        if (!isTyping()) { e.preventDefault(); store.setActiveTool("rectangle"); }
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("rectangle");
+        }
       },
       o: (e: KeyboardEvent) => {
-        if (!isTyping()) { e.preventDefault(); store.setActiveTool("ellipse"); }
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("ellipse");
+        }
       },
     });
 
@@ -104,7 +124,9 @@ export const Toolbar: Component = () => {
         {(tool, index) => (
           <Tooltip content={`${tool.label} (${tool.shortcut})`} placement="right">
             <button
-              ref={(el) => { buttonRefs[index()] = el; }}
+              ref={(el) => {
+                buttonRefs[index()] = el;
+              }}
               class="toolbar__btn"
               classList={{ "toolbar__btn--active": store.activeTool() === tool.id }}
               aria-pressed={store.activeTool() === tool.id}

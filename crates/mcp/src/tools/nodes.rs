@@ -5,12 +5,14 @@
 //!   `doc.execute(Box::new(cmd))` → build response → drop lock → `signal_dirty`
 
 use agent_designer_core::{
-    BlendMode, Effect, Fill, NodeId, NodeKind, Stroke, StyleValue, Transform,
+    BlendMode, Effect, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE,
+    NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
     commands::style_commands::{
         SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
     },
     commands::tree_commands::{ReorderChildren, ReparentNode},
+    validate_floats_in_value,
 };
 use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 use uuid::Uuid;
@@ -829,6 +831,19 @@ pub fn set_fills_impl(
     uuid_str: &str,
     fills_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
+    validate_floats_in_value(fills_value)
+        .map_err(|e| McpToolError::InvalidInput(format!("fills contain invalid floats: {e}")))?;
+
+    let arr = fills_value
+        .as_array()
+        .ok_or_else(|| McpToolError::InvalidInput("fills must be a JSON array".to_string()))?;
+    if arr.len() > MAX_FILLS_PER_STYLE {
+        return Err(McpToolError::InvalidInput(format!(
+            "fills array length {} exceeds maximum of {MAX_FILLS_PER_STYLE}",
+            arr.len()
+        )));
+    }
+
     let new_fills: Vec<Fill> = serde_json::from_value(fills_value.clone())
         .map_err(|e| McpToolError::InvalidInput(format!("invalid fills JSON: {e}")))?;
 
@@ -888,6 +903,19 @@ pub fn set_strokes_impl(
     uuid_str: &str,
     strokes_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
+    validate_floats_in_value(strokes_value)
+        .map_err(|e| McpToolError::InvalidInput(format!("strokes contain invalid floats: {e}")))?;
+
+    let arr = strokes_value
+        .as_array()
+        .ok_or_else(|| McpToolError::InvalidInput("strokes must be a JSON array".to_string()))?;
+    if arr.len() > MAX_STROKES_PER_STYLE {
+        return Err(McpToolError::InvalidInput(format!(
+            "strokes array length {} exceeds maximum of {MAX_STROKES_PER_STYLE}",
+            arr.len()
+        )));
+    }
+
     let new_strokes: Vec<Stroke> = serde_json::from_value(strokes_value.clone())
         .map_err(|e| McpToolError::InvalidInput(format!("invalid strokes JSON: {e}")))?;
 
@@ -947,6 +975,19 @@ pub fn set_effects_impl(
     uuid_str: &str,
     effects_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
+    validate_floats_in_value(effects_value)
+        .map_err(|e| McpToolError::InvalidInput(format!("effects contain invalid floats: {e}")))?;
+
+    let arr = effects_value
+        .as_array()
+        .ok_or_else(|| McpToolError::InvalidInput("effects must be a JSON array".to_string()))?;
+    if arr.len() > MAX_EFFECTS_PER_STYLE {
+        return Err(McpToolError::InvalidInput(format!(
+            "effects array length {} exceeds maximum of {MAX_EFFECTS_PER_STYLE}",
+            arr.len()
+        )));
+    }
+
     let new_effects: Vec<Effect> = serde_json::from_value(effects_value.clone())
         .map_err(|e| McpToolError::InvalidInput(format!("invalid effects JSON: {e}")))?;
 
@@ -1607,6 +1648,26 @@ mod tests {
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
+    #[test]
+    fn test_set_fills_impl_updates_fills() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let fills_json = serde_json::json!([
+            {
+                "type": "solid",
+                "color": {
+                    "type": "literal",
+                    "value": { "space": "srgb", "r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+                }
+            }
+        ]);
+        let result = set_fills_impl(&state, &created.uuid, &fills_json);
+        assert!(result.is_ok());
+        assert!(result.unwrap().success);
+    }
+
     // ── set_strokes_impl ──────────────────────────────────────────────
 
     #[test]
@@ -1621,6 +1682,29 @@ mod tests {
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
+    #[test]
+    fn test_set_strokes_impl_updates_strokes() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let strokes_json = serde_json::json!([
+            {
+                "color": {
+                    "type": "literal",
+                    "value": { "space": "srgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0 }
+                },
+                "width": { "type": "literal", "value": 2.0 },
+                "alignment": "center",
+                "cap": "butt",
+                "join": "miter"
+            }
+        ]);
+        let result = set_strokes_impl(&state, &created.uuid, &strokes_json);
+        assert!(result.is_ok());
+        assert!(result.unwrap().success);
+    }
+
     // ── set_effects_impl ──────────────────────────────────────────────
 
     #[test]
@@ -1633,5 +1717,28 @@ mod tests {
         let result = set_effects_impl(&state, &created.uuid, &bad_json);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_set_effects_impl_updates_effects() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let effects_json = serde_json::json!([
+            {
+                "type": "drop_shadow",
+                "color": {
+                    "type": "literal",
+                    "value": { "space": "srgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 0.5 }
+                },
+                "offset": { "x": 4.0, "y": 4.0 },
+                "blur": { "type": "literal", "value": 8.0 },
+                "spread": { "type": "literal", "value": 0.0 }
+            }
+        ]);
+        let result = set_effects_impl(&state, &created.uuid, &effects_json);
+        assert!(result.is_ok());
+        assert!(result.unwrap().success);
     }
 }

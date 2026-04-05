@@ -61,10 +61,7 @@ pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
     let graphql_service = GraphQL::new(schema.clone());
     if std::env::var("SIGIL_DEV_CORS").is_ok() {
         // RF-004: Also expose GraphiQL IDE in development mode (separate GET handler).
-        app = app.route(
-            "/graphql",
-            get(graphiql).post_service(graphql_service),
-        );
+        app = app.route("/graphql", get(graphiql).post_service(graphql_service));
     } else {
         app = app.route(
             "/graphql",
