@@ -23,6 +23,9 @@ Scan the diff against ALL sections of CLAUDE.md:
 - **Section 6 (Commit Messages)**: Format compliance
 - **Section 7 (PR Process)**: Review requirements
 - **Section 11 (Defensive Coding)**: All subsections — constructors, constants, recursion, floats, arena IDs, deserialization, etc.
+- **Section 5 (Kobalte triggers)**: Search for `as="span"`, `as="div"`, `as="p"` on any Kobalte interactive primitive (`Trigger`, `Button`, `Link`). These are Critical violations.
+- **Section 5 (Solid.js lists)**: Verify mutable lists (add/remove/reorder) use `<Index>`, not `<For>`.
+- **Section 5 (Deep cloning)**: Verify `JSON.parse(JSON.stringify())` is used only inside `produce()` callbacks; `structuredClone` is used elsewhere.
 
 ## Output Format
 
