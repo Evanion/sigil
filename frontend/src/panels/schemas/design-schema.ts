@@ -1,7 +1,7 @@
 import type { PropertySchema } from "../schema/types";
 
 /**
- * Property schema for the "Design" panel tab.
+ * Property schema for the "Design" panel — Layout sub-tab.
  *
  * Defines which fields are shown for each node kind. The SchemaPanel
  * renders these definitions into NumberInput/Toggle/Select editors
@@ -55,6 +55,42 @@ export const designSchema: PropertySchema = {
         },
       ],
     },
-    // Corner Radius editing deferred — requires server-side corner_radii mutation (Spec 09)
+    {
+      name: "Corner Radius",
+      when: "rectangle",
+      fields: [
+        { key: "kind.corner_radii.0", label: "TL", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.1", label: "TR", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.2", label: "BR", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.3", label: "BL", type: "number", step: 1, min: 0 },
+      ],
+    },
+    {
+      name: "Constraints",
+      fields: [
+        {
+          key: "constraints.horizontal",
+          label: "H",
+          type: "select",
+          options: [
+            { value: "start", label: "Start" },
+            { value: "center", label: "Center" },
+            { value: "end", label: "End" },
+            { value: "stretch", label: "Stretch" },
+          ],
+        },
+        {
+          key: "constraints.vertical",
+          label: "V",
+          type: "select",
+          options: [
+            { value: "start", label: "Start" },
+            { value: "center", label: "Center" },
+            { value: "end", label: "End" },
+            { value: "stretch", label: "Stretch" },
+          ],
+        },
+      ],
+    },
   ],
 };

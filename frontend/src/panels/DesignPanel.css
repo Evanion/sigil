@@ -1,0 +1,51 @@
+.sigil-design-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.sigil-design-panel__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-1);
+  padding: 0 4px;
+}
+
+.sigil-design-panel__tab {
+  flex: 1;
+  padding: 6px 0;
+  font-size: 11px;
+  text-align: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.sigil-design-panel__tab--active {
+  color: var(--text-1);
+  border-bottom-color: var(--accent);
+}
+
+.sigil-design-panel__tab:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-design-panel__content {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.sigil-design-panel__placeholder {
+  padding: 16px;
+  color: var(--text-2);
+  font-size: 11px;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-design-panel__tab {
+    transition: none;
+  }
+}
