@@ -351,7 +351,10 @@ export const LayersTree: Component = () => {
 
       // Announce the hover position only when target or position changes
       // to avoid flooding the screen reader announcement queue.
-      if (computed.targetUuid !== lastAnnounced.uuid || computed.position !== lastAnnounced.position) {
+      if (
+        computed.targetUuid !== lastAnnounced.uuid ||
+        computed.position !== lastAnnounced.position
+      ) {
         lastAnnounced = { uuid: computed.targetUuid, position: computed.position };
         const targetNodeName = targetNode.name;
         announce(`Over ${targetNodeName}, ${computed.position}`);
