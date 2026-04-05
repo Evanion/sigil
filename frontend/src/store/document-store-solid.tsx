@@ -110,6 +110,16 @@ const DEBOUNCE_MS = 100;
 const MAX_NODE_NAME_LENGTH = 1024;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// ── Clone helper ──────────────────────────────────────────────────────
+
+/**
+ * Deep clone a value. Uses JSON round-trip because Solid store proxies
+ * throw DataCloneError with structuredClone.
+ */
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 // ── Debounce helper ────────────────────────────────────────────────────
 
 function debounce(fn: () => void, ms: number): () => void {
@@ -341,10 +351,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     client
       .mutation(gql(CREATE_NODE_MUTATION), {
-        kind: structuredClone(kind),
+        kind: deepClone(kind),
         name,
         pageId,
-        transform: structuredClone(transform),
+        transform: deepClone(transform),
       })
       .toPromise()
       .then((result) => {
@@ -400,16 +410,15 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function setTransform(uuid: string, transform: Transform): void {
     // RF-003: Capture previous value for rollback
-    const previousTransform = state.nodes[uuid]?.transform
-      ? structuredClone(state.nodes[uuid].transform)
-      : undefined;
+    const node = state.nodes[uuid];
+    const previousTransform = node?.transform ? { ...node.transform } : undefined;
 
     // Optimistic update
     setState("nodes", uuid, "transform", transform);
     client
       .mutation(gql(SET_TRANSFORM_MUTATION), {
         uuid,
-        transform: structuredClone(transform),
+        transform: { ...transform },
       })
       .toPromise()
       .then((r) => {
@@ -455,7 +464,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function deleteNode(uuid: string): void {
     // RF-003: Capture full node and selection for rollback
-    const previousNode = state.nodes[uuid] ? structuredClone(state.nodes[uuid]) : undefined;
+    const previousNode = state.nodes[uuid]
+      ? (deepClone(state.nodes[uuid]) as MutableDocumentNode)
+      : undefined;
     const previousSelectedId = selectedNodeId();
 
     setState(
@@ -660,7 +671,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Snapshot previous value for rollback
     const previousOpacity = state.nodes[uuid]?.style?.opacity
-      ? structuredClone(state.nodes[uuid].style.opacity)
+      ? deepClone(state.nodes[uuid].style.opacity)
       : undefined;
 
     // Optimistic update
@@ -750,142 +761,244 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
-  function setFills(uuid: string, fills: Fill[]): void {
-    // Snapshot previous value for rollback
-    const previousFills = state.nodes[uuid]?.style?.fills
-      ? structuredClone(state.nodes[uuid].style.fills)
-      : undefined;
+  // Debounce timers and rollback snapshots for style mutations
+  // (prevents 60Hz network spam during drag while preserving rollback)
+  let fillsMutationTimer: ReturnType<typeof setTimeout> | null = null;
+  let fillsRollbackSnapshot: Fill[] | null = null;
 
-    // Optimistic update (clone fills to prevent caller mutation aliasing the store)
+  function setFills(uuid: string, fills: Fill[]): void {
+    let clonedFills: Fill[];
+    try {
+      clonedFills = deepClone(fills);
+    } catch {
+      console.error("setFills: failed to clone fills");
+      return;
+    }
+
+    // Capture rollback snapshot on first call of debounce window
+    if (fillsMutationTimer === null) {
+      try {
+        fillsRollbackSnapshot = state.nodes[uuid]?.style?.fills
+          ? (deepClone(state.nodes[uuid].style.fills) as Fill[])
+          : [];
+      } catch {
+        fillsRollbackSnapshot = [];
+      }
+    }
+
+    // Optimistic update (instant — no network delay)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: structuredClone(fills) };
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            fills: clonedFills,
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
 
-    client
-      .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: structuredClone(fills) })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("setFills error:", r.error.message);
-          if (previousFills !== undefined && state.nodes[uuid]) {
+    // Debounce the mutation — only send after 100ms of inactivity
+    if (fillsMutationTimer) clearTimeout(fillsMutationTimer);
+    const snapshot = fillsRollbackSnapshot;
+    fillsMutationTimer = setTimeout(() => {
+      fillsMutationTimer = null;
+      fillsRollbackSnapshot = null;
+      client
+        .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills })
+        .toPromise()
+        .then((r) => {
+          if (r.error) {
+            console.error("setFills error:", r.error.message);
+            // Rollback to pre-debounce-window state
+            if (snapshot && state.nodes[uuid]) {
+              setState(
+                produce((s) => {
+                  if (s.nodes[uuid]) {
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      fills: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
+                  }
+                }),
+              );
+            }
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("setFills exception:", err);
+          if (snapshot && state.nodes[uuid]) {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    fills: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
           }
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("setFills exception:", err);
-        if (previousFills !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
-              }
-            }),
-          );
-        }
-      });
+        });
+    }, DEBOUNCE_MS);
   }
+
+  let strokesMutationTimer: ReturnType<typeof setTimeout> | null = null;
+  let strokesRollbackSnapshot: Stroke[] | null = null;
 
   function setStrokes(uuid: string, strokes: Stroke[]): void {
-    // Snapshot previous value for rollback
-    const previousStrokes = state.nodes[uuid]?.style?.strokes
-      ? structuredClone(state.nodes[uuid].style.strokes)
-      : undefined;
+    let clonedStrokes: Stroke[];
+    try {
+      clonedStrokes = deepClone(strokes);
+    } catch {
+      console.error("setStrokes: failed to clone strokes");
+      return;
+    }
 
-    // Optimistic update (clone strokes to prevent caller mutation aliasing the store)
+    // Capture rollback snapshot on first call of debounce window
+    if (strokesMutationTimer === null) {
+      try {
+        strokesRollbackSnapshot = state.nodes[uuid]?.style?.strokes
+          ? (deepClone(state.nodes[uuid].style.strokes) as Stroke[])
+          : [];
+      } catch {
+        strokesRollbackSnapshot = [];
+      }
+    }
+
+    // Optimistic update (instant — no network delay)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: structuredClone(strokes) };
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            strokes: clonedStrokes,
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
 
-    client
-      .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: structuredClone(strokes) })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("setStrokes error:", r.error.message);
-          if (previousStrokes !== undefined && state.nodes[uuid]) {
+    // Debounce the mutation — only send after 100ms of inactivity
+    if (strokesMutationTimer) clearTimeout(strokesMutationTimer);
+    const snapshot = strokesRollbackSnapshot;
+    strokesMutationTimer = setTimeout(() => {
+      strokesMutationTimer = null;
+      strokesRollbackSnapshot = null;
+      client
+        .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: clonedStrokes })
+        .toPromise()
+        .then((r) => {
+          if (r.error) {
+            console.error("setStrokes error:", r.error.message);
+            if (snapshot && state.nodes[uuid]) {
+              setState(
+                produce((s) => {
+                  if (s.nodes[uuid]) {
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      strokes: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
+                  }
+                }),
+              );
+            }
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("setStrokes exception:", err);
+          if (snapshot && state.nodes[uuid]) {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: previousStrokes };
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    strokes: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
           }
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("setStrokes exception:", err);
-        if (previousStrokes !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: previousStrokes };
-              }
-            }),
-          );
-        }
-      });
+        });
+    }, DEBOUNCE_MS);
   }
 
-  function setEffects(uuid: string, effects: Effect[]): void {
-    // Snapshot previous value for rollback
-    const previousEffects = state.nodes[uuid]?.style?.effects
-      ? structuredClone(state.nodes[uuid].style.effects)
-      : undefined;
+  let effectsMutationTimer: ReturnType<typeof setTimeout> | null = null;
+  let effectsRollbackSnapshot: Effect[] | null = null;
 
-    // Optimistic update (clone effects to prevent caller mutation aliasing the store)
+  function setEffects(uuid: string, effects: Effect[]): void {
+    let clonedEffects: Effect[];
+    try {
+      clonedEffects = deepClone(effects);
+    } catch {
+      console.error("setEffects: failed to clone effects");
+      return;
+    }
+
+    // Capture rollback snapshot on first call of debounce window
+    if (effectsMutationTimer === null) {
+      try {
+        effectsRollbackSnapshot = state.nodes[uuid]?.style?.effects
+          ? (deepClone(state.nodes[uuid].style.effects) as Effect[])
+          : [];
+      } catch {
+        effectsRollbackSnapshot = [];
+      }
+    }
+
+    // Optimistic update (instant — no network delay)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: structuredClone(effects) };
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            effects: clonedEffects,
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
 
-    client
-      .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: structuredClone(effects) })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("setEffects error:", r.error.message);
-          if (previousEffects !== undefined && state.nodes[uuid]) {
+    // Debounce the mutation — only send after 100ms of inactivity
+    if (effectsMutationTimer) clearTimeout(effectsMutationTimer);
+    const snapshot = effectsRollbackSnapshot;
+    effectsMutationTimer = setTimeout(() => {
+      effectsMutationTimer = null;
+      effectsRollbackSnapshot = null;
+      client
+        .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: clonedEffects })
+        .toPromise()
+        .then((r) => {
+          if (r.error) {
+            console.error("setEffects error:", r.error.message);
+            if (snapshot && state.nodes[uuid]) {
+              setState(
+                produce((s) => {
+                  if (s.nodes[uuid]) {
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      effects: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
+                  }
+                }),
+              );
+            }
+          }
+        })
+        .catch((err: unknown) => {
+          console.error("setEffects exception:", err);
+          if (snapshot && state.nodes[uuid]) {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: previousEffects };
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    effects: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
           }
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("setEffects exception:", err);
-        if (previousEffects !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: previousEffects };
-              }
-            }),
-          );
-        }
-      });
+        });
+    }, DEBOUNCE_MS);
   }
 
   function setCornerRadii(uuid: string, radii: [number, number, number, number]): void {
@@ -899,9 +1012,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!targetNode || targetNode.kind.type !== "rectangle") return;
 
     // Snapshot previous value for rollback
-    const previousKind = state.nodes[uuid]?.kind
-      ? structuredClone(state.nodes[uuid].kind)
-      : undefined;
+    const previousKind = state.nodes[uuid]?.kind ? deepClone(state.nodes[uuid].kind) : undefined;
 
     // Optimistic update — kind.type guard is required for TypeScript narrowing even
     // though the early return above already guarantees we only reach this point for
@@ -992,6 +1103,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // ── Lifecycle (RF-002) ──────────────────────────────────────────────
 
   function destroy(): void {
+    // Clear debounce timers to prevent post-dispose mutations
+    if (fillsMutationTimer) {
+      clearTimeout(fillsMutationTimer);
+      fillsMutationTimer = null;
+    }
+    if (strokesMutationTimer) {
+      clearTimeout(strokesMutationTimer);
+      strokesMutationTimer = null;
+    }
+    if (effectsMutationTimer) {
+      clearTimeout(effectsMutationTimer);
+      effectsMutationTimer = null;
+    }
     subscriptionHandle.unsubscribe();
     void wsClient.dispose();
   }

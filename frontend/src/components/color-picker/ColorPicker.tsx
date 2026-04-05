@@ -19,13 +19,11 @@ import type { ColorSpace } from "./types";
 import {
   colorToSrgb,
   colorAlpha,
-  srgbToColor,
-  srgbToOklch,
-  oklchToSrgb,
   srgbToHex,
   isOutOfSrgbGamut,
+  hsvToSrgb,
+  srgbToHsv,
 } from "./color-math";
-import { Popover } from "../popover/Popover";
 import { ColorArea } from "./ColorArea";
 import { HueStrip } from "./HueStrip";
 import { AlphaStrip } from "./AlphaStrip";
@@ -33,13 +31,10 @@ import { ColorSpaceSwitcher } from "./ColorSpaceSwitcher";
 import { ColorValueFields } from "./ColorValueFields";
 import { HexInput } from "./HexInput";
 import "./ColorPicker.css";
-import type { JSX } from "solid-js";
 
 export interface ColorPickerProps {
   readonly color: Color;
   readonly onColorChange: (color: Color) => void;
-  /** The trigger element that opens the popover. */
-  readonly trigger: JSX.Element;
 }
 
 interface InternalState {
@@ -77,19 +72,51 @@ export function ColorPicker(props: ColorPickerProps) {
       !Number.isFinite(alpha)
     )
       return;
-    // Derive hue from OkLCH; only update hue if chroma is non-trivial to
-    // preserve the previous hue for achromatic colors.
-    const [, c, h] = srgbToOklch(r, g, b);
+    // Derive hue from RGB (HSV model). Only update hue if the color has
+    // saturation — preserve the previous hue for greys/achromatic colors.
+    const [h, svS] = srgbToHsv(r, g, b);
     // RF-019: Read state.hue inside untrack to avoid creating a reactive loop
-    // (this effect writes to state, which would re-trigger if state.hue were tracked).
     const prevHue = untrack(() => state.hue);
-    const newHue = c > 0.001 ? h : prevHue;
-    setState({ r, g, b, alpha, hue: newHue, space: color.space });
+    const newHue = svS > 0.001 ? h : prevHue;
+    // Don't overwrite the display space — it's a local UI preference,
+    // not part of the color value. Only update r/g/b/alpha/hue.
+    setState({ r, g, b, alpha, hue: newHue });
   });
 
   // ── Emit helper ────────────────────────────────────────────────────────
-  function emit(r: number, g: number, b: number, alpha: number, space: ColorSpace) {
-    props.onColorChange(srgbToColor(r, g, b, alpha, space));
+  // Guard: suppress initial emit during mount. queueMicrotask fires after
+  // all synchronous createEffect tracking runs, so mounted=false correctly
+  // prevents the sync effect's emit. This is intentional timing — if effects
+  // are restructured, verify this guard still works.
+  let mounted = false;
+  queueMicrotask(() => {
+    mounted = true;
+  });
+
+  // Throttle color change emissions to avoid overwhelming the store.
+  // During drag, emit at most once per animation frame.
+  let emitPending = false;
+  let pendingColor: { r: number; g: number; b: number; alpha: number; space: ColorSpace } | null =
+    null;
+
+  function flushEmit() {
+    emitPending = false;
+    if (pendingColor) {
+      const { r, g, b, alpha } = pendingColor;
+      pendingColor = null;
+      // Always emit as sRGB — the display space is for the UI fields only,
+      // not for storage. The canvas renderer and serialization expect sRGB.
+      props.onColorChange({ space: "srgb", r, g, b, a: alpha });
+    }
+  }
+
+  function emit(r: number, g: number, b: number, alpha: number) {
+    if (!mounted) return;
+    pendingColor = { r, g, b, alpha, space: "srgb" };
+    if (!emitPending) {
+      emitPending = true;
+      requestAnimationFrame(flushEmit);
+    }
   }
 
   // ── Committed color for aria-live (RF-002) ──────────────────────────────
@@ -114,75 +141,66 @@ export function ColorPicker(props: ColorPickerProps) {
 
   // ── ColorArea background render (RF-004) ─────────────────────────────
   // RF-034: This createMemo intentionally returns a new function reference
-  // whenever state.hue changes, which is what triggers the canvas to redraw.
-  // The identity-change-triggers-redraw pattern is deliberate here.
-  // Renders a pixel-accurate OkLCH gradient via ImageData.
-  // X-axis = chroma (0 at left to 0.2 at right).
-  // Y-axis = lightness (1 at top to 0 at bottom).
-  // This matches handleAreaChange which maps y->lightness, x->chroma.
+  // Fast CSS-gradient-based background (GPU-accelerated, no per-pixel math).
+  // Uses the classic HSV-style overlay: white→hue horizontal, transparent→black vertical.
+  // This is an approximation (not perceptually uniform like OkLCH pixel render)
+  // but is instant and matches Figma's color area performance.
   const renderAreaBackground = createMemo(() => {
     const hue = state.hue;
+    // Compute the pure hue color at full saturation for the right edge (HSV: S=1, V=1)
+    const [hr, hg, hb] = hsvToSrgb(hue, 1, 1);
+    const hueHex = srgbToHex(hr, hg, hb);
+
     return (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-      const imageData = ctx.createImageData(width, height);
-      const data = imageData.data;
+      // White-to-hue horizontal gradient
+      const hGrad = ctx.createLinearGradient(0, 0, width, 0);
+      hGrad.addColorStop(0, "#ffffff");
+      hGrad.addColorStop(1, hueHex);
+      ctx.fillStyle = hGrad;
+      ctx.fillRect(0, 0, width, height);
 
-      for (let py = 0; py < height; py++) {
-        // Top row = lightness 1, bottom row = lightness 0
-        const lightness = 1 - py / (height - 1 || 1);
-        for (let px = 0; px < width; px++) {
-          const chroma = (px / (width - 1 || 1)) * 0.2;
-          const [r, g, b] = oklchToSrgb(lightness, chroma, hue);
-          const idx = (py * width + px) * 4;
-          data[idx] = Math.round(r * 255);
-          data[idx + 1] = Math.round(g * 255);
-          data[idx + 2] = Math.round(b * 255);
-          data[idx + 3] = 255;
-        }
-      }
-
-      ctx.putImageData(imageData, 0, 0);
+      // Transparent-to-black vertical overlay
+      const vGrad = ctx.createLinearGradient(0, 0, 0, height);
+      vGrad.addColorStop(0, "rgba(0,0,0,0)");
+      vGrad.addColorStop(1, "rgba(0,0,0,1)");
+      ctx.fillStyle = vGrad;
+      ctx.fillRect(0, 0, width, height);
     };
   });
 
-  // ── ColorArea x/y position (RF-006: single srgbToOklch call) ─────────
-  // Map current sRGB to x (chroma normalized) and y (lightness) in OkLCH space.
-  // x ≈ chroma / max-chroma (use 0.2 as typical max for in-gamut sRGB colors)
-  // y ≈ lightness (OkLCH L is 0–1, top=white so y=L)
-  const areaOklch = createMemo(() => {
-    const [l, c, h] = srgbToOklch(state.r, state.g, state.b);
-    return { x: Math.min(1, c / 0.2), y: l, l, c, h };
+  // ── ColorArea x/y position (HSV-based) ──────────────────────────────
+  // x = saturation (0–1), y = value/brightness (0=black at bottom, 1=bright at top)
+  // HSV is always in-gamut for sRGB — no curved boundary issues.
+  const areaPos = createMemo(() => {
+    // Convert sRGB to HSV to get saturation and value
+    const [, s, v] = srgbToHsv(state.r, state.g, state.b);
+    return { x: s, y: v };
   });
 
-  // ── ColorArea change handler ───────────────────────────────────────────
-  // User moved the 2D color area: map x/y back to a color via OkLCH.
+  // ── ColorArea change handler (HSV-based) ───────────────────────────────
   function handleAreaChange(x: number, y: number) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
-    // x = chroma (0..0.2), y = lightness (0..1)
-    const c = x * 0.2;
-    const l = y;
-    const [nr, ng, nb] = oklchToSrgb(l, c, state.hue);
+    // x = saturation, y = value (brightness)
+    const [nr, ng, nb] = hsvToSrgb(state.hue, x, y);
     setState({ r: nr, g: ng, b: nb });
-    // Preserve hue only if chroma is non-trivial.
-    const [, newC, newH] = srgbToOklch(nr, ng, nb);
-    if (newC > 0.001) setState("hue", newH);
-    emit(nr, ng, nb, state.alpha, state.space);
+    emit(nr, ng, nb, state.alpha);
   }
 
   // ── Hue strip change handler ───────────────────────────────────────────
   function handleHueChange(hue: number) {
     if (!Number.isFinite(hue)) return;
-    // Rotate hue while preserving L and C.
-    const [l, c] = srgbToOklch(state.r, state.g, state.b);
-    const [nr, ng, nb] = oklchToSrgb(l, c, hue);
+    // Rotate hue while preserving saturation and value (HSV).
+    const { x: s, y: v } = areaPos();
+    const [nr, ng, nb] = hsvToSrgb(hue, s, v);
     setState({ r: nr, g: ng, b: nb, hue });
-    emit(nr, ng, nb, state.alpha, state.space);
+    emit(nr, ng, nb, state.alpha);
   }
 
   // ── Alpha strip change handler ─────────────────────────────────────────
   function handleAlphaChange(alpha: number) {
     if (!Number.isFinite(alpha)) return;
     setState({ alpha });
-    emit(state.r, state.g, state.b, alpha, state.space);
+    emit(state.r, state.g, state.b, alpha);
   }
 
   // ── ColorValueFields change handler ───────────────────────────────────
@@ -194,29 +212,32 @@ export function ColorPicker(props: ColorPickerProps) {
       !Number.isFinite(alpha)
     )
       return;
-    const [, c, h] = srgbToOklch(r, g, b);
-    const newHue = c > 0.001 ? h : state.hue;
-    setState({ r, g, b, alpha, hue: newHue });
-    emit(r, g, b, alpha, state.space);
+    // Derive hue from HSV — preserve previous hue for achromatic colors
+    const [derivedH, derivedS] = srgbToHsv(r, g, b);
+    const h = derivedS > 0.001 ? derivedH : state.hue;
+    setState({ r, g, b, alpha, hue: h });
+    emit(r, g, b, alpha);
     commitColor();
   }
 
   // ── HexInput change handler ────────────────────────────────────────────
   function handleHexChange(r: number, g: number, b: number) {
     if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return;
-    const [, c, h] = srgbToOklch(r, g, b);
-    const newHue = c > 0.001 ? h : state.hue;
-    setState({ r, g, b, hue: newHue });
-    emit(r, g, b, state.alpha, state.space);
+    // Derive hue from HSV — preserve previous hue for achromatic colors
+    const [derivedH, derivedS] = srgbToHsv(r, g, b);
+    const h = derivedS > 0.001 ? derivedH : state.hue;
+    setState({ r, g, b, hue: h });
+    emit(r, g, b, state.alpha);
     commitColor();
   }
 
   // ── ColorSpace change handler ──────────────────────────────────────────
   // Only changes the display space; internal sRGB state is unchanged.
   function handleSpaceChange(space: ColorSpace) {
+    // Only update the display space — don't emit a color change.
+    // The color value stays the same (sRGB internally), only the
+    // numeric field labels/ranges change.
     setState({ space });
-    emit(state.r, state.g, state.b, state.alpha, space);
-    commitColor();
   }
 
   // ── Alpha CSS color string for AlphaStrip ─────────────────────────────
@@ -226,66 +247,64 @@ export function ColorPicker(props: ColorPickerProps) {
   const outOfGamut = createMemo(() => isOutOfSrgbGamut(props.color));
 
   return (
-    <Popover trigger={props.trigger} placement="bottom" class="sigil-color-picker-popover">
-      <div class="sigil-color-picker" aria-label="Color picker">
-        <ColorArea
-          xValue={areaOklch().x}
-          yValue={areaOklch().y}
-          onChange={handleAreaChange}
-          onCommit={commitColor}
-          renderBackground={renderAreaBackground()}
-          aria-label="Color saturation and lightness"
-        />
-        <HueStrip
-          hue={state.hue}
-          onChange={handleHueChange}
-          onCommit={commitColor}
-          aria-label="Hue"
-        />
-        <AlphaStrip
-          alpha={state.alpha}
-          colorCss={alphaCss()}
-          onChange={handleAlphaChange}
-          onCommit={commitColor}
-          aria-label="Opacity"
-        />
-        <HexInput
-          r={state.r}
-          g={state.g}
-          b={state.b}
-          isOutOfGamut={outOfGamut()}
-          onChange={handleHexChange}
-        />
-        <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />
-        <ColorValueFields
-          r={state.r}
-          g={state.g}
-          b={state.b}
-          alpha={state.alpha}
-          space={state.space}
-          onChange={handleFieldsChange}
-        />
-        {/* Visually-hidden live region for discrete color change announcements.
+    <div class="sigil-color-picker" aria-label="Color picker">
+      <ColorArea
+        xValue={areaPos().x}
+        yValue={areaPos().y}
+        onChange={handleAreaChange}
+        onCommit={commitColor}
+        renderBackground={renderAreaBackground()}
+        aria-label="Color saturation and lightness"
+      />
+      <HueStrip
+        hue={state.hue}
+        onChange={handleHueChange}
+        onCommit={commitColor}
+        aria-label="Hue"
+      />
+      <AlphaStrip
+        alpha={state.alpha}
+        colorCss={alphaCss()}
+        onChange={handleAlphaChange}
+        onCommit={commitColor}
+        aria-label="Opacity"
+      />
+      <HexInput
+        r={state.r}
+        g={state.g}
+        b={state.b}
+        isOutOfGamut={outOfGamut()}
+        onChange={handleHexChange}
+      />
+      <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />
+      <ColorValueFields
+        r={state.r}
+        g={state.g}
+        b={state.b}
+        alpha={state.alpha}
+        space={state.space}
+        onChange={handleFieldsChange}
+      />
+      {/* Visually-hidden live region for discrete color change announcements.
             Not placed on the picker container (high-frequency updates would
             flood the announcement queue — CLAUDE.md §11). */}
-        <span
-          role="status"
-          aria-live="polite"
-          style={{
-            position: "absolute",
-            width: "1px",
-            height: "1px",
-            padding: "0",
-            margin: "-1px",
-            overflow: "hidden",
-            clip: "rect(0,0,0,0)",
-            "white-space": "nowrap",
-            "border-width": "0",
-          }}
-        >
-          {committedColor()}
-        </span>
-      </div>
-    </Popover>
+      <span
+        role="status"
+        aria-live="polite"
+        style={{
+          position: "absolute",
+          width: "1px",
+          height: "1px",
+          padding: "0",
+          margin: "-1px",
+          overflow: "hidden",
+          clip: "rect(0,0,0,0)",
+          "white-space": "nowrap",
+          "border-width": "0",
+        }}
+      >
+        {committedColor()}
+      </span>
+    </div>
   );
 }

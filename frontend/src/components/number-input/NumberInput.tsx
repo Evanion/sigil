@@ -7,6 +7,8 @@ export interface NumberInputProps {
   value: number;
   onValueChange: (value: number) => void;
   label?: string;
+  /** Short text rendered inside the input group as a prefix (e.g., "X", "W", "TL"). */
+  prefix?: string;
   step?: number;
   min?: number;
   max?: number;
@@ -21,6 +23,7 @@ export function NumberInput(props: NumberInputProps) {
     "value",
     "onValueChange",
     "label",
+    "prefix",
     "step",
     "min",
     "max",
@@ -56,6 +59,9 @@ export function NumberInput(props: NumberInputProps) {
         <NumberField.Label class="sigil-number-input__label">{local.label}</NumberField.Label>
       </Show>
       <div class="sigil-number-input__group">
+        <Show when={local.prefix}>
+          <span class="sigil-number-input__prefix">{local.prefix}</span>
+        </Show>
         <NumberField.Input class="sigil-number-input__input" />
         <Show when={local.suffix}>
           <span class="sigil-number-input__suffix">{local.suffix}</span>

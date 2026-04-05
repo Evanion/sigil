@@ -9,7 +9,7 @@
  * Guard: every value received from NumberInput is checked with
  * Number.isFinite() before use (CLAUDE.md S11 Floating-Point Validation).
  */
-import { createMemo, For } from "solid-js";
+import { createMemo, Index } from "solid-js";
 import { NumberInput } from "../number-input/NumberInput";
 import { srgbToOklab, srgbToOklch, oklabToSrgb, oklchToSrgb } from "./color-math";
 import type { ColorSpace } from "./types";
@@ -57,8 +57,25 @@ const FIELD_ARIA_LABELS: Record<FieldId, string> = {
 };
 
 export function ColorValueFields(props: ColorValueFieldsProps) {
+  // Guard to prevent re-entrant handleChange calls when props update
+  // triggers onRawValueChange on the NumberInput.
+  let isUpdating = false;
+
+  // Track the previous space so we can suppress spurious onRawValueChange
+  // callbacks that fire when space changes (NumberInput re-renders with new
+  // values and Kobalte fires onRawValueChange for each).
+  let lastSpace: ColorSpace = props.space;
+
   const fields = createMemo<FieldDef[]>(() => {
     const { r, g, b, alpha } = props;
+    // When space changes, suppress handleChange until the next microtask
+    if (props.space !== lastSpace) {
+      lastSpace = props.space;
+      isUpdating = true;
+      queueMicrotask(() => {
+        isUpdating = false;
+      });
+    }
     const alphaField: FieldDef = {
       id: "alpha",
       label: "A",
@@ -139,9 +156,15 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
    *  Reject out-of-range values rather than clamping (RF-014, CLAUDE.md S11). */
   function handleChange(field: FieldDef, raw: number) {
     if (!Number.isFinite(raw)) return;
+    if (isUpdating) return;
 
     // RF-014: validate range — reject rather than clamp.
     if (raw < field.min || raw > field.max) return;
+
+    isUpdating = true;
+    queueMicrotask(() => {
+      isUpdating = false;
+    });
 
     const { r, g, b, alpha } = props;
 
@@ -189,23 +212,23 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
 
   return (
     <div class="sigil-color-value-fields" role="group" aria-label="Color channel values">
-      <For each={fields()}>
+      <Index each={fields()}>
         {(field) => (
           <div class="sigil-color-value-fields__field">
             <span class="sigil-color-value-fields__label" aria-hidden="true">
-              {field.label}
+              {field().label}
             </span>
             <NumberInput
-              value={field.value}
-              onValueChange={(val) => handleChange(field, val)}
-              min={field.min}
-              max={field.max}
-              step={field.step}
-              aria-label={FIELD_ARIA_LABELS[field.id]}
+              value={field().value}
+              onValueChange={(val) => handleChange(field(), val)}
+              min={field().min}
+              max={field().max}
+              step={field().step}
+              aria-label={FIELD_ARIA_LABELS[field().id]}
             />
           </div>
         )}
-      </For>
+      </Index>
     </div>
   );
 }

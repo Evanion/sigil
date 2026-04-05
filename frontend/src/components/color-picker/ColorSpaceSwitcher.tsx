@@ -22,7 +22,8 @@ interface SpaceOption {
 
 const SPACE_OPTIONS: SpaceOption[] = [
   { value: "srgb", label: "sRGB", title: "Standard web colors (sRGB)" },
-  { value: "display_p3", label: "P3", title: "Wide-gamut display colors (Display P3)" },
+  // P3 hidden until proper color matrix conversion is implemented
+  // { value: "display_p3", label: "P3", title: "Wide-gamut display colors (Display P3)" },
   { value: "oklch", label: "OkLCH", title: "Perceptual lightness/chroma/hue (OkLCH)" },
   { value: "oklab", label: "OkLab", title: "Perceptual lightness and color axes (OkLab)" },
 ];

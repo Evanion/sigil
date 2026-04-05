@@ -1,0 +1,108 @@
+.sigil-effect-card {
+  background: var(--surface-3);
+  border-radius: var(--radius-3, 6px);
+  padding: 8px;
+  margin-bottom: 6px;
+}
+
+.sigil-effect-card__header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+
+.sigil-effect-card__handle {
+  cursor: grab;
+  color: var(--text-3);
+  font-size: 9px;
+  flex-shrink: 0;
+  line-height: 1;
+  user-select: none;
+}
+
+.sigil-effect-card__type-select {
+  flex: 1;
+  font-size: var(--font-size-0, 11px);
+  color: var(--text-1);
+  background: var(--surface-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2);
+  padding: 2px 4px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sigil-effect-card__type-select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-effect-card__color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.sigil-effect-card__color-swatch:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-effect-card__remove {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-2);
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.sigil-effect-card:hover .sigil-effect-card__remove,
+.sigil-effect-card:focus-within .sigil-effect-card__remove {
+  opacity: 1;
+}
+
+.sigil-effect-card__remove:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  opacity: 1;
+}
+
+.sigil-effect-card__fields {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sigil-effect-card__fields--single {
+  grid-template-columns: 1fr;
+}
+
+/* Shadow row: color swatch + X + Y on first line; blur + spread on second */
+.sigil-effect-card__shadow-color-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  grid-column: 1 / -1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-effect-card__remove {
+    transition: none;
+  }
+}

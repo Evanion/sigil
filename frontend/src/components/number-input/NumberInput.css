@@ -40,6 +40,18 @@
   font-family: inherit;
 }
 
+.sigil-number-input__prefix {
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  padding-left: var(--size-2);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sigil-number-input__prefix + .sigil-number-input__input {
+  padding-left: var(--size-1);
+}
+
 .sigil-number-input__suffix {
   color: var(--text-3);
   font-size: var(--font-size-00);

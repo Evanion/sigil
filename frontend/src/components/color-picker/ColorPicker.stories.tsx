@@ -9,6 +9,7 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
 import type { Color } from "../../types/document";
 import { colorToHex } from "./color-math";
+import { ColorSwatch } from "./ColorSwatch";
 import { ColorPicker } from "./ColorPicker";
 import { ColorArea } from "./ColorArea";
 import { HueStrip } from "./HueStrip";
@@ -45,20 +46,6 @@ export const FullPicker: Story = {
       a: 1,
     });
 
-    const trigger = (
-      <button
-        style={{
-          width: "32px",
-          height: "32px",
-          background: colorToHex(color()),
-          border: "1px solid var(--border-1)",
-          "border-radius": "4px",
-          cursor: "pointer",
-        }}
-        aria-label="Edit color"
-      />
-    );
-
     return (
       <div
         style={{
@@ -71,7 +58,7 @@ export const FullPicker: Story = {
           "min-height": "200px",
         }}
       >
-        <ColorPicker color={color()} onColorChange={setColor} trigger={trigger} />
+        <ColorSwatch color={color()} onColorChange={setColor} placement="bottom" />
         <span style={{ color: "var(--text-2)", "font-size": "12px", "font-family": "monospace" }}>
           {colorToHex(color())}
         </span>

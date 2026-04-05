@@ -13,10 +13,21 @@ export interface PopoverProps {
   placement?: PopoverPlacement;
   /** Additional CSS class names appended to the content element. */
   class?: string;
+  /** Whether to prevent closing when interacting inside the content. */
+  preventDismissOnInteract?: boolean;
+  /** Accessible label for the trigger button. */
+  triggerAriaLabel?: string;
 }
 
 export function Popover(props: PopoverProps) {
-  const [local, others] = splitProps(props, ["trigger", "children", "placement", "class"]);
+  const [local, others] = splitProps(props, [
+    "trigger",
+    "children",
+    "placement",
+    "class",
+    "preventDismissOnInteract",
+    "triggerAriaLabel",
+  ]);
 
   const className = () => {
     const classes = ["sigil-popover"];
@@ -26,9 +37,19 @@ export function Popover(props: PopoverProps) {
 
   return (
     <KobaltePopover placement={local.placement ?? "bottom"} {...others}>
-      <KobaltePopover.Trigger>{local.trigger}</KobaltePopover.Trigger>
+      <KobaltePopover.Trigger class="sigil-popover-trigger" aria-label={local.triggerAriaLabel}>
+        {local.trigger}
+      </KobaltePopover.Trigger>
       <KobaltePopover.Portal>
-        <KobaltePopover.Content class={className()}>
+        <KobaltePopover.Content
+          class={className()}
+          {...(local.preventDismissOnInteract
+            ? {
+                onPointerDownOutside: (e: Event) => e.preventDefault(),
+                onFocusOutside: (e: Event) => e.preventDefault(),
+              }
+            : {})}
+        >
           <KobaltePopover.Arrow class="sigil-popover__arrow" />
           {local.children}
         </KobaltePopover.Content>

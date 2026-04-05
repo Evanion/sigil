@@ -178,6 +178,8 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Prettier for formatting.
 - Every frontend view must include ARIA landmark roles (`role="toolbar"`, `role="complementary"`, `role="main"`, `role="status"`). Interactive elements must be keyboard-navigable with `tabindex`. The `<canvas>` element must have `aria-label`. Accessibility is part of "done", not optional polish.
 - Never override Kobalte trigger or interactive primitives with non-interactive elements (`as="span"`, `as="div"`, `as="p"`). Kobalte renders triggers as `<button>` by default, which provides keyboard focus, Enter/Space activation, and ARIA semantics. Overriding with a non-interactive element removes all of these. If you need custom styling, use CSS on the default element or use `as="button"` explicitly.
+- Use `<Index>` (not `<For>`) for Solid.js lists that support reorder, insert, or delete. Solid's `<For>` keyed iteration destroys and recreates DOM nodes when items move positions — this loses focus, breaks CSS transitions, and causes visible flicker during drag-and-drop reorder. `<Index>` preserves DOM elements and updates them in place, which is correct for lists where the user can add, remove, or reorder items (fills, strokes, effects, layers, gradient stops). Reserve `<For>` for read-only lists where the data identity matters more than DOM stability.
+- Deep-cloning Solid store data requires `JSON.parse(JSON.stringify())` inside `produce()` callbacks — but `structuredClone` must be used everywhere else. Solid's `createStore` wraps objects in Proxy traps; `structuredClone` throws `DataCloneError` on these proxies. Inside a `produce()` callback (where the argument is a Solid proxy), use `JSON.parse(JSON.stringify(value))` and wrap it in try-catch. Outside `produce()` — when cloning plain objects, snapshots, or function arguments that are not store proxies — use `structuredClone`. Every `JSON.parse(JSON.stringify())` call site must have a comment: `// JSON clone: Solid proxy not structuredClone-safe`.
 
 ---
 
@@ -405,6 +407,14 @@ Every mutation triggered by a direct user action (drag-and-drop, rename, toggle,
 4. On success: reconcile with server response (accept server-canonical values).
 5. On error: revert to the snapshot and display a visible error notification.
 A mutation that does a full refetch on success instead of optimistic update is a performance bug. A full refetch is only acceptable as a fallback on error.
+
+### Debounced Mutations Must Preserve Rollback Snapshots
+
+When a mutation is debounced (delayed to batch rapid user input), the pre-mutation snapshot for rollback MUST be captured on the first invocation of the debounce window, not when the debounced function finally fires. The debounce timer resets on each call, but the snapshot must remain from the first call — otherwise the rollback target drifts with each intermediate state. On error, revert to this original snapshot. On success, discard the snapshot and clear the timer. Every debounced mutation must implement the same five-step optimistic update contract from "User-Initiated Mutations Must Use Optimistic Updates" — debouncing delays the server call but does not exempt the function from error handling or rollback.
+
+### Module-Level Timers and Subscriptions Must Be Cleared on Teardown
+
+Every `setTimeout`, `setInterval`, `requestAnimationFrame`, `addEventListener`, or subscription registration at module scope or store scope MUST have a corresponding cleanup in the module's or store's teardown/destroy function. A timer that fires after its owning context is destroyed operates on stale references — this causes silent errors, memory leaks, and test flakiness. When adding a timer or subscription, add the cleanup call in the same commit.
 
 ### Pointer-Only Operations Must Have Keyboard Equivalents
 

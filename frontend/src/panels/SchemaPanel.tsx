@@ -73,6 +73,34 @@ const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> 
       if (typeof value === "boolean") store.setLocked(uuid, value);
     },
   },
+  {
+    prefix: "kind.corner_radii.",
+    handler: (store, uuid, key, value, node) => {
+      if (node.kind.type !== "rectangle") return;
+      const idx = parseInt(key.slice("kind.corner_radii.".length), 10);
+      if (idx < 0 || idx > 3 || !Number.isFinite(idx)) return;
+      const current = (node.kind as { corner_radii: readonly number[] }).corner_radii;
+      const newRadii: [number, number, number, number] = [
+        current[0] ?? 0,
+        current[1] ?? 0,
+        current[2] ?? 0,
+        current[3] ?? 0,
+      ];
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return;
+      newRadii[idx] = value;
+      store.setCornerRadii(uuid, newRadii);
+    },
+  },
+  {
+    prefix: "constraints.",
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- value will be used when setConstraints is wired
+    handler: (_store, _uuid, key, _value) => {
+      const field = key.slice("constraints.".length);
+      if (field !== "horizontal" && field !== "vertical") return;
+      // setConstraints not yet wired
+      return;
+    },
+  },
   // Future: style.opacity, style.fills, style.blend_mode, etc.
 ];
 

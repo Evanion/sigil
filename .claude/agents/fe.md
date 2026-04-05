@@ -65,12 +65,16 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - Wrap Kobalte primitives for all interactive components (Button, Tooltip, Popover, Select, etc.)
 - Never use `innerHTML` in JSX — use `textContent` or children
 - Components go in `src/components/<name>/` with `.tsx`, `.css`, `.stories.tsx`, `.test.tsx`
+- Use `<Index>` for lists that support add/remove/reorder (fills, strokes, effects, layers). Use `<For>` only for read-only or append-only lists. See CLAUDE.md section 5.
+- NEVER use `as="span"`, `as="div"`, or `as="p"` on Kobalte Trigger, Button, or interactive primitives. This is a Critical violation of CLAUDE.md section 5. If you need custom styling, style the default `<button>` element or use the `asChild` pattern with a `<button>` child.
+- Deep-clone Solid store data with `JSON.parse(JSON.stringify())` inside `produce()` callbacks only. Use `structuredClone` for all other cloning. See CLAUDE.md section 5.
 
 #### Solid.js Reactivity Pitfalls
 
 - `createStore` uses plain objects (Record), not Map/Set — iterating a store with `Object.keys()` is reactive; iterating a Map is not. If you need a reactive map, use a `Record<string, V>` store field.
 - `createEffect` tracks only the signals read in its synchronous body during the current execution. Signals read inside a callback, setTimeout, or Promise `.then()` are not tracked. If the effect must re-run when a nested value changes, read the signal before the async boundary.
 - `window.devicePixelRatio` is NOT a Solid signal — changes to DPR (e.g., moving a window to a high-DPI monitor) will not trigger reactive updates. Listen for DPR changes via `matchMedia('(resolution: 1dppx)').addEventListener('change', ...)` and store the result in a signal.
+- Kobalte's `NumberField` fires `onRawValueChange` during mount with its initial value. If your effect or handler should only respond to user-initiated changes, gate it with a `mounted` flag set via `onMount` or `queueMicrotask`. Document the guard with a comment explaining the mount-time emission behavior.
 
 ### Styling Conventions
 

@@ -38,6 +38,7 @@
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
   gap: 4px;
+  overflow: hidden;
 }
 
 .sigil-color-value-fields__field {
@@ -45,6 +46,26 @@
   flex-direction: column;
   align-items: center;
   gap: 2px;
+  min-width: 0;
+}
+
+/* Compact NumberInputs inside the color picker value fields */
+.sigil-color-value-fields .sigil-number-input {
+  min-width: 0;
+}
+
+.sigil-color-value-fields .sigil-number-input__group {
+  height: 24px;
+}
+
+.sigil-color-value-fields .sigil-number-input__input {
+  padding: 0 4px;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.sigil-color-value-fields .sigil-number-input__buttons {
+  width: 14px;
 }
 
 .sigil-color-value-fields__label {
@@ -98,14 +119,16 @@
 /* ── ColorPicker popover ────────────────────────────────────────────── */
 
 .sigil-color-picker-popover {
-  width: 270px;
+  /* 240px content + 2 * 12px padding = 264px */
+  width: 264px;
+  padding: 12px;
 }
 
 .sigil-color-picker {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 4px 0;
+  width: 240px;
 }
 
 /* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */

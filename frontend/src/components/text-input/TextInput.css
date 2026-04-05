@@ -11,12 +11,49 @@
   user-select: none;
 }
 
-.sigil-text-input__input {
+.sigil-text-input__group {
+  display: flex;
+  align-items: center;
   height: var(--input-height);
-  padding: 0 var(--input-padding-x);
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: var(--input-radius);
+  overflow: hidden;
+  transition: border-color 150ms;
+}
+
+.sigil-text-input__group:focus-within {
+  border-color: var(--input-border-focus);
+}
+
+.sigil-text-input__group:focus-within:has(:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-text-input__prefix {
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  padding-left: var(--size-2);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sigil-text-input__suffix {
+  color: var(--text-3);
+  font-size: var(--font-size-00);
+  padding-right: var(--size-1);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.sigil-text-input__input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 var(--input-padding-x);
+  background: transparent;
+  border: none;
   color: var(--text-1);
   font-size: var(--font-size-0);
   font-family: inherit;
@@ -30,17 +67,12 @@
   color: var(--text-3);
 }
 
-.sigil-text-input__input:hover {
-  border-color: var(--border-2);
-}
-
-.sigil-text-input__input:focus {
-  border-color: var(--input-border-focus);
+.sigil-text-input__prefix + .sigil-text-input__input {
+  padding-left: var(--size-1);
 }
 
 .sigil-text-input__input:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
+  outline: none;
 }
 
 .sigil-text-input[data-disabled] {
@@ -50,7 +82,7 @@
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
-  .sigil-text-input__input {
+  .sigil-text-input__group {
     transition: none;
   }
 }
