@@ -58,7 +58,7 @@ describe("StrokeRow", () => {
     render(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const swatch = document.querySelector(".sigil-stroke-row__swatch");
+    const swatch = document.querySelector(".sigil-color-swatch");
     expect(swatch).toBeTruthy();
     expect(swatch?.tagName.toLowerCase()).toBe("button");
   });

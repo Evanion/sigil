@@ -9,8 +9,7 @@
  */
 import { createMemo } from "solid-js";
 import type { Color, Stroke, StrokeAlignment, StyleValue } from "../types/document";
-import { ColorPicker } from "../components/color-picker";
-import { colorToHex } from "../components/color-picker/color-math";
+import { ColorSwatch } from "../components/color-picker";
 import { NumberInput } from "../components/number-input/NumberInput";
 import "./StrokeRow.css";
 
@@ -59,21 +58,12 @@ function strokeWidthValue(stroke: Stroke): number {
   return 0;
 }
 
-// ── Swatch background ──────────────────────────────────────────────────
-
-function swatchBackground(stroke: Stroke): string {
-  if (stroke.color.type === "literal") {
-    return colorToHex(stroke.color.value);
-  }
-  return "var(--surface-4)";
-}
-
 // ── StrokeRow component ────────────────────────────────────────────────
 
 export function StrokeRow(props: StrokeRowProps) {
   const currentColor = createMemo(() => strokeColor(props.stroke));
   const widthValue = createMemo(() => strokeWidthValue(props.stroke));
-  const background = createMemo(() => swatchBackground(props.stroke));
+  // background removed — ColorSwatch handles its own display
   const alignment = createMemo(() => alignmentLabel(props.stroke.alignment));
 
   function handleColorChange(newColor: Color): void {
@@ -99,18 +89,7 @@ export function StrokeRow(props: StrokeRowProps) {
         ☰
       </span>
 
-      <ColorPicker
-        color={currentColor()}
-        onColorChange={handleColorChange}
-        trigger={
-          <button
-            class="sigil-stroke-row__swatch"
-            style={{ background: background() }}
-            aria-label="Edit color"
-            type="button"
-          />
-        }
-      />
+      <ColorSwatch color={currentColor()} onColorChange={handleColorChange} />
 
       <div class="sigil-stroke-row__width">
         <NumberInput

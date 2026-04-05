@@ -66,7 +66,7 @@ describe("FillRow", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
-    const swatch = document.querySelector(".sigil-fill-row__swatch");
+    const swatch = document.querySelector(".sigil-color-swatch");
     expect(swatch).toBeTruthy();
     expect(swatch?.tagName.toLowerCase()).toBe("button");
   });

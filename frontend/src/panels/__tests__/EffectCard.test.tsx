@@ -175,7 +175,7 @@ describe("EffectCard", () => {
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     // The color swatch is a button inside the card
-    const swatch = document.querySelector(".sigil-effect-card__color-swatch");
+    const swatch = document.querySelector(".sigil-color-swatch");
     expect(swatch).toBeTruthy();
     expect(swatch?.tagName.toLowerCase()).toBe("button");
   });

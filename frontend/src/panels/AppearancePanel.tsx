@@ -22,7 +22,7 @@
  * EffectsPanel. If a stable ID is added to Fill/Stroke types in a future
  * spec, switch to ID-based dispatch here.
  */
-import { createMemo, createSignal, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, Index, Show, type Component } from "solid-js";
 import type { BlendMode, Fill, FillSolid, Stroke } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { NumberInput } from "../components/number-input/NumberInput";
@@ -350,18 +350,18 @@ export const AppearancePanel: Component = () => {
           <p class="sigil-appearance-panel__empty">No fills</p>
         </Show>
 
-        <For each={fills() as Fill[]}>
+        <Index each={fills() as Fill[]}>
           {(fill, index) => (
-            <div role="group" tabIndex={0} onKeyDown={(e) => handleFillKeyDown(index(), e)}>
+            <div role="group" tabIndex={0} onKeyDown={(e) => handleFillKeyDown(index, e)}>
               <FillRow
-                fill={fill}
-                index={index()}
+                fill={fill()}
+                index={index}
                 onUpdate={handleFillUpdate}
                 onRemove={handleFillRemove}
               />
             </div>
           )}
-        </For>
+        </Index>
       </div>
 
       {/* ── Stroke section ───────────────────────────────────────── */}

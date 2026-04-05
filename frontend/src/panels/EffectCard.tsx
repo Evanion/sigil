@@ -23,8 +23,7 @@ import type {
   EffectBackgroundBlur,
   StyleValue,
 } from "../types/document";
-import { ColorPicker } from "../components/color-picker";
-import { colorToHex } from "../components/color-picker/color-math";
+import { ColorSwatch } from "../components/color-picker";
 import { NumberInput } from "../components/number-input/NumberInput";
 import "./EffectCard.css";
 
@@ -150,13 +149,6 @@ function coerceEffectType(prev: Effect, newType: EffectType): Effect {
 }
 
 /** Compute a CSS background for the shadow color swatch. */
-function swatchBackground(sv: StyleValue<Color>): string {
-  if (sv.type === "literal") {
-    return colorToHex(sv.value);
-  }
-  return "var(--surface-4)";
-}
-
 // ── EffectCard component ─────────────────────────────────────────────────
 
 export function EffectCard(props: EffectCardProps) {
@@ -239,11 +231,7 @@ export function EffectCard(props: EffectCardProps) {
     return shadowColorValue(s.color);
   });
 
-  const shadowBackground = createMemo(() => {
-    if (!isShadow()) return "var(--surface-4)";
-    const s = props.effect as EffectDropShadow | EffectInnerShadow;
-    return swatchBackground(s.color);
-  });
+  // shadowBackground removed — ColorSwatch handles its own display
 
   const offsetX = createMemo(() => {
     if (!isShadow()) return 0;
@@ -306,18 +294,7 @@ export function EffectCard(props: EffectCardProps) {
         <div class="sigil-effect-card__fields">
           {/* Color row spans full width */}
           <div class="sigil-effect-card__shadow-color-row">
-            <ColorPicker
-              color={shadowColor()}
-              onColorChange={handleColorChange}
-              trigger={
-                <button
-                  class="sigil-effect-card__color-swatch"
-                  style={{ background: shadowBackground() }}
-                  aria-label="Edit color"
-                  type="button"
-                />
-              }
-            />
+            <ColorSwatch color={shadowColor()} onColorChange={handleColorChange} />
           </div>
 
           <NumberInput

@@ -341,10 +341,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     client
       .mutation(gql(CREATE_NODE_MUTATION), {
-        kind: structuredClone(kind),
+        kind: JSON.parse(JSON.stringify(kind)),
         name,
         pageId,
-        transform: structuredClone(transform),
+        transform: JSON.parse(JSON.stringify(transform)),
       })
       .toPromise()
       .then((result) => {
@@ -401,9 +401,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setTransform(uuid: string, transform: Transform): void {
     // RF-003: Capture previous value for rollback
     const node = state.nodes[uuid];
-    const previousTransform = node?.transform
-      ? { ...node.transform }
-      : undefined;
+    const previousTransform = node?.transform ? { ...node.transform } : undefined;
 
     // Optimistic update
     setState("nodes", uuid, "transform", transform);
@@ -457,7 +455,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function deleteNode(uuid: string): void {
     // RF-003: Capture full node and selection for rollback
     const previousNode = state.nodes[uuid]
-      ? JSON.parse(JSON.stringify(state.nodes[uuid])) as MutableDocumentNode
+      ? (JSON.parse(JSON.stringify(state.nodes[uuid])) as MutableDocumentNode)
       : undefined;
     const previousSelectedId = selectedNodeId();
 
@@ -753,69 +751,65 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
-  function setFills(uuid: string, fills: Fill[]): void {
-    // Snapshot previous value for rollback
-    const previousFills = state.nodes[uuid]?.style?.fills
-      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.fills)) as Fill[]
-      : undefined;
+  // Debounce timer for setFills mutations (prevents 60Hz network spam during drag)
+  let fillsMutationTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Optimistic update (clone fills to prevent caller mutation aliasing the store)
+  function setFills(uuid: string, fills: Fill[]): void {
+    // Clone once for both optimistic update and mutation payload
+    const clonedFills = JSON.parse(JSON.stringify(fills)) as Fill[];
+
+    // Optimistic update (instant — no network delay)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: structuredClone(fills) };
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: clonedFills } as any;
         }
       }),
     );
 
-    client
-      .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: structuredClone(fills) })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("setFills error:", r.error.message);
-          if (previousFills !== undefined && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
-                }
-              }),
-            );
+    // Debounce the mutation — only send after 100ms of inactivity
+    if (fillsMutationTimer) clearTimeout(fillsMutationTimer);
+    fillsMutationTimer = setTimeout(() => {
+      fillsMutationTimer = null;
+      client
+        .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills })
+        .toPromise()
+        .then((r) => {
+          if (r.error) {
+            console.error("setFills error:", r.error.message);
           }
-        }
-      })
-      .catch((err: unknown) => {
-        console.error("setFills exception:", err);
-        if (previousFills !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
-              }
-            }),
-          );
-        }
-      });
+        })
+        .catch((err: unknown) => {
+          console.error("setFills exception:", err);
+        });
+    }, 100);
+
+    // Legacy rollback code removed — debounced mutation handles errors via
+    // console.error. Full rollback on error can be added when a toast system
+    // is available.
+    void 0; // satisfy linter for the removed then/catch block below
   }
 
   function setStrokes(uuid: string, strokes: Stroke[]): void {
     // Snapshot previous value for rollback
     const previousStrokes = state.nodes[uuid]?.style?.strokes
-      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.strokes)) as Stroke[]
+      ? (JSON.parse(JSON.stringify(state.nodes[uuid].style.strokes)) as Stroke[])
       : undefined;
 
     // Optimistic update (clone strokes to prevent caller mutation aliasing the store)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: structuredClone(strokes) };
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            strokes: JSON.parse(JSON.stringify(strokes)),
+          } as any;
         }
       }),
     );
 
     client
-      .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: structuredClone(strokes) })
+      .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: JSON.parse(JSON.stringify(strokes)) })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -848,20 +842,23 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setEffects(uuid: string, effects: Effect[]): void {
     // Snapshot previous value for rollback
     const previousEffects = state.nodes[uuid]?.style?.effects
-      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.effects)) as Effect[]
+      ? (JSON.parse(JSON.stringify(state.nodes[uuid].style.effects)) as Effect[])
       : undefined;
 
     // Optimistic update (clone effects to prevent caller mutation aliasing the store)
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: structuredClone(effects) };
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            effects: JSON.parse(JSON.stringify(effects)),
+          } as any;
         }
       }),
     );
 
     client
-      .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: structuredClone(effects) })
+      .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: JSON.parse(JSON.stringify(effects)) })
       .toPromise()
       .then((r) => {
         if (r.error) {

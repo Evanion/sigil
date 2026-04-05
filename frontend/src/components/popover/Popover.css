@@ -1,3 +1,13 @@
+/* Trigger wrapper — transparent span so Kobalte can attach handlers
+   without nesting buttons (CLAUDE.md §5 Kobalte override rule). */
+.sigil-popover-trigger {
+  display: inline-flex;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
 .sigil-popover {
   background: var(--surface-3);
   color: var(--text-1);

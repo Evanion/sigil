@@ -69,10 +69,10 @@ export function ColorArea(props: ColorAreaProps) {
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    // Compose DPR into the base transform (per CLAUDE.md Canvas DPR conventions).
+    // Apply DPR scaling so canvas gradients render at logical CSS dimensions
+    // (the canvas backing store is at physical pixel resolution).
     ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
     props.renderBackground(ctx, AREA_WIDTH, AREA_HEIGHT);
-    // Reset transform so subsequent calls don't accumulate.
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
 
