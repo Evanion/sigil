@@ -130,18 +130,13 @@ export function ColorPicker(props: ColorPickerProps) {
     };
   });
 
-  // ── ColorArea x/y position ─────────────────────────────────────────────
+  // ── ColorArea x/y position (RF-006: single srgbToOklch call) ─────────
   // Map current sRGB to x (chroma normalized) and y (lightness) in OkLCH space.
   // x ≈ chroma / max-chroma (use 0.2 as typical max for in-gamut sRGB colors)
   // y ≈ lightness (OkLCH L is 0–1, top=white so y=L)
-  const areaX = createMemo(() => {
-    const [, c] = srgbToOklch(state.r, state.g, state.b);
-    return Math.min(1, c / 0.2);
-  });
-
-  const areaY = createMemo(() => {
-    const [l] = srgbToOklch(state.r, state.g, state.b);
-    return l;
+  const areaOklch = createMemo(() => {
+    const [l, c, h] = srgbToOklch(state.r, state.g, state.b);
+    return { x: Math.min(1, c / 0.2), y: l, l, c, h };
   });
 
   // ── ColorArea change handler ───────────────────────────────────────────
@@ -218,10 +213,10 @@ export function ColorPicker(props: ColorPickerProps) {
 
   return (
     <Popover trigger={props.trigger} placement="bottom" class="sigil-color-picker-popover">
-      <div class="sigil-color-picker" role="dialog" aria-label="Color picker">
+      <div class="sigil-color-picker" aria-label="Color picker">
         <ColorArea
-          xValue={areaX()}
-          yValue={areaY()}
+          xValue={areaOklch().x}
+          yValue={areaOklch().y}
           onChange={handleAreaChange}
           onCommit={commitColor}
           renderBackground={renderAreaBackground()}
@@ -247,6 +242,7 @@ export function ColorPicker(props: ColorPickerProps) {
           isOutOfGamut={outOfGamut()}
           onChange={handleHexChange}
         />
+        <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />
         <ColorValueFields
           r={state.r}
           g={state.g}
@@ -255,7 +251,6 @@ export function ColorPicker(props: ColorPickerProps) {
           space={state.space}
           onChange={handleFieldsChange}
         />
-        <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />
         {/* Visually-hidden live region for discrete color change announcements.
             Not placed on the picker container (high-frequency updates would
             flood the announcement queue — CLAUDE.md §11). */}

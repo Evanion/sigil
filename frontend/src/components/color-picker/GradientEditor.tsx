@@ -5,14 +5,16 @@
  *   - Click on bar to add a new stop (clones left neighbour's color).
  *   - Drag stops to reposition.
  *   - Drag >30px off bar vertically removes the stop (if stops.length > MIN_STOPS).
- *   - Arrow key repositioning (±1%, Shift ±10%).
+ *   - Arrow key repositioning (+/-1%, Shift +/-10%).
  *   - Delete key removes focused stop (if stops.length > MIN_STOPS).
- *   - Toggle between linear and radial gradient types.
+ *   - Toggle between linear and radial gradient types (RF-017: radiogroup pattern).
  *   - Angle input shown only for linear gradients.
  *
  * Accessibility:
  *   - Each stop is role="slider" with aria-valuenow and aria-label.
- *   - Type toggle uses ToggleButton primitives.
+ *   - Selected stop has aria-current="true" (RF-011).
+ *   - Gradient bar is focusable; Enter adds a stop at midpoint (RF-010).
+ *   - Type toggle uses role="radiogroup" with arrow-key navigation (RF-017).
  *   - Angle input uses NumberInput.
  *
  * Guard: all pointer coordinates checked with Number.isFinite() before use.
@@ -21,19 +23,26 @@
 import { createSignal, For, Show } from "solid-js";
 import type { GradientStop, Color } from "../../types/document";
 import { colorToSrgb, srgbToHex, colorAlpha } from "./color-math";
-import { ToggleButton } from "../toggle-button/ToggleButton";
 import { NumberInput } from "../number-input/NumberInput";
 import "./GradientEditor.css";
 
 export const BAR_WIDTH = 240;
 export const BAR_HEIGHT = 28;
 export const MIN_STOPS = 2;
+/** RF-015: Maximum number of gradient stops. */
+export const MAX_STOPS = 16;
 
 /** The two gradient types supported by the editor. */
 export type GradientType = "linear" | "radial";
 
 /** Vertical distance (px) from bar centre that triggers stop removal on drag. */
 const REMOVE_THRESHOLD_PX = 30;
+
+/** Ordered gradient type options for the radiogroup (RF-017). */
+const GRADIENT_TYPE_OPTIONS: readonly { value: GradientType; label: string }[] = [
+  { value: "linear", label: "Linear" },
+  { value: "radial", label: "Radial" },
+];
 
 export interface GradientEditorProps {
   /** Ordered list of gradient stops. Must have at least MIN_STOPS entries. */
@@ -99,12 +108,18 @@ export function GradientEditor(props: GradientEditorProps) {
   let barRef: HTMLDivElement | undefined;
   const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
 
+  // ── RF-017: Type toggle radio button refs ──────────────────────────
+  const typeButtonRefs: (HTMLButtonElement | undefined)[] = [];
+
   // ── Gradient bar click (add stop) ────────────────────────────────────
   function handleBarClick(e: MouseEvent) {
     // Ignore if the click originated on a stop handle.
     if ((e.target as HTMLElement).classList.contains("sigil-gradient-editor__stop")) return;
     if (!Number.isFinite(e.clientX)) return;
     if (!barRef) return;
+
+    // RF-015: enforce MAX_STOPS limit.
+    if (props.stops.length >= MAX_STOPS) return;
 
     const rect = barRef.getBoundingClientRect();
     const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
@@ -122,6 +137,28 @@ export function GradientEditor(props: GradientEditorProps) {
     props.onStopsChange(newStops);
     // Select the newly added stop.
     props.onSelectStop(newStops.length - 1);
+  }
+
+  // ── RF-010: Bar keyboard handler (Enter adds stop at midpoint) ──────
+  function handleBarKeyDown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      // RF-015: enforce MAX_STOPS limit.
+      if (props.stops.length >= MAX_STOPS) return;
+
+      // Add a stop at position 0.5 (midpoint).
+      const sorted = [...props.stops].sort((a, b) => a.position - b.position);
+      const leftNeighbour = sorted.filter((s) => s.position <= 0.5).pop() ?? sorted[0];
+
+      const newStop: GradientStop = {
+        position: 0.5,
+        color: leftNeighbour.color,
+      };
+
+      const newStops = [...props.stops, newStop];
+      props.onStopsChange(newStops);
+      props.onSelectStop(newStops.length - 1);
+    }
   }
 
   // ── Stop drag ────────────────────────────────────────────────────────
@@ -202,27 +239,62 @@ export function GradientEditor(props: GradientEditorProps) {
     }
   }
 
+  // ── RF-017: Gradient type radio keyboard navigation ─────────────────
+  function handleTypeKeyDown(e: KeyboardEvent) {
+    const currentIndex = GRADIENT_TYPE_OPTIONS.findIndex((o) => o.value === props.gradientType);
+    if (currentIndex === -1) return;
+
+    let nextIndex: number | null = null;
+
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      nextIndex = (currentIndex + 1) % GRADIENT_TYPE_OPTIONS.length;
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      nextIndex = (currentIndex - 1 + GRADIENT_TYPE_OPTIONS.length) % GRADIENT_TYPE_OPTIONS.length;
+    }
+
+    if (nextIndex !== null) {
+      const nextOption = GRADIENT_TYPE_OPTIONS[nextIndex];
+      if (nextOption) {
+        props.onGradientTypeChange(nextOption.value);
+        typeButtonRefs[nextIndex]?.focus();
+      }
+    }
+  }
+
   return (
     <div class="sigil-gradient-editor">
-      {/* Type toggle row */}
-      <div class="sigil-gradient-editor__type-row" role="group" aria-label="Gradient type">
-        <ToggleButton
-          pressed={props.gradientType === "linear"}
-          onPressedChange={() => props.onGradientTypeChange("linear")}
-          aria-label="Linear gradient"
-        >
-          Linear
-        </ToggleButton>
-        <ToggleButton
-          pressed={props.gradientType === "radial"}
-          onPressedChange={() => props.onGradientTypeChange("radial")}
-          aria-label="Radial gradient"
-        >
-          Radial
-        </ToggleButton>
+      {/* RF-017: Type toggle row — radiogroup with arrow-key navigation */}
+      <div class="sigil-gradient-editor__type-row" role="radiogroup" aria-label="Gradient type">
+        <For each={GRADIENT_TYPE_OPTIONS}>
+          {(option, i) => {
+            const isActive = () => props.gradientType === option.value;
+            return (
+              <button
+                ref={(el) => {
+                  typeButtonRefs[i()] = el;
+                }}
+                class={
+                  isActive()
+                    ? "sigil-gradient-editor__type-btn sigil-gradient-editor__type-btn--active"
+                    : "sigil-gradient-editor__type-btn"
+                }
+                role="radio"
+                aria-checked={isActive()}
+                tabindex={isActive() ? 0 : -1}
+                onClick={() => props.onGradientTypeChange(option.value)}
+                onKeyDown={handleTypeKeyDown}
+                type="button"
+              >
+                {option.label}
+              </button>
+            );
+          }}
+        </For>
       </div>
 
-      {/* Gradient bar */}
+      {/* Gradient bar — RF-010: focusable, Enter to add stop */}
       <div
         ref={barRef}
         class="sigil-gradient-editor__bar"
@@ -232,7 +304,10 @@ export function GradientEditor(props: GradientEditorProps) {
           background: buildGradientCss(props.stops),
         }}
         onClick={handleBarClick}
-        role="presentation"
+        onKeyDown={handleBarKeyDown}
+        tabindex={0}
+        role="group"
+        aria-label="Gradient stops"
       >
         <For each={props.stops}>
           {(stop, i) => {
@@ -254,6 +329,7 @@ export function GradientEditor(props: GradientEditorProps) {
                 aria-valuenow={Math.round(stop.position * 100)}
                 aria-valuemin={0}
                 aria-valuemax={100}
+                aria-current={isSelected() ? "true" : undefined}
                 onPointerDown={(e) => handleStopPointerDown(e, i())}
                 onPointerMove={(e) => handleStopPointerMove(e, i())}
                 onPointerUp={(e) => handleStopPointerUp(e, i())}

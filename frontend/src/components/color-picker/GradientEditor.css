@@ -33,9 +33,43 @@
 
 .sigil-gradient-editor__stop--selected {
   border-color: white;
+  width: 14px;
+  height: 14px;
+  margin-bottom: -1px;
 }
 
 .sigil-gradient-editor__stop:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* RF-010: focus-visible on the gradient bar when keyboard-focused */
+.sigil-gradient-editor__bar:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* RF-017: Gradient type radio buttons */
+.sigil-gradient-editor__type-btn {
+  flex: 1;
+  text-align: center;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--text-2);
+  border: 1px solid var(--border-1);
+  background: var(--surface-3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sigil-gradient-editor__type-btn--active {
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-weight: 600;
+  border-color: var(--border-2);
+}
+
+.sigil-gradient-editor__type-btn:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
