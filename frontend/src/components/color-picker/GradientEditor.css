@@ -1,0 +1,57 @@
+/* GradientEditor.css — styles for the gradient stop editor widget. */
+
+.sigil-gradient-editor__type-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sigil-gradient-editor__bar {
+  position: relative;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+/* Stop handle */
+.sigil-gradient-editor__stop {
+  position: absolute;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-2);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  cursor: grab;
+  box-shadow: var(--color-picker-thumb-shadow);
+}
+
+.sigil-gradient-editor__stop:active {
+  cursor: grabbing;
+}
+
+.sigil-gradient-editor__stop--selected {
+  border-color: white;
+}
+
+.sigil-gradient-editor__stop:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-gradient-editor__angle-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.sigil-gradient-editor__angle-label {
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No transitions currently used in this component. Placeholder for future additions. */
+}
