@@ -15,6 +15,11 @@ import { useDocument } from "../store/document-context";
 import { EffectCard } from "./EffectCard";
 import "./EffectsPanel.css";
 
+// ── UI boundary limits (RF-017) ───────────────────────────────────────────
+
+/** Maximum number of effect layers allowed per node. */
+const MAX_EFFECTS = 16;
+
 // ── Default effect for the add button ─────────────────────────────────────
 
 const DEFAULT_EFFECT: EffectDropShadow = {
@@ -55,6 +60,7 @@ export const EffectsPanel: Component = () => {
   function handleAdd(): void {
     const uuid = selectedUuid();
     if (!uuid) return;
+    if (effects().length >= MAX_EFFECTS) return;
     const current = effects();
     const next = [...(current as Effect[]), { ...DEFAULT_EFFECT }];
     store.setEffects(uuid, next);
@@ -140,6 +146,10 @@ export const EffectsPanel: Component = () => {
 
       <Show when={selectedUuid() === null}>
         <p class="sigil-effects-panel__empty">Select a layer to edit effects.</p>
+      </Show>
+
+      <Show when={effects().length === 0 && selectedUuid() !== null}>
+        <p class="sigil-effects-panel__empty">No effects</p>
       </Show>
 
       <For each={effects() as Effect[]}>

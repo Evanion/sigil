@@ -46,17 +46,11 @@ const DEFAULT_SHADOW_COLOR: StyleValue<Color> = {
   value: { space: "srgb", r: 0, g: 0, b: 0, a: 0.3 },
 };
 
-/** Extract the numeric blur value from a shadow blur StyleValue (0 if token_ref). */
-function shadowBlurValue(sv: StyleValue<number>): number {
-  if (sv.type === "literal") {
-    const v = sv.value;
-    return Number.isFinite(v) ? v : 0;
-  }
-  return 0;
-}
-
-/** Extract the numeric radius value from a blur radius StyleValue (0 if token_ref). */
-function blurRadiusValue(sv: StyleValue<number>): number {
+/**
+ * Extract the numeric value from a StyleValue<number> (0 if token_ref or non-finite).
+ * Used for blur, spread, and radius fields.
+ */
+function styleValueToNumber(sv: StyleValue<number>): number {
   if (sv.type === "literal") {
     const v = sv.value;
     return Number.isFinite(v) ? v : 0;
@@ -263,17 +257,17 @@ export function EffectCard(props: EffectCardProps) {
 
   const blurVal = createMemo(() => {
     if (!isShadow()) return 0;
-    return shadowBlurValue((props.effect as EffectDropShadow).blur);
+    return styleValueToNumber((props.effect as EffectDropShadow).blur);
   });
 
   const spreadVal = createMemo(() => {
     if (!isShadow()) return 0;
-    return shadowBlurValue((props.effect as EffectDropShadow).spread);
+    return styleValueToNumber((props.effect as EffectDropShadow).spread);
   });
 
   const radiusVal = createMemo(() => {
     if (isShadow()) return 0;
-    return blurRadiusValue((props.effect as EffectLayerBlur).radius);
+    return styleValueToNumber((props.effect as EffectLayerBlur).radius);
   });
 
   return (

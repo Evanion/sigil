@@ -31,6 +31,14 @@ import { FillRow } from "./FillRow";
 import { StrokeRow } from "./StrokeRow";
 import "./AppearancePanel.css";
 
+// ── UI boundary limits (RF-017) ───────────────────────────────────────
+
+/** Maximum number of fill layers allowed per node. */
+const MAX_FILLS = 32;
+
+/** Maximum number of stroke layers allowed per node. */
+const MAX_STROKES = 32;
+
 // ── Blend mode options ────────────────────────────────────────────────
 
 const BLEND_MODES = [
@@ -155,6 +163,7 @@ export const AppearancePanel: Component = () => {
   function handleAddFill(): void {
     const uuid = selectedUuid();
     if (!uuid) return;
+    if (fills().length >= MAX_FILLS) return;
     const newFills = [...(fills() as Fill[]), { ...DEFAULT_FILL }];
     store.setFills(uuid, newFills);
     announce(`Fill added. ${newFills.length} fills total.`);
@@ -225,6 +234,7 @@ export const AppearancePanel: Component = () => {
   function handleAddStroke(): void {
     const uuid = selectedUuid();
     if (!uuid) return;
+    if (strokes().length >= MAX_STROKES) return;
     const newStrokes = [...(strokes() as Stroke[]), { ...DEFAULT_STROKE }];
     store.setStrokes(uuid, newStrokes);
     announce(`Stroke added. ${newStrokes.length} strokes total.`);
@@ -342,7 +352,7 @@ export const AppearancePanel: Component = () => {
 
         <For each={fills() as Fill[]}>
           {(fill, index) => (
-            <div onKeyDown={(e) => handleFillKeyDown(index(), e)}>
+            <div role="group" tabIndex={0} onKeyDown={(e) => handleFillKeyDown(index(), e)}>
               <FillRow
                 fill={fill}
                 index={index()}
@@ -381,7 +391,7 @@ export const AppearancePanel: Component = () => {
 
         <For each={strokes() as Stroke[]}>
           {(stroke, index) => (
-            <div onKeyDown={(e) => handleStrokeKeyDown(index(), e)}>
+            <div role="group" tabIndex={0} onKeyDown={(e) => handleStrokeKeyDown(index(), e)}>
               <StrokeRow
                 stroke={stroke}
                 index={index()}

@@ -59,10 +59,10 @@ export const designSchema: PropertySchema = {
       name: "Corner Radius",
       when: "rectangle",
       fields: [
-        { key: "kind.corner_radii.0", label: "TL", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.1", label: "TR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.2", label: "BR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.3", label: "BL", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.0", label: "Top Left", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.1", label: "Top Right", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.2", label: "Bottom Right", type: "number", step: 1, min: 0 },
+        { key: "kind.corner_radii.3", label: "Bottom Left", type: "number", step: 1, min: 0 },
       ],
     },
     {
@@ -70,7 +70,7 @@ export const designSchema: PropertySchema = {
       fields: [
         {
           key: "constraints.horizontal",
-          label: "H",
+          label: "Horizontal",
           type: "select",
           options: [
             { value: "start", label: "Start" },
@@ -81,7 +81,7 @@ export const designSchema: PropertySchema = {
         },
         {
           key: "constraints.vertical",
-          label: "V",
+          label: "Vertical",
           type: "select",
           options: [
             { value: "start", label: "Start" },

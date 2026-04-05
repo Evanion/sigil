@@ -1,6 +1,6 @@
 .sigil-effect-card {
   background: var(--surface-3);
-  border-radius: 6px;
+  border-radius: var(--radius-3, 6px);
   padding: 8px;
   margin-bottom: 6px;
 }
@@ -45,7 +45,6 @@
   border: 1px solid var(--border-1);
   cursor: pointer;
   flex-shrink: 0;
-  outline: none;
   padding: 0;
 }
 

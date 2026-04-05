@@ -23,7 +23,6 @@
   border: 1px solid var(--border-1);
   cursor: pointer;
   flex-shrink: 0;
-  outline: none;
   padding: 0;
 }
 
