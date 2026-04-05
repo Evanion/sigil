@@ -1,0 +1,37 @@
+.sigil-color-area {
+  position: relative;
+  border-radius: var(--color-picker-radius);
+  overflow: hidden;
+  cursor: crosshair;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.sigil-color-area:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-color-area__canvas {
+  display: block;
+}
+
+.sigil-color-area__cursor {
+  position: absolute;
+  width: var(--color-picker-cursor-size);
+  height: var(--color-picker-cursor-size);
+  border-radius: 50%;
+  border: 2px solid white;
+  box-shadow: var(--color-picker-cursor-shadow);
+  transform: translate(-50%, 50%);
+  pointer-events: none;
+  transition:
+    left 60ms linear,
+    bottom 60ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-color-area__cursor {
+    transition: none;
+  }
+}

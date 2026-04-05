@@ -1,0 +1,37 @@
+.sigil-strip {
+  position: relative;
+  border-radius: var(--color-picker-strip-radius);
+  overflow: hidden;
+  cursor: pointer;
+  outline: none;
+  flex-shrink: 0;
+}
+
+.sigil-strip:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-strip__canvas {
+  display: block;
+  border-radius: var(--color-picker-strip-radius);
+}
+
+.sigil-strip__thumb {
+  position: absolute;
+  top: -1px;
+  width: 8px;
+  height: calc(100% + 2px);
+  border-radius: 4px;
+  border: 2px solid white;
+  box-shadow: var(--color-picker-thumb-shadow);
+  transform: translateX(-50%);
+  pointer-events: none;
+  transition: left 60ms linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-strip__thumb {
+    transition: none;
+  }
+}
