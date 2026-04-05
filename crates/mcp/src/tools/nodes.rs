@@ -556,7 +556,7 @@ pub fn reparent_node_impl(
     state: &AppState,
     uuid_str: &str,
     new_parent_uuid_str: &str,
-    position: i32,
+    position: u32,
 ) -> Result<NodeInfo, McpToolError> {
     let node_uuid: Uuid = uuid_str
         .parse()
@@ -582,17 +582,22 @@ pub fn reparent_node_impl(
             .get(node_id)
             .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
             .parent;
-        let old_position = old_parent_id.and_then(|pid| {
-            doc.arena
-                .get(pid)
-                .ok()
-                .and_then(|p| p.children.iter().position(|&c| c == node_id))
-        });
+        let old_position = match old_parent_id {
+            Some(pid) => {
+                let parent_node = doc
+                    .arena
+                    .get(pid)
+                    .map_err(|_| McpToolError::NodeNotFound(format!("old parent {pid:?}")))?;
+                parent_node.children.iter().position(|&c| c == node_id)
+            }
+            None => None,
+        };
 
+        // Positions beyond children count are clamped by the core engine (append semantics).
         let cmd = ReparentNode {
             node_id,
             new_parent_id: parent_id,
-            new_position: usize::try_from(position.max(0)).unwrap_or(0),
+            new_position: position as usize,
             old_parent_id,
             old_position,
         };
@@ -620,7 +625,7 @@ pub fn reparent_node_impl(
 pub fn reorder_children_impl(
     state: &AppState,
     uuid_str: &str,
-    new_position: i32,
+    new_position: u32,
 ) -> Result<NodeInfo, McpToolError> {
     let node_uuid: Uuid = uuid_str
         .parse()
@@ -654,9 +659,10 @@ pub fn reorder_children_impl(
                 McpToolError::InvalidInput("node not found in parent's children list".to_string())
             })?;
 
+        // Positions beyond children count are clamped by the core engine.
         let cmd = ReorderChildren {
             node_id,
-            new_position: usize::try_from(new_position.max(0)).unwrap_or(0),
+            new_position: new_position as usize,
             old_position,
         };
         doc.execute(Box::new(cmd))?;

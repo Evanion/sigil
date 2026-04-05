@@ -396,6 +396,10 @@ impl MutationRoot {
     }
 
     /// Move a node to a new parent at a specific position.
+    ///
+    /// Note: GraphQL `Int` is signed (i32), but position must be non-negative.
+    /// The resolver validates this before acquiring the lock. Positions beyond
+    /// the parent's children count are clamped by the core engine (append semantics).
     async fn reparent_node(
         &self,
         ctx: &Context<'_>,
@@ -404,6 +408,14 @@ impl MutationRoot {
         position: i32,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
+
+        // RF-013: reject negative positions before lock acquisition.
+        if position < 0 {
+            return Err(async_graphql::Error::new("position must be non-negative"));
+        }
+        #[allow(clippy::cast_sign_loss)] // validated non-negative above
+        let position_usize = position as usize;
+
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -428,18 +440,23 @@ impl MutationRoot {
                 .get(node_id)
                 .map_err(|_| async_graphql::Error::new("node lookup failed"))?
                 .parent;
-            let old_position = old_parent_id.and_then(|pid| {
-                doc_guard
-                    .arena
-                    .get(pid)
-                    .ok()
-                    .and_then(|p| p.children.iter().position(|&c| c == node_id))
-            });
+            // RF-019: propagate error instead of silently suppressing with .ok()
+            let old_position = match old_parent_id {
+                Some(pid) => {
+                    let parent_node = doc_guard
+                        .arena
+                        .get(pid)
+                        .map_err(|_| async_graphql::Error::new("old parent node not found"))?;
+                    parent_node.children.iter().position(|&c| c == node_id)
+                }
+                None => None,
+            };
 
+            // RF-014: positions beyond children count are clamped by the core engine.
             let cmd = ReparentNode {
                 node_id,
                 new_parent_id: parent_id,
-                new_position: usize::try_from(position.max(0)).unwrap_or(0),
+                new_position: position_usize,
                 old_parent_id,
                 old_position,
             };
@@ -463,6 +480,10 @@ impl MutationRoot {
     }
 
     /// Reorder a node within its parent's children list.
+    ///
+    /// Note: GraphQL `Int` is signed (i32), but position must be non-negative.
+    /// The resolver validates this before acquiring the lock. Positions beyond
+    /// the children count are clamped by the core engine.
     async fn reorder_children(
         &self,
         ctx: &Context<'_>,
@@ -470,6 +491,14 @@ impl MutationRoot {
         new_position: i32,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
+
+        // RF-013: reject negative positions before lock acquisition.
+        if new_position < 0 {
+            return Err(async_graphql::Error::new("position must be non-negative"));
+        }
+        #[allow(clippy::cast_sign_loss)] // validated non-negative above
+        let new_position_usize = new_position as usize;
+
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
@@ -499,9 +528,10 @@ impl MutationRoot {
                 .position(|&c| c == node_id)
                 .ok_or_else(|| async_graphql::Error::new("node not found in parent's children"))?;
 
+            // RF-014: positions beyond children count are clamped by the core engine.
             let cmd = ReorderChildren {
                 node_id,
-                new_position: usize::try_from(new_position.max(0)).unwrap_or(0),
+                new_position: new_position_usize,
                 old_position,
             };
 

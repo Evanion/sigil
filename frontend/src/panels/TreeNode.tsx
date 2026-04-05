@@ -15,10 +15,10 @@ export interface TreeNodeProps {
   readonly isExpanded: boolean;
   readonly onToggleExpand: (uuid: string) => void;
   readonly hasChildren: boolean;
-  /** Whether this node is the keyboard-focused node. */
+  /** Whether this node is the keyboard-focused node (roving tabindex). */
   readonly isFocused?: boolean;
-  /** Callback to trigger inline rename from external sources (e.g. F2 key). */
-  readonly onStartRename?: (uuid: string) => void;
+  /** Called when this node is clicked/selected (for focus sync). */
+  readonly onFocusNode?: (uuid: string) => void;
 }
 
 /** Maps node kind discriminant to a short text icon. */
@@ -76,12 +76,9 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
     });
   }
 
-  // Wire the external onStartRename callback from parent if needed
-  // The parent (LayersTree) will call props.onStartRename which we handle below.
-  // We expose the startRename function via a data attribute on the DOM element.
-
   function handleClick() {
     store.setSelectedNodeId(props.node.uuid);
+    props.onFocusNode?.(props.node.uuid);
     announce(`${props.node.name} selected`);
   }
 
@@ -141,7 +138,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       aria-selected={isSelected()}
       aria-expanded={props.hasChildren ? props.isExpanded : undefined}
       aria-level={props.depth + 1}
-      tabindex={isSelected() ? 0 : -1}
+      tabindex={props.isFocused ? 0 : -1}
       data-uuid={props.node.uuid}
       data-depth={props.depth}
       data-kind={props.node.kind.type}
@@ -179,7 +176,9 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
               inputRef = el;
             }}
             class="sigil-tree-node__name-input"
+            aria-label={`Rename ${props.node.name}`}
             value={props.node.name}
+            maxLength={1024}
             onBlur={handleRenameSubmit}
             onKeyDown={handleRenameKeyDown}
           />
@@ -191,19 +190,23 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       {/* Spacer */}
       <span class="sigil-tree-node__spacer" />
 
-      {/* Lock toggle */}
+      {/* Lock toggle — removed from tab order (use L key on focused node) */}
       <button
         class="sigil-tree-node__toggle"
+        classList={{ "sigil-tree-node__toggle--active": props.node.locked }}
         aria-label={props.node.locked ? "Unlock" : "Lock"}
+        tabindex={-1}
         onClick={handleLockToggle}
       >
         {props.node.locked ? "\u{1F512}" : "\u{1F513}"}
       </button>
 
-      {/* Visibility toggle */}
+      {/* Visibility toggle — removed from tab order (use H key on focused node) */}
       <button
         class="sigil-tree-node__toggle"
+        classList={{ "sigil-tree-node__toggle--active": !props.node.visible }}
         aria-label={props.node.visible ? "Hide" : "Show"}
+        tabindex={-1}
         onClick={handleVisibilityToggle}
       >
         {props.node.visible ? "\u{1F441}" : "\u{1F441}\u200D\u{1F5E8}"}
