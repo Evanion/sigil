@@ -25,11 +25,7 @@ const App: Component = () => {
   return (
     <DocumentProvider store={store}>
       <AnnounceProvider announce={announce}>
-        {/* TODO(Plan 10b): When drag sources are added, wire onDragStart and onDragEnd
-            callbacks on DragDropProvider to call announce() with descriptive messages, e.g.:
-            onDragStart: announce(`Picked up ${nodeName}`)
-            onDragEnd: announce(`Dropped ${nodeName} ${position} ${targetName}`)
-            This is required for WCAG 2.1 SC 4.1.3 (Status Messages). */}
+        {/* DnD announcements handled by useDragDropMonitor in LayersTree (WCAG 2.1 SC 4.1.3). */}
         <DragDropProvider>
           <div class="app-shell">
             {/* RF-018: Wrap Toolbar in grid-placed div */}

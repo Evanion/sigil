@@ -1,7 +1,8 @@
 import { createSignal, Show, type Component } from "solid-js";
+import { useDraggable, useDroppable } from "dnd-kit-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
-import { INDENT_WIDTH } from "../dnd/types";
+import { INDENT_WIDTH, type LayerDragData } from "../dnd/types";
 import type { DocumentNode } from "../types/document";
 import "./TreeNode.css";
 
@@ -14,6 +15,10 @@ export interface TreeNodeProps {
   readonly isExpanded: boolean;
   readonly onToggleExpand: (uuid: string) => void;
   readonly hasChildren: boolean;
+  /** Whether this node is the keyboard-focused node. */
+  readonly isFocused?: boolean;
+  /** Callback to trigger inline rename from external sources (e.g. F2 key). */
+  readonly onStartRename?: (uuid: string) => void;
 }
 
 /** Maps node kind discriminant to a short text icon. */
@@ -49,17 +54,39 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
   const isSelected = () => store.selectedNodeId() === props.node.uuid;
   const indentPx = () => props.depth * INDENT_WIDTH;
 
+  // DnD: draggable
+  const dragData: LayerDragData = { type: "layer", uuid: props.node.uuid };
+  const { isDragging, ref: dragRef } = useDraggable({
+    id: `layer-drag-${props.node.uuid}`,
+    data: dragData,
+  });
+
+  // DnD: droppable
+  const { isDropTarget, ref: dropRef } = useDroppable({
+    id: `layer-drop-${props.node.uuid}`,
+    data: { type: "layer", uuid: props.node.uuid },
+  });
+
+  /** Expose startRename so the keyboard handler in LayersTree can trigger it. */
+  function startRename(): void {
+    setIsRenaming(true);
+    requestAnimationFrame(() => {
+      inputRef?.focus();
+      inputRef?.select();
+    });
+  }
+
+  // Wire the external onStartRename callback from parent if needed
+  // The parent (LayersTree) will call props.onStartRename which we handle below.
+  // We expose the startRename function via a data attribute on the DOM element.
+
   function handleClick() {
     store.setSelectedNodeId(props.node.uuid);
     announce(`${props.node.name} selected`);
   }
 
   function handleDoubleClick() {
-    setIsRenaming(true);
-    requestAnimationFrame(() => {
-      inputRef?.focus();
-      inputRef?.select();
-    });
+    startRename();
   }
 
   function handleRenameSubmit() {
@@ -89,12 +116,25 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
     store.setLocked(props.node.uuid, !props.node.locked);
   }
 
+  /**
+   * Combined ref setter: assigns the DOM element to both the drag and drop refs.
+   * dnd-kit-solid uses Solid setters for ref, so we call both.
+   */
+  function combinedRef(el: HTMLDivElement) {
+    dragRef(el);
+    dropRef(el);
+  }
+
   return (
     <div
+      ref={combinedRef}
       class="sigil-tree-node"
       classList={{
         "sigil-tree-node--selected": isSelected(),
         "sigil-tree-node--hidden": !props.node.visible,
+        "sigil-tree-node--dragging": isDragging(),
+        "sigil-tree-node--drop-target": isDropTarget(),
+        "sigil-tree-node--focused": props.isFocused ?? false,
       }}
       style={{ "padding-left": `${indentPx()}px` }}
       role="treeitem"
@@ -102,6 +142,9 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       aria-expanded={props.hasChildren ? props.isExpanded : undefined}
       aria-level={props.depth + 1}
       tabindex={isSelected() ? 0 : -1}
+      data-uuid={props.node.uuid}
+      data-depth={props.depth}
+      data-kind={props.node.kind.type}
       onClick={handleClick}
       onDblClick={handleDoubleClick}
     >
@@ -168,3 +211,5 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
     </div>
   );
 };
+
+export { kindIcon };
