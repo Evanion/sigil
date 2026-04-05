@@ -20,6 +20,7 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
           onValueChange={(v) => {
             if (Number.isFinite(v)) props.onChange(v);
           }}
+          prefix={props.field.label}
           step={props.field.step ?? 1}
           min={props.field.min}
           max={props.field.max}
@@ -45,6 +46,7 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
         <TextInput
           value={typeof props.value === "string" ? props.value : ""}
           onValueChange={(v) => props.onChange(v)}
+          prefix={props.field.label}
           aria-label={props.field.label}
         />
       </Match>

@@ -57,10 +57,13 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
               <div
                 class={`sigil-schema-field ${field.span === 2 ? "sigil-schema-field--span-2" : ""}`}
               >
-                {/* RF-017: Field labels use aria-label on inputs rather than
-                    programmatic <label> association. This is acceptable per
-                    WCAG 4.1.2 since each input carries its own aria-label. */}
-                <span class="sigil-schema-field__label">{field.label}</span>
+                {/* For number/text/slider fields, the label is rendered as a
+                    prefix inside the input (Figma-style). For toggle and select
+                    fields, the label is rendered as a separate span since those
+                    components don't support prefix. */}
+                <Show when={field.type === "toggle" || field.type === "select"}>
+                  <span class="sigil-schema-field__label">{field.label}</span>
+                </Show>
                 <FieldRenderer
                   field={field}
                   value={resolveValue(props.node, field.key)}

@@ -400,8 +400,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function setTransform(uuid: string, transform: Transform): void {
     // RF-003: Capture previous value for rollback
-    const previousTransform = state.nodes[uuid]?.transform
-      ? structuredClone(state.nodes[uuid].transform)
+    const node = state.nodes[uuid];
+    const previousTransform = node?.transform
+      ? { ...node.transform }
       : undefined;
 
     // Optimistic update
@@ -409,7 +410,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     client
       .mutation(gql(SET_TRANSFORM_MUTATION), {
         uuid,
-        transform: structuredClone(transform),
+        transform: { ...transform },
       })
       .toPromise()
       .then((r) => {
@@ -455,7 +456,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function deleteNode(uuid: string): void {
     // RF-003: Capture full node and selection for rollback
-    const previousNode = state.nodes[uuid] ? structuredClone(state.nodes[uuid]) : undefined;
+    const previousNode = state.nodes[uuid]
+      ? JSON.parse(JSON.stringify(state.nodes[uuid])) as MutableDocumentNode
+      : undefined;
     const previousSelectedId = selectedNodeId();
 
     setState(
@@ -660,7 +663,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Snapshot previous value for rollback
     const previousOpacity = state.nodes[uuid]?.style?.opacity
-      ? structuredClone(state.nodes[uuid].style.opacity)
+      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.opacity))
       : undefined;
 
     // Optimistic update
@@ -753,7 +756,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setFills(uuid: string, fills: Fill[]): void {
     // Snapshot previous value for rollback
     const previousFills = state.nodes[uuid]?.style?.fills
-      ? structuredClone(state.nodes[uuid].style.fills)
+      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.fills)) as Fill[]
       : undefined;
 
     // Optimistic update (clone fills to prevent caller mutation aliasing the store)
@@ -799,7 +802,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setStrokes(uuid: string, strokes: Stroke[]): void {
     // Snapshot previous value for rollback
     const previousStrokes = state.nodes[uuid]?.style?.strokes
-      ? structuredClone(state.nodes[uuid].style.strokes)
+      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.strokes)) as Stroke[]
       : undefined;
 
     // Optimistic update (clone strokes to prevent caller mutation aliasing the store)
@@ -845,7 +848,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setEffects(uuid: string, effects: Effect[]): void {
     // Snapshot previous value for rollback
     const previousEffects = state.nodes[uuid]?.style?.effects
-      ? structuredClone(state.nodes[uuid].style.effects)
+      ? JSON.parse(JSON.stringify(state.nodes[uuid].style.effects)) as Effect[]
       : undefined;
 
     // Optimistic update (clone effects to prevent caller mutation aliasing the store)
@@ -900,7 +903,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Snapshot previous value for rollback
     const previousKind = state.nodes[uuid]?.kind
-      ? structuredClone(state.nodes[uuid].kind)
+      ? JSON.parse(JSON.stringify(state.nodes[uuid].kind))
       : undefined;
 
     // Optimistic update — kind.type guard is required for TypeScript narrowing even

@@ -6,6 +6,10 @@ export interface TextInputProps {
   value: string;
   onValueChange: (value: string) => void;
   label?: string;
+  /** Short text rendered inside the input as a prefix (e.g., "Name"). */
+  prefix?: string;
+  /** Short text rendered inside the input as a suffix. */
+  suffix?: string;
   placeholder?: string;
   disabled?: boolean;
   class?: string;
@@ -17,6 +21,8 @@ export function TextInput(props: TextInputProps) {
     "value",
     "onValueChange",
     "label",
+    "prefix",
+    "suffix",
     "placeholder",
     "disabled",
     "class",
@@ -40,11 +46,19 @@ export function TextInput(props: TextInputProps) {
       <Show when={local.label}>
         <TextField.Label class="sigil-text-input__label">{local.label}</TextField.Label>
       </Show>
-      <TextField.Input
-        class="sigil-text-input__input"
-        placeholder={local.placeholder}
-        aria-label={!local.label ? local["aria-label"] : undefined}
-      />
+      <div class="sigil-text-input__group">
+        <Show when={local.prefix}>
+          <span class="sigil-text-input__prefix">{local.prefix}</span>
+        </Show>
+        <TextField.Input
+          class="sigil-text-input__input"
+          placeholder={local.placeholder}
+          aria-label={!local.label ? local["aria-label"] : undefined}
+        />
+        <Show when={local.suffix}>
+          <span class="sigil-text-input__suffix">{local.suffix}</span>
+        </Show>
+      </div>
     </TextField>
   );
 }
