@@ -18,7 +18,7 @@ use axum::Router;
 use axum::extract::WebSocketUpgrade;
 use axum::http::{HeaderMap, HeaderValue, Method};
 use axum::response::{Html, IntoResponse};
-use axum::routing::get;
+use axum::routing::{get, get_service};
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
@@ -56,16 +56,19 @@ pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
         .route("/health", get(routes::health::health))
         .route("/graphql/ws", get(graphql_ws_handler));
 
-    // RF-004: Only expose GraphiQL IDE in development mode.
+    // GraphQL endpoint accepts both GET (query params) and POST (JSON body).
+    // GET is required because urql's fetchExchange sends queries as GET by default.
+    let graphql_service = GraphQL::new(schema.clone());
     if std::env::var("SIGIL_DEV_CORS").is_ok() {
+        // RF-004: Also expose GraphiQL IDE in development mode (separate GET handler).
         app = app.route(
             "/graphql",
-            get(graphiql).post_service(GraphQL::new(schema.clone())),
+            get(graphiql).post_service(graphql_service),
         );
     } else {
         app = app.route(
             "/graphql",
-            axum::routing::post_service(GraphQL::new(schema.clone())),
+            get_service(graphql_service.clone()).post_service(graphql_service),
         );
     }
 

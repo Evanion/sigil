@@ -109,7 +109,7 @@ export const Toolbar: Component = () => {
       onKeyDown={handleToolbarKeydown}
     >
       <div class="toolbar__logo" aria-hidden="true">
-        S
+        SIGIL
       </div>
       <For each={TOOLS}>
         {(tool, index) => (

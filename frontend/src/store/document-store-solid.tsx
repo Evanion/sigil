@@ -240,6 +240,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   const client = createClient({
     url: httpUrl,
+    fetchOptions: { method: "POST" },
     exchanges: [
       cacheExchange,
       subscriptionExchange({
