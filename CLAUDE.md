@@ -395,3 +395,26 @@ When migrating from one protocol, library, or API to another (e.g., WebSocket to
 4. Dead test fixtures or mocks for the old protocol.
 5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
 A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.
+
+### User-Initiated Mutations Must Use Optimistic Updates
+
+Every mutation triggered by a direct user action (drag-and-drop, rename, toggle, delete) that modifies server state MUST apply the expected state change to the local store immediately, before the server responds. Waiting for a server round-trip before updating the UI creates perceptible lag that violates the "feels like Figma" UX requirement. The optimistic update contract:
+1. Snapshot the pre-mutation local state.
+2. Apply the change to the local store immediately.
+3. Send the mutation to the server.
+4. On success: reconcile with server response (accept server-canonical values).
+5. On error: revert to the snapshot and display a visible error notification.
+A mutation that does a full refetch on success instead of optimistic update is a performance bug. A full refetch is only acceptable as a fallback on error.
+
+### Pointer-Only Operations Must Have Keyboard Equivalents
+
+Every operation achievable via pointer gesture (drag-and-drop reorder, drag-and-drop reparent, hover-to-reveal controls, long-press, right-click context menu) MUST have a keyboard-accessible equivalent in the same PR. This is a WCAG 2.1.1 (Keyboard) requirement, not optional polish. Common patterns:
+- Drag-and-drop reorder: Alt+Arrow Up/Down to move the focused item.
+- Drag-and-drop reparent: Alt+Arrow Left (outdent) / Alt+Arrow Right (indent).
+- Hover-to-reveal controls: controls must be reachable via Tab or a disclosed keyboard shortcut.
+- Context menu: must open on Shift+F10 or the Menu key.
+If a keyboard equivalent cannot ship in the same PR due to technical constraints, file a tracking issue and document the deferral in the PR description — do not merge without acknowledgment.
+
+### No Silent Clamping of Invalid Input
+
+Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
