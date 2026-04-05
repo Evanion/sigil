@@ -5,9 +5,11 @@
 //!   `doc.execute(Box::new(cmd))` → build response → drop lock → `signal_dirty`
 
 use agent_designer_core::{
-    NodeId, NodeKind, Transform,
+    BlendMode, Effect, Fill, NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
-    commands::style_commands::SetTransform,
+    commands::style_commands::{
+        SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+    },
     commands::tree_commands::{ReorderChildren, ReparentNode},
 };
 use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
@@ -679,6 +681,398 @@ pub fn reorder_children_impl(
     Ok(node_info)
 }
 
+// ── Style tool implementations ────────────────────────────────────────────────
+
+/// Sets a node's opacity.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if opacity is NaN, infinity, or outside [0.0, 1.0].
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures.
+pub fn set_opacity_impl(
+    state: &AppState,
+    uuid_str: &str,
+    opacity: f64,
+) -> Result<MutationResult, McpToolError> {
+    if !opacity.is_finite() {
+        return Err(McpToolError::InvalidInput(
+            "opacity must be finite (no NaN or infinity)".to_string(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&opacity) {
+        return Err(McpToolError::InvalidInput(format!(
+            "opacity must be in [0.0, 1.0], got {opacity}"
+        )));
+    }
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_opacity = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .style
+            .opacity
+            .clone();
+
+        let cmd = SetOpacity {
+            node_id,
+            new_opacity: StyleValue::Literal { value: opacity },
+            old_opacity,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "opacity"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Opacity set to {opacity} on node {uuid_str}"),
+    })
+}
+
+/// Sets a node's blend mode.
+///
+/// Parses the string to a `BlendMode` via serde deserialization.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if the blend mode string is not recognized.
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures.
+pub fn set_blend_mode_impl(
+    state: &AppState,
+    uuid_str: &str,
+    blend_mode_str: &str,
+) -> Result<MutationResult, McpToolError> {
+    let new_blend_mode: BlendMode = serde_json::from_value(serde_json::Value::String(
+        blend_mode_str.to_string(),
+    ))
+    .map_err(|_| {
+        McpToolError::InvalidInput(format!(
+            "unknown blend mode '{blend_mode_str}': expected one of normal, multiply, screen, \
+             overlay, darken, lighten, color_dodge, color_burn, hard_light, soft_light, \
+             difference, exclusion, hue, saturation, color, luminosity"
+        ))
+    })?;
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_blend_mode = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .style
+            .blend_mode;
+
+        let cmd = SetBlendMode {
+            node_id,
+            new_blend_mode,
+            old_blend_mode,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "blend_mode"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Blend mode set to '{blend_mode_str}' on node {uuid_str}"),
+    })
+}
+
+/// Sets a node's fills.
+///
+/// Deserializes the `serde_json::Value` to `Vec<Fill>` before executing.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if the fills JSON is invalid.
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures.
+pub fn set_fills_impl(
+    state: &AppState,
+    uuid_str: &str,
+    fills_value: &serde_json::Value,
+) -> Result<MutationResult, McpToolError> {
+    let new_fills: Vec<Fill> = serde_json::from_value(fills_value.clone())
+        .map_err(|e| McpToolError::InvalidInput(format!("invalid fills JSON: {e}")))?;
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_fills = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .style
+            .fills
+            .clone();
+
+        let cmd = SetFills {
+            node_id,
+            new_fills,
+            old_fills,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "fills"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Fills updated on node {uuid_str}"),
+    })
+}
+
+/// Sets a node's strokes.
+///
+/// Deserializes the `serde_json::Value` to `Vec<Stroke>` before executing.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if the strokes JSON is invalid.
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures.
+pub fn set_strokes_impl(
+    state: &AppState,
+    uuid_str: &str,
+    strokes_value: &serde_json::Value,
+) -> Result<MutationResult, McpToolError> {
+    let new_strokes: Vec<Stroke> = serde_json::from_value(strokes_value.clone())
+        .map_err(|e| McpToolError::InvalidInput(format!("invalid strokes JSON: {e}")))?;
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_strokes = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .style
+            .strokes
+            .clone();
+
+        let cmd = SetStrokes {
+            node_id,
+            new_strokes,
+            old_strokes,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "strokes"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Strokes updated on node {uuid_str}"),
+    })
+}
+
+/// Sets a node's effects.
+///
+/// Deserializes the `serde_json::Value` to `Vec<Effect>` before executing.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if the effects JSON is invalid.
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures.
+pub fn set_effects_impl(
+    state: &AppState,
+    uuid_str: &str,
+    effects_value: &serde_json::Value,
+) -> Result<MutationResult, McpToolError> {
+    let new_effects: Vec<Effect> = serde_json::from_value(effects_value.clone())
+        .map_err(|e| McpToolError::InvalidInput(format!("invalid effects JSON: {e}")))?;
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_effects = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .style
+            .effects
+            .clone();
+
+        let cmd = SetEffects {
+            node_id,
+            new_effects,
+            old_effects,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "effects"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Effects updated on node {uuid_str}"),
+    })
+}
+
+/// Sets a rectangle node's corner radii.
+///
+/// Validates that exactly 4 elements are provided, all finite and non-negative.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidInput` if radii count is not 4, or any value is NaN/infinity/negative.
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
+/// - `McpToolError::CoreError` on engine-level failures (e.g. node is not a rectangle).
+pub fn set_corner_radii_impl(
+    state: &AppState,
+    uuid_str: &str,
+    radii: &[f64],
+) -> Result<MutationResult, McpToolError> {
+    if radii.len() != 4 {
+        return Err(McpToolError::InvalidInput(format!(
+            "corner radii must have exactly 4 elements, got {}",
+            radii.len()
+        )));
+    }
+    for (i, &r) in radii.iter().enumerate() {
+        if !r.is_finite() {
+            return Err(McpToolError::InvalidInput(format!(
+                "radii[{i}] must be finite (no NaN or infinity), got {r}"
+            )));
+        }
+        if r < 0.0 {
+            return Err(McpToolError::InvalidInput(format!(
+                "radii[{i}] must be non-negative, got {r}"
+            )));
+        }
+    }
+    let new_radii: [f64; 4] = [radii[0], radii[1], radii[2], radii[3]];
+
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let node = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let old_radii = match &node.kind {
+            NodeKind::Rectangle { corner_radii } => *corner_radii,
+            _ => {
+                return Err(McpToolError::InvalidInput(
+                    "SetCornerRadii requires a rectangle node".to_string(),
+                ));
+            }
+        };
+
+        let cmd = SetCornerRadii {
+            node_id,
+            new_radii,
+            old_radii,
+        };
+        doc.execute(Box::new(cmd))?;
+    }
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "corner_radii"})),
+    });
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Corner radii set on node {uuid_str}"),
+    })
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1024,5 +1418,220 @@ mod tests {
 
         let result = reorder_children_impl(&state, &root.uuid, 0);
         assert!(result.is_err(), "root node has no parent, should fail");
+    }
+
+    // ── set_opacity_impl ──────────────────────────────────────────────
+
+    #[test]
+    fn test_set_opacity_impl_updates_opacity() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_opacity_impl(&state, &created.uuid, 0.5);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        let mutation = result.unwrap();
+        assert!(mutation.success);
+        assert!(mutation.message.contains("0.5"));
+
+        // Verify the opacity was actually applied.
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_id = doc
+            .arena
+            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        assert_eq!(
+            node.style.opacity,
+            agent_designer_core::StyleValue::Literal { value: 0.5 }
+        );
+    }
+
+    #[test]
+    fn test_set_opacity_impl_rejects_nan() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_opacity_impl(&state, &created.uuid, f64::NAN);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+    }
+
+    #[test]
+    fn test_set_opacity_impl_rejects_out_of_range() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_opacity_impl(&state, &created.uuid, 1.5);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+
+        let result2 = set_opacity_impl(&state, &created.uuid, -0.1);
+        assert!(result2.is_err());
+        assert!(matches!(
+            result2.unwrap_err(),
+            McpToolError::InvalidInput(_)
+        ));
+    }
+
+    // ── set_blend_mode_impl ───────────────────────────────────────────
+
+    #[test]
+    fn test_set_blend_mode_impl_updates_blend_mode() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_blend_mode_impl(&state, &created.uuid, "multiply");
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_id = doc
+            .arena
+            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        assert_eq!(
+            node.style.blend_mode,
+            agent_designer_core::BlendMode::Multiply
+        );
+    }
+
+    #[test]
+    fn test_set_blend_mode_impl_rejects_invalid() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_blend_mode_impl(&state, &created.uuid, "banana");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+    }
+
+    // ── set_corner_radii_impl ─────────────────────────────────────────
+
+    #[test]
+    fn test_set_corner_radii_impl_on_rectangle() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 8.0, 4.0, 8.0]);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        assert!(result.unwrap().success);
+
+        // Verify radii were applied.
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_id = doc
+            .arena
+            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        match &node.kind {
+            agent_designer_core::NodeKind::Rectangle { corner_radii } => {
+                assert_eq!(*corner_radii, [4.0, 8.0, 4.0, 8.0]);
+            }
+            _ => panic!("expected rectangle"),
+        }
+    }
+
+    #[test]
+    fn test_set_corner_radii_impl_rejects_non_rectangle() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0, 4.0, 4.0]);
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("rectangle")),
+            "error should mention rectangle requirement"
+        );
+    }
+
+    #[test]
+    fn test_set_corner_radii_impl_rejects_wrong_count() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0]);
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("4 elements")),
+            "error should mention 4 elements"
+        );
+    }
+
+    #[test]
+    fn test_set_corner_radii_impl_rejects_negative() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, -1.0, 4.0, 4.0]);
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("non-negative")),
+            "error should mention non-negative"
+        );
+    }
+
+    #[test]
+    fn test_set_corner_radii_impl_rejects_nan() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let result = set_corner_radii_impl(&state, &created.uuid, &[f64::NAN, 0.0, 0.0, 0.0]);
+        assert!(result.is_err());
+        assert!(
+            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
+            "error should mention finiteness"
+        );
+    }
+
+    // ── set_fills_impl ────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_fills_impl_rejects_invalid_json() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let bad_json = serde_json::json!("not an array");
+        let result = set_fills_impl(&state, &created.uuid, &bad_json);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+    }
+
+    // ── set_strokes_impl ──────────────────────────────────────────────
+
+    #[test]
+    fn test_set_strokes_impl_rejects_invalid_json() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let bad_json = serde_json::json!(42);
+        let result = set_strokes_impl(&state, &created.uuid, &bad_json);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
+    }
+
+    // ── set_effects_impl ──────────────────────────────────────────────
+
+    #[test]
+    fn test_set_effects_impl_rejects_invalid_json() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+
+        let bad_json = serde_json::json!({"not": "an array"});
+        let result = set_effects_impl(&state, &created.uuid, &bad_json);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 }
