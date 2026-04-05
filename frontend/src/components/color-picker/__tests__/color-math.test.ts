@@ -351,6 +351,28 @@ describe("isOutOfSrgbGamut", () => {
     const color: ColorOklch = { space: "oklch", l: 1, c: 0, h: 0, a: 1 };
     expect(isOutOfSrgbGamut(color)).toBe(false);
   });
+
+  it("should return true for OkLCH color with high chroma that exceeds sRGB gamut (RF-003)", () => {
+    // High chroma at medium lightness is out of sRGB gamut
+    const color: ColorOklch = { space: "oklch", l: 0.5, c: 0.3, h: 150, a: 1 };
+    expect(isOutOfSrgbGamut(color)).toBe(true);
+  });
+
+  it("should return true for OkLab color that maps to negative linear RGB (RF-003)", () => {
+    // Large a/b values map to out-of-gamut sRGB
+    const color: ColorOklab = { space: "oklab", l: 0.5, a: 0.3, b: 0.3, alpha: 1 };
+    expect(isOutOfSrgbGamut(color)).toBe(true);
+  });
+
+  it("should return true for sRGB Color with negative channel", () => {
+    const color: ColorSrgb = { space: "srgb", r: -0.1, g: 0.5, b: 0.5, a: 1 };
+    expect(isOutOfSrgbGamut(color)).toBe(true);
+  });
+
+  it("should return true for sRGB Color with channel above 1", () => {
+    const color: ColorSrgb = { space: "srgb", r: 0.5, g: 1.1, b: 0.5, a: 1 };
+    expect(isOutOfSrgbGamut(color)).toBe(true);
+  });
 });
 
 // ── colorAlpha ────────────────────────────────────────────────────────

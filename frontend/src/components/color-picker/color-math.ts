@@ -336,8 +336,11 @@ function oklabToSrgbUnclamped(L: number, a: number, b: number): [number, number,
   const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   const lb = -0.004196086300000001 * l - 0.7034186147 * m + 1.707614701 * s;
 
+  // Preserve negative linear values so the gamut check catches them (RF-003).
+  // Without this, negative inputs go through Math.pow which returns NaN for
+  // fractional exponents, masking the out-of-gamut condition.
   const toSrgb = (c: number): number =>
-    c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+    c < 0 ? c : c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
 
   return [toSrgb(lr), toSrgb(lg), toSrgb(lb)];
 }

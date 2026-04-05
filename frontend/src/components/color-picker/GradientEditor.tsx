@@ -20,7 +20,7 @@
  */
 import { createSignal, For, Show } from "solid-js";
 import type { GradientStop, Color } from "../../types/document";
-import { colorToSrgb, srgbToHex } from "./color-math";
+import { colorToSrgb, srgbToHex, colorAlpha } from "./color-math";
 import { ToggleButton } from "../toggle-button/ToggleButton";
 import { NumberInput } from "../number-input/NumberInput";
 import "./GradientEditor.css";
@@ -61,6 +61,7 @@ export interface GradientEditorProps {
 function buildGradientCss(stops: readonly GradientStop[]): string {
   const sorted = [...stops].sort((a, b) => a.position - b.position);
   const colorStops = sorted
+    .filter((s) => Number.isFinite(s.position) && s.position >= 0 && s.position <= 1)
     .map((stop) => {
       let color: Color;
       if (stop.color.type === "literal") {
@@ -70,7 +71,7 @@ function buildGradientCss(stops: readonly GradientStop[]): string {
         return `transparent ${stop.position * 100}%`;
       }
       const [r, g, b] = colorToSrgb(color);
-      const alpha = color.space === "oklab" ? color.alpha : color.a;
+      const alpha = colorAlpha(color);
       const hex = srgbToHex(r, g, b);
       if (alpha < 1) {
         const a = Math.round(alpha * 255)

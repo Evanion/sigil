@@ -19,8 +19,10 @@ export interface ColorAreaProps {
   xValue: number;
   /** Normalized y position in [0, 1], where 1 = top and 0 = bottom. */
   yValue: number;
-  /** Called when the user changes the position. */
+  /** Called when the user changes the position (continuously during drag). */
   onChange: (x: number, y: number) => void;
+  /** Called when the user finishes a drag gesture (pointerup). */
+  onCommit?: () => void;
   /**
    * Caller-supplied function that paints the gradient background.
    * Called with the 2D context and the logical (CSS) dimensions.
@@ -110,6 +112,7 @@ export function ColorArea(props: ColorAreaProps) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
     setIsDragging(false);
+    props.onCommit?.();
   }
 
   // ── Keyboard events ───────────────────────────────────────────────────

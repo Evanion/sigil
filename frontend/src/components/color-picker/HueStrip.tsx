@@ -16,8 +16,10 @@ export const STRIP_HEIGHT = 14;
 export interface HueStripProps {
   /** Current hue value in [0, 360). */
   hue: number;
-  /** Called when the user changes the hue. */
+  /** Called when the user changes the hue (continuously during drag). */
   onChange: (hue: number) => void;
+  /** Called when the user finishes a drag gesture (pointerup). */
+  onCommit?: () => void;
   /** Accessible label. Defaults to "Hue". */
   "aria-label"?: string;
 }
@@ -106,6 +108,7 @@ export function HueStrip(props: HueStripProps) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
     setIsDragging(false);
+    props.onCommit?.();
   }
 
   // ── Keyboard events ───────────────────────────────────────────────────

@@ -12,7 +12,7 @@
  * All numeric values from callbacks are guarded with Number.isFinite() before
  * use (CLAUDE.md §11 Floating-Point Validation).
  */
-import { createEffect, createMemo } from "solid-js";
+import { createEffect, createMemo, createSignal } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { Color } from "../../types/document";
 import type { ColorSpace } from "./types";
@@ -81,28 +81,52 @@ export function ColorPicker(props: ColorPickerProps) {
     props.onColorChange(srgbToColor(r, g, b, alpha, space));
   }
 
-  // ── ColorArea background render ────────────────────────────────────────
-  // Renders white→hue-color horizontal gradient + transparent→black vertical
-  // overlay, matching the classic Figma-style color area.
+  // ── Committed color for aria-live (RF-002) ──────────────────────────────
+  // Only updated on discrete events (pointerup, blur, Enter, space change)
+  // so that the aria-live region does not flood the screen reader at 60Hz.
+  const [committedColor, setCommittedColor] = createSignal("");
+
+  function commitColor() {
+    setCommittedColor(
+      `Color: ${srgbToHex(state.r, state.g, state.b)} opacity ${Math.round(state.alpha * 100)}%`,
+    );
+  }
+
+  // Initialize the committed color from the incoming prop.
+  createEffect(() => {
+    // Re-read props.color to track it reactively; this fires on prop changes
+    // (which are discrete events, not drag events).
+    const _color = props.color;
+    void _color;
+    commitColor();
+  });
+
+  // ── ColorArea background render (RF-004) ─────────────────────────────
+  // Renders a pixel-accurate OkLCH gradient via ImageData.
+  // X-axis = chroma (0 at left to 0.2 at right).
+  // Y-axis = lightness (1 at top to 0 at bottom).
+  // This matches handleAreaChange which maps y->lightness, x->chroma.
   const renderAreaBackground = createMemo(() => {
     const hue = state.hue;
     return (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-      // Horizontal: white (left) to pure hue-color (right)
-      const hGrad = ctx.createLinearGradient(0, 0, width, 0);
-      hGrad.addColorStop(0, "#ffffff");
-      // Convert hue to an sRGB hex using full saturation + medium lightness.
-      const [hr, hg, hb] = oklchToSrgb(0.65, 0.2, hue);
-      const hueHex = srgbToHex(hr, hg, hb);
-      hGrad.addColorStop(1, hueHex);
-      ctx.fillStyle = hGrad;
-      ctx.fillRect(0, 0, width, height);
+      const imageData = ctx.createImageData(width, height);
+      const data = imageData.data;
 
-      // Vertical overlay: transparent (top) to black (bottom)
-      const vGrad = ctx.createLinearGradient(0, 0, 0, height);
-      vGrad.addColorStop(0, "rgba(0,0,0,0)");
-      vGrad.addColorStop(1, "rgba(0,0,0,1)");
-      ctx.fillStyle = vGrad;
-      ctx.fillRect(0, 0, width, height);
+      for (let py = 0; py < height; py++) {
+        // Top row = lightness 1, bottom row = lightness 0
+        const lightness = 1 - py / (height - 1 || 1);
+        for (let px = 0; px < width; px++) {
+          const chroma = (px / (width - 1 || 1)) * 0.2;
+          const [r, g, b] = oklchToSrgb(lightness, chroma, hue);
+          const idx = (py * width + px) * 4;
+          data[idx] = Math.round(r * 255);
+          data[idx + 1] = Math.round(g * 255);
+          data[idx + 2] = Math.round(b * 255);
+          data[idx + 3] = 255;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
     };
   });
 
@@ -165,6 +189,7 @@ export function ColorPicker(props: ColorPickerProps) {
     const newHue = c > 0.001 ? h : state.hue;
     setState({ r, g, b, alpha, hue: newHue });
     emit(r, g, b, alpha, state.space);
+    commitColor();
   }
 
   // ── HexInput change handler ────────────────────────────────────────────
@@ -174,6 +199,7 @@ export function ColorPicker(props: ColorPickerProps) {
     const newHue = c > 0.001 ? h : state.hue;
     setState({ r, g, b, hue: newHue });
     emit(r, g, b, state.alpha, state.space);
+    commitColor();
   }
 
   // ── ColorSpace change handler ──────────────────────────────────────────
@@ -181,6 +207,7 @@ export function ColorPicker(props: ColorPickerProps) {
   function handleSpaceChange(space: ColorSpace) {
     setState({ space });
     emit(state.r, state.g, state.b, state.alpha, space);
+    commitColor();
   }
 
   // ── Alpha CSS color string for AlphaStrip ─────────────────────────────
@@ -196,14 +223,21 @@ export function ColorPicker(props: ColorPickerProps) {
           xValue={areaX()}
           yValue={areaY()}
           onChange={handleAreaChange}
+          onCommit={commitColor}
           renderBackground={renderAreaBackground()}
           aria-label="Color saturation and lightness"
         />
-        <HueStrip hue={state.hue} onChange={handleHueChange} aria-label="Hue" />
+        <HueStrip
+          hue={state.hue}
+          onChange={handleHueChange}
+          onCommit={commitColor}
+          aria-label="Hue"
+        />
         <AlphaStrip
           alpha={state.alpha}
           colorCss={alphaCss()}
           onChange={handleAlphaChange}
+          onCommit={commitColor}
           aria-label="Opacity"
         />
         <HexInput
@@ -240,7 +274,7 @@ export function ColorPicker(props: ColorPickerProps) {
             "border-width": "0",
           }}
         >
-          {`Color: ${srgbToHex(state.r, state.g, state.b)} opacity ${Math.round(state.alpha * 100)}%`}
+          {committedColor()}
         </span>
       </div>
     </Popover>

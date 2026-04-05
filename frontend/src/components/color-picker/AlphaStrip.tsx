@@ -21,8 +21,10 @@ export interface AlphaStripProps {
   alpha: number;
   /** CSS color string for the opaque end of the gradient (e.g. "hsl(200, 100%, 50%)"). */
   colorCss: string;
-  /** Called when the user changes the alpha. */
+  /** Called when the user changes the alpha (continuously during drag). */
   onChange: (alpha: number) => void;
+  /** Called when the user finishes a drag gesture (pointerup). */
+  onCommit?: () => void;
   /** Accessible label. Defaults to "Opacity". */
   "aria-label"?: string;
 }
@@ -120,6 +122,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
     setIsDragging(false);
+    props.onCommit?.();
   }
 
   // ── Keyboard events ───────────────────────────────────────────────────
