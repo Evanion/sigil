@@ -1,4 +1,4 @@
-import { createSignal, Show, type Component } from "solid-js";
+import { createSignal, For, Show, type Component } from "solid-js";
 import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
 import { AppearancePanel } from "./AppearancePanel";
@@ -51,20 +51,29 @@ export const DesignPanel: Component = () => {
         aria-label="Design panel tabs"
         onKeyDown={handleKeyDown}
       >
-        {TABS.map((tab) => (
-          <button
-            class="sigil-design-panel__tab"
-            classList={{ "sigil-design-panel__tab--active": activeTab() === tab }}
-            role="tab"
-            aria-selected={activeTab() === tab}
-            tabindex={activeTab() === tab ? 0 : -1}
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </button>
-        ))}
+        <For each={TABS}>
+          {(tab) => (
+            <button
+              class="sigil-design-panel__tab"
+              classList={{ "sigil-design-panel__tab--active": activeTab() === tab }}
+              role="tab"
+              id={`design-tab-${tab}`}
+              aria-controls="design-tabpanel"
+              aria-selected={activeTab() === tab}
+              tabIndex={activeTab() === tab ? 0 : -1}
+              onClick={() => setActiveTab(tab)}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          )}
+        </For>
       </div>
-      <div class="sigil-design-panel__content" role="tabpanel">
+      <div
+        class="sigil-design-panel__content"
+        role="tabpanel"
+        id="design-tabpanel"
+        aria-labelledby={`design-tab-${activeTab()}`}
+      >
         <Show when={activeTab() === "layout"}>
           <SchemaPanel schema={designSchema} />
         </Show>

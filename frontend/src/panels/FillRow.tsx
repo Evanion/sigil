@@ -9,7 +9,7 @@
  * The color swatch background is set inline; all numeric values interpolated
  * into CSS strings are guarded with Number.isFinite() per CLAUDE.md §11.
  */
-import { createMemo, createSignal } from "solid-js";
+import { createMemo, Show } from "solid-js";
 import type { Color, Fill, FillSolid, StyleValue } from "../types/document";
 import { ColorPicker } from "../components/color-picker";
 import { colorToHex } from "../components/color-picker/color-math";
@@ -101,9 +101,6 @@ function solidFillColor(fill: FillSolid): Color {
 // ── FillRow component ──────────────────────────────────────────────────
 
 export function FillRow(props: FillRowProps) {
-  // Track popover open state so the swatch aria-label can reflect it
-  const [open, setOpen] = createSignal(false);
-
   const label = createMemo(() => fillTypeLabel(props.fill));
 
   const background = createMemo(() => swatchBackground(props.fill));
@@ -123,82 +120,51 @@ export function FillRow(props: FillRowProps) {
     props.onRemove(props.index);
   }
 
-  /**
-   * Swatch element — passed as the ColorPicker trigger for solid fills.
-   * For non-solid fills, it is a non-interactive visual preview (still a button
-   * for accessibility, but with no popover).
-   */
-  const swatchAriaLabel = createMemo(() =>
-    open() ? "Close color picker" : `Edit ${label()} fill color`,
+  const solidColor = createMemo(() =>
+    props.fill.type === "solid"
+      ? solidFillColor(props.fill as FillSolid)
+      : { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 },
   );
 
-  // ── Solid fill branch — ColorPicker-connected swatch ────────────────
-  if (props.fill.type === "solid") {
-    const solidColor = createMemo(() =>
-      props.fill.type === "solid"
-        ? solidFillColor(props.fill as FillSolid)
-        : { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 },
-    );
-
-    const swatchTrigger = (
-      <button
-        class="sigil-fill-row__swatch"
-        style={{ background: background() }}
-        aria-label={swatchAriaLabel()}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-      />
-    );
-
-    return (
-      <div class="sigil-fill-row">
-        {/* Drag handle — decorative, hidden from screen readers */}
-        <span class="sigil-fill-row__handle" aria-hidden="true">
-          ☰
-        </span>
-
-        <ColorPicker
-          color={solidColor()}
-          onColorChange={handleColorChange}
-          trigger={swatchTrigger}
-        />
-
-        <span class="sigil-fill-row__type">{label()}</span>
-
-        <button
-          class="sigil-fill-row__remove"
-          type="button"
-          tabindex={-1}
-          aria-label="Remove fill"
-          onClick={handleRemove}
-        >
-          ×
-        </button>
-      </div>
-    );
-  }
-
-  // ── Non-solid fills (gradient, image) — swatch is preview-only ──────
   return (
     <div class="sigil-fill-row">
+      {/* Drag handle — decorative, hidden from screen readers */}
       <span class="sigil-fill-row__handle" aria-hidden="true">
         ☰
       </span>
 
-      <button
-        class="sigil-fill-row__swatch"
-        style={{ background: background() }}
-        aria-label={`${label()} fill preview`}
-        type="button"
-        disabled
-      />
+      <Show
+        when={props.fill.type === "solid"}
+        fallback={
+          <button
+            class="sigil-fill-row__swatch"
+            style={{ background: background() }}
+            aria-label={`${label()} fill preview`}
+            type="button"
+            disabled
+          />
+        }
+      >
+        <ColorPicker
+          color={solidColor()}
+          onColorChange={handleColorChange}
+          trigger={
+            <button
+              class="sigil-fill-row__swatch"
+              style={{ background: background() }}
+              aria-label="Edit color"
+              type="button"
+            />
+          }
+        />
+      </Show>
 
       <span class="sigil-fill-row__type">{label()}</span>
 
       <button
         class="sigil-fill-row__remove"
         type="button"
-        tabindex={-1}
+        tabIndex={-1}
         aria-label="Remove fill"
         onClick={handleRemove}
       >

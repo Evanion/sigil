@@ -13,7 +13,7 @@
  *
  * All numeric inputs are guarded with Number.isFinite() per CLAUDE.md §11.
  */
-import { createMemo, createSignal } from "solid-js";
+import { createEffect, createMemo } from "solid-js";
 import type {
   Color,
   Effect,
@@ -166,16 +166,18 @@ function swatchBackground(sv: StyleValue<Color>): string {
 // ── EffectCard component ─────────────────────────────────────────────────
 
 export function EffectCard(props: EffectCardProps) {
-  const [pickerOpen, setPickerOpen] = createSignal(false);
-
   // ── Type select ────────────────────────────────────────────────────────
-  // The select element is uncontrolled: no reactive value binding. We set
-  // the initial value imperatively via a ref callback so Solid cannot reset
-  // the DOM value during user interaction.
+  // Controlled via createEffect: when props.effect.type changes externally
+  // (e.g. undo), the select element value is kept in sync.
 
-  function initSelect(el: HTMLSelectElement): void {
-    el.value = props.effect.type;
-  }
+  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
+  let selectRef: HTMLSelectElement | undefined;
+
+  createEffect(() => {
+    if (selectRef) {
+      selectRef.value = props.effect.type;
+    }
+  });
 
   function handleTypeChange(e: Event): void {
     const newType = (e.currentTarget as HTMLSelectElement).value as EffectType;
@@ -274,22 +276,6 @@ export function EffectCard(props: EffectCardProps) {
     return blurRadiusValue((props.effect as EffectLayerBlur).radius);
   });
 
-  const swatchAriaLabel = createMemo(() =>
-    pickerOpen() ? "Close color picker" : "Edit shadow color",
-  );
-
-  // ── Shadow color swatch (used as ColorPicker trigger) ──────────────────
-
-  const swatchTrigger = (
-    <button
-      class="sigil-effect-card__color-swatch"
-      style={{ background: shadowBackground() }}
-      aria-label={swatchAriaLabel()}
-      type="button"
-      onClick={() => setPickerOpen((v) => !v)}
-    />
-  );
-
   return (
     <div class="sigil-effect-card">
       {/* Header row */}
@@ -299,7 +285,7 @@ export function EffectCard(props: EffectCardProps) {
         </span>
 
         <select
-          ref={initSelect}
+          ref={selectRef}
           class="sigil-effect-card__type-select"
           onChange={handleTypeChange}
           aria-label="Effect type"
@@ -329,7 +315,14 @@ export function EffectCard(props: EffectCardProps) {
             <ColorPicker
               color={shadowColor()}
               onColorChange={handleColorChange}
-              trigger={swatchTrigger}
+              trigger={
+                <button
+                  class="sigil-effect-card__color-swatch"
+                  style={{ background: shadowBackground() }}
+                  aria-label="Edit color"
+                  type="button"
+                />
+              }
             />
           </div>
 

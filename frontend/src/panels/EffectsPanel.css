@@ -11,9 +11,9 @@
 }
 
 .sigil-effects-panel__title {
-  font-size: 10px;
+  font-size: var(--font-size-00, 10px);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--letter-spacing-1, 0.5px);
   color: var(--text-2);
   font-weight: 600;
 }
@@ -41,7 +41,7 @@
 
 .sigil-effects-panel__empty {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--font-size-0, 11px);
   padding: 4px 0;
 }
 

@@ -23,7 +23,7 @@
 
 .sigil-effect-card__type-select {
   flex: 1;
-  font-size: 11px;
+  font-size: var(--font-size-0, 11px);
   color: var(--text-1);
   background: var(--surface-2);
   border: 1px solid var(--border-1);

@@ -44,11 +44,11 @@
 
 .sigil-stroke-row__width .sigil-number-input__input {
   height: 22px;
-  font-size: 11px;
+  font-size: var(--font-size-0, 11px);
 }
 
 .sigil-stroke-row__alignment {
-  font-size: 11px;
+  font-size: var(--font-size-0, 11px);
   color: var(--text-2);
   flex: 1;
 }

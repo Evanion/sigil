@@ -86,18 +86,19 @@ const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> 
         current[2] ?? 0,
         current[3] ?? 0,
       ];
-      newRadii[idx] = value as number;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return;
+      newRadii[idx] = value;
       store.setCornerRadii(uuid, newRadii);
     },
   },
   {
     prefix: "constraints.",
-    handler: (_store, _uuid, key, value) => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- value will be used when setConstraints is wired
+    handler: (_store, _uuid, key, _value) => {
       const field = key.slice("constraints.".length);
       if (field !== "horizontal" && field !== "vertical") return;
-      // setConstraints not yet wired — this handler is ready for when it is.
-      // store.setConstraints(uuid, { ...node.constraints, [field]: value as string });
-      console.warn("setConstraints not yet implemented — field:", field, "value:", value);
+      // setConstraints not yet wired
+      return;
     },
   },
   // Future: style.opacity, style.fills, style.blend_mode, etc.

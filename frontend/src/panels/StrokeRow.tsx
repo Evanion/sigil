@@ -7,7 +7,7 @@
  * All numeric values from NumberInput are guarded with Number.isFinite()
  * before use per CLAUDE.md §11 Floating-Point Validation.
  */
-import { createMemo, createSignal } from "solid-js";
+import { createMemo } from "solid-js";
 import type { Color, Stroke, StrokeAlignment, StyleValue } from "../types/document";
 import { ColorPicker } from "../components/color-picker";
 import { colorToHex } from "../components/color-picker/color-math";
@@ -71,14 +71,10 @@ function swatchBackground(stroke: Stroke): string {
 // ── StrokeRow component ────────────────────────────────────────────────
 
 export function StrokeRow(props: StrokeRowProps) {
-  const [open, setOpen] = createSignal(false);
-
   const currentColor = createMemo(() => strokeColor(props.stroke));
   const widthValue = createMemo(() => strokeWidthValue(props.stroke));
   const background = createMemo(() => swatchBackground(props.stroke));
   const alignment = createMemo(() => alignmentLabel(props.stroke.alignment));
-
-  const swatchAriaLabel = createMemo(() => (open() ? "Close color picker" : "Edit stroke color"));
 
   function handleColorChange(newColor: Color): void {
     const newColorValue: StyleValue<Color> = { type: "literal", value: newColor };
@@ -96,16 +92,6 @@ export function StrokeRow(props: StrokeRowProps) {
     props.onRemove(props.index);
   }
 
-  const swatchTrigger = (
-    <button
-      class="sigil-stroke-row__swatch"
-      style={{ background: background() }}
-      aria-label={swatchAriaLabel()}
-      type="button"
-      onClick={() => setOpen((v) => !v)}
-    />
-  );
-
   return (
     <div class="sigil-stroke-row">
       {/* Drag handle — decorative, hidden from screen readers */}
@@ -116,7 +102,14 @@ export function StrokeRow(props: StrokeRowProps) {
       <ColorPicker
         color={currentColor()}
         onColorChange={handleColorChange}
-        trigger={swatchTrigger}
+        trigger={
+          <button
+            class="sigil-stroke-row__swatch"
+            style={{ background: background() }}
+            aria-label="Edit color"
+            type="button"
+          />
+        }
       />
 
       <div class="sigil-stroke-row__width">
@@ -134,7 +127,7 @@ export function StrokeRow(props: StrokeRowProps) {
       <button
         class="sigil-stroke-row__remove"
         type="button"
-        tabindex={-1}
+        tabIndex={-1}
         aria-label="Remove stroke"
         onClick={handleRemove}
       >

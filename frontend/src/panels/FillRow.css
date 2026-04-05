@@ -33,7 +33,7 @@
 }
 
 .sigil-fill-row__type {
-  font-size: 11px;
+  font-size: var(--font-size-0, 11px);
   color: var(--text-2);
   flex: 1;
 }

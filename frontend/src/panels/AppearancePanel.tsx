@@ -22,7 +22,7 @@
  * EffectsPanel. If a stable ID is added to Fill/Stroke types in a future
  * spec, switch to ID-based dispatch here.
  */
-import { createMemo, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, Show, type Component } from "solid-js";
 import type { BlendMode, Fill, FillSolid, Stroke } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { NumberInput } from "../components/number-input/NumberInput";
@@ -71,6 +71,16 @@ const DEFAULT_STROKE: Stroke = {
 
 export const AppearancePanel: Component = () => {
   const store = useDocument();
+
+  // ── Live region announcement (RF-009) ──────────────────────────────
+  const [announcement, setAnnouncement] = createSignal("");
+
+  function announce(message: string): void {
+    // Clear first to ensure the screen reader re-announces even if
+    // the same message is set twice in a row.
+    setAnnouncement("");
+    queueMicrotask(() => setAnnouncement(message));
+  }
 
   // ── Derived values ────────────────────────────────────────────────
 
@@ -145,7 +155,9 @@ export const AppearancePanel: Component = () => {
   function handleAddFill(): void {
     const uuid = selectedUuid();
     if (!uuid) return;
-    store.setFills(uuid, [...(fills() as Fill[]), { ...DEFAULT_FILL }]);
+    const newFills = [...(fills() as Fill[]), { ...DEFAULT_FILL }];
+    store.setFills(uuid, newFills);
+    announce(`Fill added. ${newFills.length} fills total.`);
   }
 
   function handleFillUpdate(index: number, updated: Fill): void {
@@ -162,10 +174,9 @@ export const AppearancePanel: Component = () => {
     const uuid = selectedUuid();
     if (!uuid) return;
     const current = fills() as Fill[];
-    store.setFills(
-      uuid,
-      current.filter((_, i) => i !== index),
-    );
+    const next = current.filter((_, i) => i !== index);
+    store.setFills(uuid, next);
+    announce(`Fill removed. ${next.length} fills total.`);
   }
 
   /**
@@ -173,6 +184,16 @@ export const AppearancePanel: Component = () => {
    * drag-and-drop reorder (CLAUDE.md Pointer-Only Operations rule).
    */
   function handleFillKeyDown(index: number, e: KeyboardEvent): void {
+    // RF-014: skip reorder when event originates from an input element
+    if (e.target instanceof HTMLInputElement) return;
+
+    // RF-007: Delete key removes the focused fill row
+    if (e.key === "Delete") {
+      e.preventDefault();
+      handleFillRemove(index);
+      return;
+    }
+
     if (!e.altKey) return;
     const current = fills() as Fill[];
     const uuid = selectedUuid();
@@ -204,7 +225,9 @@ export const AppearancePanel: Component = () => {
   function handleAddStroke(): void {
     const uuid = selectedUuid();
     if (!uuid) return;
-    store.setStrokes(uuid, [...(strokes() as Stroke[]), { ...DEFAULT_STROKE }]);
+    const newStrokes = [...(strokes() as Stroke[]), { ...DEFAULT_STROKE }];
+    store.setStrokes(uuid, newStrokes);
+    announce(`Stroke added. ${newStrokes.length} strokes total.`);
   }
 
   function handleStrokeUpdate(index: number, updated: Stroke): void {
@@ -221,10 +244,9 @@ export const AppearancePanel: Component = () => {
     const uuid = selectedUuid();
     if (!uuid) return;
     const current = strokes() as Stroke[];
-    store.setStrokes(
-      uuid,
-      current.filter((_, i) => i !== index),
-    );
+    const next = current.filter((_, i) => i !== index);
+    store.setStrokes(uuid, next);
+    announce(`Stroke removed. ${next.length} strokes total.`);
   }
 
   /**
@@ -232,6 +254,16 @@ export const AppearancePanel: Component = () => {
    * drag-and-drop reorder (CLAUDE.md Pointer-Only Operations rule).
    */
   function handleStrokeKeyDown(index: number, e: KeyboardEvent): void {
+    // RF-014: skip reorder when event originates from an input element
+    if (e.target instanceof HTMLInputElement) return;
+
+    // RF-007: Delete key removes the focused stroke row
+    if (e.key === "Delete") {
+      e.preventDefault();
+      handleStrokeRemove(index);
+      return;
+    }
+
     if (!e.altKey) return;
     const current = strokes() as Stroke[];
     const uuid = selectedUuid();
@@ -284,9 +316,15 @@ export const AppearancePanel: Component = () => {
       </div>
 
       {/* ── Fill section ─────────────────────────────────────────── */}
-      <div class="sigil-appearance-panel__section">
+      <div
+        class="sigil-appearance-panel__section"
+        role="group"
+        aria-labelledby="appearance-fill-title"
+      >
         <div class="sigil-appearance-panel__section-header">
-          <span class="sigil-appearance-panel__section-title">Fill</span>
+          <span class="sigil-appearance-panel__section-title" id="appearance-fill-title">
+            Fill
+          </span>
           <button
             class="sigil-appearance-panel__add"
             type="button"
@@ -317,9 +355,15 @@ export const AppearancePanel: Component = () => {
       </div>
 
       {/* ── Stroke section ───────────────────────────────────────── */}
-      <div class="sigil-appearance-panel__section">
+      <div
+        class="sigil-appearance-panel__section"
+        role="group"
+        aria-labelledby="appearance-stroke-title"
+      >
         <div class="sigil-appearance-panel__section-header">
-          <span class="sigil-appearance-panel__section-title">Stroke</span>
+          <span class="sigil-appearance-panel__section-title" id="appearance-stroke-title">
+            Stroke
+          </span>
           <button
             class="sigil-appearance-panel__add"
             type="button"
@@ -348,6 +392,11 @@ export const AppearancePanel: Component = () => {
           )}
         </For>
       </div>
+
+      {/* RF-009: visually-hidden live region for discrete add/remove announcements */}
+      <span role="status" aria-live="polite" class="sr-only">
+        {announcement()}
+      </span>
     </div>
   );
 };

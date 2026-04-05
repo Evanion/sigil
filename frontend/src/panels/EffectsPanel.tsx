@@ -9,7 +9,7 @@
  *
  * Keyboard: Alt+ArrowUp / Alt+ArrowDown on a focused EffectCard reorders it.
  */
-import { createMemo, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, Show, type Component } from "solid-js";
 import type { Effect, EffectDropShadow } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { EffectCard } from "./EffectCard";
@@ -30,6 +30,14 @@ const DEFAULT_EFFECT: EffectDropShadow = {
 export const EffectsPanel: Component = () => {
   const store = useDocument();
 
+  // ── Live region announcement (RF-009) ──────────────────────────────
+  const [announcement, setAnnouncement] = createSignal("");
+
+  function announce(message: string): void {
+    setAnnouncement("");
+    queueMicrotask(() => setAnnouncement(message));
+  }
+
   // Derive selected node UUID
   const selectedUuid = createMemo(() => store.selectedNodeId());
 
@@ -48,7 +56,9 @@ export const EffectsPanel: Component = () => {
     const uuid = selectedUuid();
     if (!uuid) return;
     const current = effects();
-    store.setEffects(uuid, [...(current as Effect[]), { ...DEFAULT_EFFECT }]);
+    const next = [...(current as Effect[]), { ...DEFAULT_EFFECT }];
+    store.setEffects(uuid, next);
+    announce(`Effect added. ${next.length} effects total.`);
   }
 
   function handleUpdate(index: number, updated: Effect): void {
@@ -65,6 +75,7 @@ export const EffectsPanel: Component = () => {
     const current = effects() as Effect[];
     const next = current.filter((_, i) => i !== index);
     store.setEffects(uuid, next);
+    announce(`Effect removed. ${next.length} effects total.`);
   }
 
   /**
@@ -72,13 +83,24 @@ export const EffectsPanel: Component = () => {
    * for drag-and-drop reorder, per CLAUDE.md Pointer-Only Operations rule).
    */
   function handleCardKeyDown(index: number, e: KeyboardEvent): void {
+    // RF-014: skip reorder when event originates from an input element
+    if (e.target instanceof HTMLInputElement) return;
+
+    // RF-007: Delete key removes the focused effect card
+    if (e.key === "Delete") {
+      e.preventDefault();
+      handleRemove(index);
+      return;
+    }
+
     if (!e.altKey) return;
 
     const current = effects() as Effect[];
     if (e.key === "ArrowUp" && index > 0) {
-      e.preventDefault();
+      // RF-015: check uuid before calling preventDefault
       const uuid = selectedUuid();
       if (!uuid) return;
+      e.preventDefault();
       const next = [...current];
       const prevItem = next[index - 1];
       const currItem = next[index];
@@ -87,9 +109,10 @@ export const EffectsPanel: Component = () => {
       next[index] = prevItem;
       store.setEffects(uuid, next);
     } else if (e.key === "ArrowDown" && index < current.length - 1) {
-      e.preventDefault();
+      // RF-015: check uuid before calling preventDefault
       const uuid = selectedUuid();
       if (!uuid) return;
+      e.preventDefault();
       const next = [...current];
       const nextItem = next[index + 1];
       const currItem = next[index];
@@ -131,6 +154,11 @@ export const EffectsPanel: Component = () => {
           </div>
         )}
       </For>
+
+      {/* RF-009: visually-hidden live region for discrete add/remove announcements */}
+      <span role="status" aria-live="polite" class="sr-only">
+        {announcement()}
+      </span>
     </div>
   );
 };
