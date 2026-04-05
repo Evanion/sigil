@@ -34,36 +34,28 @@ describe("FillRow", () => {
   it("should render the fill type label as Solid for solid fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     expect(screen.getByText("Solid")).toBeTruthy();
   });
 
   it("should render the fill type label as Linear for linear gradient fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={gradientFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={gradientFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     expect(screen.getByText("Linear")).toBeTruthy();
   });
 
   it("should render the fill type label as Image for image fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={imageFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={imageFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     expect(screen.getByText("Image")).toBeTruthy();
   });
 
   it("should render a drag handle that is aria-hidden", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     // The drag handle has aria-hidden="true"
     const handle = document.querySelector(".sigil-fill-row__handle");
     expect(handle).toBeTruthy();
@@ -73,9 +65,7 @@ describe("FillRow", () => {
   it("should render a color swatch button for solid fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     const swatch = document.querySelector(".sigil-fill-row__swatch");
     expect(swatch).toBeTruthy();
     expect(swatch?.tagName.toLowerCase()).toBe("button");
@@ -84,9 +74,7 @@ describe("FillRow", () => {
   it("should render a remove button with aria-label", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     const removeBtn = screen.getByRole("button", { name: "Remove fill" });
     expect(removeBtn).toBeTruthy();
   });
@@ -94,9 +82,7 @@ describe("FillRow", () => {
   it("should call onRemove with the correct index when remove is clicked", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={2} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={2} onUpdate={onUpdate} onRemove={onRemove} />);
     const removeBtn = screen.getByRole("button", { name: "Remove fill" });
     fireEvent.click(removeBtn);
     expect(onRemove).toHaveBeenCalledWith(2);
@@ -105,9 +91,7 @@ describe("FillRow", () => {
   it("should render the row container with sigil-fill-row class", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
-      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
+    render(() => <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />);
     const row = document.querySelector(".sigil-fill-row");
     expect(row).toBeTruthy();
   });
