@@ -136,7 +136,7 @@ function resolveDropParent(
     }
     // At this point, `current` is the parent at the desired depth.
     // The drop goes into current's parent.
-    return current !== null ? nodes[current]?.parentUuid ?? null : null;
+    return current !== null ? (nodes[current]?.parentUuid ?? null) : null;
   }
 
   // Depth > target depth: dropping deeper = inside the target's parent chain.
@@ -304,9 +304,7 @@ export const LayersTree: Component = () => {
       // Get cursor position from the drag event's native event if available,
       // or fallback to the center of the target.
       const nativeEvent = (event as unknown as { nativeEvent?: PointerEvent }).nativeEvent;
-      const cursorY = nativeEvent
-        ? nativeEvent.clientY - targetRect.top
-        : targetRect.height / 2;
+      const cursorY = nativeEvent ? nativeEvent.clientY - targetRect.top : targetRect.height / 2;
       const cursorX = nativeEvent ? nativeEvent.clientX : targetRect.left + targetRect.width / 2;
 
       const targetUuid = targetData.uuid;
@@ -394,9 +392,7 @@ export const LayersTree: Component = () => {
         const targetNode = nodes[currentDrop.targetUuid];
         const childCount = targetNode?.childrenUuids.length ?? 0;
         store.reparentNode(draggedUuid, currentDrop.targetUuid, childCount);
-        announce(
-          `${draggedNode?.name ?? "Layer"} moved inside ${targetNode?.name ?? "container"}`,
-        );
+        announce(`${draggedNode?.name ?? "Layer"} moved inside ${targetNode?.name ?? "container"}`);
         return;
       }
 
@@ -413,9 +409,7 @@ export const LayersTree: Component = () => {
         const position = resolveDropPosition(nodes, currentDrop, parentUuid, draggedUuid);
         store.reparentNode(draggedUuid, parentUuid, position);
         const parentNode = nodes[parentUuid];
-        announce(
-          `${draggedNode?.name ?? "Layer"} moved to ${parentNode?.name ?? "parent"}`,
-        );
+        announce(`${draggedNode?.name ?? "Layer"} moved to ${parentNode?.name ?? "parent"}`);
       } else {
         // Moving to root level — reparent with root (no parent).
         // For now we cannot reparent to root via the current API,
@@ -432,7 +426,9 @@ export const LayersTree: Component = () => {
     if (list.length === 0) return;
 
     const currentFocused = focusedUuid();
-    const currentIndex = currentFocused ? list.findIndex((entry) => entry.uuid === currentFocused) : -1;
+    const currentIndex = currentFocused
+      ? list.findIndex((entry) => entry.uuid === currentFocused)
+      : -1;
 
     switch (e.key) {
       case "ArrowDown": {
