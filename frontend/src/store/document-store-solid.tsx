@@ -2,7 +2,17 @@ import { createSignal, batch } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { createClient, cacheExchange, fetchExchange, subscriptionExchange, gql } from "@urql/solid";
 import { createClient as createWSClient } from "graphql-ws";
-import type { DocumentNode, Page, Transform, NodeKind, NodeId } from "../types/document";
+import type {
+  DocumentNode,
+  Page,
+  Transform,
+  NodeKind,
+  NodeId,
+  Fill,
+  Stroke,
+  Effect,
+  BlendMode,
+} from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY } from "../graphql/queries";
 import {
@@ -16,6 +26,12 @@ import {
   REDO_MUTATION,
   REPARENT_NODE_MUTATION,
   REORDER_CHILDREN_MUTATION,
+  SET_OPACITY_MUTATION,
+  SET_BLEND_MODE_MUTATION,
+  SET_FILLS_MUTATION,
+  SET_STROKES_MUTATION,
+  SET_EFFECTS_MUTATION,
+  SET_CORNER_RADII_MUTATION,
 } from "../graphql/mutations";
 import { DOCUMENT_CHANGED_SUBSCRIPTION } from "../graphql/subscriptions";
 
@@ -74,6 +90,12 @@ export interface DocumentStoreAPI {
   setLocked(uuid: string, locked: boolean): void;
   reparentNode(uuid: string, newParentUuid: string, position: number): void;
   reorderChildren(uuid: string, newPosition: number): void;
+  setOpacity(uuid: string, opacity: number): void;
+  setBlendMode(uuid: string, blendMode: BlendMode): void;
+  setFills(uuid: string, fills: Fill[]): void;
+  setStrokes(uuid: string, strokes: Stroke[]): void;
+  setEffects(uuid: string, effects: Effect[]): void;
+  setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
   undo(): void;
   redo(): void;
 
@@ -632,6 +654,296 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  function setOpacity(uuid: string, opacity: number): void {
+    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return;
+
+    // Snapshot previous value for rollback
+    const previousOpacity = state.nodes[uuid]?.style?.opacity
+      ? structuredClone(state.nodes[uuid].style.opacity)
+      : undefined;
+
+    // Optimistic update
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            opacity: { type: "literal", value: opacity },
+          };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_OPACITY_MUTATION), { uuid, opacity })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setOpacity error:", r.error.message);
+          if (previousOpacity !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].style = { ...s.nodes[uuid].style, opacity: previousOpacity };
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setOpacity exception:", err);
+        if (previousOpacity !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].style = { ...s.nodes[uuid].style, opacity: previousOpacity };
+              }
+            }),
+          );
+        }
+      });
+  }
+
+  function setBlendMode(uuid: string, blendMode: BlendMode): void {
+    // Snapshot previous value for rollback
+    const previousBlendMode = state.nodes[uuid]?.style?.blend_mode;
+
+    // Optimistic update
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: blendMode };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_BLEND_MODE_MUTATION), { uuid, blendMode })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setBlendMode error:", r.error.message);
+          if (previousBlendMode !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: previousBlendMode };
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setBlendMode exception:", err);
+        if (previousBlendMode !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: previousBlendMode };
+              }
+            }),
+          );
+        }
+      });
+  }
+
+  function setFills(uuid: string, fills: Fill[]): void {
+    // Snapshot previous value for rollback
+    const previousFills = state.nodes[uuid]?.style?.fills
+      ? structuredClone(state.nodes[uuid].style.fills)
+      : undefined;
+
+    // Optimistic update (clone fills to prevent caller mutation aliasing the store)
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: structuredClone(fills) };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: structuredClone(fills) })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setFills error:", r.error.message);
+          if (previousFills !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setFills exception:", err);
+        if (previousFills !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: previousFills };
+              }
+            }),
+          );
+        }
+      });
+  }
+
+  function setStrokes(uuid: string, strokes: Stroke[]): void {
+    // Snapshot previous value for rollback
+    const previousStrokes = state.nodes[uuid]?.style?.strokes
+      ? structuredClone(state.nodes[uuid].style.strokes)
+      : undefined;
+
+    // Optimistic update (clone strokes to prevent caller mutation aliasing the store)
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: structuredClone(strokes) };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: structuredClone(strokes) })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setStrokes error:", r.error.message);
+          if (previousStrokes !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: previousStrokes };
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setStrokes exception:", err);
+        if (previousStrokes !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: previousStrokes };
+              }
+            }),
+          );
+        }
+      });
+  }
+
+  function setEffects(uuid: string, effects: Effect[]): void {
+    // Snapshot previous value for rollback
+    const previousEffects = state.nodes[uuid]?.style?.effects
+      ? structuredClone(state.nodes[uuid].style.effects)
+      : undefined;
+
+    // Optimistic update (clone effects to prevent caller mutation aliasing the store)
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: structuredClone(effects) };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: structuredClone(effects) })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setEffects error:", r.error.message);
+          if (previousEffects !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: previousEffects };
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setEffects exception:", err);
+        if (previousEffects !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: previousEffects };
+              }
+            }),
+          );
+        }
+      });
+  }
+
+  function setCornerRadii(uuid: string, radii: [number, number, number, number]): void {
+    // Validate all 4 values are finite and non-negative
+    for (const r of radii) {
+      if (!Number.isFinite(r) || r < 0) return;
+    }
+
+    // Early return if node is not a rectangle — before snapshot to avoid spurious mutations
+    const targetNode = state.nodes[uuid];
+    if (!targetNode || targetNode.kind.type !== "rectangle") return;
+
+    // Snapshot previous value for rollback
+    const previousKind = state.nodes[uuid]?.kind
+      ? structuredClone(state.nodes[uuid].kind)
+      : undefined;
+
+    // Optimistic update — kind.type guard is required for TypeScript narrowing even
+    // though the early return above already guarantees we only reach this point for
+    // rectangle nodes; the produce draft is typed as the full NodeKind union.
+    setState(
+      produce((s) => {
+        if (s.nodes[uuid] && s.nodes[uuid].kind.type === "rectangle") {
+          s.nodes[uuid].kind = { ...s.nodes[uuid].kind, corner_radii: radii };
+        }
+      }),
+    );
+
+    client
+      .mutation(gql(SET_CORNER_RADII_MUTATION), { uuid, radii: [...radii] })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setCornerRadii error:", r.error.message);
+          if (previousKind !== undefined && state.nodes[uuid]) {
+            setState(
+              produce((s) => {
+                if (s.nodes[uuid]) {
+                  s.nodes[uuid].kind = previousKind;
+                }
+              }),
+            );
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setCornerRadii exception:", err);
+        if (previousKind !== undefined && state.nodes[uuid]) {
+          setState(
+            produce((s) => {
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].kind = previousKind;
+              }
+            }),
+          );
+        }
+      });
+  }
+
   function undo(): void {
     client
       .mutation(gql(UNDO_MUTATION), {})
@@ -702,6 +1014,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setLocked,
     reparentNode,
     reorderChildren,
+    setOpacity,
+    setBlendMode,
+    setFills,
+    setStrokes,
+    setEffects,
+    setCornerRadii,
     undo,
     redo,
     destroy,
