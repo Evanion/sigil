@@ -264,8 +264,12 @@ export const LayersTree: Component = () => {
 
   // ── DnD Monitor ─────────────────────────────────────────────────────
 
+  /** Track last announced target to prevent flooding screen readers during drag. */
+  let lastAnnounced = { uuid: "", position: "" };
+
   useDragDropMonitor({
     onDragStart(event) {
+      lastAnnounced = { uuid: "", position: "" };
       const source = event.operation.source;
       if (!source) return;
       const data = source.data as LayerDragData | undefined;
@@ -345,12 +349,17 @@ export const LayersTree: Component = () => {
 
       setDropTarget(computed);
 
-      // Announce the hover position.
-      const targetNodeName = targetNode.name;
-      announce(`Over ${targetNodeName}, ${computed.position}`);
+      // Announce the hover position only when target or position changes
+      // to avoid flooding the screen reader announcement queue.
+      if (computed.targetUuid !== lastAnnounced.uuid || computed.position !== lastAnnounced.position) {
+        lastAnnounced = { uuid: computed.targetUuid, position: computed.position };
+        const targetNodeName = targetNode.name;
+        announce(`Over ${targetNodeName}, ${computed.position}`);
+      }
     },
 
     onDragEnd(event) {
+      lastAnnounced = { uuid: "", position: "" };
       const currentDrop = dropTarget();
       setDropTarget(null);
 
@@ -511,7 +520,7 @@ export const LayersTree: Component = () => {
         e.preventDefault();
         if (currentFocused) {
           // Find the DOM element and trigger rename via double-click.
-          const el = treeRef?.querySelector(`[data-uuid="${currentFocused}"]`);
+          const el = treeRef?.querySelector(`[data-uuid="${CSS.escape(currentFocused)}"]`);
           if (el) {
             el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
           }
@@ -550,8 +559,18 @@ export const LayersTree: Component = () => {
     }
   }
 
+  /** Set initial focus to the first node when the tree container receives focus. */
+  function handleTreeFocus() {
+    if (!focusedUuid()) {
+      const firstNode = flatList()[0];
+      if (firstNode) {
+        setFocusedUuid(firstNode.uuid);
+      }
+    }
+  }
+
   function scrollToNode(uuid: string) {
-    const el = treeRef?.querySelector(`[data-uuid="${uuid}"]`);
+    const el = treeRef?.querySelector(`[data-uuid="${CSS.escape(uuid)}"]`);
     if (el) {
       el.scrollIntoView({ block: "nearest" });
     }
@@ -576,6 +595,7 @@ export const LayersTree: Component = () => {
       role="tree"
       aria-label="Layer hierarchy"
       tabindex={0}
+      onFocus={handleTreeFocus}
       onKeyDown={handleKeyDown}
       style={{ position: "relative" }}
     >
@@ -586,7 +606,7 @@ export const LayersTree: Component = () => {
             <Show when={node()}>
               {(n) => (
                 <TreeNode
-                  node={n() as unknown as TreeNodeProps["node"]}
+                  node={n() as TreeNodeProps["node"]}
                   depth={entry.depth}
                   isExpanded={expandedNodes().has(entry.uuid)}
                   onToggleExpand={toggleExpand}

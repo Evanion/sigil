@@ -247,4 +247,50 @@ mod tests {
         assert_eq!(doc.arena.get(parent_b).expect("get").children, vec![child]);
         assert!(doc.arena.get(parent_a).expect("get").children.is_empty());
     }
+
+    #[test]
+    fn test_reorder_children_execute_undo_redo_cycle() {
+        let mut doc = Document::new("Test".to_string());
+        let parent = insert_frame(&mut doc, 1, "Parent");
+        let child_a = insert_frame(&mut doc, 2, "A");
+        let child_b = insert_frame(&mut doc, 3, "B");
+        let child_c = insert_frame(&mut doc, 4, "C");
+
+        crate::tree::add_child(&mut doc.arena, parent, child_a).expect("add a");
+        crate::tree::add_child(&mut doc.arena, parent, child_b).expect("add b");
+        crate::tree::add_child(&mut doc.arena, parent, child_c).expect("add c");
+
+        let original_order = vec![child_a, child_b, child_c];
+        assert_eq!(doc.arena.get(parent).expect("get").children, original_order);
+
+        // Execute: move A (position 0) to position 2 → [B, C, A]
+        let cmd = ReorderChildren {
+            node_id: child_a,
+            new_position: 2,
+            old_position: 0,
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        let expected_after = vec![child_b, child_c, child_a];
+        assert_eq!(
+            doc.arena.get(parent).expect("get").children,
+            expected_after,
+            "state after execute"
+        );
+
+        // Undo → [A, B, C]
+        doc.undo().expect("undo");
+        assert_eq!(
+            doc.arena.get(parent).expect("get").children,
+            original_order,
+            "state after undo matches original"
+        );
+
+        // Redo → [B, C, A]
+        doc.redo().expect("redo");
+        assert_eq!(
+            doc.arena.get(parent).expect("get").children,
+            expected_after,
+            "state after redo matches post-execute"
+        );
+    }
 }

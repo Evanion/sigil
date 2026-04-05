@@ -530,12 +530,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         if (r.error) {
           console.error("reparentNode error:", r.error.message);
         }
-        // Refresh tree structure regardless of success/error
-        // since we don't do optimistic reparenting (too complex for tree structure).
+        // Tree structure refresh on error serves as implicit rollback;
+        // explicit error notification deferred until toast system is available.
         void fetchPages();
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
+        // Tree structure refresh on error serves as implicit rollback;
+        // explicit error notification deferred until toast system is available.
         void fetchPages();
       });
   }
@@ -553,11 +555,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         if (r.error) {
           console.error("reorderChildren error:", r.error.message);
         }
-        // Refresh tree structure regardless of success/error
+        // Tree structure refresh on error serves as implicit rollback;
+        // explicit error notification deferred until toast system is available.
         void fetchPages();
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
+        // Tree structure refresh on error serves as implicit rollback;
+        // explicit error notification deferred until toast system is available.
         void fetchPages();
       });
   }
