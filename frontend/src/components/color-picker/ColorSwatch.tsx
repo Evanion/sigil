@@ -31,7 +31,15 @@ export interface ColorSwatchProps {
 }
 
 export const ColorSwatch: Component<ColorSwatchProps> = (props) => {
-  const hex = () => colorToHex(props.color);
+  const hex = (): string => {
+    try {
+      return colorToHex(props.color);
+    } catch {
+      // Defense in depth: if colorToHex fails due to unexpected input
+      // (e.g., NaN channels from a corrupted color value), fall back to black.
+      return "#000000";
+    }
+  };
 
   const className = () => {
     const classes = ["sigil-color-swatch"];
@@ -44,12 +52,11 @@ export const ColorSwatch: Component<ColorSwatchProps> = (props) => {
       placement={props.placement ?? "left"}
       class="sigil-color-picker-popover"
       preventDismissOnInteract
+      triggerAriaLabel={props["aria-label"] ?? "Edit color"}
       trigger={
-        <button
+        <span
           class={className()}
-          type="button"
           style={{ background: hex() }}
-          aria-label={props["aria-label"] ?? "Edit color"}
         />
       }
     >

@@ -170,13 +170,14 @@ describe("EffectCard", () => {
     expect((inputs[2] as HTMLInputElement).value).toBe("12");
   });
 
-  it("should render a color swatch button for drop_shadow effects", () => {
+  it("should render a color swatch span inside a trigger button for drop_shadow effects", () => {
     render(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
-    // The color swatch is a button inside the card
+    // The swatch visual is a <span>; the Kobalte trigger <button> wraps it
     const swatch = document.querySelector(".sigil-color-swatch");
     expect(swatch).toBeTruthy();
-    expect(swatch?.tagName.toLowerCase()).toBe("button");
+    expect(swatch?.tagName.toLowerCase()).toBe("span");
+    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
   });
 });

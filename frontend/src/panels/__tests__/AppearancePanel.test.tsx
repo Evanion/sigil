@@ -371,4 +371,46 @@ describe("AppearancePanel", () => {
     fireEvent.keyDown(secondRow, { key: "ArrowUp", altKey: true });
     expect(setStrokes).toHaveBeenCalledWith("node-1", [stroke2, solidStroke]);
   });
+
+  // ── RF-013: MAX_* enforcement tests ──────────────────────────────────
+
+  it("test_max_fills_enforced: should not add fill when at maximum (32)", () => {
+    const fills = Array.from({ length: 32 }, () => ({
+      ...solidFill,
+    }));
+    const setFills = vi.fn();
+    const store = createMockStore("node-1", {
+      "node-1": makeNode({ fills }),
+    });
+    store.setFills = setFills;
+    render(() => (
+      <DocumentProvider store={store}>
+        <AppearancePanel />
+      </DocumentProvider>
+    ));
+    const addBtn = screen.getByRole("button", { name: "Add fill" });
+    fireEvent.click(addBtn);
+    expect(setFills).not.toHaveBeenCalled();
+  });
+
+  it("test_max_strokes_enforced: should not add stroke when at maximum (32)", () => {
+    const strokes = Array.from({ length: 32 }, () => ({
+      ...solidStroke,
+    }));
+    const setStrokes = vi.fn();
+    const store = createMockStore("node-1", {
+      "node-1": makeNode({ strokes }),
+    });
+    store.setStrokes = setStrokes;
+    render(() => (
+      <DocumentProvider store={store}>
+        <AppearancePanel />
+      </DocumentProvider>
+    ));
+    // Clear calls from Kobalte NumberField firing onRawValueChange during mount
+    setStrokes.mockClear();
+    const addBtn = screen.getByRole("button", { name: "Add stroke" });
+    fireEvent.click(addBtn);
+    expect(setStrokes).not.toHaveBeenCalled();
+  });
 });

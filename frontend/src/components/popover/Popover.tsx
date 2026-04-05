@@ -15,6 +15,8 @@ export interface PopoverProps {
   class?: string;
   /** Whether to prevent closing when interacting inside the content. */
   preventDismissOnInteract?: boolean;
+  /** Accessible label for the trigger button. */
+  triggerAriaLabel?: string;
 }
 
 export function Popover(props: PopoverProps) {
@@ -24,6 +26,7 @@ export function Popover(props: PopoverProps) {
     "placement",
     "class",
     "preventDismissOnInteract",
+    "triggerAriaLabel",
   ]);
 
   const className = () => {
@@ -34,7 +37,7 @@ export function Popover(props: PopoverProps) {
 
   return (
     <KobaltePopover placement={local.placement ?? "bottom"} {...others}>
-      <KobaltePopover.Trigger as="span" class="sigil-popover-trigger">
+      <KobaltePopover.Trigger class="sigil-popover-trigger" aria-label={local.triggerAriaLabel}>
         {local.trigger}
       </KobaltePopover.Trigger>
       <KobaltePopover.Portal>

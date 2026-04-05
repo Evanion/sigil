@@ -23,6 +23,7 @@ import type {
   EffectBackgroundBlur,
   StyleValue,
 } from "../types/document";
+import { GripVertical } from "lucide-solid";
 import { ColorSwatch } from "../components/color-picker";
 import { NumberInput } from "../components/number-input/NumberInput";
 import "./EffectCard.css";
@@ -37,6 +38,13 @@ export interface EffectCardProps {
 }
 
 type EffectType = Effect["type"];
+
+const VALID_EFFECT_TYPES: readonly EffectType[] = [
+  "drop_shadow",
+  "inner_shadow",
+  "layer_blur",
+  "background_blur",
+];
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
@@ -166,7 +174,9 @@ export function EffectCard(props: EffectCardProps) {
   });
 
   function handleTypeChange(e: Event): void {
-    const newType = (e.currentTarget as HTMLSelectElement).value as EffectType;
+    const rawValue = (e.currentTarget as HTMLSelectElement).value;
+    if (!VALID_EFFECT_TYPES.includes(rawValue as EffectType)) return;
+    const newType = rawValue as EffectType;
     const newEffect = coerceEffectType(props.effect, newType);
     props.onUpdate(props.index, newEffect);
   }
@@ -235,12 +245,14 @@ export function EffectCard(props: EffectCardProps) {
 
   const offsetX = createMemo(() => {
     if (!isShadow()) return 0;
-    return (props.effect as EffectDropShadow).offset.x;
+    const v = (props.effect as EffectDropShadow).offset.x;
+    return Number.isFinite(v) ? v : 0;
   });
 
   const offsetY = createMemo(() => {
     if (!isShadow()) return 0;
-    return (props.effect as EffectDropShadow).offset.y;
+    const v = (props.effect as EffectDropShadow).offset.y;
+    return Number.isFinite(v) ? v : 0;
   });
 
   const blurVal = createMemo(() => {
@@ -263,7 +275,7 @@ export function EffectCard(props: EffectCardProps) {
       {/* Header row */}
       <div class="sigil-effect-card__header">
         <span class="sigil-effect-card__handle" aria-hidden="true">
-          ☰
+          <GripVertical size={14} />
         </span>
 
         <select
@@ -301,18 +313,21 @@ export function EffectCard(props: EffectCardProps) {
             value={offsetX()}
             onValueChange={handleOffsetX}
             aria-label="X offset"
+            prefix="X"
             step={1}
           />
           <NumberInput
             value={offsetY()}
             onValueChange={handleOffsetY}
             aria-label="Y offset"
+            prefix="Y"
             step={1}
           />
           <NumberInput
             value={blurVal()}
             onValueChange={handleBlur}
             aria-label="Blur"
+            prefix="B"
             step={1}
             min={0}
           />
@@ -320,6 +335,7 @@ export function EffectCard(props: EffectCardProps) {
             value={spreadVal()}
             onValueChange={handleSpread}
             aria-label="Spread"
+            prefix="S"
             step={1}
           />
         </div>
@@ -329,6 +345,7 @@ export function EffectCard(props: EffectCardProps) {
             value={radiusVal()}
             onValueChange={handleRadius}
             aria-label="Radius"
+            prefix="R"
             step={1}
             min={0}
           />

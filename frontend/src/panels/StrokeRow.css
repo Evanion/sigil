@@ -48,8 +48,19 @@
 
 .sigil-stroke-row__alignment {
   font-size: var(--font-size-0, 11px);
-  color: var(--text-2);
+  color: var(--text-1);
+  background: var(--input-bg);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  padding: 0 var(--size-1);
+  height: var(--input-height);
+  cursor: pointer;
   flex: 1;
+}
+
+.sigil-stroke-row__alignment:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 .sigil-stroke-row__remove {

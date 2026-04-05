@@ -22,7 +22,7 @@
  * EffectsPanel. If a stable ID is added to Fill/Stroke types in a future
  * spec, switch to ID-based dispatch here.
  */
-import { createMemo, createSignal, For, Index, Show, type Component } from "solid-js";
+import { createMemo, createSignal, Index, Show, type Component } from "solid-js";
 import type { BlendMode, Fill, FillSolid, Stroke } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { NumberInput } from "../components/number-input/NumberInput";
@@ -64,7 +64,7 @@ const BLEND_MODES = [
 
 const DEFAULT_FILL: FillSolid = {
   type: "solid",
-  color: { type: "literal", value: { space: "srgb", r: 1, g: 1, b: 1, a: 1 } },
+  color: { type: "literal", value: { space: "srgb", r: 0.85, g: 0.85, b: 0.85, a: 1 } },
 };
 
 const DEFAULT_STROKE: Stroke = {
@@ -155,6 +155,7 @@ export const AppearancePanel: Component = () => {
   function handleBlendModeChange(mode: string): void {
     const uuid = selectedUuid();
     if (!uuid) return;
+    if (!BLEND_MODES.some((bm) => bm.value === mode)) return;
     store.setBlendMode(uuid, mode as BlendMode);
   }
 
@@ -164,9 +165,23 @@ export const AppearancePanel: Component = () => {
     const uuid = selectedUuid();
     if (!uuid) return;
     if (fills().length >= MAX_FILLS) return;
-    const newFills = [...(fills() as Fill[]), { ...DEFAULT_FILL }];
+    const newFills = [
+      ...(fills() as Fill[]),
+      JSON.parse(JSON.stringify(DEFAULT_FILL)) as FillSolid,
+    ];
     store.setFills(uuid, newFills);
     announce(`Fill added. ${newFills.length} fills total.`);
+    // RF-028: scroll new item into view and focus its first interactive control
+    queueMicrotask(() => {
+      const section = document.querySelector("[aria-labelledby='appearance-fill-title']");
+      const rows = section?.querySelectorAll("[role='group']");
+      const lastRow = rows?.[rows.length - 1] as HTMLElement | undefined;
+      if (typeof lastRow?.scrollIntoView === "function") {
+        lastRow.scrollIntoView({ block: "nearest" });
+      }
+      const focusable = lastRow?.querySelector<HTMLElement>("button, input, select, [tabindex]");
+      (focusable ?? lastRow)?.focus();
+    });
   }
 
   function handleFillUpdate(index: number, updated: Fill): void {
@@ -235,9 +250,23 @@ export const AppearancePanel: Component = () => {
     const uuid = selectedUuid();
     if (!uuid) return;
     if (strokes().length >= MAX_STROKES) return;
-    const newStrokes = [...(strokes() as Stroke[]), { ...DEFAULT_STROKE }];
+    const newStrokes = [
+      ...(strokes() as Stroke[]),
+      JSON.parse(JSON.stringify(DEFAULT_STROKE)) as Stroke,
+    ];
     store.setStrokes(uuid, newStrokes);
     announce(`Stroke added. ${newStrokes.length} strokes total.`);
+    // RF-028: scroll new item into view and focus its first interactive control
+    queueMicrotask(() => {
+      const section = document.querySelector("[aria-labelledby='appearance-stroke-title']");
+      const rows = section?.querySelectorAll("[role='group']");
+      const lastRow = rows?.[rows.length - 1] as HTMLElement | undefined;
+      if (typeof lastRow?.scrollIntoView === "function") {
+        lastRow.scrollIntoView({ block: "nearest" });
+      }
+      const focusable = lastRow?.querySelector<HTMLElement>("button, input, select, [tabindex]");
+      (focusable ?? lastRow)?.focus();
+    });
   }
 
   function handleStrokeUpdate(index: number, updated: Stroke): void {
@@ -352,7 +381,12 @@ export const AppearancePanel: Component = () => {
 
         <Index each={fills() as Fill[]}>
           {(fill, index) => (
-            <div role="group" tabIndex={0} onKeyDown={(e) => handleFillKeyDown(index, e)}>
+            <div
+              role="group"
+              tabIndex={0}
+              aria-label={`Fill ${index + 1}`}
+              onKeyDown={(e) => handleFillKeyDown(index, e)}
+            >
               <FillRow
                 fill={fill()}
                 index={index}
@@ -389,18 +423,23 @@ export const AppearancePanel: Component = () => {
           <p class="sigil-appearance-panel__empty">No strokes</p>
         </Show>
 
-        <For each={strokes() as Stroke[]}>
+        <Index each={strokes() as Stroke[]}>
           {(stroke, index) => (
-            <div role="group" tabIndex={0} onKeyDown={(e) => handleStrokeKeyDown(index(), e)}>
+            <div
+              role="group"
+              tabIndex={0}
+              aria-label={`Stroke ${index + 1}`}
+              onKeyDown={(e) => handleStrokeKeyDown(index, e)}
+            >
               <StrokeRow
-                stroke={stroke}
-                index={index()}
+                stroke={stroke()}
+                index={index}
                 onUpdate={handleStrokeUpdate}
                 onRemove={handleStrokeRemove}
               />
             </div>
           )}
-        </For>
+        </Index>
       </div>
 
       {/* RF-009: visually-hidden live region for discrete add/remove announcements */}

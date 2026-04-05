@@ -9,28 +9,24 @@
  */
 import { createMemo } from "solid-js";
 import type { Color, Stroke, StrokeAlignment, StyleValue } from "../types/document";
+import { GripVertical } from "lucide-solid";
 import { ColorSwatch } from "../components/color-picker";
 import { NumberInput } from "../components/number-input/NumberInput";
 import "./StrokeRow.css";
+
+// ── Alignment options ───────────────────────────────────────────────────
+
+const ALIGNMENT_OPTIONS: readonly { value: StrokeAlignment; label: string }[] = [
+  { value: "inside", label: "Inside" },
+  { value: "center", label: "Center" },
+  { value: "outside", label: "Outside" },
+];
 
 export interface StrokeRowProps {
   readonly stroke: Stroke;
   readonly index: number;
   readonly onUpdate: (index: number, stroke: Stroke) => void;
   readonly onRemove: (index: number) => void;
-}
-
-// ── Alignment label ────────────────────────────────────────────────────
-
-function alignmentLabel(alignment: StrokeAlignment): string {
-  switch (alignment) {
-    case "inside":
-      return "Inside";
-    case "outside":
-      return "Outside";
-    case "center":
-      return "Center";
-  }
 }
 
 // ── Color extraction ───────────────────────────────────────────────────
@@ -63,8 +59,12 @@ function strokeWidthValue(stroke: Stroke): number {
 export function StrokeRow(props: StrokeRowProps) {
   const currentColor = createMemo(() => strokeColor(props.stroke));
   const widthValue = createMemo(() => strokeWidthValue(props.stroke));
-  // background removed — ColorSwatch handles its own display
-  const alignment = createMemo(() => alignmentLabel(props.stroke.alignment));
+
+  function handleAlignmentChange(e: Event): void {
+    const value = (e.currentTarget as HTMLSelectElement).value;
+    if (!ALIGNMENT_OPTIONS.some((o) => o.value === value)) return;
+    props.onUpdate(props.index, { ...props.stroke, alignment: value as StrokeAlignment });
+  }
 
   function handleColorChange(newColor: Color): void {
     const newColorValue: StyleValue<Color> = { type: "literal", value: newColor };
@@ -86,7 +86,7 @@ export function StrokeRow(props: StrokeRowProps) {
     <div class="sigil-stroke-row">
       {/* Drag handle — decorative, hidden from screen readers */}
       <span class="sigil-stroke-row__handle" aria-hidden="true">
-        ☰
+        <GripVertical size={14} />
       </span>
 
       <ColorSwatch color={currentColor()} onColorChange={handleColorChange} />
@@ -101,7 +101,16 @@ export function StrokeRow(props: StrokeRowProps) {
         />
       </div>
 
-      <span class="sigil-stroke-row__alignment">{alignment()}</span>
+      <select
+        class="sigil-stroke-row__alignment"
+        value={props.stroke.alignment}
+        onChange={handleAlignmentChange}
+        aria-label="Stroke alignment"
+      >
+        {ALIGNMENT_OPTIONS.map((opt) => (
+          <option value={opt.value}>{opt.label}</option>
+        ))}
+      </select>
 
       <button
         class="sigil-stroke-row__remove"

@@ -6,6 +6,7 @@
  *   sRGB <-> Linear RGB (gamma encode/decode)
  *   Linear RGB <-> OkLab (via Björn Ottosson's matrices)
  *   OkLab <-> OkLCH (polar form)
+ *   sRGB <-> HSV
  *
  * OkLab reference: https://bottosson.github.io/posts/oklab/
  *
@@ -205,6 +206,57 @@ export function oklchToSrgb(L: number, C: number, H: number): [number, number, n
   return oklabToSrgb(...oklchToOklab(L, C, H));
 }
 
+// ── HSV conversions ──────────────────────────────────────────────────
+
+/**
+ * Convert HSV to sRGB.
+ * h: hue in [0, 360), s: saturation in [0, 1], v: value in [0, 1]
+ * Returns [r, g, b] each in [0, 1].
+ */
+export function hsvToSrgb(h: number, s: number, v: number): [number, number, number] {
+  const h6 = (h / 60) % 6;
+  const f = h6 - Math.floor(h6);
+  const p = v * (1 - s);
+  const q = v * (1 - f * s);
+  const t = v * (1 - (1 - f) * s);
+  switch (Math.floor(h6)) {
+    case 0:
+      return [v, t, p];
+    case 1:
+      return [q, v, p];
+    case 2:
+      return [p, v, t];
+    case 3:
+      return [p, q, v];
+    case 4:
+      return [t, p, v];
+    default:
+      return [v, p, q];
+  }
+}
+
+/**
+ * Convert sRGB to HSV.
+ * r, g, b each in [0, 1].
+ * Returns [h, s, v] where h is in [0, 360), s and v in [0, 1].
+ * For achromatic colors (s=0), hue is returned as 0.
+ */
+export function srgbToHsv(r: number, g: number, b: number): [number, number, number] {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  const s = max === 0 ? 0 : delta / max;
+  const v = max;
+  let h = 0;
+  if (delta > 0.001) {
+    if (max === r) h = 60 * (((g - b) / delta) % 6);
+    else if (max === g) h = 60 * ((b - r) / delta + 2);
+    else h = 60 * ((r - g) / delta + 4);
+    if (h < 0) h += 360;
+  }
+  return [h, s, v];
+}
+
 // ── Color type helpers ────────────────────────────────────────────────
 
 /**
@@ -290,7 +342,9 @@ export function isOutOfSrgbGamut(color: Color): boolean {
   switch (color.space) {
     case "srgb":
     case "display_p3":
-      return color.r < 0 || color.r > 1 || color.g < 0 || color.g > 1 || color.b < 0 || color.b > 1;
+      return (
+        color.r < 0 || color.r > 1 || color.g < 0 || color.g > 1 || color.b < 0 || color.b > 1
+      );
 
     case "oklch": {
       const [r, g, b] = oklchToSrgbUnclamped(color.l, color.c, color.h);

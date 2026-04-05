@@ -52,7 +52,7 @@ describe("StrokeRow", () => {
     expect(handle?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("should render a color swatch button", () => {
+  it("should render a color swatch span inside a trigger button", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     render(() => (
@@ -60,7 +60,9 @@ describe("StrokeRow", () => {
     ));
     const swatch = document.querySelector(".sigil-color-swatch");
     expect(swatch).toBeTruthy();
-    expect(swatch?.tagName.toLowerCase()).toBe("button");
+    // The swatch visual is a <span>; the Kobalte trigger <button> wraps it
+    expect(swatch?.tagName.toLowerCase()).toBe("span");
+    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
   });
 
   it("should render the alignment as Center text", () => {

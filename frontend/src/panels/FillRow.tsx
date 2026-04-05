@@ -6,6 +6,7 @@
  */
 import { createMemo } from "solid-js";
 import type { Color, Fill, FillSolid, StyleValue } from "../types/document";
+import { GripVertical } from "lucide-solid";
 import { ColorSwatch } from "../components/color-picker";
 import "./FillRow.css";
 
@@ -53,7 +54,7 @@ export function FillRow(props: FillRowProps) {
   return (
     <div class="sigil-fill-row">
       <span class="sigil-fill-row__handle" aria-hidden="true">
-        ☰
+        <GripVertical size={14} />
       </span>
 
       <ColorSwatch color={solidColor()} onColorChange={handleColorChange} />

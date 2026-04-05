@@ -240,4 +240,30 @@ describe("EffectsPanel", () => {
     fireEvent.keyDown(firstCard, { key: "ArrowDown", altKey: true });
     expect(setEffects).toHaveBeenCalledWith("node-1", [twoEffects[1], twoEffects[0]]);
   });
+
+  // ── RF-013: MAX_EFFECTS enforcement test ──────────────────────────────
+
+  it("test_max_effects_enforced: should not add effect when at maximum (16)", () => {
+    const effects: Effect[] = Array.from({ length: 16 }, () => ({
+      ...dropShadowEffect,
+    }));
+    const setEffects = vi.fn();
+    const store = createMockStore("node-1", {
+      "node-1": {
+        ...nodeWithEffects,
+        style: { ...nodeWithEffects.style, effects },
+      },
+    });
+    store.setEffects = setEffects;
+    render(() => (
+      <DocumentProvider store={store}>
+        <EffectsPanel />
+      </DocumentProvider>
+    ));
+    // Clear calls from Kobalte NumberField firing onRawValueChange during mount
+    setEffects.mockClear();
+    const addBtn = screen.getByRole("button", { name: "Add effect" });
+    fireEvent.click(addBtn);
+    expect(setEffects).not.toHaveBeenCalled();
+  });
 });

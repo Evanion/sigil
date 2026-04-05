@@ -16,7 +16,14 @@ import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { Color } from "../../types/document";
 import type { ColorSpace } from "./types";
-import { colorToSrgb, colorAlpha, srgbToHex, isOutOfSrgbGamut } from "./color-math";
+import {
+  colorToSrgb,
+  colorAlpha,
+  srgbToHex,
+  isOutOfSrgbGamut,
+  hsvToSrgb,
+  srgbToHsv,
+} from "./color-math";
 import { ColorArea } from "./ColorArea";
 import { HueStrip } from "./HueStrip";
 import { AlphaStrip } from "./AlphaStrip";
@@ -67,26 +74,20 @@ export function ColorPicker(props: ColorPickerProps) {
       return;
     // Derive hue from RGB (HSV model). Only update hue if the color has
     // saturation — preserve the previous hue for greys/achromatic colors.
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-    let h = 0;
-    if (delta > 0.001) {
-      if (max === r) h = 60 * (((g - b) / delta) % 6);
-      else if (max === g) h = 60 * ((b - r) / delta + 2);
-      else h = 60 * ((r - g) / delta + 4);
-      if (h < 0) h += 360;
-    }
+    const [h, svS] = srgbToHsv(r, g, b);
     // RF-019: Read state.hue inside untrack to avoid creating a reactive loop
     const prevHue = untrack(() => state.hue);
-    const newHue = delta > 0.001 ? h : prevHue;
+    const newHue = svS > 0.001 ? h : prevHue;
     // Don't overwrite the display space — it's a local UI preference,
     // not part of the color value. Only update r/g/b/alpha/hue.
     setState({ r, g, b, alpha, hue: newHue });
   });
 
   // ── Emit helper ────────────────────────────────────────────────────────
-  // Guard: don't emit during initial mount (sync effect sets state first).
+  // Guard: suppress initial emit during mount. queueMicrotask fires after
+  // all synchronous createEffect tracking runs, so mounted=false correctly
+  // prevents the sync effect's emit. This is intentional timing — if effects
+  // are restructured, verify this guard still works.
   let mounted = false;
   queueMicrotask(() => {
     mounted = true;
@@ -147,41 +148,7 @@ export function ColorPicker(props: ColorPickerProps) {
   const renderAreaBackground = createMemo(() => {
     const hue = state.hue;
     // Compute the pure hue color at full saturation for the right edge (HSV: S=1, V=1)
-    const h6 = (hue / 60) % 6;
-    const f = h6 - Math.floor(h6);
-    let hr: number, hg: number, hb: number;
-    switch (Math.floor(h6)) {
-      case 0:
-        hr = 1;
-        hg = f;
-        hb = 0;
-        break;
-      case 1:
-        hr = 1 - f;
-        hg = 1;
-        hb = 0;
-        break;
-      case 2:
-        hr = 0;
-        hg = 1;
-        hb = f;
-        break;
-      case 3:
-        hr = 0;
-        hg = 1 - f;
-        hb = 1;
-        break;
-      case 4:
-        hr = f;
-        hg = 0;
-        hb = 1;
-        break;
-      default:
-        hr = 1;
-        hg = 0;
-        hb = 1 - f;
-        break;
-    }
+    const [hr, hg, hb] = hsvToSrgb(hue, 1, 1);
     const hueHex = srgbToHex(hr, hg, hb);
 
     return (ctx: CanvasRenderingContext2D, width: number, height: number) => {
@@ -206,13 +173,7 @@ export function ColorPicker(props: ColorPickerProps) {
   // HSV is always in-gamut for sRGB — no curved boundary issues.
   const areaPos = createMemo(() => {
     // Convert sRGB to HSV to get saturation and value
-    const r = state.r,
-      g = state.g,
-      b = state.b;
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const s = max === 0 ? 0 : (max - min) / max;
-    const v = max;
+    const [, s, v] = srgbToHsv(state.r, state.g, state.b);
     return { x: s, y: v };
   });
 
@@ -220,48 +181,7 @@ export function ColorPicker(props: ColorPickerProps) {
   function handleAreaChange(x: number, y: number) {
     if (!Number.isFinite(x) || !Number.isFinite(y)) return;
     // x = saturation, y = value (brightness)
-    const s = x;
-    const v = y;
-    const hue = state.hue;
-    // HSV to RGB
-    const h6 = (hue / 60) % 6;
-    const f = h6 - Math.floor(h6);
-    const p = v * (1 - s);
-    const q = v * (1 - f * s);
-    const t = v * (1 - (1 - f) * s);
-    let nr: number, ng: number, nb: number;
-    switch (Math.floor(h6)) {
-      case 0:
-        nr = v;
-        ng = t;
-        nb = p;
-        break;
-      case 1:
-        nr = q;
-        ng = v;
-        nb = p;
-        break;
-      case 2:
-        nr = p;
-        ng = v;
-        nb = t;
-        break;
-      case 3:
-        nr = p;
-        ng = q;
-        nb = v;
-        break;
-      case 4:
-        nr = t;
-        ng = p;
-        nb = v;
-        break;
-      default:
-        nr = v;
-        ng = p;
-        nb = q;
-        break;
-    }
+    const [nr, ng, nb] = hsvToSrgb(state.hue, x, y);
     setState({ r: nr, g: ng, b: nb });
     emit(nr, ng, nb, state.alpha);
   }
@@ -271,44 +191,7 @@ export function ColorPicker(props: ColorPickerProps) {
     if (!Number.isFinite(hue)) return;
     // Rotate hue while preserving saturation and value (HSV).
     const { x: s, y: v } = areaPos();
-    const h6 = (hue / 60) % 6;
-    const f = h6 - Math.floor(h6);
-    const p = v * (1 - s);
-    const q = v * (1 - f * s);
-    const t = v * (1 - (1 - f) * s);
-    let nr: number, ng: number, nb: number;
-    switch (Math.floor(h6)) {
-      case 0:
-        nr = v;
-        ng = t;
-        nb = p;
-        break;
-      case 1:
-        nr = q;
-        ng = v;
-        nb = p;
-        break;
-      case 2:
-        nr = p;
-        ng = v;
-        nb = t;
-        break;
-      case 3:
-        nr = p;
-        ng = q;
-        nb = v;
-        break;
-      case 4:
-        nr = t;
-        ng = p;
-        nb = v;
-        break;
-      default:
-        nr = v;
-        ng = p;
-        nb = q;
-        break;
-    }
+    const [nr, ng, nb] = hsvToSrgb(hue, s, v);
     setState({ r: nr, g: ng, b: nb, hue });
     emit(nr, ng, nb, state.alpha);
   }
@@ -329,17 +212,9 @@ export function ColorPicker(props: ColorPickerProps) {
       !Number.isFinite(alpha)
     )
       return;
-    // Derive hue from HSV
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-    let h = state.hue;
-    if (delta > 0.001) {
-      if (max === r) h = 60 * (((g - b) / delta) % 6);
-      else if (max === g) h = 60 * ((b - r) / delta + 2);
-      else h = 60 * ((r - g) / delta + 4);
-      if (h < 0) h += 360;
-    }
+    // Derive hue from HSV — preserve previous hue for achromatic colors
+    const [derivedH, derivedS] = srgbToHsv(r, g, b);
+    const h = derivedS > 0.001 ? derivedH : state.hue;
     setState({ r, g, b, alpha, hue: h });
     emit(r, g, b, alpha);
     commitColor();
@@ -348,19 +223,11 @@ export function ColorPicker(props: ColorPickerProps) {
   // ── HexInput change handler ────────────────────────────────────────────
   function handleHexChange(r: number, g: number, b: number) {
     if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return;
-    // Derive hue from HSV
-    const max = Math.max(r, g, b);
-    const min = Math.min(r, g, b);
-    const delta = max - min;
-    let h = state.hue;
-    if (delta > 0.001) {
-      if (max === r) h = 60 * (((g - b) / delta) % 6);
-      else if (max === g) h = 60 * ((b - r) / delta + 2);
-      else h = 60 * ((r - g) / delta + 4);
-      if (h < 0) h += 360;
-    }
+    // Derive hue from HSV — preserve previous hue for achromatic colors
+    const [derivedH, derivedS] = srgbToHsv(r, g, b);
+    const h = derivedS > 0.001 ? derivedH : state.hue;
     setState({ r, g, b, hue: h });
-    emit(r, g, b, state.alpha, state.space);
+    emit(r, g, b, state.alpha);
     commitColor();
   }
 

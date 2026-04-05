@@ -26,6 +26,11 @@
   border-color: var(--input-border-focus);
 }
 
+.sigil-text-input__group:focus-within:has(:focus-visible) {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 .sigil-text-input__prefix {
   color: var(--text-2);
   font-size: var(--font-size-0);

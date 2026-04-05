@@ -58,7 +58,7 @@ export const DesignPanel: Component = () => {
               classList={{ "sigil-design-panel__tab--active": activeTab() === tab }}
               role="tab"
               id={`design-tab-${tab}`}
-              aria-controls="design-tabpanel"
+              aria-controls={`design-tabpanel-${tab}`}
               aria-selected={activeTab() === tab}
               tabIndex={activeTab() === tab ? 0 : -1}
               onClick={() => setActiveTab(tab)}
@@ -71,7 +71,7 @@ export const DesignPanel: Component = () => {
       <div
         class="sigil-design-panel__content"
         role="tabpanel"
-        id="design-tabpanel"
+        id={`design-tabpanel-${activeTab()}`}
         aria-labelledby={`design-tab-${activeTab()}`}
       >
         <Show when={activeTab() === "layout"}>

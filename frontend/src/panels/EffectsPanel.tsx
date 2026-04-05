@@ -9,7 +9,7 @@
  *
  * Keyboard: Alt+ArrowUp / Alt+ArrowDown on a focused EffectCard reorders it.
  */
-import { createMemo, createSignal, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, Index, Show, type Component } from "solid-js";
 import type { Effect, EffectDropShadow } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { EffectCard } from "./EffectCard";
@@ -62,9 +62,23 @@ export const EffectsPanel: Component = () => {
     if (!uuid) return;
     if (effects().length >= MAX_EFFECTS) return;
     const current = effects();
-    const next = [...(current as Effect[]), { ...DEFAULT_EFFECT }];
+    const next = [
+      ...(current as Effect[]),
+      JSON.parse(JSON.stringify(DEFAULT_EFFECT)) as EffectDropShadow,
+    ];
     store.setEffects(uuid, next);
     announce(`Effect added. ${next.length} effects total.`);
+    // RF-028: scroll new item into view and focus its first interactive control
+    queueMicrotask(() => {
+      const panel = document.querySelector(".sigil-effects-panel");
+      const cards = panel?.querySelectorAll(".sigil-effect-card");
+      const lastCard = cards?.[cards.length - 1] as HTMLElement | undefined;
+      if (typeof lastCard?.scrollIntoView === "function") {
+        lastCard.scrollIntoView({ block: "nearest" });
+      }
+      const focusable = lastCard?.querySelector<HTMLElement>("button, input, select, [tabindex]");
+      (focusable ?? lastCard)?.focus();
+    });
   }
 
   function handleUpdate(index: number, updated: Effect): void {
@@ -152,18 +166,23 @@ export const EffectsPanel: Component = () => {
         <p class="sigil-effects-panel__empty">No effects</p>
       </Show>
 
-      <For each={effects() as Effect[]}>
+      <Index each={effects() as Effect[]}>
         {(effect, index) => (
-          <div onKeyDown={(e) => handleCardKeyDown(index(), e)}>
+          <div
+            role="group"
+            tabIndex={0}
+            aria-label={`Effect ${index + 1}`}
+            onKeyDown={(e) => handleCardKeyDown(index, e)}
+          >
             <EffectCard
-              effect={effect}
-              index={index()}
+              effect={effect()}
+              index={index}
               onUpdate={handleUpdate}
               onRemove={handleRemove}
             />
           </div>
         )}
-      </For>
+      </Index>
 
       {/* RF-009: visually-hidden live region for discrete add/remove announcements */}
       <span role="status" aria-live="polite" class="sr-only">

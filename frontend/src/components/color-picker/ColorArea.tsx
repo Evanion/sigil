@@ -7,6 +7,10 @@
  * DPR handling: canvas pixel dimensions are scaled by devicePixelRatio.
  * The DPR is composed into setTransform rather than a standalone scale() call,
  * per the Canvas DPR Handling conventions in CLAUDE.md.
+ *
+ * TODO(RF-011): CLAUDE.md section 11 requires two ARIA widgets for 2D controls.
+ * Currently exposes a single role="slider" for saturation; brightness axis
+ * is only in aria-valuetext. Defer to a dedicated a11y follow-up PR.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import "./ColorArea.css";
