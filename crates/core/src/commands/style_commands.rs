@@ -8,7 +8,7 @@ use crate::command::{Command, SideEffect};
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
-use crate::node::{BlendMode, Constraints, Effect, Fill, Stroke, StyleValue, Transform};
+use crate::node::{BlendMode, Constraints, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
 use crate::validate::{MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE};
 
 /// Validates that all transform fields are finite and dimensions are non-negative.
@@ -257,6 +257,76 @@ impl Command for SetEffects {
     }
 }
 
+/// Validates that all four corner radii are finite and non-negative.
+///
+/// # Errors
+///
+/// Returns [`CoreError::ValidationError`] if any radius is NaN, infinity, or negative.
+fn validate_corner_radii(radii: &[f64; 4]) -> Result<(), CoreError> {
+    for (i, &r) in radii.iter().enumerate() {
+        if !r.is_finite() {
+            return Err(CoreError::ValidationError(format!(
+                "corner_radii[{i}] must be finite (no NaN or infinity), got {r}"
+            )));
+        }
+        if r < 0.0 {
+            return Err(CoreError::ValidationError(format!(
+                "corner_radii[{i}] must be non-negative, got {r}"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Sets the corner radii on a rectangle node.
+///
+/// Fails if the target node is not a `NodeKind::Rectangle`.
+#[derive(Debug)]
+pub struct SetCornerRadii {
+    /// The target node (must be a rectangle).
+    pub node_id: NodeId,
+    /// The new corner radii to apply (top-left, top-right, bottom-right, bottom-left).
+    pub new_radii: [f64; 4],
+    /// The previous corner radii (for undo).
+    pub old_radii: [f64; 4],
+}
+
+impl Command for SetCornerRadii {
+    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_corner_radii(&self.new_radii)?;
+        let node = doc.arena.get_mut(self.node_id)?;
+        match &mut node.kind {
+            NodeKind::Rectangle { corner_radii } => {
+                *corner_radii = self.new_radii;
+                Ok(vec![])
+            }
+            _ => Err(CoreError::ValidationError(format!(
+                "SetCornerRadii requires a Rectangle node, got a different kind (node {:?})",
+                self.node_id
+            ))),
+        }
+    }
+
+    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        validate_corner_radii(&self.old_radii)?;
+        let node = doc.arena.get_mut(self.node_id)?;
+        match &mut node.kind {
+            NodeKind::Rectangle { corner_radii } => {
+                *corner_radii = self.old_radii;
+                Ok(vec![])
+            }
+            _ => Err(CoreError::ValidationError(format!(
+                "SetCornerRadii undo requires a Rectangle node, got a different kind (node {:?})",
+                self.node_id
+            ))),
+        }
+    }
+
+    fn description(&self) -> &str {
+        "Set corner radii"
+    }
+}
+
 /// Sets a node's constraints.
 #[derive(Debug)]
 pub struct SetConstraints {
@@ -291,6 +361,19 @@ mod tests {
     use crate::id::NodeId;
     use crate::node::{Color, Node, NodeKind, PinConstraint};
     use uuid::Uuid;
+
+    fn setup_doc_with_frame() -> (Document, NodeId) {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Frame { layout: None },
+            "Frame".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+        (doc, node_id)
+    }
 
     fn make_uuid(n: u8) -> Uuid {
         Uuid::from_bytes([n, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
@@ -641,6 +724,95 @@ mod tests {
         assert_eq!(
             doc.arena.get(node_id).expect("get").style.opacity,
             StyleValue::Literal { value: 0.5 }
+        );
+    }
+
+    // ── SetCornerRadii ────────────────────────────────────────────────
+
+    #[test]
+    fn test_set_corner_radii_execute_undo_redo_cycle() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+        // Initial radii are all 0.0 from setup_doc_with_rect.
+        let old_radii = [0.0; 4];
+        let new_radii = [4.0, 8.0, 4.0, 8.0];
+
+        let cmd = SetCornerRadii {
+            node_id,
+            new_radii,
+            old_radii,
+        };
+        doc.execute(Box::new(cmd)).expect("execute");
+        let after_execute = match &doc.arena.get(node_id).expect("get").kind {
+            NodeKind::Rectangle { corner_radii } => *corner_radii,
+            _ => panic!("expected Rectangle"),
+        };
+        assert_eq!(after_execute, new_radii, "execute: radii should be updated");
+
+        doc.undo().expect("undo");
+        let after_undo = match &doc.arena.get(node_id).expect("get").kind {
+            NodeKind::Rectangle { corner_radii } => *corner_radii,
+            _ => panic!("expected Rectangle"),
+        };
+        assert_eq!(after_undo, old_radii, "undo: radii should be restored");
+
+        doc.redo().expect("redo");
+        let after_redo = match &doc.arena.get(node_id).expect("get").kind {
+            NodeKind::Rectangle { corner_radii } => *corner_radii,
+            _ => panic!("expected Rectangle"),
+        };
+        assert_eq!(after_redo, new_radii, "redo: radii should be new again");
+    }
+
+    #[test]
+    fn test_set_corner_radii_rejects_nan() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+        // NaN in first position.
+        let cmd = SetCornerRadii {
+            node_id,
+            new_radii: [f64::NAN, 0.0, 0.0, 0.0],
+            old_radii: [0.0; 4],
+        };
+        assert!(
+            cmd.apply(&mut doc).is_err(),
+            "NaN in corner_radii[0] must be rejected"
+        );
+        // NaN in last position.
+        let cmd2 = SetCornerRadii {
+            node_id,
+            new_radii: [0.0, 0.0, 0.0, f64::NAN],
+            old_radii: [0.0; 4],
+        };
+        assert!(
+            cmd2.apply(&mut doc).is_err(),
+            "NaN in corner_radii[3] must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_set_corner_radii_rejects_negative() {
+        let (mut doc, node_id) = setup_doc_with_rect();
+        let cmd = SetCornerRadii {
+            node_id,
+            new_radii: [4.0, -1.0, 4.0, 4.0],
+            old_radii: [0.0; 4],
+        };
+        assert!(
+            cmd.apply(&mut doc).is_err(),
+            "negative corner radius must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_set_corner_radii_on_non_rectangle_fails() {
+        let (mut doc, frame_id) = setup_doc_with_frame();
+        let cmd = SetCornerRadii {
+            node_id: frame_id,
+            new_radii: [4.0; 4],
+            old_radii: [0.0; 4],
+        };
+        assert!(
+            cmd.apply(&mut doc).is_err(),
+            "SetCornerRadii on a Frame node must return an error"
         );
     }
 }
