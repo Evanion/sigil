@@ -210,6 +210,41 @@ impl SigilMcpServer {
             .map_err(|e| e.to_mcp_error())
     }
 
+    /// Moves a node to a new parent at a specific position.
+    #[tool(
+        name = "reparent_node",
+        description = "Move a node to a new parent at a specific child position. \
+                        Used for drag-and-drop reparenting in the layers tree."
+    )]
+    fn reparent_node(
+        &self,
+        Parameters(input): Parameters<crate::types::ReparentNodeInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::reparent_node_impl(
+            &self.state,
+            &input.uuid,
+            &input.new_parent_uuid,
+            input.position,
+        )
+        .map(Json)
+        .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Reorders a node within its parent's children list.
+    #[tool(
+        name = "reorder_children",
+        description = "Move a node to a new position within its current parent's children list. \
+                        Used for drag-and-drop reordering in the layers tree."
+    )]
+    fn reorder_children(
+        &self,
+        Parameters(input): Parameters<crate::types::ReorderChildrenInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::nodes::reorder_children_impl(&self.state, &input.uuid, input.new_position)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
     /// Sets a node's locked state.
     #[tool(name = "set_locked", description = "Lock or unlock a node")]
     fn set_locked(

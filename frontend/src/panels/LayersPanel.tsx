@@ -1,6 +1,11 @@
 import { type Component } from "solid-js";
-import { PlaceholderPanel } from "./PlaceholderPanel";
+import { LayersTree } from "./LayersTree";
 
-export const LayersPanel: Component = () => (
-  <PlaceholderPanel title="Layers" message="Layer tree -- Spec 10" />
-);
+/**
+ * LayersPanel renders inside a <TabRegion> which already provides
+ * role="complementary" as the ARIA landmark. No additional landmark
+ * role is needed on this component.
+ */
+export const LayersPanel: Component = () => {
+  return <LayersTree />;
+};

@@ -8,7 +8,7 @@ use agent_designer_core::{
     NodeId, NodeKind, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
     commands::style_commands::SetTransform,
-    commands::tree_commands::ReparentNode,
+    commands::tree_commands::{ReorderChildren, ReparentNode},
 };
 use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
 use uuid::Uuid;
@@ -545,6 +545,134 @@ pub fn set_locked_impl(
     Ok(node_info)
 }
 
+/// Moves a node to a new parent at a specific position.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidUuid` if `uuid_str` or `new_parent_uuid_str` are not valid UUIDs.
+/// - `McpToolError::NodeNotFound` if either node does not exist.
+/// - `McpToolError::CoreError` on engine-level failures (e.g. cycle detection).
+pub fn reparent_node_impl(
+    state: &AppState,
+    uuid_str: &str,
+    new_parent_uuid_str: &str,
+    position: i32,
+) -> Result<NodeInfo, McpToolError> {
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+    let parent_uuid: Uuid = new_parent_uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(new_parent_uuid_str.to_string()))?;
+
+    let node_info = {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+        let parent_id = doc
+            .arena
+            .id_by_uuid(&parent_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(new_parent_uuid_str.to_string()))?;
+
+        let old_parent_id = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .parent;
+        let old_position = old_parent_id.and_then(|pid| {
+            doc.arena
+                .get(pid)
+                .ok()
+                .and_then(|p| p.children.iter().position(|&c| c == node_id))
+        });
+
+        let cmd = ReparentNode {
+            node_id,
+            new_parent_id: parent_id,
+            new_position: usize::try_from(position.max(0)).unwrap_or(0),
+            old_parent_id,
+            old_position,
+        };
+        doc.execute(Box::new(cmd))?;
+
+        build_node_info(&doc, node_id, node_uuid)?
+    };
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "parent"})),
+    });
+    Ok(node_info)
+}
+
+/// Reorders a node within its parent's children list.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
+/// - `McpToolError::NodeNotFound` if the node does not exist.
+/// - `McpToolError::CoreError` on engine-level failures (e.g. node has no parent).
+pub fn reorder_children_impl(
+    state: &AppState,
+    uuid_str: &str,
+    new_position: i32,
+) -> Result<NodeInfo, McpToolError> {
+    let node_uuid: Uuid = uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
+
+    let node_info = {
+        let mut doc = acquire_document_lock(state);
+
+        let node_id = doc
+            .arena
+            .id_by_uuid(&node_uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+
+        let parent_id = doc
+            .arena
+            .get(node_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .parent
+            .ok_or_else(|| {
+                McpToolError::InvalidInput("node has no parent — cannot reorder".to_string())
+            })?;
+
+        let old_position = doc
+            .arena
+            .get(parent_id)
+            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
+            .children
+            .iter()
+            .position(|&c| c == node_id)
+            .ok_or_else(|| {
+                McpToolError::InvalidInput("node not found in parent's children list".to_string())
+            })?;
+
+        let cmd = ReorderChildren {
+            node_id,
+            new_position: usize::try_from(new_position.max(0)).unwrap_or(0),
+            old_position,
+        };
+        doc.execute(Box::new(cmd))?;
+
+        build_node_info(&doc, node_id, node_uuid)?
+    };
+
+    state.signal_dirty();
+    state.publish_event(MutationEvent {
+        kind: MutationEventKind::NodeUpdated,
+        uuid: Some(node_uuid.to_string()),
+        data: Some(serde_json::json!({"field": "order"})),
+    });
+    Ok(node_info)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -809,5 +937,86 @@ mod tests {
             page.root_nodes.is_empty(),
             "no nodes should remain after failed create+reparent"
         );
+    }
+
+    // ── reparent_node_impl ────────────────────────────────────────────
+
+    #[test]
+    fn test_reparent_node_moves_node_to_new_parent() {
+        let (state, page_id) = make_state_with_page();
+        let parent =
+            create_node_impl(&state, "frame", "Parent", Some(&page_id), None, None).unwrap();
+        let child = create_node_impl(&state, "frame", "Child", Some(&page_id), None, None).unwrap();
+
+        let result = reparent_node_impl(&state, &child.uuid, &parent.uuid, 0);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        let info = result.unwrap();
+        assert_eq!(info.uuid, child.uuid);
+
+        // Verify parent now has child — single lock acquisition to avoid deadlock
+        let doc = crate::server::acquire_document_lock(&state);
+        let parent_id = doc
+            .arena
+            .id_by_uuid(&parent.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let parent_info = build_node_info(&doc, parent_id, parent.uuid.parse().unwrap()).unwrap();
+        assert!(parent_info.children.contains(&child.uuid));
+    }
+
+    #[test]
+    fn test_reparent_node_with_invalid_uuid_returns_error() {
+        let state = AppState::new();
+        let result = reparent_node_impl(&state, "bad-uuid", "also-bad", 0);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
+    }
+
+    // ── reorder_children_impl ─────────────────────────────────────────
+
+    #[test]
+    fn test_reorder_children_changes_position() {
+        let (state, page_id) = make_state_with_page();
+        let parent =
+            create_node_impl(&state, "frame", "Parent", Some(&page_id), None, None).unwrap();
+        let child_a = create_node_impl(&state, "frame", "A", Some(&page_id), None, None).unwrap();
+        let child_b = create_node_impl(&state, "frame", "B", Some(&page_id), None, None).unwrap();
+        let child_c = create_node_impl(&state, "frame", "C", Some(&page_id), None, None).unwrap();
+
+        // Reparent children under parent
+        reparent_node_impl(&state, &child_a.uuid, &parent.uuid, 0).unwrap();
+        reparent_node_impl(&state, &child_b.uuid, &parent.uuid, 1).unwrap();
+        reparent_node_impl(&state, &child_c.uuid, &parent.uuid, 2).unwrap();
+
+        // Move A from position 0 to position 2
+        let result = reorder_children_impl(&state, &child_a.uuid, 2);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+
+        // Verify new order: B, C, A
+        let doc = crate::server::acquire_document_lock(&state);
+        let parent_id = doc
+            .arena
+            .id_by_uuid(&parent.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let children_uuids: Vec<String> = doc
+            .arena
+            .get(parent_id)
+            .unwrap()
+            .children
+            .iter()
+            .map(|&cid| doc.arena.uuid_of(cid).unwrap().to_string())
+            .collect();
+        assert_eq!(
+            children_uuids,
+            vec![child_b.uuid, child_c.uuid, child_a.uuid]
+        );
+    }
+
+    #[test]
+    fn test_reorder_children_on_root_node_returns_error() {
+        let (state, page_id) = make_state_with_page();
+        let root = create_node_impl(&state, "frame", "Root", Some(&page_id), None, None).unwrap();
+
+        let result = reorder_children_impl(&state, &root.uuid, 0);
+        assert!(result.is_err(), "root node has no parent, should fail");
     }
 }

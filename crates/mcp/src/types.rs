@@ -220,6 +220,26 @@ pub struct CreateNodeInput {
     pub transform: Option<TransformInput>,
 }
 
+/// Input for reparenting a node to a new parent.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReparentNodeInput {
+    /// UUID of the node to reparent.
+    pub uuid: String,
+    /// UUID of the new parent node.
+    pub new_parent_uuid: String,
+    /// Position within the new parent's children list (0-based).
+    pub position: i32,
+}
+
+/// Input for reordering a node within its parent's children list.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct ReorderChildrenInput {
+    /// UUID of the node to reorder.
+    pub uuid: String,
+    /// New position within the parent's children list (0-based).
+    pub new_position: i32,
+}
+
 /// Input for setting a node's transform.
 ///
 /// Float fields are validated at the tool-handler layer — NaN and infinity are

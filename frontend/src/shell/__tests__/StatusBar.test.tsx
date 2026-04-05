@@ -31,6 +31,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     deleteNode: vi.fn(),
     setVisible: vi.fn(),
     setLocked: vi.fn(),
+    reparentNode: vi.fn(),
+    reorderChildren: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     destroy: vi.fn(),

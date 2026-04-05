@@ -1,0 +1,160 @@
+.sigil-tree-node {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  gap: var(--size-1);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-1);
+  transition: background-color 120ms;
+}
+
+.sigil-tree-node:hover {
+  background: var(--surface-3);
+}
+
+.sigil-tree-node--selected {
+  background: var(--accent);
+  color: var(--text-on-accent);
+}
+
+.sigil-tree-node--selected:hover {
+  background: var(--accent-hover);
+}
+
+.sigil-tree-node--hidden {
+  opacity: 0.5;
+}
+
+/* DnD: dimmed while being dragged */
+.sigil-tree-node--dragging {
+  opacity: 0.4;
+}
+
+/* DnD: subtle highlight when this node is a drop target */
+.sigil-tree-node--drop-target {
+  background: var(--surface-3);
+}
+
+/* Keyboard focus ring (distinct from selection highlight) */
+.sigil-tree-node--focused {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.sigil-tree-node:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+/* Expand toggle */
+.sigil-tree-node__expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font-size: 10px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sigil-tree-node__expand:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Spacer matching expand toggle width when no children */
+.sigil-tree-node__expand-spacer {
+  display: inline-block;
+  width: 16px;
+  flex-shrink: 0;
+}
+
+/* Kind icon */
+.sigil-tree-node__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+/* Node name */
+.sigil-tree-node__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-0);
+  line-height: 28px;
+}
+
+/* Inline rename input */
+.sigil-tree-node__name-input {
+  width: 100%;
+  min-width: 40px;
+  height: 20px;
+  padding: 0 var(--size-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--input-radius);
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  outline: none;
+}
+
+/* Flexible spacer between name and toggles */
+.sigil-tree-node__spacer {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Toggle buttons (lock, visibility) */
+.sigil-tree-node__toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+
+.sigil-tree-node:hover .sigil-tree-node__toggle,
+.sigil-tree-node--selected .sigil-tree-node__toggle {
+  opacity: 1;
+}
+
+.sigil-tree-node__toggle:hover {
+  color: var(--text-1);
+}
+
+.sigil-tree-node__toggle:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+  opacity: 1;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-tree-node {
+    transition: none;
+  }
+
+  .sigil-tree-node__toggle {
+    transition: none;
+  }
+}
