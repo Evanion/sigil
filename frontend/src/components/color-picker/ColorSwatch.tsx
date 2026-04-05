@@ -53,12 +53,7 @@ export const ColorSwatch: Component<ColorSwatchProps> = (props) => {
       class="sigil-color-picker-popover"
       preventDismissOnInteract
       triggerAriaLabel={props["aria-label"] ?? "Edit color"}
-      trigger={
-        <span
-          class={className()}
-          style={{ background: hex() }}
-        />
-      }
+      trigger={<span class={className()} style={{ background: hex() }} />}
     >
       <ColorPicker color={props.color} onColorChange={props.onColorChange} />
     </Popover>

@@ -342,9 +342,7 @@ export function isOutOfSrgbGamut(color: Color): boolean {
   switch (color.space) {
     case "srgb":
     case "display_p3":
-      return (
-        color.r < 0 || color.r > 1 || color.g < 0 || color.g > 1 || color.b < 0 || color.b > 1
-      );
+      return color.r < 0 || color.r > 1 || color.g < 0 || color.g > 1 || color.b < 0 || color.b > 1;
 
     case "oklch": {
       const [r, g, b] = oklchToSrgbUnclamped(color.l, color.c, color.h);

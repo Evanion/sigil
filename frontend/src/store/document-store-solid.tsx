@@ -465,7 +465,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function deleteNode(uuid: string): void {
     // RF-003: Capture full node and selection for rollback
     const previousNode = state.nodes[uuid]
-      ? deepClone(state.nodes[uuid]) as MutableDocumentNode
+      ? (deepClone(state.nodes[uuid]) as MutableDocumentNode)
       : undefined;
     const previousSelectedId = selectedNodeId();
 
@@ -779,7 +779,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (fillsMutationTimer === null) {
       try {
         fillsRollbackSnapshot = state.nodes[uuid]?.style?.fills
-          ? deepClone(state.nodes[uuid].style.fills) as Fill[]
+          ? (deepClone(state.nodes[uuid].style.fills) as Fill[])
           : [];
       } catch {
         fillsRollbackSnapshot = [];
@@ -790,7 +790,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: clonedFills } as typeof s.nodes[string]["style"];
+          s.nodes[uuid].style = {
+            ...s.nodes[uuid].style,
+            fills: clonedFills,
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
@@ -812,7 +815,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               setState(
                 produce((s) => {
                   if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: snapshot } as typeof s.nodes[string]["style"];
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      fills: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
                   }
                 }),
               );
@@ -825,7 +831,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: snapshot } as typeof s.nodes[string]["style"];
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    fills: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
@@ -850,7 +859,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (strokesMutationTimer === null) {
       try {
         strokesRollbackSnapshot = state.nodes[uuid]?.style?.strokes
-          ? deepClone(state.nodes[uuid].style.strokes) as Stroke[]
+          ? (deepClone(state.nodes[uuid].style.strokes) as Stroke[])
           : [];
       } catch {
         strokesRollbackSnapshot = [];
@@ -864,7 +873,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           s.nodes[uuid].style = {
             ...s.nodes[uuid].style,
             strokes: clonedStrokes,
-          } as typeof s.nodes[string]["style"];
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
@@ -885,7 +894,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               setState(
                 produce((s) => {
                   if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: snapshot } as typeof s.nodes[string]["style"];
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      strokes: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
                   }
                 }),
               );
@@ -898,7 +910,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, strokes: snapshot } as typeof s.nodes[string]["style"];
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    strokes: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
@@ -923,7 +938,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (effectsMutationTimer === null) {
       try {
         effectsRollbackSnapshot = state.nodes[uuid]?.style?.effects
-          ? deepClone(state.nodes[uuid].style.effects) as Effect[]
+          ? (deepClone(state.nodes[uuid].style.effects) as Effect[])
           : [];
       } catch {
         effectsRollbackSnapshot = [];
@@ -937,7 +952,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           s.nodes[uuid].style = {
             ...s.nodes[uuid].style,
             effects: clonedEffects,
-          } as typeof s.nodes[string]["style"];
+          } as (typeof s.nodes)[string]["style"];
         }
       }),
     );
@@ -958,7 +973,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               setState(
                 produce((s) => {
                   if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: snapshot } as typeof s.nodes[string]["style"];
+                    s.nodes[uuid].style = {
+                      ...s.nodes[uuid].style,
+                      effects: snapshot,
+                    } as (typeof s.nodes)[string]["style"];
                   }
                 }),
               );
@@ -971,7 +989,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             setState(
               produce((s) => {
                 if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, effects: snapshot } as typeof s.nodes[string]["style"];
+                  s.nodes[uuid].style = {
+                    ...s.nodes[uuid].style,
+                    effects: snapshot,
+                  } as (typeof s.nodes)[string]["style"];
                 }
               }),
             );
@@ -991,9 +1012,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!targetNode || targetNode.kind.type !== "rectangle") return;
 
     // Snapshot previous value for rollback
-    const previousKind = state.nodes[uuid]?.kind
-      ? deepClone(state.nodes[uuid].kind)
-      : undefined;
+    const previousKind = state.nodes[uuid]?.kind ? deepClone(state.nodes[uuid].kind) : undefined;
 
     // Optimistic update — kind.type guard is required for TypeScript narrowing even
     // though the early return above already guarantees we only reach this point for
