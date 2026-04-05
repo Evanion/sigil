@@ -351,9 +351,7 @@ export const Canvas: Component = () => {
       // on key additions/deletions in Solid's store. Object.values() alone does
       // not track new keys being added (e.g., optimistic node creation).
       const keys = Object.keys(nodesObj);
-      const nodesArray: DocumentNode[] = keys
-        .map((k) => nodesObj[k])
-        .filter((n): n is DocumentNode => n != null);
+      const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
       renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview);
     });
