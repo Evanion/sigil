@@ -106,7 +106,8 @@ describe("DesignPanel", () => {
     const effectsTab = screen.getByRole("tab", { name: "Effects" });
     fireEvent.click(effectsTab);
     expect(effectsTab.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText(/Effects panel/)).toBeTruthy();
+    // EffectsPanel renders a panel with the sigil-effects-panel class
+    expect(document.querySelector(".sigil-effects-panel")).toBeTruthy();
   });
 
   it("should navigate tabs with ArrowRight key", () => {

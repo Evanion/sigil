@@ -1,6 +1,7 @@
 import { createSignal, Show, type Component } from "solid-js";
 import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
+import { EffectsPanel } from "./EffectsPanel";
 import "./DesignPanel.css";
 
 type DesignTab = "layout" | "appearance" | "effects";
@@ -70,7 +71,7 @@ export const DesignPanel: Component = () => {
           <div class="sigil-design-panel__placeholder">Appearance panel — Plan 09c Task 4</div>
         </Show>
         <Show when={activeTab() === "effects"}>
-          <div class="sigil-design-panel__placeholder">Effects panel — Plan 09c Task 5</div>
+          <EffectsPanel />
         </Show>
       </div>
     </div>

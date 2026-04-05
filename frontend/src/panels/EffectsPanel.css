@@ -1,0 +1,50 @@
+.sigil-effects-panel {
+  padding: 8px;
+}
+
+.sigil-effects-panel__header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.sigil-effects-panel__title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.sigil-effects-panel__add {
+  color: var(--accent);
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-2);
+}
+
+.sigil-effects-panel__add:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-effects-panel__add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sigil-effects-panel__empty {
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No transitions in this file currently; placeholder for future additions. */
+}
