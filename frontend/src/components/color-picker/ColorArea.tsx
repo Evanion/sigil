@@ -157,6 +157,9 @@ export function ColorArea(props: ColorAreaProps) {
       role="slider"
       tabindex="0"
       aria-label={props["aria-label"]}
+      aria-valuenow={Math.round(props.xValue * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
       aria-valuetext={ariaValueText()}
       style={{ width: `${AREA_WIDTH}px`, height: `${AREA_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
@@ -167,7 +170,6 @@ export function ColorArea(props: ColorAreaProps) {
       <canvas
         ref={canvasRef}
         class="sigil-color-area__canvas"
-        aria-label={props["aria-label"]}
         aria-hidden="true"
         style={{ width: `${AREA_WIDTH}px`, height: `${AREA_HEIGHT}px` }}
       >

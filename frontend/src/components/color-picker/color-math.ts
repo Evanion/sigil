@@ -125,14 +125,13 @@ export function srgbToOklab(r: number, g: number, b: number): [number, number, n
 }
 
 /**
- * Convert OkLab [L, a, b] to sRGB [r, g, b].
- * Inverse of srgbToOklab. Output is clamped to [0, 1].
+ * RF-026: Shared OkLab -> linear RGB conversion used by both oklabToSrgb
+ * and oklabToSrgbUnclamped to avoid duplicating the matrix constants.
  *
- * Pipeline: OkLab -> LMS (cube) -> linear RGB -> sRGB (gamma encode)
- *
+ * Pipeline: OkLab -> LMS (cube) -> linear RGB
  * Inverse matrices from https://bottosson.github.io/posts/oklab/
  */
-export function oklabToSrgb(L: number, a: number, b: number): [number, number, number] {
+function oklabToLinearRgb(L: number, a: number, b: number): [number, number, number] {
   // OkLab -> LMS (cube root space)
   const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
   const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
@@ -147,6 +146,18 @@ export function oklabToSrgb(L: number, a: number, b: number): [number, number, n
   const lr = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
   const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
   const lb = -0.004196086300000001 * l - 0.7034186147 * m + 1.707614701 * s;
+
+  return [lr, lg, lb];
+}
+
+/**
+ * Convert OkLab [L, a, b] to sRGB [r, g, b].
+ * Inverse of srgbToOklab. Output is clamped to [0, 1].
+ *
+ * Pipeline: OkLab -> linear RGB (shared) -> sRGB (gamma encode)
+ */
+export function oklabToSrgb(L: number, a: number, b: number): [number, number, number] {
+  const [lr, lg, lb] = oklabToLinearRgb(L, a, b);
 
   // Linear RGB -> sRGB (gamma encode), clamp output
   return [
@@ -322,19 +333,10 @@ export function withAlpha(color: Color, alpha: number): Color {
 /**
  * OkLab -> linear RGB -> sRGB without clamping.
  * Used only by isOutOfSrgbGamut to detect out-of-gamut colors.
+ * RF-026: Uses shared oklabToLinearRgb to avoid duplicating the matrix.
  */
 function oklabToSrgbUnclamped(L: number, a: number, b: number): [number, number, number] {
-  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
-  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
-  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
-
-  const l = l_ * l_ * l_;
-  const m = m_ * m_ * m_;
-  const s = s_ * s_ * s_;
-
-  const lr = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
-  const lg = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
-  const lb = -0.004196086300000001 * l - 0.7034186147 * m + 1.707614701 * s;
+  const [lr, lg, lb] = oklabToLinearRgb(L, a, b);
 
   // Preserve negative linear values so the gamut check catches them (RF-003).
   // Without this, negative inputs go through Math.pow which returns NaN for

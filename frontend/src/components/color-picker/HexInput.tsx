@@ -29,6 +29,7 @@ export interface HexInputProps {
 export function HexInput(props: HexInputProps) {
   const [isEditing, setIsEditing] = createSignal(false);
   const [editValue, setEditValue] = createSignal("");
+  const [isError, setIsError] = createSignal(false);
 
   const committedHex = () => srgbToHex(props.r, props.g, props.b);
   const swatchColor = () => committedHex();
@@ -44,6 +45,10 @@ export function HexInput(props: HexInputProps) {
     const parsed = hexToSrgb(raw);
     if (parsed !== null) {
       props.onChange(parsed[0], parsed[1], parsed[2]);
+    } else if (raw.length > 0) {
+      // RF-023: Flash error state on failed parse so the user knows the value was invalid.
+      setIsError(true);
+      setTimeout(() => setIsError(false), 1200);
     }
     // Revert to committed value on invalid input (done implicitly — we don't
     // store the parsed value locally, so committedHex() still reflects props).
@@ -56,7 +61,9 @@ export function HexInput(props: HexInputProps) {
 
   function handleInput(e: Event) {
     const target = e.currentTarget as HTMLInputElement;
-    setEditValue(target.value);
+    // RF-018: Strip non-hex and non-# characters before storing.
+    const sanitized = target.value.replace(/[^0-9a-fA-F#]/g, "").slice(0, 7);
+    setEditValue(sanitized);
   }
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -89,6 +96,7 @@ export function HexInput(props: HexInputProps) {
       />
       <input
         class="sigil-hex-input__input"
+        classList={{ "sigil-hex-input__input--error": isError() }}
         type="text"
         maxLength={7}
         aria-label="Hex color"

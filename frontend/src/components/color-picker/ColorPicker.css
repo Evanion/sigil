@@ -80,6 +80,11 @@
   outline: none;
 }
 
+.sigil-hex-input__input--error {
+  border-color: var(--danger);
+  transition: border-color 200ms ease-out;
+}
+
 .sigil-hex-input__input:focus-visible {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
@@ -103,6 +108,9 @@
   padding: 4px 0;
 }
 
+/* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */
 @media (prefers-reduced-motion: reduce) {
-  /* No transitions in this file currently — placeholder for future additions. */
+  .sigil-hex-input__input--error {
+    transition: none;
+  }
 }

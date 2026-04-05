@@ -12,7 +12,7 @@
  * All numeric values from callbacks are guarded with Number.isFinite() before
  * use (CLAUDE.md §11 Floating-Point Validation).
  */
-import { createEffect, createMemo, createSignal } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { Color } from "../../types/document";
 import type { ColorSpace } from "./types";
@@ -69,10 +69,21 @@ export function ColorPicker(props: ColorPickerProps) {
     const color = props.color;
     const [r, g, b] = colorToSrgb(color);
     const alpha = colorAlpha(color);
+    // RF-033: Guard against NaN/Infinity from color conversion.
+    if (
+      !Number.isFinite(r) ||
+      !Number.isFinite(g) ||
+      !Number.isFinite(b) ||
+      !Number.isFinite(alpha)
+    )
+      return;
     // Derive hue from OkLCH; only update hue if chroma is non-trivial to
     // preserve the previous hue for achromatic colors.
     const [, c, h] = srgbToOklch(r, g, b);
-    const newHue = c > 0.001 ? h : state.hue;
+    // RF-019: Read state.hue inside untrack to avoid creating a reactive loop
+    // (this effect writes to state, which would re-trigger if state.hue were tracked).
+    const prevHue = untrack(() => state.hue);
+    const newHue = c > 0.001 ? h : prevHue;
     setState({ r, g, b, alpha, hue: newHue, space: color.space });
   });
 
@@ -102,6 +113,9 @@ export function ColorPicker(props: ColorPickerProps) {
   });
 
   // ── ColorArea background render (RF-004) ─────────────────────────────
+  // RF-034: This createMemo intentionally returns a new function reference
+  // whenever state.hue changes, which is what triggers the canvas to redraw.
+  // The identity-change-triggers-redraw pattern is deliberate here.
   // Renders a pixel-accurate OkLCH gradient via ImageData.
   // X-axis = chroma (0 at left to 0.2 at right).
   // Y-axis = lightness (1 at top to 0 at bottom).

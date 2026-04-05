@@ -14,6 +14,8 @@ import { ColorArea } from "./ColorArea";
 import { HueStrip } from "./HueStrip";
 import { AlphaStrip } from "./AlphaStrip";
 import { ColorSpaceSwitcher } from "./ColorSpaceSwitcher";
+import { GradientEditor } from "./GradientEditor";
+import type { GradientStop } from "../../types/document";
 import type { ColorSpace } from "./types";
 
 // ── Story meta ──────────────────────────────────────────────────────────
@@ -211,6 +213,44 @@ export const SpaceSwitcher: Story = {
       >
         <ColorSpaceSwitcher value={space()} onChange={setSpace} />
         <span style={{ color: "var(--text-2)", "font-size": "11px" }}>Selected: {space()}</span>
+      </div>
+    );
+  },
+};
+
+// ── Gradient ──────────────────────────────────────────────────────────────
+
+/**
+ * GradientEditor — visual gradient stop editor with drag handles.
+ * Drag stops to reposition, click the bar to add, drag off to remove.
+ */
+export const Gradient: StoryObj = {
+  render: () => {
+    const [stops, setStops] = createSignal<GradientStop[]>([
+      {
+        position: 0,
+        color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+      },
+      {
+        position: 1,
+        color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+      },
+    ]);
+    const [type, setType] = createSignal<"linear" | "radial">("linear");
+    const [angle, setAngle] = createSignal(90);
+    const [selected, setSelected] = createSignal(0);
+    return (
+      <div style={{ padding: "20px", background: "var(--surface-1)", width: "260px" }}>
+        <GradientEditor
+          stops={stops()}
+          gradientType={type()}
+          angle={angle()}
+          selectedStopIndex={selected()}
+          onStopsChange={(s) => setStops(s)}
+          onGradientTypeChange={setType}
+          onAngleChange={setAngle}
+          onSelectStop={setSelected}
+        />
       </div>
     );
   },

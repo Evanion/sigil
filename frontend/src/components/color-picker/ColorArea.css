@@ -21,7 +21,7 @@
   width: var(--color-picker-cursor-size);
   height: var(--color-picker-cursor-size);
   border-radius: 50%;
-  border: 2px solid white;
+  border: 2px solid var(--color-picker-thumb-border, #ffffff);
   box-shadow: var(--color-picker-cursor-shadow);
   transform: translate(-50%, 50%);
   pointer-events: none;

@@ -13,9 +13,6 @@ import "./Strip.css";
 export const STRIP_WIDTH = 240;
 export const STRIP_HEIGHT = 14;
 
-/** Size of each checkerboard square in logical pixels. */
-const CHECKER_SIZE = 4;
-
 export interface AlphaStripProps {
   /** Current alpha value in [0, 1]. */
   alpha: number;
@@ -65,23 +62,11 @@ export function AlphaStrip(props: AlphaStripProps) {
 
     ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
 
-    // Draw checkerboard in logical pixels.
-    // Colors are defined in theme.css tokens but canvas API needs string values;
-    // we use the token values directly from the CSS variables.
-    const cols = Math.ceil(STRIP_WIDTH / CHECKER_SIZE);
-    const rows = Math.ceil(STRIP_HEIGHT / CHECKER_SIZE);
+    // RF-024: Checkerboard is rendered via CSS background on the container
+    // (see Strip.css .sigil-strip--alpha). The canvas only draws the gradient
+    // overlay on top, avoiding 240 fillRect calls per color change.
+    ctx.clearRect(0, 0, STRIP_WIDTH, STRIP_HEIGHT);
 
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const isDark = (row + col) % 2 === 0;
-        // These colors are sourced from the CSS token definitions in theme.css.
-        // We read them here as string literals that match the token values.
-        ctx.fillStyle = isDark ? "#444444" : "#666666";
-        ctx.fillRect(col * CHECKER_SIZE, row * CHECKER_SIZE, CHECKER_SIZE, CHECKER_SIZE);
-      }
-    }
-
-    // Draw the transparency-to-color gradient overlay.
     const gradient = ctx.createLinearGradient(0, 0, STRIP_WIDTH, 0);
     gradient.addColorStop(0, "transparent");
     gradient.addColorStop(1, props.colorCss);
@@ -153,7 +138,7 @@ export function AlphaStrip(props: AlphaStripProps) {
   return (
     <div
       ref={containerRef}
-      class="sigil-strip"
+      class="sigil-strip sigil-strip--alpha"
       role="slider"
       tabindex="0"
       aria-label={label()}

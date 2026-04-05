@@ -88,4 +88,5 @@
   --color-picker-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   --color-picker-checkerboard-dark: #444444;
   --color-picker-checkerboard-light: #666666;
+  --color-picker-thumb-border: #ffffff;
 }

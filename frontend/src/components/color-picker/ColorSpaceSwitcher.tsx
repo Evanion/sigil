@@ -16,13 +16,15 @@ import "./ColorPicker.css";
 interface SpaceOption {
   value: ColorSpace;
   label: string;
+  /** RF-030: Descriptive tooltip for the color space button. */
+  title: string;
 }
 
 const SPACE_OPTIONS: SpaceOption[] = [
-  { value: "srgb", label: "sRGB" },
-  { value: "display_p3", label: "P3" },
-  { value: "oklch", label: "OkLCH" },
-  { value: "oklab", label: "OkLab" },
+  { value: "srgb", label: "sRGB", title: "Standard web colors (sRGB)" },
+  { value: "display_p3", label: "P3", title: "Wide-gamut display colors (Display P3)" },
+  { value: "oklch", label: "OkLCH", title: "Perceptual lightness/chroma/hue (OkLCH)" },
+  { value: "oklab", label: "OkLab", title: "Perceptual lightness and color axes (OkLab)" },
 ];
 
 export interface ColorSpaceSwitcherProps {
@@ -76,6 +78,7 @@ export function ColorSpaceSwitcher(props: ColorSpaceSwitcherProps) {
               role="radio"
               aria-checked={isActive()}
               tabindex={isActive() ? 0 : -1}
+              title={option.title}
               onClick={() => props.onChange(option.value)}
               onKeyDown={handleKeyDown}
               type="button"

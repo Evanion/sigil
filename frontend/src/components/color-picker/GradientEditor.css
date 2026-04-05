@@ -86,6 +86,7 @@
   color: var(--text-2);
 }
 
+/* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */
 @media (prefers-reduced-motion: reduce) {
   /* No transitions currently used in this component. Placeholder for future additions. */
 }

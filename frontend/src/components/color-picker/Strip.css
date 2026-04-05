@@ -2,9 +2,20 @@
   position: relative;
   border-radius: var(--color-picker-strip-radius);
   overflow: hidden;
-  cursor: pointer;
+  cursor: crosshair;
   outline: none;
   flex-shrink: 0;
+}
+
+/* RF-024: CSS checkerboard for the alpha strip — avoids redrawing 240
+   fillRect calls on every color change. The canvas sits on top of this
+   background and only draws the gradient overlay. */
+.sigil-strip--alpha {
+  background: repeating-conic-gradient(
+      var(--color-picker-checkerboard-dark) 0% 25%,
+      var(--color-picker-checkerboard-light) 0% 50%
+    )
+    50% / 8px 8px;
 }
 
 .sigil-strip:focus-visible {
@@ -23,7 +34,7 @@
   width: 8px;
   height: calc(100% + 2px);
   border-radius: 4px;
-  border: 2px solid white;
+  border: 2px solid var(--color-picker-thumb-border, #ffffff);
   box-shadow: var(--color-picker-thumb-shadow);
   transform: translateX(-50%);
   pointer-events: none;
