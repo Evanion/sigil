@@ -1,6 +1,8 @@
-import { For, createSignal, createEffect, onMount, onCleanup, type Component } from "solid-js";
+import { For, createSignal, createEffect, onMount, onCleanup, type Component, type JSX } from "solid-js";
+import { MousePointer2, Frame, Square, Circle } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "./AnnounceProvider";
+import { Tooltip } from "../components/tooltip/Tooltip";
 import type { ToolType } from "../store/document-store-solid";
 import { tinykeys } from "tinykeys";
 import "./Toolbar.css";
@@ -9,21 +11,20 @@ interface ToolDef {
   id: ToolType;
   label: string;
   shortcut: string;
-  icon: string;
+  icon: (props: { size?: number }) => JSX.Element;
 }
 
 const TOOLS: ToolDef[] = [
-  { id: "select", label: "Select", shortcut: "V", icon: "V" },
-  { id: "frame", label: "Frame", shortcut: "F", icon: "F" },
-  { id: "rectangle", label: "Rectangle", shortcut: "R", icon: "R" },
-  { id: "ellipse", label: "Ellipse", shortcut: "O", icon: "O" },
+  { id: "select", label: "Select", shortcut: "V", icon: (p) => <MousePointer2 size={p.size} /> },
+  { id: "frame", label: "Frame", shortcut: "F", icon: (p) => <Frame size={p.size} /> },
+  { id: "rectangle", label: "Rectangle", shortcut: "R", icon: (p) => <Square size={p.size} /> },
+  { id: "ellipse", label: "Ellipse", shortcut: "O", icon: (p) => <Circle size={p.size} /> },
 ];
 
 export const Toolbar: Component = () => {
   const store = useDocument();
   const announce = useAnnounce();
 
-  // RF-023: Use a refs array instead of fragile DOM child index
   const buttonRefs: HTMLButtonElement[] = [];
 
   // Roving tabindex: only active tool button is tabbable
@@ -35,7 +36,7 @@ export const Toolbar: Component = () => {
     if (idx >= 0) setFocusedIndex(idx);
   });
 
-  // RF-001: Announce active tool changes to screen readers
+  // Announce active tool changes to screen readers
   createEffect(() => {
     const tool = TOOLS.find((t) => t.id === store.activeTool());
     if (tool) {
@@ -43,7 +44,7 @@ export const Toolbar: Component = () => {
     }
   });
 
-  // Keyboard shortcuts for tool selection (skip if user is typing in an input)
+  // Keyboard shortcuts (skip if typing in an input)
   onMount(() => {
     const isTyping = () => {
       const el = document.activeElement;
@@ -56,35 +57,23 @@ export const Toolbar: Component = () => {
 
     const unsubscribe = tinykeys(window, {
       v: (e: KeyboardEvent) => {
-        if (!isTyping()) {
-          e.preventDefault();
-          store.setActiveTool("select");
-        }
+        if (!isTyping()) { e.preventDefault(); store.setActiveTool("select"); }
       },
       f: (e: KeyboardEvent) => {
-        if (!isTyping()) {
-          e.preventDefault();
-          store.setActiveTool("frame");
-        }
+        if (!isTyping()) { e.preventDefault(); store.setActiveTool("frame"); }
       },
       r: (e: KeyboardEvent) => {
-        if (!isTyping()) {
-          e.preventDefault();
-          store.setActiveTool("rectangle");
-        }
+        if (!isTyping()) { e.preventDefault(); store.setActiveTool("rectangle"); }
       },
       o: (e: KeyboardEvent) => {
-        if (!isTyping()) {
-          e.preventDefault();
-          store.setActiveTool("ellipse");
-        }
+        if (!isTyping()) { e.preventDefault(); store.setActiveTool("ellipse"); }
       },
     });
 
     onCleanup(unsubscribe);
   });
 
-  // RF-007: Arrow keys only move focus, do not activate tool
+  // Arrow keys move focus within toolbar (roving tabindex)
   function handleToolbarKeydown(e: KeyboardEvent) {
     const len = TOOLS.length;
     if (e.key === "ArrowDown" || e.key === "ArrowRight") {
@@ -113,18 +102,19 @@ export const Toolbar: Component = () => {
       </div>
       <For each={TOOLS}>
         {(tool, index) => (
-          <button
-            ref={(el) => {
-              buttonRefs[index()] = el;
-            }}
-            class="toolbar__btn"
-            aria-pressed={store.activeTool() === tool.id}
-            aria-label={`${tool.label} (${tool.shortcut})`}
-            tabindex={focusedIndex() === index() ? 0 : -1}
-            onClick={() => store.setActiveTool(tool.id)}
-          >
-            {tool.icon}
-          </button>
+          <Tooltip content={`${tool.label} (${tool.shortcut})`} placement="right">
+            <button
+              ref={(el) => { buttonRefs[index()] = el; }}
+              class="toolbar__btn"
+              classList={{ "toolbar__btn--active": store.activeTool() === tool.id }}
+              aria-pressed={store.activeTool() === tool.id}
+              aria-label={`${tool.label} (${tool.shortcut})`}
+              tabindex={focusedIndex() === index() ? 0 : -1}
+              onClick={() => store.setActiveTool(tool.id)}
+            >
+              {tool.icon({ size: 16 })}
+            </button>
+          </Tooltip>
         )}
       </For>
     </div>

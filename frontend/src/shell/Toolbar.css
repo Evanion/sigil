@@ -50,7 +50,8 @@
   outline-offset: -2px;
 }
 
+.toolbar__btn--active,
 .toolbar__btn[aria-pressed="true"] {
-  background: var(--accent, #cba6f7);
-  color: var(--surface-1, #1e1e2e);
+  background: var(--accent);
+  color: var(--surface-1);
 }
