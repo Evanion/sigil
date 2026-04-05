@@ -762,7 +762,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setState(
       produce((s) => {
         if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: clonedFills } as any;
+          s.nodes[uuid].style = { ...s.nodes[uuid].style, fills: clonedFills } as typeof s.nodes[string]["style"];
         }
       }),
     );
@@ -803,7 +803,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           s.nodes[uuid].style = {
             ...s.nodes[uuid].style,
             strokes: JSON.parse(JSON.stringify(strokes)),
-          } as any;
+          } as typeof s.nodes[string]["style"];
         }
       }),
     );
@@ -852,7 +852,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           s.nodes[uuid].style = {
             ...s.nodes[uuid].style,
             effects: JSON.parse(JSON.stringify(effects)),
-          } as any;
+          } as typeof s.nodes[string]["style"];
         }
       }),
     );

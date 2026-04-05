@@ -109,7 +109,7 @@ export function ColorPicker(props: ColorPickerProps) {
     }
   }
 
-  function emit(r: number, g: number, b: number, alpha: number, _space: ColorSpace) {
+  function emit(r: number, g: number, b: number, alpha: number) {
     if (!mounted) return;
     pendingColor = { r, g, b, alpha, space: "srgb" };
     if (!emitPending) {
@@ -263,7 +263,7 @@ export function ColorPicker(props: ColorPickerProps) {
         break;
     }
     setState({ r: nr, g: ng, b: nb });
-    emit(nr, ng, nb, state.alpha, state.space);
+    emit(nr, ng, nb, state.alpha);
   }
 
   // ── Hue strip change handler ───────────────────────────────────────────
@@ -310,14 +310,14 @@ export function ColorPicker(props: ColorPickerProps) {
         break;
     }
     setState({ r: nr, g: ng, b: nb, hue });
-    emit(nr, ng, nb, state.alpha, state.space);
+    emit(nr, ng, nb, state.alpha);
   }
 
   // ── Alpha strip change handler ─────────────────────────────────────────
   function handleAlphaChange(alpha: number) {
     if (!Number.isFinite(alpha)) return;
     setState({ alpha });
-    emit(state.r, state.g, state.b, alpha, state.space);
+    emit(state.r, state.g, state.b, alpha);
   }
 
   // ── ColorValueFields change handler ───────────────────────────────────
@@ -341,7 +341,7 @@ export function ColorPicker(props: ColorPickerProps) {
       if (h < 0) h += 360;
     }
     setState({ r, g, b, alpha, hue: h });
-    emit(r, g, b, alpha, state.space);
+    emit(r, g, b, alpha);
     commitColor();
   }
 
