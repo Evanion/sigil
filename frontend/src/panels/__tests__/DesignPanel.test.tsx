@@ -93,7 +93,8 @@ describe("DesignPanel", () => {
     const appearanceTab = screen.getByRole("tab", { name: "Appearance" });
     fireEvent.click(appearanceTab);
     expect(appearanceTab.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText(/Appearance panel/)).toBeTruthy();
+    // AppearancePanel renders a region with aria-label "Appearance"
+    expect(document.querySelector(".sigil-appearance-panel")).toBeTruthy();
   });
 
   it("should switch to Effects tab when clicked", () => {

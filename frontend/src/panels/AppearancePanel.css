@@ -1,0 +1,78 @@
+.sigil-appearance-panel {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Opacity + blend mode row ─────────────────────────────────────── */
+
+.sigil-appearance-panel__opacity-blend {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.sigil-appearance-panel__opacity-blend > :first-child {
+  flex: 1;
+}
+
+/* ── Section (fill, stroke) ───────────────────────────────────────── */
+
+.sigil-appearance-panel__section {
+  display: flex;
+  flex-direction: column;
+}
+
+.sigil-appearance-panel__section-header {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.sigil-appearance-panel__section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.sigil-appearance-panel__add {
+  color: var(--accent);
+  background: none;
+  border: none;
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-2);
+}
+
+.sigil-appearance-panel__add:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-appearance-panel__add:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sigil-appearance-panel__empty {
+  color: var(--text-3);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
+/* ── Fill / stroke row wrappers — keyboard reorder target ─────────── */
+
+.sigil-appearance-panel__row-wrapper {
+  display: contents;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* No transitions in this file currently; placeholder for future additions. */
+}

@@ -1,6 +1,7 @@
 import { createSignal, Show, type Component } from "solid-js";
 import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
+import { AppearancePanel } from "./AppearancePanel";
 import { EffectsPanel } from "./EffectsPanel";
 import "./DesignPanel.css";
 
@@ -68,7 +69,7 @@ export const DesignPanel: Component = () => {
           <SchemaPanel schema={designSchema} />
         </Show>
         <Show when={activeTab() === "appearance"}>
-          <div class="sigil-design-panel__placeholder">Appearance panel — Plan 09c Task 4</div>
+          <AppearancePanel />
         </Show>
         <Show when={activeTab() === "effects"}>
           <EffectsPanel />
