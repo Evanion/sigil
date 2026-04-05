@@ -1,0 +1,92 @@
+/* GradientEditor.css — styles for the gradient stop editor widget. */
+
+.sigil-gradient-editor__type-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.sigil-gradient-editor__bar {
+  position: relative;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  margin-bottom: 4px;
+}
+
+/* Stop handle */
+.sigil-gradient-editor__stop {
+  position: absolute;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-2);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  cursor: grab;
+  box-shadow: var(--color-picker-thumb-shadow);
+}
+
+.sigil-gradient-editor__stop:active {
+  cursor: grabbing;
+}
+
+.sigil-gradient-editor__stop--selected {
+  border-color: white;
+  width: 14px;
+  height: 14px;
+  margin-bottom: -1px;
+}
+
+.sigil-gradient-editor__stop:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* RF-010: focus-visible on the gradient bar when keyboard-focused */
+.sigil-gradient-editor__bar:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* RF-017: Gradient type radio buttons */
+.sigil-gradient-editor__type-btn {
+  flex: 1;
+  text-align: center;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--text-2);
+  border: 1px solid var(--border-1);
+  background: var(--surface-3);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sigil-gradient-editor__type-btn--active {
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-weight: 600;
+  border-color: var(--border-2);
+}
+
+.sigil-gradient-editor__type-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-gradient-editor__angle-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+
+.sigil-gradient-editor__angle-label {
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+
+/* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */
+@media (prefers-reduced-motion: reduce) {
+  /* No transitions currently used in this component. Placeholder for future additions. */
+}

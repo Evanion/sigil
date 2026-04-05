@@ -79,4 +79,14 @@
   --z-dialog: 61;
   --z-toast: 80;
   --z-tooltip: 100;
+
+  /* Color picker widget tokens */
+  --color-picker-radius: var(--radius-2);
+  --color-picker-strip-radius: 7px;
+  --color-picker-cursor-size: 12px;
+  --color-picker-cursor-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  --color-picker-thumb-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  --color-picker-checkerboard-dark: #444444;
+  --color-picker-checkerboard-light: #666666;
+  --color-picker-thumb-border: #ffffff;
 }

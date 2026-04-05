@@ -1,0 +1,116 @@
+/* ColorPicker.css — styles for ColorSpaceSwitcher, ColorValueFields, HexInput */
+
+/* ── ColorSpaceSwitcher ─────────────────────────────────────────────── */
+
+.sigil-color-space-switcher {
+  display: flex;
+  background: var(--surface-3);
+  border-radius: 4px;
+  padding: 2px;
+}
+
+.sigil-color-space-switcher__btn {
+  flex: 1;
+  text-align: center;
+  padding: 3px 0;
+  font-size: 10px;
+  color: var(--text-2);
+  border: none;
+  background: transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.sigil-color-space-switcher__btn--active {
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+.sigil-color-space-switcher__btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── ColorValueFields ───────────────────────────────────────────────── */
+
+.sigil-color-value-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.sigil-color-value-fields__field {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.sigil-color-value-fields__label {
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+/* ── HexInput ───────────────────────────────────────────────────────── */
+
+.sigil-hex-input {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sigil-hex-input__swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.sigil-hex-input__input {
+  background: var(--surface-4);
+  border: 1px solid transparent;
+  border-radius: var(--input-radius);
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: monospace;
+  color: var(--text-1);
+  flex: 1;
+  outline: none;
+}
+
+.sigil-hex-input__input--error {
+  border-color: var(--danger);
+  transition: border-color 200ms ease-out;
+}
+
+.sigil-hex-input__input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-hex-input__gamut-warning {
+  font-size: 12px;
+  color: var(--warning);
+}
+
+/* ── ColorPicker popover ────────────────────────────────────────────── */
+
+.sigil-color-picker-popover {
+  width: 270px;
+}
+
+.sigil-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+/* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-hex-input__input--error {
+    transition: none;
+  }
+}
