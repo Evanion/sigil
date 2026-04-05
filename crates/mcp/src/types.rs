@@ -228,7 +228,8 @@ pub struct ReparentNodeInput {
     /// UUID of the new parent node.
     pub new_parent_uuid: String,
     /// Position within the new parent's children list (0-based).
-    pub position: i32,
+    /// Positions beyond the children count are clamped to append.
+    pub position: u32,
 }
 
 /// Input for reordering a node within its parent's children list.
@@ -237,7 +238,8 @@ pub struct ReorderChildrenInput {
     /// UUID of the node to reorder.
     pub uuid: String,
     /// New position within the parent's children list (0-based).
-    pub new_position: i32,
+    /// Positions beyond the children count are clamped by the core engine.
+    pub new_position: u32,
 }
 
 /// Input for setting a node's transform.

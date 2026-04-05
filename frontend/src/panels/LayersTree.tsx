@@ -164,11 +164,28 @@ function resolveDropPosition(
   if (!parentNode) return 0;
 
   const children = parentNode.childrenUuids;
-  const targetIdx = children.indexOf(target.targetUuid);
+  let targetIdx = children.indexOf(target.targetUuid);
 
   if (targetIdx === -1) {
-    // Target is not a direct child of the resolved parent — append at end.
-    return children.length;
+    // Target is not a direct child of the resolved parent (cross-depth drop).
+    // Walk up from the target to find which direct child of the parent is
+    // on the path to the target, and use that child's index.
+    let walk: string | null = target.targetUuid;
+    let walkGuard = 0;
+    while (walk !== null && walkGuard < 64) {
+      const walkNode: DocumentState["nodes"][string] | undefined = nodes[walk];
+      if (!walkNode) break;
+      if (walkNode.parentUuid === parentUuid) {
+        targetIdx = children.indexOf(walk);
+        break;
+      }
+      walk = walkNode.parentUuid;
+      walkGuard++;
+    }
+    if (targetIdx === -1) {
+      // Could not resolve — append at end.
+      return children.length;
+    }
   }
 
   // Account for whether the dragged node is already a child of this parent
@@ -196,11 +213,11 @@ export const LayersTree: Component = () => {
   let treeRef: HTMLDivElement | undefined;
 
   // Auto-expand root-level nodes on first load.
-  let hasAutoExpanded = false;
+  const [hasAutoExpanded, setHasAutoExpanded] = createSignal(false);
   createEffect(() => {
     const nodes = store.state.nodes;
     const keys = Object.keys(nodes);
-    if (keys.length === 0 || hasAutoExpanded) return;
+    if (keys.length === 0 || hasAutoExpanded()) return;
 
     const roots: string[] = [];
     for (const uuid of keys) {
@@ -212,7 +229,7 @@ export const LayersTree: Component = () => {
     }
 
     if (roots.length > 0) {
-      hasAutoExpanded = true;
+      setHasAutoExpanded(true);
       setExpandedNodes(new Set(roots));
     }
   });
@@ -306,8 +323,15 @@ export const LayersTree: Component = () => {
       const treeRect = treeRef.getBoundingClientRect();
 
       // Get cursor position from the drag event's native event if available,
-      // or fallback to the center of the target.
+      // or fallback to the center of the target. Note: this accesses dnd-kit-solid's
+      // internal event shape — if the library changes, the fallback produces
+      // center-of-target positioning which defaults to "inside" for containers.
       const nativeEvent = (event as unknown as { nativeEvent?: PointerEvent }).nativeEvent;
+      if (!nativeEvent && import.meta.env.DEV) {
+        console.warn(
+          "LayersTree: nativeEvent missing from drag event — drop zones use fallback positions",
+        );
+      }
       const cursorY = nativeEvent ? nativeEvent.clientY - targetRect.top : targetRect.height / 2;
       const cursorX = nativeEvent ? nativeEvent.clientX : targetRect.left + targetRect.width / 2;
 
@@ -333,16 +357,11 @@ export const LayersTree: Component = () => {
       });
 
       // Cycle prevention: don't allow dropping a node into its own subtree.
+      // Check for all positions (inside/before/after can all resolve to reparent).
       if (
-        computed.position === "inside" &&
+        targetUuid === sourceData.uuid ||
         isAncestor(store.state.nodes, targetUuid, sourceData.uuid)
       ) {
-        setDropTarget(null);
-        return;
-      }
-
-      // Also prevent dropping onto self.
-      if (targetUuid === sourceData.uuid && computed.position === "inside") {
         setDropTarget(null);
         return;
       }
@@ -387,16 +406,18 @@ export const LayersTree: Component = () => {
         return;
       }
 
-      // Cycle prevention (double-check).
+      const parentUuid = resolveDropParent(nodes, list, currentDrop, targetIndex);
+
+      // Cycle prevention (double-check against resolved parent).
       if (
         currentDrop.targetUuid === draggedUuid ||
-        isAncestor(nodes, currentDrop.targetUuid, draggedUuid)
+        isAncestor(nodes, currentDrop.targetUuid, draggedUuid) ||
+        (parentUuid !== null &&
+          (parentUuid === draggedUuid || isAncestor(nodes, parentUuid, draggedUuid)))
       ) {
         announce("Cannot drop a layer into itself");
         return;
       }
-
-      const parentUuid = resolveDropParent(nodes, list, currentDrop, targetIndex);
       const draggedNode = nodes[draggedUuid];
 
       if (currentDrop.position === "inside") {
@@ -444,28 +465,33 @@ export const LayersTree: Component = () => {
 
     switch (e.key) {
       case "ArrowDown": {
+        if (e.altKey) break; // Handled by Alt+Arrow move below
         e.preventDefault();
-        const nextIndex = currentIndex < list.length - 1 ? currentIndex + 1 : 0;
+        if (currentIndex >= list.length - 1) break; // No wrap
+        const nextIndex = currentIndex + 1;
         const nextEntry = list[nextIndex];
         if (nextEntry) {
           setFocusedUuid(nextEntry.uuid);
-          scrollToNode(nextEntry.uuid);
+          focusNode(nextEntry.uuid);
         }
         break;
       }
 
       case "ArrowUp": {
+        if (e.altKey) break; // Handled by Alt+Arrow move below
         e.preventDefault();
-        const prevIndex = currentIndex > 0 ? currentIndex - 1 : list.length - 1;
+        if (currentIndex <= 0) break; // No wrap
+        const prevIndex = currentIndex - 1;
         const prevEntry = list[prevIndex];
         if (prevEntry) {
           setFocusedUuid(prevEntry.uuid);
-          scrollToNode(prevEntry.uuid);
+          focusNode(prevEntry.uuid);
         }
         break;
       }
 
       case "ArrowRight": {
+        if (e.altKey) break; // Handled by Alt+Arrow move below
         e.preventDefault();
         if (currentIndex === -1) break;
         const entry = list[currentIndex];
@@ -482,13 +508,14 @@ export const LayersTree: Component = () => {
           const nextEntry = list[nextIndex];
           if (nextEntry && nextEntry.depth > entry.depth) {
             setFocusedUuid(nextEntry.uuid);
-            scrollToNode(nextEntry.uuid);
+            focusNode(nextEntry.uuid);
           }
         }
         break;
       }
 
       case "ArrowLeft": {
+        if (e.altKey) break; // Handled by Alt+Arrow move below
         e.preventDefault();
         if (currentIndex === -1) break;
         const entry = list[currentIndex];
@@ -502,7 +529,7 @@ export const LayersTree: Component = () => {
         } else if (node.parentUuid && node.parentUuid in store.state.nodes) {
           // Move to parent.
           setFocusedUuid(node.parentUuid);
-          scrollToNode(node.parentUuid);
+          focusNode(node.parentUuid);
         }
         break;
       }
@@ -531,52 +558,134 @@ export const LayersTree: Component = () => {
         break;
       }
 
-      case "Delete":
-      case "Backspace": {
+      case "Delete": {
         e.preventDefault();
         if (currentFocused) {
           const node = store.state.nodes[currentFocused];
           if (node) {
+            // Capture next focus target BEFORE deletion (list may change after delete)
+            let nextFocus: string | null = null;
+            if (currentIndex !== -1 && list.length > 1) {
+              const nextIdx = currentIndex < list.length - 1 ? currentIndex + 1 : currentIndex - 1;
+              const nextEntry = list[nextIdx];
+              if (nextEntry) {
+                nextFocus = nextEntry.uuid;
+              }
+            }
             store.deleteNode(currentFocused);
             announce(`${node.name} deleted`);
-            // Move focus to next or previous node.
-            const list2 = flatList();
-            const idx = list2.findIndex((entry) => entry.uuid === currentFocused);
-            if (idx !== -1 && list2.length > 1) {
-              const nextIdx = idx < list2.length - 1 ? idx + 1 : idx - 1;
-              const nextEntry = list2[nextIdx];
-              if (nextEntry) {
-                setFocusedUuid(nextEntry.uuid);
-              }
-            } else {
-              setFocusedUuid(null);
-            }
+            setFocusedUuid(nextFocus);
           }
         }
         break;
       }
 
       default:
-        // No-op for other keys.
+        // Keyboard shortcuts for toggles on focused node
+        if (currentFocused) {
+          const focusedNode = store.state.nodes[currentFocused];
+          if (focusedNode) {
+            if (e.key === "l" || e.key === "L") {
+              e.preventDefault();
+              store.setLocked(currentFocused, !focusedNode.locked);
+              announce(
+                focusedNode.locked ? `${focusedNode.name} unlocked` : `${focusedNode.name} locked`,
+              );
+            } else if (e.key === "h" || e.key === "H") {
+              e.preventDefault();
+              store.setVisible(currentFocused, !focusedNode.visible);
+              announce(
+                focusedNode.visible ? `${focusedNode.name} hidden` : `${focusedNode.name} shown`,
+              );
+            }
+          }
+        }
+
+        // Alt+Arrow keys for keyboard-based move (WCAG 2.1.1)
+        if (e.altKey && currentFocused && currentIndex !== -1) {
+          const moveNode = store.state.nodes[currentFocused];
+          if (!moveNode) break;
+
+          if (e.key === "ArrowUp" && moveNode.parentUuid) {
+            // Move up within parent's children
+            e.preventDefault();
+            const parentNode = store.state.nodes[moveNode.parentUuid];
+            if (!parentNode) break;
+            const idx = parentNode.childrenUuids.indexOf(currentFocused);
+            if (idx > 0) {
+              store.reorderChildren(currentFocused, idx - 1);
+              announce(`${moveNode.name} moved up`);
+            }
+          } else if (e.key === "ArrowDown" && moveNode.parentUuid) {
+            // Move down within parent's children
+            e.preventDefault();
+            const parentNode = store.state.nodes[moveNode.parentUuid];
+            if (!parentNode) break;
+            const idx = parentNode.childrenUuids.indexOf(currentFocused);
+            if (idx < parentNode.childrenUuids.length - 1) {
+              store.reorderChildren(currentFocused, idx + 1);
+              announce(`${moveNode.name} moved down`);
+            }
+          } else if (e.key === "ArrowLeft" && moveNode.parentUuid) {
+            // Move out: reparent to grandparent (un-nest)
+            e.preventDefault();
+            const parentNode = store.state.nodes[moveNode.parentUuid];
+            if (!parentNode || !parentNode.parentUuid) break;
+            const grandParent = store.state.nodes[parentNode.parentUuid];
+            if (!grandParent) break;
+            const parentIdx = grandParent.childrenUuids.indexOf(moveNode.parentUuid);
+            store.reparentNode(currentFocused, parentNode.parentUuid, parentIdx + 1);
+            announce(`${moveNode.name} moved out`);
+          } else if (e.key === "ArrowRight") {
+            // Move in: reparent under previous sibling (nest)
+            e.preventDefault();
+            if (!moveNode.parentUuid) break;
+            const parentNode = store.state.nodes[moveNode.parentUuid];
+            if (!parentNode) break;
+            const idx = parentNode.childrenUuids.indexOf(currentFocused);
+            if (idx > 0) {
+              const prevSiblingUuid = parentNode.childrenUuids[idx - 1];
+              const prevSibling = store.state.nodes[prevSiblingUuid];
+              if (prevSibling) {
+                store.reparentNode(
+                  currentFocused,
+                  prevSiblingUuid,
+                  prevSibling.childrenUuids.length,
+                );
+                // Auto-expand the new parent so the moved node stays visible
+                setExpandedNodes((prev) => {
+                  const next = new Set(prev);
+                  next.add(prevSiblingUuid);
+                  return next;
+                });
+                announce(`${moveNode.name} nested inside ${prevSibling.name}`);
+              }
+            }
+          }
+        }
         break;
     }
   }
 
-  /** Set initial focus to the first node when the tree container receives focus. */
-  function handleTreeFocus() {
-    if (!focusedUuid()) {
-      const firstNode = flatList()[0];
-      if (firstNode) {
-        setFocusedUuid(firstNode.uuid);
-      }
-    }
-  }
+  /** Ensure at least one node has tabindex=0 for keyboard entry into the tree. */
+  const activeFocusUuid = createMemo(() => {
+    const focused = focusedUuid();
+    if (focused) return focused;
+    const first = flatList()[0];
+    return first?.uuid ?? null;
+  });
 
-  function scrollToNode(uuid: string) {
-    const el = treeRef?.querySelector(`[data-uuid="${CSS.escape(uuid)}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "nearest" });
-    }
+  /** Scroll to a node and move DOM focus to it (roving tabindex). */
+  function focusNode(uuid: string) {
+    // Use requestAnimationFrame to ensure the DOM has updated tabindex
+    // before calling .focus() (Solid batches updates).
+    requestAnimationFrame(() => {
+      const el = treeRef?.querySelector(`[data-uuid="${CSS.escape(uuid)}"]`);
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ block: "nearest" });
+        el.focus();
+      }
+    });
   }
 
   // Compute the drop indicator position.
@@ -597,8 +706,6 @@ export const LayersTree: Component = () => {
       class="sigil-layers-tree"
       role="tree"
       aria-label="Layer hierarchy"
-      tabindex={0}
-      onFocus={handleTreeFocus}
       onKeyDown={handleKeyDown}
       style={{ position: "relative" }}
     >
@@ -614,7 +721,8 @@ export const LayersTree: Component = () => {
                   isExpanded={expandedNodes().has(entry.uuid)}
                   onToggleExpand={toggleExpand}
                   hasChildren={(n().childrenUuids?.length ?? 0) > 0}
-                  isFocused={focusedUuid() === entry.uuid}
+                  isFocused={activeFocusUuid() === entry.uuid}
+                  onFocusNode={setFocusedUuid}
                 />
               )}
             </Show>

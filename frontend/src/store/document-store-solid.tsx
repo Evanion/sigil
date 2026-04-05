@@ -519,25 +519,67 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function reparentNode(uuid: string, newParentUuid: string, position: number): void {
     if (!Number.isFinite(position)) return;
 
+    // Capture previous state for rollback
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const oldParentUuid = node.parentUuid;
+    const oldParentChildren = oldParentUuid
+      ? [...(state.nodes[oldParentUuid]?.childrenUuids ?? [])]
+      : [];
+    const newParentChildren = [...(state.nodes[newParentUuid]?.childrenUuids ?? [])];
+    const clampedPos = Math.max(0, Math.round(position));
+
+    // Optimistic update: move node from old parent to new parent
+    setState(
+      produce((s) => {
+        // Remove from old parent's childrenUuids
+        if (oldParentUuid && s.nodes[oldParentUuid]) {
+          s.nodes[oldParentUuid].childrenUuids = s.nodes[oldParentUuid].childrenUuids.filter(
+            (c: string) => c !== uuid,
+          );
+        }
+        // Insert into new parent's childrenUuids
+        if (s.nodes[newParentUuid]) {
+          const children = s.nodes[newParentUuid].childrenUuids.filter((c: string) => c !== uuid);
+          const insertAt = Math.min(clampedPos, children.length);
+          children.splice(insertAt, 0, uuid);
+          s.nodes[newParentUuid].childrenUuids = children;
+        }
+        // Update node's parentUuid
+        if (s.nodes[uuid]) {
+          s.nodes[uuid].parentUuid = newParentUuid;
+        }
+      }),
+    );
+
     client
       .mutation(gql(REPARENT_NODE_MUTATION), {
         uuid,
         newParentUuid,
-        position: Math.max(0, Math.round(position)),
+        position: clampedPos,
       })
       .toPromise()
       .then((r) => {
         if (r.error) {
           console.error("reparentNode error:", r.error.message);
+          // Rollback: restore previous parent relationships
+          setState(
+            produce((s) => {
+              if (oldParentUuid && s.nodes[oldParentUuid]) {
+                s.nodes[oldParentUuid].childrenUuids = oldParentChildren;
+              }
+              if (s.nodes[newParentUuid]) {
+                s.nodes[newParentUuid].childrenUuids = newParentChildren;
+              }
+              if (s.nodes[uuid]) {
+                s.nodes[uuid].parentUuid = oldParentUuid;
+              }
+            }),
+          );
         }
-        // Tree structure refresh on error serves as implicit rollback;
-        // explicit error notification deferred until toast system is available.
-        void fetchPages();
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
-        // Tree structure refresh on error serves as implicit rollback;
-        // explicit error notification deferred until toast system is available.
         void fetchPages();
       });
   }
@@ -545,24 +587,47 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function reorderChildren(uuid: string, newPosition: number): void {
     if (!Number.isFinite(newPosition)) return;
 
+    // Capture previous state for rollback
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const parentUuid = node.parentUuid;
+    if (!parentUuid) return;
+    const previousChildren = [...(state.nodes[parentUuid]?.childrenUuids ?? [])];
+    const clampedPos = Math.max(0, Math.round(newPosition));
+
+    // Optimistic update: reorder within parent's childrenUuids
+    setState(
+      produce((s) => {
+        if (s.nodes[parentUuid]) {
+          const children = s.nodes[parentUuid].childrenUuids.filter((c: string) => c !== uuid);
+          const insertAt = Math.min(clampedPos, children.length);
+          children.splice(insertAt, 0, uuid);
+          s.nodes[parentUuid].childrenUuids = children;
+        }
+      }),
+    );
+
     client
       .mutation(gql(REORDER_CHILDREN_MUTATION), {
         uuid,
-        newPosition: Math.max(0, Math.round(newPosition)),
+        newPosition: clampedPos,
       })
       .toPromise()
       .then((r) => {
         if (r.error) {
           console.error("reorderChildren error:", r.error.message);
+          // Rollback: restore previous children order
+          setState(
+            produce((s) => {
+              if (s.nodes[parentUuid]) {
+                s.nodes[parentUuid].childrenUuids = previousChildren;
+              }
+            }),
+          );
         }
-        // Tree structure refresh on error serves as implicit rollback;
-        // explicit error notification deferred until toast system is available.
-        void fetchPages();
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
-        // Tree structure refresh on error serves as implicit rollback;
-        // explicit error notification deferred until toast system is available.
         void fetchPages();
       });
   }

@@ -67,6 +67,10 @@
   --focus-ring: 2px solid var(--accent);
   --focus-offset: 2px;
 
+  /* Opacity scale */
+  --opacity-hidden: 0.5;
+  --opacity-dragging: 0.4;
+
   /* Z-index scale */
   --z-drop-indicator: 10;
   --z-dropdown: 50;

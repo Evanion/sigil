@@ -23,12 +23,12 @@
 }
 
 .sigil-tree-node--hidden {
-  opacity: 0.5;
+  opacity: var(--opacity-hidden);
 }
 
 /* DnD: dimmed while being dragged */
 .sigil-tree-node--dragging {
-  opacity: 0.4;
+  opacity: var(--opacity-dragging);
 }
 
 /* DnD: subtle highlight when this node is a drop target */
@@ -109,6 +109,11 @@
   outline: none;
 }
 
+.sigil-tree-node__name-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* Flexible spacer between name and toggles */
 .sigil-tree-node__spacer {
   flex: 1;
@@ -134,7 +139,8 @@
 }
 
 .sigil-tree-node:hover .sigil-tree-node__toggle,
-.sigil-tree-node--selected .sigil-tree-node__toggle {
+.sigil-tree-node--selected .sigil-tree-node__toggle,
+.sigil-tree-node__toggle--active {
   opacity: 1;
 }
 
