@@ -29,6 +29,9 @@ export const BAR_WIDTH = 240;
 export const BAR_HEIGHT = 28;
 export const MIN_STOPS = 2;
 
+/** The two gradient types supported by the editor. */
+export type GradientType = "linear" | "radial";
+
 /** Vertical distance (px) from bar centre that triggers stop removal on drag. */
 const REMOVE_THRESHOLD_PX = 30;
 
@@ -91,6 +94,7 @@ function stopHandleColor(stop: GradientStop): string {
 }
 
 export function GradientEditor(props: GradientEditorProps) {
+  // eslint-disable-next-line no-unassigned-vars
   let barRef: HTMLDivElement | undefined;
   const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
 
@@ -99,8 +103,9 @@ export function GradientEditor(props: GradientEditorProps) {
     // Ignore if the click originated on a stop handle.
     if ((e.target as HTMLElement).classList.contains("sigil-gradient-editor__stop")) return;
     if (!Number.isFinite(e.clientX)) return;
+    if (!barRef) return;
 
-    const rect = barRef!.getBoundingClientRect();
+    const rect = barRef.getBoundingClientRect();
     const position = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
 
     // Find the stop immediately to the left (or the first stop if none).
@@ -131,8 +136,9 @@ export function GradientEditor(props: GradientEditorProps) {
   function handleStopPointerMove(e: PointerEvent, index: number) {
     if (draggingIndex() !== index) return;
     if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    if (!barRef) return;
 
-    const rect = barRef!.getBoundingClientRect();
+    const rect = barRef.getBoundingClientRect();
     const barCentreY = rect.top + rect.height / 2;
     const verticalOffset = Math.abs(e.clientY - barCentreY);
 

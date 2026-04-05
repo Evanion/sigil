@@ -23,7 +23,9 @@ export interface HueStripProps {
 }
 
 export function HueStrip(props: HueStripProps) {
+  // eslint-disable-next-line no-unassigned-vars
   let canvasRef: HTMLCanvasElement | undefined;
+  // eslint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   const [isDragging, setIsDragging] = createSignal(false);
 
@@ -74,7 +76,8 @@ export function HueStrip(props: HueStripProps) {
 
   // ── Coordinate helper ─────────────────────────────────────────────────
   function pointerToHue(clientX: number): number {
-    const rect = containerRef!.getBoundingClientRect();
+    if (!containerRef) return 0;
+    const rect = containerRef.getBoundingClientRect();
     const ratio = (clientX - rect.left) / rect.width;
     // Clamping is the intended UX for a slider widget.
     const clamped = Math.max(0, Math.min(1, ratio));
@@ -84,8 +87,9 @@ export function HueStrip(props: HueStripProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX)) return;
-    e.currentTarget instanceof Element &&
-      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (e.currentTarget instanceof Element) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     setIsDragging(true);
     props.onChange(pointerToHue(e.clientX));
   }
@@ -98,8 +102,9 @@ export function HueStrip(props: HueStripProps) {
 
   function handlePointerUp(e: PointerEvent) {
     if (!isDragging()) return;
-    e.currentTarget instanceof Element &&
-      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    if (e.currentTarget instanceof Element) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     setIsDragging(false);
   }
 

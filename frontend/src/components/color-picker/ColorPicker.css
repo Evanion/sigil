@@ -90,6 +90,19 @@
   color: var(--warning);
 }
 
+/* ── ColorPicker popover ────────────────────────────────────────────── */
+
+.sigil-color-picker-popover {
+  width: 270px;
+}
+
+.sigil-color-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   /* No transitions in this file currently — placeholder for future additions. */
 }

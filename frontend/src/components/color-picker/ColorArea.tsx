@@ -33,7 +33,9 @@ export interface ColorAreaProps {
 }
 
 export function ColorArea(props: ColorAreaProps) {
+  // eslint-disable-next-line no-unassigned-vars
   let canvasRef: HTMLCanvasElement | undefined;
+  // eslint-disable-next-line no-unassigned-vars
   let containerRef: HTMLDivElement | undefined;
   const [isDragging, setIsDragging] = createSignal(false);
 
@@ -74,7 +76,8 @@ export function ColorArea(props: ColorAreaProps) {
 
   // ── Coordinate helpers ────────────────────────────────────────────────
   function pointerToNormalized(clientX: number, clientY: number): [number, number] {
-    const rect = containerRef!.getBoundingClientRect();
+    if (!containerRef) return [0, 0];
+    const rect = containerRef.getBoundingClientRect();
     const rawX = (clientX - rect.left) / rect.width;
     const rawY = 1 - (clientY - rect.top) / rect.height;
     // Clamping is the intended UX for a slider widget (CLAUDE.md §11 exception).
@@ -86,8 +89,9 @@ export function ColorArea(props: ColorAreaProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
-    e.currentTarget instanceof Element &&
-      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    if (e.currentTarget instanceof Element) {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
     setIsDragging(true);
     const [x, y] = pointerToNormalized(e.clientX, e.clientY);
     props.onChange(x, y);
@@ -102,8 +106,9 @@ export function ColorArea(props: ColorAreaProps) {
 
   function handlePointerUp(e: PointerEvent) {
     if (!isDragging()) return;
-    e.currentTarget instanceof Element &&
-      (e.currentTarget as Element).releasePointerCapture(e.pointerId);
+    if (e.currentTarget instanceof Element) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     setIsDragging(false);
   }
 

@@ -27,7 +27,7 @@ function approx(a: number, b: number, eps = EPSILON): boolean {
 }
 
 function approxTuple(a: readonly number[], b: readonly number[], eps = EPSILON): boolean {
-  return a.length === b.length && a.every((v, i) => approx(v, b[i]!, eps));
+  return a.length === b.length && a.every((v, i) => approx(v, b[i] ?? 0, eps));
 }
 
 // ── clamp01 ───────────────────────────────────────────────────────────
@@ -92,20 +92,23 @@ describe("hexToSrgb", () => {
   it("should parse a 6-char hex string", () => {
     const result = hexToSrgb("#0d99ff");
     expect(result).not.toBeNull();
-    expect(approxTuple(result!, [13 / 255, 153 / 255, 255 / 255])).toBe(true);
+    if (result === null) throw new Error("expected non-null result");
+    expect(approxTuple(result, [13 / 255, 153 / 255, 255 / 255])).toBe(true);
   });
 
   it("should parse a 6-char hex string without hash prefix", () => {
     const result = hexToSrgb("ff0000");
     expect(result).not.toBeNull();
-    expect(approxTuple(result!, [1, 0, 0])).toBe(true);
+    if (result === null) throw new Error("expected non-null result");
+    expect(approxTuple(result, [1, 0, 0])).toBe(true);
   });
 
   it("should parse a 3-char hex string and expand it", () => {
     // #f0a => #ff00aa
     const result = hexToSrgb("#f0a");
     expect(result).not.toBeNull();
-    expect(approxTuple(result!, [1, 0, 170 / 255])).toBe(true);
+    if (result === null) throw new Error("expected non-null result");
+    expect(approxTuple(result, [1, 0, 170 / 255])).toBe(true);
   });
 
   it("should return null for an invalid hex string", () => {
@@ -118,15 +121,17 @@ describe("hexToSrgb", () => {
   it("should parse black #000000", () => {
     const result = hexToSrgb("#000000");
     expect(result).not.toBeNull();
-    expect(result![0]).toBe(0);
-    expect(result![1]).toBe(0);
-    expect(result![2]).toBe(0);
+    if (result === null) throw new Error("expected non-null result");
+    expect(result[0]).toBe(0);
+    expect(result[1]).toBe(0);
+    expect(result[2]).toBe(0);
   });
 
   it("should parse white #ffffff", () => {
     const result = hexToSrgb("#ffffff");
     expect(result).not.toBeNull();
-    expect(approxTuple(result!, [1, 1, 1])).toBe(true);
+    if (result === null) throw new Error("expected non-null result");
+    expect(approxTuple(result, [1, 1, 1])).toBe(true);
   });
 });
 
@@ -189,7 +194,7 @@ describe("oklabToSrgb", () => {
 
 describe("oklabToOklch", () => {
   it("should convert achromatic color (a=0, b=0) to C=0", () => {
-    const [L, C, _H] = oklabToOklch(0.7, 0, 0);
+    const [L, C] = oklabToOklch(0.7, 0, 0);
     expect(approx(L, 0.7)).toBe(true);
     expect(approx(C, 0, 1e-10)).toBe(true);
   });
@@ -198,12 +203,12 @@ describe("oklabToOklch", () => {
     const a = 0.1;
     const b = 0.2;
     const expectedC = Math.sqrt(a * a + b * b);
-    const [_L, C, _H] = oklabToOklch(0.5, a, b);
+    const [, C] = oklabToOklch(0.5, a, b);
     expect(approx(C, expectedC)).toBe(true);
   });
 
   it("should produce H in [0, 360)", () => {
-    const [_L, _C, H] = oklabToOklch(0.5, -0.1, -0.1);
+    const [, , H] = oklabToOklch(0.5, -0.1, -0.1);
     expect(H).toBeGreaterThanOrEqual(0);
     expect(H).toBeLessThan(360);
   });
