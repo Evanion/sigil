@@ -1,6 +1,6 @@
 /**
  * Tests for the canvas renderer — selection handles, preview drawing,
- * and snap guide line rendering.
+ * multi-select compound bounds, marquee rect, and snap guide line rendering.
  *
  * @vitest-environment jsdom
  */
@@ -84,7 +84,7 @@ describe("renderer", () => {
     it("should draw selection handles when a node is selected by UUID", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], "test-uuid-1", 1);
+      render(ctx, viewport, [node], ["test-uuid-1"], 1);
 
       const calls = getCalls(ctx);
       // Selection handles are drawn as fillRect calls with SELECTION_COLOR
@@ -101,7 +101,7 @@ describe("renderer", () => {
     it("should not draw selection handles when no node is selected", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], null, 1);
+      render(ctx, viewport, [node], [], 1);
 
       const calls = getCalls(ctx);
       // No selection color should be set (besides the node fill itself)
@@ -114,7 +114,7 @@ describe("renderer", () => {
     it("should not draw selection handles for invisible nodes", () => {
       const node = createTestNode({ visible: false });
 
-      render(ctx, viewport, [node], "test-uuid-1", 1);
+      render(ctx, viewport, [node], ["test-uuid-1"], 1);
 
       const calls = getCalls(ctx);
       const selectionStyleSets = calls.filter(
@@ -125,12 +125,22 @@ describe("renderer", () => {
 
     it("should use preview transform for selected node when provided", () => {
       const node = createTestNode({ uuid: "drag-node" });
-      const previewTransform = {
-        uuid: "drag-node",
-        transform: { x: 200, y: 200, width: 200, height: 150, rotation: 0, scale_x: 1, scale_y: 1 },
-      };
+      const previewTransforms = [
+        {
+          uuid: "drag-node",
+          transform: {
+            x: 200,
+            y: 200,
+            width: 200,
+            height: 150,
+            rotation: 0,
+            scale_x: 1,
+            scale_y: 1,
+          },
+        },
+      ];
 
-      render(ctx, viewport, [node], "drag-node", 1, null, previewTransform);
+      render(ctx, viewport, [node], ["drag-node"], 1, null, previewTransforms);
 
       const calls = getCalls(ctx);
       // The node should be drawn at the preview position (200, 200), not (100, 100)
@@ -140,11 +150,153 @@ describe("renderer", () => {
     });
   });
 
+  describe("multi-select compound bounds", () => {
+    it("should draw individual highlights for each selected node", () => {
+      const node1 = createTestNode({ uuid: "uuid-1", name: "Node 1" });
+      const node2 = createTestNode({
+        uuid: "uuid-2",
+        name: "Node 2",
+        transform: {
+          x: 400,
+          y: 400,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          scale_x: 1,
+          scale_y: 1,
+        },
+      });
+
+      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+
+      const calls = getCalls(ctx);
+      // Should see strokeRect calls for individual highlights
+      const strokeRects = calls.filter((c) => c.method === "strokeRect");
+      // At least: individual highlight for node1, individual highlight for node2,
+      // and compound bounds outline = 3 strokeRects total
+      expect(strokeRects.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("should draw compound bounding box handles when 2+ nodes are selected", () => {
+      const node1 = createTestNode({ uuid: "uuid-1", name: "Node 1" });
+      const node2 = createTestNode({
+        uuid: "uuid-2",
+        name: "Node 2",
+        transform: {
+          x: 400,
+          y: 400,
+          width: 100,
+          height: 100,
+          rotation: 0,
+          scale_x: 1,
+          scale_y: 1,
+        },
+      });
+
+      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+
+      const calls = getCalls(ctx);
+      // Compound bounds handles: 8 fillRect calls with SELECTION_COLOR
+      // after the compound bounds strokeRect.
+      // We look for the dashed strokeRect (compound bounds) followed by handle fillRects.
+      const setLineDashCalls = calls.filter((c) => c.method === "setLineDash");
+      // drawCompoundBounds sets a dashed pattern and then resets it
+      expect(setLineDashCalls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("should not draw name label when multiple nodes are selected", () => {
+      const node1 = createTestNode({ uuid: "uuid-1", name: "Node 1" });
+      const node2 = createTestNode({ uuid: "uuid-2", name: "Node 2" });
+
+      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+
+      const calls = getCalls(ctx);
+      // fillText is used for name labels and text nodes
+      const fillTextCalls = calls.filter((c) => c.method === "fillText");
+      // Neither node has text content, so no fillText calls for node rendering.
+      // No name labels should be drawn for multi-select.
+      expect(fillTextCalls.length).toBe(0);
+    });
+
+    it("should draw name label when exactly one node is selected", () => {
+      const node = createTestNode({ uuid: "uuid-1", name: "My Node" });
+
+      render(ctx, viewport, [node], ["uuid-1"], 1);
+
+      const calls = getCalls(ctx);
+      const fillTextCalls = calls.filter((c) => c.method === "fillText");
+      // Should have a name label drawn
+      const hasLabel = fillTextCalls.some((c) => c.args[0] === "My Node");
+      expect(hasLabel).toBe(true);
+    });
+  });
+
+  describe("drawMarqueeRect (via render)", () => {
+    it("should draw marquee rect when provided", () => {
+      const marquee = { x: 50, y: 50, width: 200, height: 150 };
+
+      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+
+      const calls = getCalls(ctx);
+      // Marquee should produce a fillRect and strokeRect with the marquee color
+      const marqueeFills = calls.filter(
+        (c) => c.method === "fillRect" && c.args[0] === 50 && c.args[1] === 50,
+      );
+      expect(marqueeFills.length).toBeGreaterThanOrEqual(1);
+
+      const marqueeStrokes = calls.filter(
+        (c) => c.method === "strokeRect" && c.args[0] === 50 && c.args[1] === 50,
+      );
+      expect(marqueeStrokes.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should set dashed line pattern for marquee rect", () => {
+      const marquee = { x: 0, y: 0, width: 100, height: 100 };
+
+      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+
+      const calls = getCalls(ctx);
+      // Should have a setLineDash call with non-empty array
+      const dashCalls = calls.filter(
+        (c) => c.method === "setLineDash" && Array.isArray(c.args[0]),
+      );
+      const hasDashPattern = dashCalls.some(
+        (c) => (c.args[0] as number[]).length > 0 && (c.args[0] as number[])[0] > 0,
+      );
+      expect(hasDashPattern).toBe(true);
+    });
+
+    it("should not draw marquee rect when null", () => {
+      render(ctx, viewport, [], [], 1, null, [], [], null);
+
+      const calls = getCalls(ctx);
+      // With no nodes, no selection, no preview, no guides, no marquee,
+      // there should be minimal calls (just setTransform + clearRect + setTransform).
+      const strokeRectCalls = calls.filter((c) => c.method === "strokeRect");
+      expect(strokeRectCalls.length).toBe(0);
+    });
+
+    it("should use marquee fill color with semi-transparency", () => {
+      const marquee = { x: 10, y: 10, width: 50, height: 50 };
+
+      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+
+      const calls = getCalls(ctx);
+      const fillStyleSets = calls.filter(
+        (c) => c.method === "set:fillStyle" && typeof c.args[0] === "string",
+      );
+      const hasMarqueeFill = fillStyleSets.some(
+        (c) => (c.args[0] as string).includes("rgba(13, 153, 255, 0.1)"),
+      );
+      expect(hasMarqueeFill).toBe(true);
+    });
+  });
+
   describe("drawGuideLines (via render)", () => {
     it("should not call stroke when no snap guides are provided", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], null, 1, null, null, []);
+      render(ctx, viewport, [node], [], 1, null, [], []);
 
       const calls = getCalls(ctx);
       // With empty guides the guide color should never be set
@@ -157,7 +309,7 @@ describe("renderer", () => {
     it("should set stroke style to guide color when x-axis snap guide is present", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 150 }];
 
-      render(ctx, viewport, [], null, 1, null, null, guides);
+      render(ctx, viewport, [], [], 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorSets = calls.filter(
@@ -172,7 +324,7 @@ describe("renderer", () => {
         { axis: "y", position: 200 },
       ];
 
-      render(ctx, viewport, [], null, 1, null, null, guides);
+      render(ctx, viewport, [], [], 1, null, [], guides);
 
       const calls = getCalls(ctx);
       // Count stroke calls that occur after guide color is set
@@ -193,7 +345,7 @@ describe("renderer", () => {
       // Viewport at origin, zoom 1 — canvas is 800x600 logical px
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], null, 1, null, null, guides);
+      render(ctx, vp, [], [], 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -211,7 +363,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "y", position: 250 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], null, 1, null, null, guides);
+      render(ctx, vp, [], [], 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -229,7 +381,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 100 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 2 };
 
-      render(ctx, vp, [], null, 1, null, null, guides);
+      render(ctx, vp, [], [], 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(

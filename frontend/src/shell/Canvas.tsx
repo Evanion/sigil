@@ -24,7 +24,7 @@ import { render as renderCanvas } from "../canvas/renderer";
 import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
 import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-manager";
 import type { ToolType } from "../store/document-store-solid";
-import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
+import { createSelectTool, type PreviewTransform, type MarqueeRect } from "../tools/select-tool";
 import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
@@ -99,6 +99,7 @@ export const Canvas: Component = () => {
   const [previewTransforms, setPreviewTransforms] = createSignal<PreviewTransform[]>([]);
   const [previewRect, setPreviewRect] = createSignal<PreviewRect | null>(null);
   const [snapGuides, setSnapGuides] = createSignal<readonly SnapGuide[]>([]);
+  const [marqueeRect, setMarqueeRect] = createSignal<MarqueeRect | null>(null);
   const [cursor, setCursor] = createSignal("default");
 
   // Space key tracking for grab cursor
@@ -117,13 +118,16 @@ export const Canvas: Component = () => {
     return map;
   });
 
-  // RF-020 (a11y): Dynamic aria-label reflecting the selected node.
+  // RF-020 (a11y): Dynamic aria-label reflecting the selected node(s).
   const canvasAriaLabel = createMemo((): string => {
-    const selectedId = store.selectedNodeId();
-    if (selectedId === null) return "Design canvas";
-    const node = store.state.nodes[selectedId];
-    if (node) return `Design canvas — ${node.name} selected`;
-    return "Design canvas";
+    const ids = store.selectedNodeIds();
+    if (ids.length === 0) return "Design canvas";
+    if (ids.length === 1) {
+      const node = store.state.nodes[ids[0]];
+      if (node) return `Design canvas — ${node.name} selected`;
+      return "Design canvas";
+    }
+    return `Design canvas — ${String(ids.length)} nodes selected`;
   });
 
   onMount(() => {
@@ -229,6 +233,7 @@ export const Canvas: Component = () => {
 
       // Update preview signals
       setPreviewTransforms(selectTool.getPreviewTransforms());
+      setMarqueeRect(selectTool.getMarqueeRect());
       // RF-011: Only query snap guides when the select tool is active.
       if (store.activeTool() === "select") {
         setSnapGuides(selectTool.getSnapGuides());
@@ -251,6 +256,7 @@ export const Canvas: Component = () => {
       toolManager.onPointerUp(makeToolEvent(e));
       setPreviewTransforms([]);
       setPreviewRect(null);
+      setMarqueeRect(null);
       // RF-003: Clear snap guides when pointer is released.
       setSnapGuides([]);
       setCursor(toolManager.getCursor());
@@ -336,6 +342,7 @@ export const Canvas: Component = () => {
           e.preventDefault();
           toolManager.onKeyDown("Escape");
           setPreviewTransforms([]);
+          setMarqueeRect(null);
           setSnapGuides([]);
           setCursor(toolManager.getCursor());
         }
@@ -378,12 +385,13 @@ export const Canvas: Component = () => {
     createEffect(() => {
       // Read every signal that affects rendering so Solid tracks them.
       const nodesObj = store.state.nodes;
-      const selected = store.selectedNodeId();
+      const selectedIds = store.selectedNodeIds();
       const vp = store.viewport();
       const previews = previewTransforms();
       const prevRect = previewRect();
       // RF-001: Read snap guides and pass them to the renderer as the 8th argument.
       const guides = snapGuides();
+      const marquee = marqueeRect();
       // RF-013: Read canvasSize to track resize/DPR changes as a dependency
       const size = canvasSize();
       const dpr = size.dpr;
@@ -395,9 +403,7 @@ export const Canvas: Component = () => {
       const keys = Object.keys(nodesObj);
       const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
-      // Pass first preview transform for backward compat until Task 4 updates the renderer.
-      const preview = previews.length > 0 ? previews[0] : null;
-      renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview, guides);
+      renderCanvas(ctx, vp, nodesArray, selectedIds, dpr, prevRect, previews, guides, marquee);
     });
 
     // -- Cleanup --------------------------------------------------------------
