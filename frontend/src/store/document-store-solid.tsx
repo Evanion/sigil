@@ -213,6 +213,10 @@ function parsePagesResponse(data: unknown): {
 // ── Store factory ─────────────────────────────────────────────────────
 
 export function createDocumentStoreSolid(): DocumentStoreAPI {
+  // RF-010: Visible error notifications deferred until toast/notification system
+  // is implemented. console.error provides diagnostic trail per CLAUDE.md
+  // minimum requirement.
+
   // Client session ID for self-echo suppression (RF-004)
   const clientSessionId = crypto.randomUUID();
 
@@ -378,7 +382,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               Reflect.deleteProperty(s.nodes, optimisticUuid);
             }),
           );
-          setSelectedNodeIds(selectedNodeIds().filter((id) => id !== optimisticUuid));
+          const filteredAfterError = selectedNodeIds().filter((id) => id !== optimisticUuid);
+          if (filteredAfterError.length !== selectedNodeIds().length) {
+            setSelectedNodeIds(filteredAfterError);
+          }
           return;
         }
         const serverUuid = result.data?.createNode?.uuid as string | undefined;
@@ -412,7 +419,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             Reflect.deleteProperty(s.nodes, optimisticUuid);
           }),
         );
-        setSelectedNodeIds(selectedNodeIds().filter((id) => id !== optimisticUuid));
+        const filteredAfterCatch = selectedNodeIds().filter((id) => id !== optimisticUuid);
+        if (filteredAfterCatch.length !== selectedNodeIds().length) {
+          setSelectedNodeIds(filteredAfterCatch);
+        }
       });
 
     return optimisticUuid;
@@ -484,7 +494,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         Reflect.deleteProperty(s.nodes, uuid);
       }),
     );
-    setSelectedNodeIds(selectedNodeIds().filter((id) => id !== uuid));
+    const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
+    if (filteredIds.length !== selectedNodeIds().length) {
+      setSelectedNodeIds(filteredIds);
+    }
 
     client
       .mutation(gql(DELETE_NODE_MUTATION), { uuid })
@@ -1066,14 +1079,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
-  function batchSetTransform(
-    entries: Array<{ uuid: string; transform: Transform }>,
-  ): void {
+  function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
     // Capture previous values for rollback
     const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
     for (const entry of entries) {
       const node = state.nodes[entry.uuid];
       if (node?.transform) {
+        // JSON clone: Solid proxy not structuredClone-safe
         rollbackEntries.push({ uuid: entry.uuid, transform: deepClone(node.transform) });
       }
     }
@@ -1105,6 +1117,21 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }
             }
           });
+        } else {
+          // Reconcile with server-canonical values
+          const data = r.data as Record<string, unknown> | undefined;
+          const results = data?.batchSetTransform as Array<Record<string, unknown>> | undefined;
+          if (results) {
+            batch(() => {
+              for (const node of results) {
+                const uuid = node.uuid as string;
+                const transform = node.transform as Transform | undefined;
+                if (uuid && transform && state.nodes[uuid]) {
+                  setState("nodes", uuid, "transform", transform);
+                }
+              }
+            });
+          }
         }
       })
       .catch((err: unknown) => {
@@ -1119,6 +1146,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  // RF-005 optimistic update deferred: Grouping creates a new node requiring
+  // server-generated UUID. Ungrouping involves complex tree reparenting. Both
+  // are discrete one-shot operations (Ctrl+G), not continuous drag operations.
+  // Subscription handler triggers refetch within one round-trip. Full optimistic
+  // implementation deferred to reduce complexity — latency is bounded and
+  // acceptable for the action frequency.
   function groupNodes(uuids: string[], name: string): void {
     client
       .mutation(gql(GROUP_NODES_MUTATION), { uuids, name })
@@ -1129,8 +1162,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           return;
         }
         const data = r.data as Record<string, unknown> | undefined;
-        const groupData = data?.groupNodes as Record<string, unknown> | undefined;
-        const groupUuid = groupData?.uuid as string | undefined;
+        const groupUuid = data?.groupNodes as string | undefined;
         if (groupUuid) {
           setSelectedNodeIds([groupUuid]);
         }
@@ -1140,6 +1172,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  // RF-005 optimistic update deferred: see groupNodes comment above.
   function ungroupNodes(uuids: string[]): void {
     client
       .mutation(gql(UNGROUP_NODES_MUTATION), { uuids })
@@ -1150,11 +1183,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           return;
         }
         const data = r.data as Record<string, unknown> | undefined;
-        const childNodes = data?.ungroupNodes as Array<Record<string, unknown>> | undefined;
-        if (childNodes && childNodes.length > 0) {
-          setSelectedNodeIds(
-            childNodes.map((n) => n.uuid as string).filter(Boolean),
-          );
+        const childUuids = data?.ungroupNodes as string[] | undefined;
+        if (childUuids && childUuids.length > 0) {
+          setSelectedNodeIds(childUuids.filter(Boolean));
         }
       })
       .catch((err: unknown) => {

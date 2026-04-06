@@ -123,12 +123,12 @@ export const BATCH_SET_TRANSFORM_MUTATION = `
 
 export const GROUP_NODES_MUTATION = `
   mutation GroupNodes($uuids: [String!]!, $name: String!) {
-    groupNodes(uuids: $uuids, name: $name) { uuid name kind transform }
+    groupNodes(uuids: $uuids, name: $name)
   }
 `;
 
 export const UNGROUP_NODES_MUTATION = `
   mutation UngroupNodes($uuids: [String!]!) {
-    ungroupNodes(uuids: $uuids) { uuid }
+    ungroupNodes(uuids: $uuids)
   }
 `;
