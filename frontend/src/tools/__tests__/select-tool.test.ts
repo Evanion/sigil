@@ -13,6 +13,7 @@ function makeEvent(overrides?: Partial<ToolEvent>): ToolEvent {
     screenY: 0,
     shiftKey: false,
     altKey: false,
+    metaKey: false,
     ...overrides,
   };
 }
@@ -60,16 +61,20 @@ function makeNode(overrides?: Partial<DocumentNode>): DocumentNode {
 function makeMockStore(initialNodes?: Map<string, DocumentNode>): ToolStore & {
   selectCalls: (string | null)[];
   setTransformCalls: Array<{ uuid: string; transform: Transform }>;
+  batchSetTransformCalls: Array<Array<{ uuid: string; transform: Transform }>>;
   nodes: Map<string, DocumentNode>;
 } {
   const selectCalls: (string | null)[] = [];
   const setTransformCalls: Array<{ uuid: string; transform: Transform }> = [];
+  const batchSetTransformCalls: Array<Array<{ uuid: string; transform: Transform }>> = [];
   let selectedNodeId: string | null = null;
+  let selectedNodeIds: string[] = [];
   const nodes: Map<string, DocumentNode> = initialNodes ?? new Map();
 
   return {
     selectCalls,
     setTransformCalls,
+    batchSetTransformCalls,
     nodes,
     getAllNodes: () => nodes,
     setTransform: (uuid: string, transform: Transform) => {
@@ -82,6 +87,13 @@ function makeMockStore(initialNodes?: Map<string, DocumentNode>): ToolStore & {
     },
     createNode: () => "mock-uuid",
     getViewportZoom: () => 1,
+    getSelectedNodeIds: () => selectedNodeIds,
+    setSelectedNodeIds: (ids: string[]) => {
+      selectedNodeIds = ids;
+    },
+    batchSetTransform: (entries: Array<{ uuid: string; transform: Transform }>) => {
+      batchSetTransformCalls.push(entries);
+    },
   };
 }
 

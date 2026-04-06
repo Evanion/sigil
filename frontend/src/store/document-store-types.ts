@@ -23,4 +23,10 @@ export interface ToolStore {
   getSelectedNodeId(): string | null;
   /** Current viewport zoom level, needed for handle hit-testing and snapping. */
   getViewportZoom(): number;
+  /** Multi-select: returns all currently selected node UUIDs. */
+  getSelectedNodeIds(): string[];
+  /** Multi-select: replaces the entire selection set. */
+  setSelectedNodeIds(ids: string[]): void;
+  /** Multi-select: commits transforms for multiple nodes in a single batch operation. */
+  batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
 }

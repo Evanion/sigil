@@ -65,6 +65,15 @@ function createStoreAdapter(
     getViewportZoom(): number {
       return store.viewport().zoom;
     },
+    getSelectedNodeIds(): string[] {
+      return store.selectedNodeIds();
+    },
+    setSelectedNodeIds(ids: string[]): void {
+      store.setSelectedNodeIds(ids);
+    },
+    batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
+      store.batchSetTransform(entries);
+    },
   };
 }
 
@@ -177,6 +186,7 @@ export const Canvas: Component = () => {
         screenY: sy,
         shiftKey: e.shiftKey,
         altKey: e.altKey,
+        metaKey: e.metaKey,
       };
     }
 

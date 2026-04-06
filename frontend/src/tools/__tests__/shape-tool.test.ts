@@ -13,6 +13,7 @@ function makeEvent(worldX: number, worldY: number): ToolEvent {
     screenY: worldY,
     shiftKey: false,
     altKey: false,
+    metaKey: false,
   };
 }
 
@@ -40,6 +41,9 @@ function makeMockStore(): ToolStore & {
       selectCalls.push(uuid);
     },
     getViewportZoom: () => 1,
+    getSelectedNodeIds: () => [],
+    setSelectedNodeIds: () => undefined,
+    batchSetTransform: () => undefined,
   };
 }
 

@@ -17,6 +17,8 @@ export interface ToolEvent {
   readonly screenY: number;
   readonly shiftKey: boolean;
   readonly altKey: boolean;
+  /** True when Cmd (macOS) or Ctrl (Windows/Linux) is held — used for multi-select toggle. */
+  readonly metaKey: boolean;
 }
 
 /** Interface that each tool implementation must satisfy. */
