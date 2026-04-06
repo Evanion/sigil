@@ -32,6 +32,9 @@ import {
   SET_STROKES_MUTATION,
   SET_EFFECTS_MUTATION,
   SET_CORNER_RADII_MUTATION,
+  BATCH_SET_TRANSFORM_MUTATION,
+  GROUP_NODES_MUTATION,
+  UNGROUP_NODES_MUTATION,
 } from "../graphql/mutations";
 import { DOCUMENT_CHANGED_SUBSCRIPTION } from "../graphql/subscriptions";
 
@@ -98,6 +101,9 @@ export interface DocumentStoreAPI {
   setStrokes(uuid: string, strokes: Stroke[]): void;
   setEffects(uuid: string, effects: Effect[]): void;
   setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
+  batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
+  groupNodes(uuids: string[], name: string): void;
+  ungroupNodes(uuids: string[]): void;
   undo(): void;
   redo(): void;
 
@@ -1060,6 +1066,102 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  function batchSetTransform(
+    entries: Array<{ uuid: string; transform: Transform }>,
+  ): void {
+    // Capture previous values for rollback
+    const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
+    for (const entry of entries) {
+      const node = state.nodes[entry.uuid];
+      if (node?.transform) {
+        rollbackEntries.push({ uuid: entry.uuid, transform: deepClone(node.transform) });
+      }
+    }
+
+    // Optimistic update: apply all transforms immediately
+    batch(() => {
+      for (const entry of entries) {
+        if (state.nodes[entry.uuid]) {
+          setState("nodes", entry.uuid, "transform", entry.transform);
+        }
+      }
+    });
+
+    client
+      .mutation(gql(BATCH_SET_TRANSFORM_MUTATION), {
+        entries: entries.map((e) => ({
+          uuid: e.uuid,
+          transform: { ...e.transform },
+        })),
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("batchSetTransform error:", r.error.message);
+          batch(() => {
+            for (const entry of rollbackEntries) {
+              if (state.nodes[entry.uuid]) {
+                setState("nodes", entry.uuid, "transform", entry.transform);
+              }
+            }
+          });
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("batchSetTransform exception:", err);
+        batch(() => {
+          for (const entry of rollbackEntries) {
+            if (state.nodes[entry.uuid]) {
+              setState("nodes", entry.uuid, "transform", entry.transform);
+            }
+          }
+        });
+      });
+  }
+
+  function groupNodes(uuids: string[], name: string): void {
+    client
+      .mutation(gql(GROUP_NODES_MUTATION), { uuids, name })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("groupNodes error:", r.error.message);
+          return;
+        }
+        const data = r.data as Record<string, unknown> | undefined;
+        const groupData = data?.groupNodes as Record<string, unknown> | undefined;
+        const groupUuid = groupData?.uuid as string | undefined;
+        if (groupUuid) {
+          setSelectedNodeIds([groupUuid]);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("groupNodes exception:", err);
+      });
+  }
+
+  function ungroupNodes(uuids: string[]): void {
+    client
+      .mutation(gql(UNGROUP_NODES_MUTATION), { uuids })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("ungroupNodes error:", r.error.message);
+          return;
+        }
+        const data = r.data as Record<string, unknown> | undefined;
+        const childNodes = data?.ungroupNodes as Array<Record<string, unknown>> | undefined;
+        if (childNodes && childNodes.length > 0) {
+          setSelectedNodeIds(
+            childNodes.map((n) => n.uuid as string).filter(Boolean),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("ungroupNodes exception:", err);
+      });
+  }
+
   function undo(): void {
     client
       .mutation(gql(UNDO_MUTATION), {})
@@ -1151,6 +1253,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setStrokes,
     setEffects,
     setCornerRadii,
+    batchSetTransform,
+    groupNodes,
+    ungroupNodes,
     undo,
     redo,
     destroy,
