@@ -240,7 +240,7 @@ export function createSelectTool(store: ToolStore): Tool & {
 
     // RF-030: Accept ToolEvent parameter for interface consistency.
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches Tool interface signature
-    onPointerUp(event: ToolEvent): void {
+    onPointerUp(_event: ToolEvent): void {
       // RF-012: Use proper discriminated union narrowing instead of negation check.
       if ((state.kind === "moving" || state.kind === "resizing") && previewTransform !== null) {
         // RF-005: Send a single setTransform mutation with the final transform.
