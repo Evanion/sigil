@@ -100,6 +100,9 @@ type SelectState =
       readonly originalTransform: Transform;
       /** UUID of the single selected node (single resize). */
       readonly draggedUuid: string;
+      // RF-032: draggedUuid is for cursor tracking only in multi-resize — not used
+      // for transform dispatch. In multi-resize, all selected UUIDs are in
+      // multiResize.uuids; draggedUuid just identifies the first for cursor style.
       /** Multi-resize state: null for single node. */
       readonly multiResize: {
         readonly originalTransforms: Transform[];
@@ -165,8 +168,18 @@ export function createSelectTool(store: ToolStore): Tool & {
       const zoom = store.getViewportZoom();
       const selectedIds = store.getSelectedNodeIds();
       const selectedId = store.getSelectedNodeId();
-      const isMultiSelect = selectedIds.length > 1;
-      const isToggleModifier = event.shiftKey || event.metaKey;
+      // RF-008: Derive isMultiSelect from visible+unlocked count, not raw selectedIds.length.
+      // This ensures resize handles appear when only one actionable node is selected
+      // alongside locked/hidden nodes.
+      let actionableCount = 0;
+      for (const id of selectedIds) {
+        const node = store.getAllNodes().get(id);
+        if (node && node.visible && !node.locked) actionableCount++;
+      }
+      const isMultiSelect = actionableCount > 1;
+      // RF-001: metaKey is Cmd on Mac but Windows key on Win/Linux.
+      // ctrlKey is Ctrl on all platforms. Accept all three for cross-platform toggle.
+      const isToggleModifier = event.shiftKey || event.metaKey || event.ctrlKey;
 
       // If nodes are selected and we have a multi-selection, check compound bounds handles
       if (isMultiSelect) {
@@ -280,9 +293,9 @@ export function createSelectTool(store: ToolStore): Tool & {
             snapGuides = [];
             prepareSnap(new Set(movingUuids));
           } else {
-            // Replace selection with just this node
+            // RF-014: Use only setSelectedNodeIds — the derived selectedNodeId signal
+            // provides backward compatibility automatically.
             store.setSelectedNodeIds([hit.uuid]);
-            store.select(hit.uuid);
             const originalTransforms = new Map<string, Transform>();
             originalTransforms.set(hit.uuid, hit.transform);
             state = {
@@ -300,8 +313,8 @@ export function createSelectTool(store: ToolStore): Tool & {
       } else {
         // Clicked empty space
         if (!isToggleModifier) {
+          // RF-014: Use only setSelectedNodeIds — no dual store.select() call.
           store.setSelectedNodeIds([]);
-          store.select(null);
         }
         // Enter marquee-selecting state
         state = {
@@ -381,23 +394,21 @@ export function createSelectTool(store: ToolStore): Tool & {
           ];
           snapGuides = snapResult.guides;
         } else {
-          // Multi-node move — apply same delta to all
-          previewTransforms = state.movingUuids.map((uuid) => {
+          // RF-002: Multi-node move — apply same delta to all.
+          // Skip nodes with missing original transforms instead of falling back to zero-transform.
+          previewTransforms = state.movingUuids.flatMap((uuid) => {
             const original = state.originalTransforms.get(uuid);
-            if (!original) {
-              return {
+            if (!original) return [];
+            return [
+              {
                 uuid,
-                transform: { x: 0, y: 0, width: 0, height: 0, rotation: 0, scale_x: 1, scale_y: 1 },
-              };
-            }
-            return {
-              uuid,
-              transform: {
-                ...original,
-                x: original.x + deltaX,
-                y: original.y + deltaY,
+                transform: {
+                  ...original,
+                  x: original.x + deltaX,
+                  y: original.y + deltaY,
+                },
               },
-            };
+            ];
           });
           snapGuides = [];
         }
@@ -410,6 +421,7 @@ export function createSelectTool(store: ToolStore): Tool & {
 
         if (state.multiResize !== null) {
           // Multi-resize: resize compound bounds, then apply proportional resize
+          // TODO(RF-015): Apply snapEdges to compound bounds for multi-resize snapping.
           const resizedCompound = computeResize(
             state.originalTransform,
             state.handle,
@@ -423,10 +435,12 @@ export function createSelectTool(store: ToolStore): Tool & {
             resizedCompound,
           );
 
-          previewTransforms = state.multiResize.uuids.map((uuid, i) => ({
-            uuid,
-            transform: newTransforms[i],
-          }));
+          // RF-009: Guard against undefined newTransforms[i] if arrays are misaligned.
+          previewTransforms = state.multiResize.uuids.flatMap((uuid, i) => {
+            const transform = newTransforms[i];
+            if (!transform) return [];
+            return [{ uuid, transform }];
+          });
           snapGuides = [];
         } else {
           // Single-node resize
@@ -452,9 +466,7 @@ export function createSelectTool(store: ToolStore): Tool & {
       }
     },
 
-    // RF-030: Accept ToolEvent parameter for interface consistency.
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches Tool interface signature
-    onPointerUp(_event: ToolEvent): void {
+    onPointerUp(event: ToolEvent): void {
       if (state.kind === "marquee-selecting") {
         // Select all visible/unlocked nodes whose AABB intersects the marquee rect
         if (marqueeRect !== null) {
@@ -469,7 +481,12 @@ export function createSelectTool(store: ToolStore): Tool & {
             }
           }
 
-          if (state.shiftKey) {
+          // RF-028: Re-read shift from the pointer-up event, not the stored
+          // state.shiftKey from pointer-down. The user may have pressed or
+          // released Shift between pointer-down and pointer-up.
+          const additive = event.shiftKey;
+
+          if (additive) {
             // Additive: union with previous selection
             const previous = store.getSelectedNodeIds();
             const combined = new Set([...previous, ...matchingUuids]);

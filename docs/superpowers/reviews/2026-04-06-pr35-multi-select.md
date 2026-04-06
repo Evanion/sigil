@@ -72,47 +72,47 @@
 
 ### RF-012 — executeAlign duplicated
 - **Fix:** Extract to shared `align-helpers.ts`.
-- **Status:** `open`
+- **Status:** `resolved` — Extracted `executeAlign` to `frontend/src/canvas/align-helpers.ts`. Canvas.tsx alignment shortcuts removed (RF-033). AlignPanel.tsx imports shared helper.
 
 ### RF-013 — Dual selection API not deprecated
 - **Fix:** Mark `getSelectedNodeId`/`select` as @deprecated in ToolStore.
-- **Status:** `open`
+- **Status:** `resolved` — Added `@deprecated` JSDoc annotations to `getSelectedNodeId()` and `select()` in `document-store-types.ts`.
 
 ### RF-014 — Double mutation on selection change
 - **Fix:** Remove redundant `store.select()` calls. Use only `setSelectedNodeIds`.
-- **Status:** `open`
+- **Status:** `resolved` — Removed both `store.select()` calls from `select-tool.ts`. Updated test to verify `setSelectedNodeIds` instead.
 
 ### RF-015 — Multi-resize does not snap
 - **Fix:** Apply snapEdges to compound bounds in multi-resize path.
-- **Status:** `open`
+- **Status:** `deferred` — Added TODO comment in select-tool.ts. Snap integration for multi-resize requires plumbing compound bounds through snap engine; deferred to follow-up.
 
 ### RF-016 — Marquee drawn with unnormalized negative dimensions
 - **Fix:** Normalize rect before ctx.fillRect/strokeRect.
-- **Status:** `open`
+- **Status:** `resolved` — Added normalization in `drawMarqueeRect` in renderer.ts. Added test for negative-dimension marquee.
 
 ### RF-017 — Keyboard equivalents not documented in PR
 - **Fix:** Add deferral note to PR description.
-- **Status:** `open`
+- **Status:** `deferred` — Deferral documented. Keyboard equivalents for alignment tracked as follow-up.
 
 ### RF-018 — applyProportionalResize no length guard
 - **Fix:** Validate originals.length === positions.length at entry.
-- **Status:** `open`
+- **Status:** `resolved` — Added RangeError guard at function entry in multi-select.ts. Added enforcement test.
 
 ### RF-019 — Math.min/max spread on large arrays
 - **Fix:** Replace with reduce loops.
-- **Status:** `open`
+- **Status:** `resolved` — Replaced all `Math.min(...nodes.map(...))` and `Math.max(...)` with imperative `for` loops in align-math.ts.
 
 ### RF-020 — AlignPanel batchSetTransform no error handling
 - **Fix:** Add try-catch or .then/.catch (defer visible notification until toast system).
-- **Status:** `open`
+- **Status:** `resolved` — Shared `executeAlign` helper in align-helpers.ts wraps `batchSetTransform` in try-catch with console.error. Toast notification deferred until toast system.
 
 ### RF-021 — Ungroup silent no-op
 - **Fix:** Announce "No groups selected" when groupUuids is empty.
-- **Status:** `open`
+- **Status:** `resolved` — Added else branch in Canvas.tsx Ctrl+Shift+G handler to announce "No groups selected".
 
 ### RF-022 — Per-frame assertFiniteTransform in hot path
 - **Fix:** Move validation to drag-start only, not per-frame.
-- **Status:** `open`
+- **Status:** `deferred` — Added TODO comment in multi-select.ts. Performance impact needs measurement before changing validation timing.
 
 ## Minor/Low
 
@@ -122,11 +122,11 @@
 
 ### RF-024 — Align buttons no shortcut hints
 - **Fix:** Add shortcut to title: "Align left (Ctrl+Shift+L)".
-- **Status:** `open`
+- **Status:** `resolved` — N/A: alignment shortcuts removed per RF-033. No shortcuts to display.
 
 ### RF-025 — Select All "0 nodes" announce
 - **Fix:** Guard: if 0, announce "Nothing to select".
-- **Status:** `open`
+- **Status:** `resolved` — Added explicit "Nothing to select" announce in Canvas.tsx Ctrl+A handler when no selectable nodes exist.
 
 ### RF-026 — Group doesn't select new group
 - **Fix:** groupNodes already updates selection via store method.
@@ -134,27 +134,27 @@
 
 ### RF-027 — Selectability filter duplicated
 - **Fix:** Extract getSelectableNodeIds helper. Defer.
-- **Status:** `open`
+- **Status:** `deferred` — Extraction deferred to follow-up. Filter logic is small and contextual.
 
 ### RF-028 — Marquee modifier at pointer-down not pointer-up
 - **Fix:** Re-read modifier from event at pointerUp.
-- **Status:** `open`
+- **Status:** `resolved` — onPointerUp now reads `event.shiftKey` from the ToolEvent parameter instead of `state.shiftKey` stored at pointer-down.
 
 ### RF-029 — isToggleModifier conflates Shift and Meta for marquee
 - **Fix:** Separate concerns — only Shift for additive marquee.
-- **Status:** `open`
+- **Status:** `resolved` — Already addressed by RF-001 (cross-platform modifier fix). Marquee additive now reads from event.shiftKey at pointer-up (RF-028).
 
 ### RF-030 — Distribute jumps in/out
 - **Fix:** Show disabled instead of hidden when < 3 selected.
-- **Status:** `open`
+- **Status:** `resolved` — Distribute buttons now always visible when 2+ selected, with `disabled={selectionCount() < 3}`. Disabled styles already in AlignPanel.css.
 
 ### RF-031 — Inconsistent error contracts
 - **Fix:** Document conventions. Defer standardization.
-- **Status:** `open`
+- **Status:** `deferred` — Added TODO comment in multi-select.ts documenting the inconsistency. Standardization deferred to follow-up.
 
 ### RF-032 — draggedUuid meaningless in multi-resize
 - **Fix:** Add comment clarifying it's cursor-only.
-- **Status:** `open`
+- **Status:** `resolved` — Added clarifying comment in select-tool.ts above the multiResize state field.
 
 ## Additional Findings (from Security, FE, A11y agents)
 
@@ -163,7 +163,7 @@
 - **File:** `Canvas.tsx`
 - **Issue:** Ctrl+Shift+T reopens closed browser tabs. Ctrl+Shift+C opens DevTools element picker. Ctrl+Shift+B toggles bookmarks. These are consumed by the app's alignment shortcuts.
 - **Fix:** Remove conflicting alignment shortcuts. Use a single shortcut to open alignment popover, or use different key combos.
-- **Status:** `open`
+- **Status:** `resolved` — Removed all alignment keyboard shortcuts from Canvas.tsx. Alignment accessible via AlignPanel buttons.
 
 ### RF-034 — No max selection limit (HIGH)
 - **Source:** Security
@@ -174,7 +174,7 @@
 ### RF-035 — AlignPanel missing roving tabindex (MAJOR)
 - **Source:** A11y
 - **Fix:** Implement roving tabindex on role="toolbar" per WAI-ARIA APG.
-- **Status:** `open`
+- **Status:** `resolved` — Added roving tabindex with `activeIndex` signal. ArrowLeft/ArrowRight/Home/End cycle focus. Only active button has tabIndex=0.
 
 ### RF-036 — Screen reader double-announcement on selection change (CRITICAL)
 - **Source:** A11y
@@ -185,7 +185,7 @@
 ### RF-037 — Missing AlignPanel.stories.tsx (MEDIUM)
 - **Source:** FE
 - **Fix:** Create stories file per CLAUDE.md §5.
-- **Status:** `open`
+- **Status:** `resolved` — Created `frontend/src/panels/AlignPanel.stories.tsx` with TwoNodesSelected, ThreeNodesSelected, and OneNodeSelected stories.
 
 ### RF-038 — batchSetTransform no NaN guard at store level (HIGH)
 - **Source:** Security

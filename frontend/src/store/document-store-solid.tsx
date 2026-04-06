@@ -1,4 +1,4 @@
-import { createSignal, batch } from "solid-js";
+import { createSignal, createMemo, batch } from "solid-js";
 import { createStore, produce, reconcile } from "solid-js/store";
 import { createClient, cacheExchange, fetchExchange, subscriptionExchange, gql } from "@urql/solid";
 import { createClient as createWSClient } from "graphql-ws";
@@ -76,6 +76,8 @@ export interface DocumentStoreAPI {
   readonly setSelectedNodeId: (id: string | null) => void;
   readonly selectedNodeIds: () => string[];
   readonly setSelectedNodeIds: (ids: string[]) => void;
+  /** RF-004: Memoized Set for O(1) lookup — avoids O(n) .includes() per TreeNode. */
+  readonly isNodeSelected: (uuid: string) => boolean;
   readonly activeTool: () => ToolType;
   readonly setActiveTool: (tool: ToolType) => void;
   readonly viewport: () => Viewport;
@@ -238,6 +240,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   const setSelectedNodeId = (id: string | null): void => {
     setSelectedNodeIds(id ? [id] : []);
   };
+  // RF-004: Memoized Set for O(1) lookup — avoids O(n) .includes() per TreeNode.
+  const selectedNodeIdsSet = createMemo((): ReadonlySet<string> => new Set(selectedNodeIds()));
+  const isNodeSelected = (uuid: string): boolean => selectedNodeIdsSet().has(uuid);
   const [activeTool, setActiveTool] = createSignal<ToolType>("select");
   const [viewport, setViewport] = createSignal<Viewport>({
     x: 0,
@@ -1080,6 +1085,25 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   }
 
   function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
+    // RF-038: Reject non-finite transform values at the store boundary.
+    // NaN/Infinity would propagate silently through the optimistic update and
+    // corrupt the document state.
+    for (const entry of entries) {
+      const t = entry.transform;
+      if (
+        !Number.isFinite(t.x) ||
+        !Number.isFinite(t.y) ||
+        !Number.isFinite(t.width) ||
+        !Number.isFinite(t.height) ||
+        !Number.isFinite(t.rotation) ||
+        !Number.isFinite(t.scale_x) ||
+        !Number.isFinite(t.scale_y)
+      ) {
+        console.error("batchSetTransform: non-finite transform for", entry.uuid, t);
+        return;
+      }
+    }
+
     // Capture previous values for rollback
     const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
     for (const entry of entries) {
@@ -1263,6 +1287,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setSelectedNodeId,
     selectedNodeIds,
     setSelectedNodeIds,
+    isNodeSelected,
     activeTool,
     setActiveTool,
     viewport,

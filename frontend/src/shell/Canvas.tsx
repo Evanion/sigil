@@ -29,15 +29,9 @@ import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
-import type { AlignEntry } from "../canvas/align-math";
-import {
-  alignLeft,
-  alignCenter,
-  alignRight,
-  alignTop,
-  alignMiddle,
-  alignBottom,
-} from "../canvas/align-math";
+// RF-033: Alignment shortcuts removed — they conflict with browser defaults
+// (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
+// the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
 import { useAnnounce } from "./AnnounceProvider";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";
@@ -91,17 +85,23 @@ export const Canvas: Component = () => {
   const store = useDocument();
   const announce = useAnnounce();
 
-  // RF-001: Announce selection changes to screen readers
+  // RF-036: Consolidated selection announcement — reads selectedNodeIds() (not
+  // selectedNodeId()) to avoid double-firing when single- and multi-select
+  // signals change simultaneously.
   createEffect(() => {
-    const selectedId = store.selectedNodeId();
-    if (selectedId === null) {
+    const ids = store.selectedNodeIds();
+    if (ids.length === 0) {
       announce("Selection cleared");
       return;
     }
-    const node = store.state.nodes[selectedId];
-    if (node) {
-      announce(`Selected ${node.name}`);
+    if (ids.length === 1) {
+      const node = store.state.nodes[ids[0]];
+      if (node) {
+        announce(`Selected ${node.name}`);
+      }
+      return;
     }
+    announce(`${String(ids.length)} nodes selected`);
   });
 
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
@@ -137,6 +137,12 @@ export const Canvas: Component = () => {
       return "Design canvas";
     }
     return `Design canvas — ${String(ids.length)} nodes selected`;
+  });
+
+  // RF-006: Memoize selectedNodeIds as a Set so the renderer does not allocate
+  // a new Set per frame. Passed to renderCanvas as ReadonlySet<string>.
+  const selectedIdsSet = createMemo((): ReadonlySet<string> => {
+    return new Set(store.selectedNodeIds());
   });
 
   onMount(() => {
@@ -200,6 +206,7 @@ export const Canvas: Component = () => {
         shiftKey: e.shiftKey,
         altKey: e.altKey,
         metaKey: e.metaKey,
+        ctrlKey: e.ctrlKey,
       };
     }
 
@@ -311,25 +318,6 @@ export const Canvas: Component = () => {
       );
     };
 
-    /**
-     * Execute an alignment function on the currently selected nodes.
-     * Shared helper used by both AlignPanel buttons and keyboard shortcuts.
-     */
-    function executeAlign(alignFn: (nodes: readonly AlignEntry[]) => readonly AlignEntry[]): void {
-      const ids = store.selectedNodeIds();
-      if (ids.length < 2) return;
-      const entries: AlignEntry[] = [];
-      for (const id of ids) {
-        const node = store.state.nodes[id];
-        if (node?.transform) {
-          entries.push({ uuid: id, transform: node.transform });
-        }
-      }
-      if (entries.length < 2) return;
-      const result = alignFn(entries);
-      store.batchSetTransform(result.map((r) => ({ uuid: r.uuid, transform: r.transform })));
-    }
-
     const unbindKeys = tinykeys(window, {
       "$mod+z": (e: KeyboardEvent) => {
         if (!isTyping()) {
@@ -397,6 +385,8 @@ export const Canvas: Component = () => {
         if (groupUuids.length > 0) {
           store.ungroupNodes(groupUuids);
           announce("Ungrouped");
+        } else {
+          announce("No groups selected");
         }
       },
 
@@ -412,11 +402,19 @@ export const Canvas: Component = () => {
             allIds.push(uuid);
           }
         }
+        if (allIds.length === 0) {
+          // RF-025: Announce empty canvas explicitly — setSelectedNodeIds([]) triggers
+          // "Selection cleared" via the consolidated effect, but "Nothing to select"
+          // is more informative for the Ctrl+A intent.
+          announce("Nothing to select");
+        }
         store.setSelectedNodeIds(allIds);
-        announce(`Selected all (${String(allIds.length)} nodes)`);
+        // RF-036: Non-empty case — the consolidated selection effect handles announcement.
       },
 
       // -- Delete selected --
+      // RF-007: Multi-delete issues N individual deleteNode calls. Each is a
+      // separate undo step. TODO: implement batchDeleteNodes for atomic undo.
       Delete: (e: KeyboardEvent) => {
         if (isTyping()) return;
         e.preventDefault();
@@ -427,7 +425,7 @@ export const Canvas: Component = () => {
           store.deleteNode(uuid);
         }
         store.setSelectedNodeIds([]);
-        announce(`Deleted ${String(count)} nodes`);
+        announce(`Deleted ${String(count)} node${count > 1 ? "s" : ""}`);
       },
       Backspace: (e: KeyboardEvent) => {
         if (isTyping()) return;
@@ -439,46 +437,14 @@ export const Canvas: Component = () => {
           store.deleteNode(uuid);
         }
         store.setSelectedNodeIds([]);
-        announce(`Deleted ${String(count)} nodes`);
+        announce(`Deleted ${String(count)} node${count > 1 ? "s" : ""}`);
       },
 
-      // -- Alignment shortcuts --
-      "$mod+Shift+l": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignLeft);
-        announce("Aligned left");
-      },
-      "$mod+Shift+c": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignCenter);
-        announce("Aligned center");
-      },
-      "$mod+Shift+r": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignRight);
-        announce("Aligned right");
-      },
-      "$mod+Shift+t": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignTop);
-        announce("Aligned top");
-      },
-      "$mod+Shift+m": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignMiddle);
-        announce("Aligned middle");
-      },
-      "$mod+Shift+b": (e: KeyboardEvent) => {
-        if (isTyping()) return;
-        e.preventDefault();
-        executeAlign(alignBottom);
-        announce("Aligned bottom");
-      },
+      // RF-033: Alignment shortcuts ($mod+Shift+l/c/r/t/m/b) REMOVED.
+      // They conflict with browser defaults (Ctrl+Shift+T reopens tabs,
+      // Ctrl+Shift+C opens DevTools, Ctrl+Shift+B toggles bookmarks).
+      // Alignment is accessible via the AlignPanel buttons. Non-conflicting
+      // keyboard shortcuts can be reconsidered in a follow-up.
     });
 
     // Space key for grab cursor
@@ -517,7 +483,6 @@ export const Canvas: Component = () => {
     createEffect(() => {
       // Read every signal that affects rendering so Solid tracks them.
       const nodesObj = store.state.nodes;
-      const selectedIds = store.selectedNodeIds();
       const vp = store.viewport();
       const previews = previewTransforms();
       const prevRect = previewRect();
@@ -527,6 +492,8 @@ export const Canvas: Component = () => {
       // RF-013: Read canvasSize to track resize/DPR changes as a dependency
       const size = canvasSize();
       const dpr = size.dpr;
+      // RF-006: Read memoized Set (created once per selection change, not per frame).
+      const selSet = selectedIdsSet();
 
       // Convert nodes Record to array for the renderer.
       // IMPORTANT: Object.keys() must be called to create a reactive dependency
@@ -535,7 +502,13 @@ export const Canvas: Component = () => {
       const keys = Object.keys(nodesObj);
       const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
-      renderCanvas(ctx, vp, nodesArray, selectedIds, dpr, prevRect, previews, guides, marquee);
+      // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
+      // errors in the render path do not crash the entire reactive effect.
+      try {
+        renderCanvas(ctx, vp, nodesArray, selSet, dpr, prevRect, previews, guides, marquee);
+      } catch (err: unknown) {
+        console.error("Canvas render error:", err);
+      }
     });
 
     // -- Cleanup --------------------------------------------------------------

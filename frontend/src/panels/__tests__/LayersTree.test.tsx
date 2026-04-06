@@ -65,6 +65,10 @@ function createMockStore(
       return id ? [id] : [];
     },
     setSelectedNodeIds: vi.fn(),
+    isNodeSelected: (uuid: string) => {
+      const id = selectedNodeId();
+      return id === uuid;
+    },
     activeTool,
     setActiveTool,
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),

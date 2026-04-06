@@ -19,6 +19,8 @@ export interface ToolEvent {
   readonly altKey: boolean;
   /** True when Cmd (macOS) or Ctrl (Windows/Linux) is held — used for multi-select toggle. */
   readonly metaKey: boolean;
+  /** True when Ctrl is held. Needed alongside metaKey for cross-platform multi-select (RF-001). */
+  readonly ctrlKey: boolean;
 }
 
 /** Interface that each tool implementation must satisfy. */

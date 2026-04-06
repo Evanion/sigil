@@ -6,6 +6,7 @@
  *
  * RF-002: Selection is identified by UUID (string), not NodeId.
  * RF-005: Accepts an optional preview transform to render drag feedback.
+ * RF-006: Accepts ReadonlySet<string> for selectedUuids (caller memoizes).
  */
 
 import type { DocumentNode, Transform } from "../types/document";
@@ -62,19 +63,14 @@ function resolveFillColor(node: DocumentNode): string {
 }
 
 /**
- * Get the effective transform for a node, taking into account any active
- * preview transforms (e.g. during drag or multi-move/resize).
+ * RF-005: Get the effective transform for a node, using a Map for O(1) lookup
+ * instead of a linear scan over the previewTransforms array.
  */
 function getEffectiveTransform(
   node: DocumentNode,
-  previewTransforms: readonly PreviewTransform[],
+  previewMap: ReadonlyMap<string, Transform>,
 ): Transform {
-  for (const pt of previewTransforms) {
-    if (pt.uuid === node.uuid) {
-      return pt.transform;
-    }
-  }
-  return node.transform;
+  return previewMap.get(node.uuid) ?? node.transform;
 }
 
 /**
@@ -236,11 +232,7 @@ const COMPOUND_BOUNDS_COLOR = "#0d99ff";
  * All dimensions are in world coordinates; the viewport transform
  * is already applied by the caller.
  */
-function drawMarqueeRect(
-  ctx: CanvasRenderingContext2D,
-  rect: MarqueeRect,
-  zoom: number,
-): void {
+function drawMarqueeRect(ctx: CanvasRenderingContext2D, rect: MarqueeRect, zoom: number): void {
   const lineWidth = 1 / zoom;
   const dashPattern = [6 / zoom, 4 / zoom];
 
@@ -249,8 +241,17 @@ function drawMarqueeRect(
   ctx.setLineDash(dashPattern);
   ctx.fillStyle = MARQUEE_FILL;
 
-  ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
-  ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+  // RF-016: Normalize negative dimensions before drawing. The marquee rect
+  // may have negative width/height when the user drags right-to-left or
+  // bottom-to-top. Canvas fillRect/strokeRect handle negatives inconsistently
+  // across browsers, so we normalize to always-positive dimensions.
+  const rx = rect.width >= 0 ? rect.x : rect.x + rect.width;
+  const ry = rect.height >= 0 ? rect.y : rect.y + rect.height;
+  const rw = Math.abs(rect.width);
+  const rh = Math.abs(rect.height);
+
+  ctx.fillRect(rx, ry, rw, rh);
+  ctx.strokeRect(rx, ry, rw, rh);
   ctx.setLineDash([]);
 }
 
@@ -259,6 +260,11 @@ function drawMarqueeRect(
  *
  * Computes the union bounding box of all provided transforms and draws a
  * dashed outline with resize handles at corners and edge midpoints.
+ *
+ * RF-010: This recomputes compound bounds separately from select-tool.ts.
+ * Known redundancy — the tool computes bounds for resize math, the renderer
+ * computes bounds for drawing. Merging would require plumbing compound bounds
+ * through the preview signal, deferred for simplicity.
  */
 function drawCompoundBounds(
   ctx: CanvasRenderingContext2D,
@@ -341,12 +347,15 @@ function drawGuideLines(
  * is provided, draws a dashed outline for the shape tool drag preview.
  * If previewTransforms are provided, uses them for the dragged nodes' positions.
  * If a marqueeRect is provided, draws a dashed selection rectangle on top.
+ *
+ * RF-006: selectedUuids is now ReadonlySet<string> (memoized by caller).
+ * RF-005: previewTransforms are converted to a Map once before the render loop.
  */
 export function render(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
   nodes: readonly DocumentNode[],
-  selectedUuids: string[],
+  selectedUuids: ReadonlySet<string>,
   dpr = 1,
   previewRect: PreviewRect | null = null,
   previewTransforms: readonly PreviewTransform[] = [],
@@ -368,39 +377,44 @@ export function render(
     viewport.y * dpr,
   );
 
+  // RF-005: Build Map<string, Transform> from previewTransforms once before
+  // the render loop, replacing the O(n*k) linear scan per node.
+  const previewMap = new Map<string, Transform>(
+    previewTransforms.map((pt) => [pt.uuid, pt.transform]),
+  );
+
   // Draw each visible node.
   for (const node of nodes) {
     if (!node.visible) {
       continue;
     }
-    const effectiveTransform = getEffectiveTransform(node, previewTransforms);
+    const effectiveTransform = getEffectiveTransform(node, previewMap);
     drawNode(ctx, node, effectiveTransform);
   }
 
-  // Build a Set for efficient UUID lookup.
-  const selectedSet = new Set(selectedUuids);
+  // RF-006: selectedUuids is already a Set — no per-frame allocation needed.
 
   // Draw selection highlights on all selected nodes.
-  if (selectedSet.size > 0) {
+  if (selectedUuids.size > 0) {
     const selectedTransforms: Transform[] = [];
 
     for (const node of nodes) {
       if (!node.visible) continue;
-      if (!selectedSet.has(node.uuid)) continue;
+      if (!selectedUuids.has(node.uuid)) continue;
 
-      const effectiveTransform = getEffectiveTransform(node, previewTransforms);
+      const effectiveTransform = getEffectiveTransform(node, previewMap);
       drawSelectionHighlight(ctx, node, effectiveTransform, viewport.zoom);
       selectedTransforms.push(effectiveTransform);
 
       // Draw name label + individual handles only for single selection.
-      if (selectedSet.size === 1) {
+      if (selectedUuids.size === 1) {
         drawNameLabel(ctx, node, effectiveTransform, viewport.zoom);
         drawSelectionHandles(ctx, effectiveTransform, viewport.zoom);
       }
     }
 
     // For multi-selection: draw compound bounding box + handles.
-    if (selectedSet.size >= 2 && selectedTransforms.length >= 2) {
+    if (selectedUuids.size >= 2 && selectedTransforms.length >= 2) {
       drawCompoundBounds(ctx, selectedTransforms, viewport.zoom);
     }
   }

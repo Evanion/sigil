@@ -14,6 +14,7 @@ function makeEvent(overrides?: Partial<ToolEvent>): ToolEvent {
     shiftKey: false,
     altKey: false,
     metaKey: false,
+    ctrlKey: false,
     ...overrides,
   };
 }
@@ -152,7 +153,8 @@ describe("select tool click to select", () => {
 
     tool.onPointerDown(makeEvent({ worldX: 30, worldY: 30 }));
 
-    expect(store.selectCalls).toContain("rect-1");
+    // RF-014: select() is no longer called — only setSelectedNodeIds
+    expect(store.setSelectedNodeIdsCalls).toContainEqual(["rect-1"]);
   });
 
   it("should deselect when clicking on empty space", () => {

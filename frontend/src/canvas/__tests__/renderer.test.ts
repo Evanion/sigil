@@ -84,7 +84,7 @@ describe("renderer", () => {
     it("should draw selection handles when a node is selected by UUID", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], ["test-uuid-1"], 1);
+      render(ctx, viewport, [node], new Set(["test-uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       // Selection handles are drawn as fillRect calls with SELECTION_COLOR
@@ -101,7 +101,7 @@ describe("renderer", () => {
     it("should not draw selection handles when no node is selected", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], [], 1);
+      render(ctx, viewport, [node], new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // No selection color should be set (besides the node fill itself)
@@ -114,7 +114,7 @@ describe("renderer", () => {
     it("should not draw selection handles for invisible nodes", () => {
       const node = createTestNode({ visible: false });
 
-      render(ctx, viewport, [node], ["test-uuid-1"], 1);
+      render(ctx, viewport, [node], new Set(["test-uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       const selectionStyleSets = calls.filter(
@@ -140,7 +140,7 @@ describe("renderer", () => {
         },
       ];
 
-      render(ctx, viewport, [node], ["drag-node"], 1, null, previewTransforms);
+      render(ctx, viewport, [node], new Set(["drag-node"]), 1, null, previewTransforms);
 
       const calls = getCalls(ctx);
       // The node should be drawn at the preview position (200, 200), not (100, 100)
@@ -167,7 +167,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
 
       const calls = getCalls(ctx);
       // Should see strokeRect calls for individual highlights
@@ -193,7 +193,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
 
       const calls = getCalls(ctx);
       // Compound bounds handles: 8 fillRect calls with SELECTION_COLOR
@@ -208,7 +208,7 @@ describe("renderer", () => {
       const node1 = createTestNode({ uuid: "uuid-1", name: "Node 1" });
       const node2 = createTestNode({ uuid: "uuid-2", name: "Node 2" });
 
-      render(ctx, viewport, [node1, node2], ["uuid-1", "uuid-2"], 1);
+      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
 
       const calls = getCalls(ctx);
       // fillText is used for name labels and text nodes
@@ -221,7 +221,7 @@ describe("renderer", () => {
     it("should draw name label when exactly one node is selected", () => {
       const node = createTestNode({ uuid: "uuid-1", name: "My Node" });
 
-      render(ctx, viewport, [node], ["uuid-1"], 1);
+      render(ctx, viewport, [node], new Set(["uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       const fillTextCalls = calls.filter((c) => c.method === "fillText");
@@ -235,7 +235,7 @@ describe("renderer", () => {
     it("should draw marquee rect when provided", () => {
       const marquee = { x: 50, y: 50, width: 200, height: 150 };
 
-      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       // Marquee should produce a fillRect and strokeRect with the marquee color
@@ -253,13 +253,11 @@ describe("renderer", () => {
     it("should set dashed line pattern for marquee rect", () => {
       const marquee = { x: 0, y: 0, width: 100, height: 100 };
 
-      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       // Should have a setLineDash call with non-empty array
-      const dashCalls = calls.filter(
-        (c) => c.method === "setLineDash" && Array.isArray(c.args[0]),
-      );
+      const dashCalls = calls.filter((c) => c.method === "setLineDash" && Array.isArray(c.args[0]));
       const hasDashPattern = dashCalls.some(
         (c) => (c.args[0] as number[]).length > 0 && (c.args[0] as number[])[0] > 0,
       );
@@ -267,7 +265,7 @@ describe("renderer", () => {
     });
 
     it("should not draw marquee rect when null", () => {
-      render(ctx, viewport, [], [], 1, null, [], [], null);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], null);
 
       const calls = getCalls(ctx);
       // With no nodes, no selection, no preview, no guides, no marquee,
@@ -279,16 +277,40 @@ describe("renderer", () => {
     it("should use marquee fill color with semi-transparency", () => {
       const marquee = { x: 10, y: 10, width: 50, height: 50 };
 
-      render(ctx, viewport, [], [], 1, null, [], [], marquee);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       const fillStyleSets = calls.filter(
         (c) => c.method === "set:fillStyle" && typeof c.args[0] === "string",
       );
-      const hasMarqueeFill = fillStyleSets.some(
-        (c) => (c.args[0] as string).includes("rgba(13, 153, 255, 0.1)"),
+      const hasMarqueeFill = fillStyleSets.some((c) =>
+        (c.args[0] as string).includes("rgba(13, 153, 255, 0.1)"),
       );
       expect(hasMarqueeFill).toBe(true);
+    });
+
+    it("should normalize negative marquee dimensions before drawing", () => {
+      // RF-016: Test that right-to-left / bottom-to-top marquee is normalized
+      const marquee = { x: 250, y: 200, width: -200, height: -150 };
+
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
+
+      const calls = getCalls(ctx);
+      // After normalization: x=50, y=50, w=200, h=150
+      const marqueeFills = calls.filter(
+        (c) => c.method === "fillRect" && c.args[0] === 50 && c.args[1] === 50,
+      );
+      expect(marqueeFills.length).toBeGreaterThanOrEqual(1);
+
+      const marqueeStrokes = calls.filter(
+        (c) =>
+          c.method === "strokeRect" &&
+          c.args[0] === 50 &&
+          c.args[1] === 50 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(marqueeStrokes.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -296,7 +318,7 @@ describe("renderer", () => {
     it("should not call stroke when no snap guides are provided", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], [], 1, null, [], []);
+      render(ctx, viewport, [node], new Set<string>(), 1, null, [], []);
 
       const calls = getCalls(ctx);
       // With empty guides the guide color should never be set
@@ -309,7 +331,7 @@ describe("renderer", () => {
     it("should set stroke style to guide color when x-axis snap guide is present", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 150 }];
 
-      render(ctx, viewport, [], [], 1, null, [], guides);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorSets = calls.filter(
@@ -324,7 +346,7 @@ describe("renderer", () => {
         { axis: "y", position: 200 },
       ];
 
-      render(ctx, viewport, [], [], 1, null, [], guides);
+      render(ctx, viewport, [], new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       // Count stroke calls that occur after guide color is set
@@ -345,7 +367,7 @@ describe("renderer", () => {
       // Viewport at origin, zoom 1 — canvas is 800x600 logical px
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], [], 1, null, [], guides);
+      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -354,7 +376,7 @@ describe("renderer", () => {
       expect(guideColorIdx).toBeGreaterThanOrEqual(0);
 
       const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
-      // x-axis guide → vertical line → moveTo(guide.position, worldTop)
+      // x-axis guide -> vertical line -> moveTo(guide.position, worldTop)
       expect(moveToAfterColor).toBeDefined();
       expect(moveToAfterColor?.args[0]).toBe(300);
     });
@@ -363,7 +385,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "y", position: 250 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], [], 1, null, [], guides);
+      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -372,7 +394,7 @@ describe("renderer", () => {
       expect(guideColorIdx).toBeGreaterThanOrEqual(0);
 
       const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
-      // y-axis guide → horizontal line → moveTo(worldLeft, guide.position)
+      // y-axis guide -> horizontal line -> moveTo(worldLeft, guide.position)
       expect(moveToAfterColor).toBeDefined();
       expect(moveToAfterColor?.args[1]).toBe(250);
     });
@@ -381,7 +403,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 100 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 2 };
 
-      render(ctx, vp, [], [], 1, null, [], guides);
+      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(

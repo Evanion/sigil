@@ -7,6 +7,9 @@
  * Guards: all functions validate Number.isFinite on x, y, width, height of
  * every input transform per CLAUDE.md §11 Floating-Point Validation. If any
  * value is non-finite, the input is returned unchanged.
+ *
+ * RF-019: Uses reduce loops instead of Math.min/max spread to avoid
+ * call stack overflow on large selections (> ~65k nodes on V8).
  */
 
 import type { Transform } from "../types/document";
@@ -57,7 +60,8 @@ function withY(entry: AlignEntry, y: number): AlignEntry {
  */
 export function alignLeft(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const minX = Math.min(...nodes.map((n) => n.transform.x));
+  let minX = Infinity;
+  for (const n of nodes) minX = Math.min(minX, n.transform.x);
   return nodes.map((n) => withX(n, minX));
 }
 
@@ -67,8 +71,12 @@ export function alignLeft(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
  */
 export function alignCenter(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const minX = Math.min(...nodes.map((n) => n.transform.x));
-  const maxRight = Math.max(...nodes.map((n) => n.transform.x + n.transform.width));
+  let minX = Infinity;
+  let maxRight = -Infinity;
+  for (const n of nodes) {
+    minX = Math.min(minX, n.transform.x);
+    maxRight = Math.max(maxRight, n.transform.x + n.transform.width);
+  }
   const centerX = (minX + maxRight) / 2;
   return nodes.map((n) => withX(n, centerX - n.transform.width / 2));
 }
@@ -79,7 +87,8 @@ export function alignCenter(nodes: readonly AlignEntry[]): readonly AlignEntry[]
  */
 export function alignRight(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const maxRight = Math.max(...nodes.map((n) => n.transform.x + n.transform.width));
+  let maxRight = -Infinity;
+  for (const n of nodes) maxRight = Math.max(maxRight, n.transform.x + n.transform.width);
   return nodes.map((n) => withX(n, maxRight - n.transform.width));
 }
 
@@ -89,7 +98,8 @@ export function alignRight(nodes: readonly AlignEntry[]): readonly AlignEntry[] 
  */
 export function alignTop(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const minY = Math.min(...nodes.map((n) => n.transform.y));
+  let minY = Infinity;
+  for (const n of nodes) minY = Math.min(minY, n.transform.y);
   return nodes.map((n) => withY(n, minY));
 }
 
@@ -99,8 +109,12 @@ export function alignTop(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
  */
 export function alignMiddle(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const minY = Math.min(...nodes.map((n) => n.transform.y));
-  const maxBottom = Math.max(...nodes.map((n) => n.transform.y + n.transform.height));
+  let minY = Infinity;
+  let maxBottom = -Infinity;
+  for (const n of nodes) {
+    minY = Math.min(minY, n.transform.y);
+    maxBottom = Math.max(maxBottom, n.transform.y + n.transform.height);
+  }
   const centerY = (minY + maxBottom) / 2;
   return nodes.map((n) => withY(n, centerY - n.transform.height / 2));
 }
@@ -111,7 +125,8 @@ export function alignMiddle(nodes: readonly AlignEntry[]): readonly AlignEntry[]
  */
 export function alignBottom(nodes: readonly AlignEntry[]): readonly AlignEntry[] {
   if (nodes.length < 2 || !allFinite(nodes)) return nodes;
-  const maxBottom = Math.max(...nodes.map((n) => n.transform.y + n.transform.height));
+  let maxBottom = -Infinity;
+  for (const n of nodes) maxBottom = Math.max(maxBottom, n.transform.y + n.transform.height);
   return nodes.map((n) => withY(n, maxBottom - n.transform.height));
 }
 
@@ -135,7 +150,8 @@ export function distributeHorizontal(nodes: readonly AlignEntry[]): readonly Ali
 
   // Total span from left of first to right of last
   const totalSpan = last.transform.x + last.transform.width - first.transform.x;
-  const totalNodeWidths = sorted.reduce((sum, n) => sum + n.transform.width, 0);
+  let totalNodeWidths = 0;
+  for (const n of sorted) totalNodeWidths += n.transform.width;
   const gap = (totalSpan - totalNodeWidths) / (sorted.length - 1);
 
   // Build a uuid->new-x map so we can return results in original order
@@ -169,7 +185,8 @@ export function distributeVertical(nodes: readonly AlignEntry[]): readonly Align
   if (!first || !last) return nodes;
 
   const totalSpan = last.transform.y + last.transform.height - first.transform.y;
-  const totalNodeHeights = sorted.reduce((sum, n) => sum + n.transform.height, 0);
+  let totalNodeHeights = 0;
+  for (const n of sorted) totalNodeHeights += n.transform.height;
   const gap = (totalSpan - totalNodeHeights) / (sorted.length - 1);
 
   const newYMap = new Map<string, number>();

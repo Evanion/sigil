@@ -7,6 +7,10 @@
  *
  * Every function guards Number.isFinite on numeric inputs per CLAUDE.md
  * §11 "Floating-Point Validation".
+ *
+ * TODO(RF-031): Error contracts are inconsistent across this module and
+ * align-math.ts. This module throws RangeError on invalid input; align-math
+ * returns input unchanged. Standardize in a follow-up.
  */
 
 import type { Transform } from "../types/document";
@@ -30,7 +34,13 @@ export interface RelativePosition {
 
 // ── Guards ────────────────────────────────────────────────────────────
 
-/** Assert that every field of a Transform contains a finite number. */
+/**
+ * Assert that every field of a Transform contains a finite number.
+ *
+ * TODO(RF-022): This is called per-transform per-frame in the hot render path
+ * (via computeCompoundBounds). Consider moving validation to drag-start only
+ * and removing from per-frame paths for performance.
+ */
 function assertFiniteTransform(t: Transform): void {
   const fields: (keyof Transform)[] = [
     "x",
@@ -99,10 +109,14 @@ export function computeCompoundBounds(transforms: Transform[]): Transform {
 /**
  * Express each transform's position and size as 0-1 fractions within `bounds`.
  *
- * The fractions map the transform's AABB top-left corner and dimensions
- * relative to the compound bounds rectangle (not the screen origin).
+ * RF-003: Uses intrinsic transform fields (x, y, width, height) for relative
+ * position computation, NOT the AABB. AABB dimensions expand when a node is
+ * rotated, so using them causes width/height corruption when writing back to
+ * intrinsic fields in applyProportionalResize. The compound bounds (computed
+ * from AABBs) define the union rectangle, but each node's fraction within
+ * that rectangle must be based on its own intrinsic geometry.
  *
- * Guard: zero-dimension bounds (width or height === 0) → all fractions are 0.
+ * Guard: zero-dimension bounds (width or height === 0) -> all fractions are 0.
  */
 export function computeRelativePositions(
   transforms: Transform[],
@@ -119,15 +133,13 @@ export function computeRelativePositions(
 
   return transforms.map((t) => {
     assertFiniteTransform(t);
-    const [minX, minY, maxX, maxY] = computeAABB(t);
-    const nodeW = maxX - minX;
-    const nodeH = maxY - minY;
-
+    // RF-003: Use intrinsic x/y/width/height instead of AABB dimensions.
+    // This prevents rotated node dimensions from being inflated by the AABB.
     return {
-      rx: canDivideW ? (minX - bounds.x) / bw : 0,
-      ry: canDivideH ? (minY - bounds.y) / bh : 0,
-      rw: canDivideW ? nodeW / bw : 0,
-      rh: canDivideH ? nodeH / bh : 0,
+      rx: canDivideW ? (t.x - bounds.x) / bw : 0,
+      ry: canDivideH ? (t.y - bounds.y) / bh : 0,
+      rw: canDivideW ? t.width / bw : 0,
+      rh: canDivideH ? t.height / bh : 0,
     };
   });
 }
@@ -147,6 +159,13 @@ export function applyProportionalResize(
   positions: RelativePosition[],
   newBounds: Transform,
 ): Transform[] {
+  // RF-018: Guard against mismatched array lengths — a mismatch would cause
+  // silent out-of-bounds reads from the positions array.
+  if (originals.length !== positions.length) {
+    throw new RangeError(
+      `applyProportionalResize: originals.length (${String(originals.length)}) !== positions.length (${String(positions.length)})`,
+    );
+  }
   assertFiniteTransform(newBounds);
 
   return originals.map((original, i) => {

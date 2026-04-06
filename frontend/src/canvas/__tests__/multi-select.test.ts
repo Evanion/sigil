@@ -200,6 +200,13 @@ describe("applyProportionalResize", () => {
     const newBounds = makeTransform({ x: 0, y: 0, width: 200, height: 200 });
     expect(applyProportionalResize([], [], newBounds)).toEqual([]);
   });
+
+  it("should throw RangeError when originals and positions arrays have different lengths (RF-018)", () => {
+    const originals = [makeTransform(), makeTransform({ x: 100 })];
+    const positions = [{ rx: 0, ry: 0, rw: 0.5, rh: 1 }]; // length 1, not 2
+    const newBounds = makeTransform({ width: 200, height: 200 });
+    expect(() => applyProportionalResize(originals, positions, newBounds)).toThrow(RangeError);
+  });
 });
 
 // ── rectIntersectsAABB ────────────────────────────────────────────────

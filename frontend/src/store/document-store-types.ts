@@ -17,9 +17,11 @@ import type { DocumentNode, NodeKind, Transform } from "../types/document";
  */
 export interface ToolStore {
   getAllNodes(): ReadonlyMap<string, DocumentNode>;
+  /** @deprecated Use setSelectedNodeIds() instead. Retained for single-select backward compat. */
   select(uuid: string | null): void;
   setTransform(uuid: string, transform: Transform): void;
   createNode(kind: NodeKind, name: string, transform: Transform): string;
+  /** @deprecated Use getSelectedNodeIds() instead. Returns the first selected node or null. */
   getSelectedNodeId(): string | null;
   /** Current viewport zoom level, needed for handle hit-testing and snapping. */
   getViewportZoom(): number;
