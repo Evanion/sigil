@@ -59,6 +59,8 @@ function findNearest(sorted: readonly number[], target: number): number {
 
   // lo is the insertion point. Compare lo and lo-1 for the closest value.
   if (lo === 0) return 0;
+  // RF-024: Safety guard — binary search loop guarantees lo <= sorted.length-1 when
+  // hi starts at sorted.length-1, but this branch handles any edge case defensively.
   if (lo >= sorted.length) return sorted.length - 1;
 
   const diffLo = Math.abs((sorted[lo] as number) - target);
@@ -77,6 +79,10 @@ export class SnapEngine {
   /**
    * Collect snap targets from all provided nodes, excluding the dragged
    * node(s). Call once at drag start, or whenever the viewport or node set changes.
+   *
+   * RF-027: Targets are captured at drag-start and remain static for the
+   * duration of the drag. This means other clients' concurrent changes will
+   * not affect snap targets until the next drag begins.
    *
    * @param nodes - All visible nodes in the document.
    * @param excludeIds - UUIDs of the node(s) being dragged (these are skipped).
@@ -132,11 +138,20 @@ export class SnapEngine {
    * X and Y axes snap independently. Width and height are never modified.
    *
    * @param source - The current preview transform (before snapping).
-   * @param customThreshold - Optional override for the world-space snap threshold.
    * @returns The snapped transform and guide lines to render.
    */
-  snap(source: Transform, customThreshold?: number): SnapResult {
-    const threshold = customThreshold !== undefined ? customThreshold : this.threshold;
+  snap(source: Transform): SnapResult {
+    // RF-004: Guard against non-finite source transform fields to prevent NaN propagation.
+    if (
+      !Number.isFinite(source.x) ||
+      !Number.isFinite(source.y) ||
+      !Number.isFinite(source.width) ||
+      !Number.isFinite(source.height)
+    ) {
+      return { snappedTransform: source, guides: [] };
+    }
+
+    const threshold = this.threshold;
     const { x, y, width, height } = source;
     const guides: SnapGuide[] = [];
 
@@ -192,6 +207,127 @@ export class SnapEngine {
         y: snappedY,
         width,
         height,
+        rotation: source.rotation,
+        scale_x: source.scale_x,
+        scale_y: source.scale_y,
+      },
+      guides,
+    };
+  }
+
+  /**
+   * Snap only specific edges of a transform during resize (RF-002).
+   *
+   * Unlike `snap()` which tests all 3 source points per axis, this method
+   * only tests the edges that are actually moving based on the resize handle.
+   * The snap delta is applied to the moving edge's position AND the dimension,
+   * preserving the anchored edge.
+   *
+   * @param source - The current resized transform (after computeResize).
+   * @param movingXEdges - Which X-axis edges to snap: "left", "right", or both.
+   * @param movingYEdges - Which Y-axis edges to snap: "top", "bottom", or both.
+   * @returns The snapped transform and guide lines to render.
+   */
+  snapEdges(
+    source: Transform,
+    movingXEdges: readonly ("left" | "right")[],
+    movingYEdges: readonly ("top" | "bottom")[],
+  ): SnapResult {
+    // Guard against non-finite source transform fields.
+    if (
+      !Number.isFinite(source.x) ||
+      !Number.isFinite(source.y) ||
+      !Number.isFinite(source.width) ||
+      !Number.isFinite(source.height)
+    ) {
+      return { snappedTransform: source, guides: [] };
+    }
+
+    const threshold = this.threshold;
+    const { x, y, width, height } = source;
+    const guides: SnapGuide[] = [];
+
+    // --- X axis: only snap the moving edge(s) ---
+    let bestXDelta: number | null = null;
+    let bestXDistance = Infinity;
+    let bestXGuidePos = 0;
+
+    for (const edge of movingXEdges) {
+      const sx = edge === "left" ? x : x + width;
+      const idx = findNearest(this.xTargets, sx);
+      if (idx < 0) continue;
+      const targetVal = this.xTargets[idx] as number;
+      const dist = Math.abs(targetVal - sx);
+      if (dist <= threshold && dist < bestXDistance) {
+        bestXDistance = dist;
+        bestXDelta = targetVal - sx;
+        bestXGuidePos = targetVal;
+      }
+    }
+
+    // --- Y axis: only snap the moving edge(s) ---
+    let bestYDelta: number | null = null;
+    let bestYDistance = Infinity;
+    let bestYGuidePos = 0;
+
+    for (const edge of movingYEdges) {
+      const sy = edge === "top" ? y : y + height;
+      const idx = findNearest(this.yTargets, sy);
+      if (idx < 0) continue;
+      const targetVal = this.yTargets[idx] as number;
+      const dist = Math.abs(targetVal - sy);
+      if (dist <= threshold && dist < bestYDistance) {
+        bestYDistance = dist;
+        bestYDelta = targetVal - sy;
+        bestYGuidePos = targetVal;
+      }
+    }
+
+    // Apply snap delta to the moving edge while preserving the anchor.
+    // For moving right edge: increase width by delta (x stays fixed).
+    // For moving left edge: decrease x by delta and increase width correspondingly.
+    let snappedX = x;
+    let snappedY = y;
+    let snappedWidth = width;
+    let snappedHeight = height;
+
+    if (bestXDelta !== null) {
+      guides.push({ axis: "x", position: bestXGuidePos });
+      const hasLeft = movingXEdges.includes("left");
+      const hasRight = movingXEdges.includes("right");
+      if (hasLeft && !hasRight) {
+        // Left edge moves: shift x, compensate width
+        snappedX = x + bestXDelta;
+        snappedWidth = width - bestXDelta;
+      } else if (hasRight && !hasLeft) {
+        // Right edge moves: grow width, x stays
+        snappedWidth = width + bestXDelta;
+      } else {
+        // Both edges move (e.g., Alt resize from center): shift position only
+        snappedX = x + bestXDelta;
+      }
+    }
+
+    if (bestYDelta !== null) {
+      guides.push({ axis: "y", position: bestYGuidePos });
+      const hasTop = movingYEdges.includes("top");
+      const hasBottom = movingYEdges.includes("bottom");
+      if (hasTop && !hasBottom) {
+        snappedY = y + bestYDelta;
+        snappedHeight = height - bestYDelta;
+      } else if (hasBottom && !hasTop) {
+        snappedHeight = height + bestYDelta;
+      } else {
+        snappedY = y + bestYDelta;
+      }
+    }
+
+    return {
+      snappedTransform: {
+        x: snappedX,
+        y: snappedY,
+        width: snappedWidth,
+        height: snappedHeight,
         rotation: source.rotation,
         scale_x: source.scale_x,
         scale_y: source.scale_y,

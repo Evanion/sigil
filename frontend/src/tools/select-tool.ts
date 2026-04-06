@@ -26,14 +26,38 @@
 import type { ToolStore } from "../store/document-store-types";
 import type { Transform } from "../types/document";
 import { hitTest } from "../canvas/hit-test";
-import {
-  hitTestHandle,
-  getHandleCursor,
-  HandleType,
-} from "../canvas/handle-hit-test";
+import { hitTestHandle, getHandleCursor, HandleType } from "../canvas/handle-hit-test";
 import { computeResize } from "../canvas/resize-math";
 import { SnapEngine, type SnapGuide } from "../canvas/snap-engine";
 import type { Tool, ToolEvent } from "./tool-manager";
+
+/**
+ * Determine which edges are moving for a given resize handle type (RF-002).
+ * Used to restrict snap engine to only the edges being dragged.
+ */
+function getMovingEdges(handle: HandleType): {
+  x: readonly ("left" | "right")[];
+  y: readonly ("top" | "bottom")[];
+} {
+  switch (handle) {
+    case HandleType.NW:
+      return { x: ["left"], y: ["top"] };
+    case HandleType.N:
+      return { x: [], y: ["top"] };
+    case HandleType.NE:
+      return { x: ["right"], y: ["top"] };
+    case HandleType.E:
+      return { x: ["right"], y: [] };
+    case HandleType.SE:
+      return { x: ["right"], y: ["bottom"] };
+    case HandleType.S:
+      return { x: [], y: ["bottom"] };
+    case HandleType.SW:
+      return { x: ["left"], y: ["bottom"] };
+    case HandleType.W:
+      return { x: ["left"], y: [] };
+  }
+}
 
 /** Internal state discriminator. */
 type SelectState =
@@ -75,6 +99,9 @@ export function createSelectTool(store: ToolStore): Tool & {
   let previewTransform: PreviewTransform | null = null;
   let snapGuides: readonly SnapGuide[] = [];
   let hoverHandle: HandleType | null = null;
+  // RF-009: Track last hover-test position to avoid redundant hit tests.
+  let lastHoverX = -Infinity;
+  let lastHoverY = -Infinity;
 
   const snapEngine = new SnapEngine();
 
@@ -84,11 +111,7 @@ export function createSelectTool(store: ToolStore): Tool & {
     const snapNodes = nodes
       .filter((n) => n.visible && !n.locked)
       .map((n) => ({ uuid: n.uuid, transform: n.transform }));
-    snapEngine.prepare(
-      snapNodes,
-      new Set([excludeUuid]),
-      store.getViewportZoom(),
-    );
+    snapEngine.prepare(snapNodes, new Set([excludeUuid]), store.getViewportZoom());
   }
 
   return {
@@ -99,13 +122,9 @@ export function createSelectTool(store: ToolStore): Tool & {
       // If a node is selected, first check if we're clicking a resize handle
       if (selectedId !== null) {
         const selectedNode = store.getAllNodes().get(selectedId);
-        if (selectedNode) {
-          const handle = hitTestHandle(
-            selectedNode.transform,
-            event.worldX,
-            event.worldY,
-            zoom,
-          );
+        // RF-014: Locked nodes cannot be resized.
+        if (selectedNode && !selectedNode.locked) {
+          const handle = hitTestHandle(selectedNode.transform, event.worldX, event.worldY, zoom);
           if (handle !== null) {
             state = {
               kind: "resizing",
@@ -143,28 +162,34 @@ export function createSelectTool(store: ToolStore): Tool & {
         state = { kind: "idle" };
         previewTransform = null;
         snapGuides = [];
+        // RF-010: Clear hover handle when clicking empty canvas.
+        hoverHandle = null;
       }
     },
 
     onPointerMove(event: ToolEvent): void {
       if (state.kind === "idle") {
-        // Update hover cursor for handles
-        const selectedId = store.getSelectedNodeId();
-        if (selectedId !== null) {
-          const selectedNode = store.getAllNodes().get(selectedId);
-          if (selectedNode) {
-            const zoom = store.getViewportZoom();
-            hoverHandle = hitTestHandle(
-              selectedNode.transform,
-              event.worldX,
-              event.worldY,
-              zoom,
-            );
+        // RF-009: Only re-test handles if pointer moved > 1px world-space since last test.
+        // TODO(RF-010): full rAF throttle for hover cursor
+        const dxHover = event.worldX - lastHoverX;
+        const dyHover = event.worldY - lastHoverY;
+        if (dxHover * dxHover + dyHover * dyHover > 1) {
+          lastHoverX = event.worldX;
+          lastHoverY = event.worldY;
+
+          // Update hover cursor for handles
+          const selectedId = store.getSelectedNodeId();
+          if (selectedId !== null) {
+            const selectedNode = store.getAllNodes().get(selectedId);
+            if (selectedNode) {
+              const zoom = store.getViewportZoom();
+              hoverHandle = hitTestHandle(selectedNode.transform, event.worldX, event.worldY, zoom);
+            } else {
+              hoverHandle = null;
+            }
           } else {
             hoverHandle = null;
           }
-        } else {
-          hoverHandle = null;
         }
         return;
       }
@@ -201,8 +226,9 @@ export function createSelectTool(store: ToolStore): Tool & {
           { shift: event.shiftKey, alt: event.altKey },
         );
 
-        // Apply snapping to the resized transform
-        const snapResult = snapEngine.snap(resizedTransform);
+        // RF-002: Only snap the MOVING edges based on the handle type to preserve the anchor invariant.
+        const movingEdges = getMovingEdges(state.handle);
+        const snapResult = snapEngine.snapEdges(resizedTransform, movingEdges.x, movingEdges.y);
 
         previewTransform = {
           uuid: state.draggedUuid,
@@ -212,17 +238,23 @@ export function createSelectTool(store: ToolStore): Tool & {
       }
     },
 
-    onPointerUp(): void {
-      if (state.kind !== "idle" && previewTransform !== null) {
+    // RF-030: Accept ToolEvent parameter for interface consistency.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- matches Tool interface signature
+    onPointerUp(event: ToolEvent): void {
+      // RF-012: Use proper discriminated union narrowing instead of negation check.
+      if ((state.kind === "moving" || state.kind === "resizing") && previewTransform !== null) {
         // RF-005: Send a single setTransform mutation with the final transform.
         store.setTransform(state.draggedUuid, previewTransform.transform);
       }
       state = { kind: "idle" };
       previewTransform = null;
       snapGuides = [];
+      // RF-010: Clear hover handle to prevent stale cursor after drag ends.
+      hoverHandle = null;
     },
 
     onKeyDown(key: string): void {
+      // TODO: Add Alt+Arrow resize nudge for keyboard accessibility (tracking issue needed)
       if (key === "Escape" && state.kind !== "idle") {
         state = { kind: "idle" };
         previewTransform = null;

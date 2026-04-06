@@ -35,18 +35,102 @@ interface HandleAxes {
 }
 
 const HANDLE_AXES: Readonly<Record<HandleType, HandleAxes>> = {
-  [HandleType.NW]: { affectsX: true,  affectsY: true,  affectsWidth: true,  affectsHeight: true,  xSign: 1, ySign: 1, wSign: -1, hSign: -1, isCorner: true  },
-  [HandleType.N]:  { affectsX: false, affectsY: true,  affectsWidth: false, affectsHeight: true,  xSign: 0, ySign: 1, wSign:  0, hSign: -1, isCorner: false },
-  [HandleType.NE]: { affectsX: false, affectsY: true,  affectsWidth: true,  affectsHeight: true,  xSign: 0, ySign: 1, wSign:  1, hSign: -1, isCorner: true  },
-  [HandleType.E]:  { affectsX: false, affectsY: false, affectsWidth: true,  affectsHeight: false, xSign: 0, ySign: 0, wSign:  1, hSign:  0, isCorner: false },
-  [HandleType.SE]: { affectsX: false, affectsY: false, affectsWidth: true,  affectsHeight: true,  xSign: 0, ySign: 0, wSign:  1, hSign:  1, isCorner: true  },
-  [HandleType.S]:  { affectsX: false, affectsY: false, affectsWidth: false, affectsHeight: true,  xSign: 0, ySign: 0, wSign:  0, hSign:  1, isCorner: false },
-  [HandleType.SW]: { affectsX: true,  affectsY: false, affectsWidth: true,  affectsHeight: true,  xSign: 1, ySign: 0, wSign: -1, hSign:  1, isCorner: true  },
-  [HandleType.W]:  { affectsX: true,  affectsY: false, affectsWidth: true,  affectsHeight: false, xSign: 1, ySign: 0, wSign: -1, hSign:  0, isCorner: false },
+  [HandleType.NW]: {
+    affectsX: true,
+    affectsY: true,
+    affectsWidth: true,
+    affectsHeight: true,
+    xSign: 1,
+    ySign: 1,
+    wSign: -1,
+    hSign: -1,
+    isCorner: true,
+  },
+  [HandleType.N]: {
+    affectsX: false,
+    affectsY: true,
+    affectsWidth: false,
+    affectsHeight: true,
+    xSign: 0,
+    ySign: 1,
+    wSign: 0,
+    hSign: -1,
+    isCorner: false,
+  },
+  [HandleType.NE]: {
+    affectsX: false,
+    affectsY: true,
+    affectsWidth: true,
+    affectsHeight: true,
+    xSign: 0,
+    ySign: 1,
+    wSign: 1,
+    hSign: -1,
+    isCorner: true,
+  },
+  [HandleType.E]: {
+    affectsX: false,
+    affectsY: false,
+    affectsWidth: true,
+    affectsHeight: false,
+    xSign: 0,
+    ySign: 0,
+    wSign: 1,
+    hSign: 0,
+    isCorner: false,
+  },
+  [HandleType.SE]: {
+    affectsX: false,
+    affectsY: false,
+    affectsWidth: true,
+    affectsHeight: true,
+    xSign: 0,
+    ySign: 0,
+    wSign: 1,
+    hSign: 1,
+    isCorner: true,
+  },
+  [HandleType.S]: {
+    affectsX: false,
+    affectsY: false,
+    affectsWidth: false,
+    affectsHeight: true,
+    xSign: 0,
+    ySign: 0,
+    wSign: 0,
+    hSign: 1,
+    isCorner: false,
+  },
+  [HandleType.SW]: {
+    affectsX: true,
+    affectsY: false,
+    affectsWidth: true,
+    affectsHeight: true,
+    xSign: 1,
+    ySign: 0,
+    wSign: -1,
+    hSign: 1,
+    isCorner: true,
+  },
+  [HandleType.W]: {
+    affectsX: true,
+    affectsY: false,
+    affectsWidth: true,
+    affectsHeight: false,
+    xSign: 1,
+    ySign: 0,
+    wSign: -1,
+    hSign: 0,
+    isCorner: false,
+  },
 };
 
 /**
  * Compute a new transform for a resize operation.
+ *
+ * When Shift is held on a corner handle, aspect ratio is locked. The dominant
+ * axis is determined by comparing absolute delta magnitudes. On a tiebreak
+ * (|dx| === |dy|), width is treated as dominant (RF-028).
  *
  * @param original - The node's transform at drag start.
  * @param handle - Which handle is being dragged.
@@ -60,13 +144,26 @@ export function computeResize(
   dragDelta: { readonly dx: number; readonly dy: number },
   modifiers: { readonly shift: boolean; readonly alt: boolean },
 ): Transform {
+  // RF-004: Guard against non-finite inputs to prevent NaN propagation.
+  if (
+    !Number.isFinite(original.x) ||
+    !Number.isFinite(original.y) ||
+    !Number.isFinite(original.width) ||
+    !Number.isFinite(original.height) ||
+    !Number.isFinite(dragDelta.dx) ||
+    !Number.isFinite(dragDelta.dy)
+  ) {
+    return original;
+  }
+
   const axes = HANDLE_AXES[handle];
   let { dx, dy } = dragDelta;
 
   // Shift: lock aspect ratio (corner handles only).
   // Determine the dominant axis by comparing absolute delta magnitudes,
   // then derive the constrained delta for the other axis.
-  if (modifiers.shift && axes.isCorner) {
+  // RF-005: Skip aspect lock if dimensions are degenerate (zero/negative) to avoid Infinity.
+  if (modifiers.shift && axes.isCorner && original.width > 0 && original.height > 0) {
     const aspectRatio = original.width / original.height;
     const absDx = Math.abs(dx);
     const absDy = Math.abs(dy);
@@ -124,10 +221,14 @@ export function computeResize(
     }
   }
 
+  // CLAUDE.md §11 exception: clamping is the intended UX for resize handles (user-facing affordance).
   // Clamp minimum size to MIN_SIZE. When the origin-moving side hits the
   // minimum, pin the origin so the far edge stays at its current position.
   if (newWidth < MIN_SIZE) {
-    if (axes.affectsX && !modifiers.alt) {
+    if (modifiers.alt) {
+      // RF-007: When Alt is active, recenter so the center point stays fixed.
+      newX = original.x + original.width / 2 - MIN_SIZE / 2;
+    } else if (axes.affectsX) {
       // The left edge is moving (NW, SW, W handles). Pin x so the right edge
       // stays at original.x + original.width.
       newX = original.x + original.width - MIN_SIZE;
@@ -135,7 +236,10 @@ export function computeResize(
     newWidth = MIN_SIZE;
   }
   if (newHeight < MIN_SIZE) {
-    if (axes.affectsY && !modifiers.alt) {
+    if (modifiers.alt) {
+      // RF-007: When Alt is active, recenter so the center point stays fixed.
+      newY = original.y + original.height / 2 - MIN_SIZE / 2;
+    } else if (axes.affectsY) {
       // The top edge is moving (NW, N, NE handles). Pin y so the bottom edge
       // stays at original.y + original.height.
       newY = original.y + original.height - MIN_SIZE;

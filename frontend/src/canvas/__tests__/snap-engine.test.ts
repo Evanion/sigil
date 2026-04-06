@@ -144,7 +144,15 @@ describe("SnapEngine", () => {
     const engine = new SnapEngine();
     engine.prepare(
       [
-        makeNode("bad", { x: NaN, y: 0, width: 50, height: 50, rotation: 0, scale_x: 1, scale_y: 1 }),
+        makeNode("bad", {
+          x: NaN,
+          y: 0,
+          width: 50,
+          height: 50,
+          rotation: 0,
+          scale_x: 1,
+          scale_y: 1,
+        }),
         makeNode("good", T(200, 200, 50, 50)),
       ],
       new Set(),
@@ -222,5 +230,72 @@ describe("SnapEngine", () => {
     expect(result.snappedTransform.rotation).toBe(45);
     expect(result.snappedTransform.scale_x).toBe(2);
     expect(result.snappedTransform.scale_y).toBe(0.5);
+  });
+
+  // RF-006: Canonical enforcement test for SNAP_THRESHOLD_PX constant (CLAUDE.md §11)
+  it("test_snap_threshold_px_enforced", () => {
+    const engine = new SnapEngine();
+    // At zoom=1, threshold is 8px. A source 9px away should NOT snap.
+    engine.prepare([makeNode("target", T(100, 200, 50, 50))], new Set(["dragged"]), 1);
+    const noSnap = engine.snap(T(109, 300, 60, 40));
+    expect(noSnap.snappedTransform.x).toBe(109); // 9px > 8px threshold
+
+    // A source 8px away should snap.
+    const yesSnap = engine.snap(T(108, 300, 60, 40));
+    expect(yesSnap.snappedTransform.x).toBe(100); // 8px <= 8px threshold
+  });
+
+  // RF-004: Non-finite source guard
+  it("returns source unchanged when transform contains NaN", () => {
+    const engine = new SnapEngine();
+    engine.prepare([makeNode("target", T(100, 200, 50, 50))], new Set(["dragged"]), 1);
+    const nanSource: Transform = {
+      x: NaN,
+      y: 100,
+      width: 50,
+      height: 50,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+    const result = engine.snap(nanSource);
+    expect(result.snappedTransform).toEqual(nanSource);
+    expect(result.guides).toHaveLength(0);
+  });
+});
+
+describe("SnapEngine.snapEdges (RF-002)", () => {
+  it("snaps only the right edge when moving right", () => {
+    const engine = new SnapEngine();
+    // Target right edge at 150
+    engine.prepare([makeNode("target", T(100, 200, 50, 50))], new Set(["dragged"]), 1);
+
+    // Source: x=50, width=98 => right edge = 148, within 8px of 150
+    const result = engine.snapEdges(T(50, 300, 98, 40), ["right"], []);
+    // Right edge should snap to 150, so width becomes 100, x stays at 50
+    expect(result.snappedTransform.x).toBe(50);
+    expect(result.snappedTransform.width).toBe(100);
+  });
+
+  it("snaps only the left edge when moving left", () => {
+    const engine = new SnapEngine();
+    engine.prepare([makeNode("target", T(100, 200, 50, 50))], new Set(["dragged"]), 1);
+
+    // Source: x=102, width=200 => left edge=102, within 8px of 100
+    const result = engine.snapEdges(T(102, 300, 200, 40), ["left"], []);
+    // Left edge snaps to 100, width increases by 2
+    expect(result.snappedTransform.x).toBe(100);
+    expect(result.snappedTransform.width).toBe(202);
+  });
+
+  it("does not snap edges that are not in the moving set", () => {
+    const engine = new SnapEngine();
+    engine.prepare([makeNode("target", T(100, 200, 50, 50))], new Set(["dragged"]), 1);
+
+    // Source left edge at x=102, close to target at 100.
+    // But we only allow right edge snapping.
+    // Source right edge = 102 + 200 = 302, far from any target.
+    const result = engine.snapEdges(T(102, 300, 200, 40), ["right"], []);
+    expect(result.snappedTransform.x).toBe(102); // x unchanged (left edge not snapped)
   });
 });

@@ -201,9 +201,7 @@ describe("renderer", () => {
       );
       expect(guideColorIdx).toBeGreaterThanOrEqual(0);
 
-      const moveToAfterColor = calls
-        .slice(guideColorIdx)
-        .find((c) => c.method === "moveTo");
+      const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
       // x-axis guide → vertical line → moveTo(guide.position, worldTop)
       expect(moveToAfterColor).toBeDefined();
       expect(moveToAfterColor?.args[0]).toBe(300);
@@ -221,9 +219,7 @@ describe("renderer", () => {
       );
       expect(guideColorIdx).toBeGreaterThanOrEqual(0);
 
-      const moveToAfterColor = calls
-        .slice(guideColorIdx)
-        .find((c) => c.method === "moveTo");
+      const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
       // y-axis guide → horizontal line → moveTo(worldLeft, guide.position)
       expect(moveToAfterColor).toBeDefined();
       expect(moveToAfterColor?.args[1]).toBe(250);

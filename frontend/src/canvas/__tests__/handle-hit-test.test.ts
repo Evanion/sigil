@@ -7,11 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import {
-  hitTestHandle,
-  getHandleCursor,
-  HandleType,
-} from "../handle-hit-test";
+import { hitTestHandle, getHandleCursor, HandleType } from "../handle-hit-test";
 import type { Transform } from "../../types/document";
 
 const TRANSFORM: Transform = {
@@ -114,5 +110,55 @@ describe("getHandleCursor", () => {
 
   it("returns ew-resize for W", () => {
     expect(getHandleCursor(HandleType.W)).toBe("ew-resize");
+  });
+});
+
+// RF-006: Canonical enforcement test for HANDLE_HIT_ZONE_PX constant (CLAUDE.md §11)
+describe("hitTestHandle — constant enforcement", () => {
+  it("test_handle_hit_zone_px_enforced", () => {
+    // HANDLE_HIT_ZONE_PX = 8. At zoom=1, points within 8px hit, points beyond do not.
+    const t: Transform = {
+      x: 100,
+      y: 100,
+      width: 200,
+      height: 150,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+    // 8px from NW corner (100,100) — should hit
+    expect(hitTestHandle(t, 108, 108, 1)).toBe(HandleType.NW);
+    // 9px from NW corner — should miss
+    expect(hitTestHandle(t, 109, 109, 1)).toBeNull();
+  });
+});
+
+// RF-004: Non-finite zoom guard
+describe("hitTestHandle — Number.isFinite guard", () => {
+  it("falls back to zoom=1 when zoom is NaN", () => {
+    const t: Transform = {
+      x: 100,
+      y: 100,
+      width: 200,
+      height: 150,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+    // Should not throw and should use default zoom=1 threshold
+    expect(hitTestHandle(t, 100, 100, NaN)).toBe(HandleType.NW);
+  });
+
+  it("falls back to zoom=1 when zoom is zero", () => {
+    const t: Transform = {
+      x: 100,
+      y: 100,
+      width: 200,
+      height: 150,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
+    expect(hitTestHandle(t, 100, 100, 0)).toBe(HandleType.NW);
   });
 });

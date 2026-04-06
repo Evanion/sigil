@@ -108,6 +108,15 @@ export const Canvas: Component = () => {
     return map;
   });
 
+  // RF-020 (a11y): Dynamic aria-label reflecting the selected node.
+  const canvasAriaLabel = createMemo((): string => {
+    const selectedId = store.selectedNodeId();
+    if (selectedId === null) return "Design canvas";
+    const node = store.state.nodes[selectedId];
+    if (node) return `Design canvas — ${node.name} selected`;
+    return "Design canvas";
+  });
+
   onMount(() => {
     if (!canvasRef) return;
     const canvas = canvasRef;
@@ -210,11 +219,15 @@ export const Canvas: Component = () => {
 
       // Update preview signals
       setPreviewTransform(selectTool.getPreviewTransform());
-      setSnapGuides(selectTool.getSnapGuides());
+      // RF-011: Only query snap guides when the select tool is active.
+      if (store.activeTool() === "select") {
+        setSnapGuides(selectTool.getSnapGuides());
+      }
       const activeTool = toolImpls.get(store.activeTool());
       if (activeTool && "getPreviewRect" in activeTool) {
         setPreviewRect((activeTool as ReturnType<typeof createShapeTool>).getPreviewRect());
       }
+      // RF-015: Update cursor after the tool's onPointerMove to reflect hover state changes.
       setCursor(toolManager.getCursor());
     }
 
@@ -228,6 +241,8 @@ export const Canvas: Component = () => {
       toolManager.onPointerUp(makeToolEvent(e));
       setPreviewTransform(null);
       setPreviewRect(null);
+      // RF-003: Clear snap guides when pointer is released.
+      setSnapGuides([]);
       setCursor(toolManager.getCursor());
     }
 
@@ -357,10 +372,8 @@ export const Canvas: Component = () => {
       const vp = store.viewport();
       const preview = previewTransform();
       const prevRect = previewRect();
-      // Read snap guides so the effect re-triggers when they change.
-      // The renderer will use these once guide line rendering is added (Task 5).
-      const _guides = snapGuides();
-      void _guides;
+      // RF-001: Read snap guides and pass them to the renderer as the 8th argument.
+      const guides = snapGuides();
       // RF-013: Read canvasSize to track resize/DPR changes as a dependency
       const size = canvasSize();
       const dpr = size.dpr;
@@ -372,7 +385,7 @@ export const Canvas: Component = () => {
       const keys = Object.keys(nodesObj);
       const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
-      renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview);
+      renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview, guides);
     });
 
     // -- Cleanup --------------------------------------------------------------
@@ -390,6 +403,8 @@ export const Canvas: Component = () => {
     });
   });
 
+  // TODO(a11y): Add discrete aria-live announcements for resize start/commit/cancel
+
   return (
     <canvas
       ref={(el) => {
@@ -397,7 +412,7 @@ export const Canvas: Component = () => {
       }}
       class="sigil-canvas-container__canvas"
       role="application"
-      aria-label="Design canvas"
+      aria-label={canvasAriaLabel()}
       tabindex={0}
       style={{ cursor: cursor() }}
     />

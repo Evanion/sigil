@@ -400,9 +400,7 @@ describe("select tool resize via handles", () => {
     // Click SE handle at (300, 250)
     tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
     // Drag 20px to the right and 10px down
-    tool.onPointerMove(
-      makeEvent({ worldX: 320, worldY: 260, shiftKey: false, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 320, worldY: 260, shiftKey: false, altKey: false }));
 
     const preview = tool.getPreviewTransform();
     expect(preview).not.toBeNull();
@@ -427,9 +425,7 @@ describe("select tool resize via handles", () => {
 
     // Click SE handle
     tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
-    tool.onPointerMove(
-      makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }));
     tool.onPointerUp(makeEvent({ worldX: 350, worldY: 300 }));
 
     expect(store.setTransformCalls).toHaveLength(1);
@@ -452,9 +448,7 @@ describe("select tool resize via handles", () => {
     // Click SE handle at (200, 100)
     tool.onPointerDown(makeEvent({ worldX: 200, worldY: 100 }));
     // Drag with shift held — dominant axis is X (dx=40 > dy=5)
-    tool.onPointerMove(
-      makeEvent({ worldX: 240, worldY: 105, shiftKey: true, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 240, worldY: 105, shiftKey: true, altKey: false }));
 
     const preview = tool.getPreviewTransform();
     expect(preview).not.toBeNull();
@@ -480,9 +474,7 @@ describe("select tool resize via handles", () => {
     expect(tool.getCursor()).toBe("grabbing");
 
     // Move and verify it moves position, not resizes
-    tool.onPointerMove(
-      makeEvent({ worldX: 210, worldY: 185, shiftKey: false, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 210, worldY: 185, shiftKey: false, altKey: false }));
     const preview = tool.getPreviewTransform();
     expect(preview).not.toBeNull();
     expect(preview?.transform.x).toBe(110); // 100 + 10
@@ -504,9 +496,7 @@ describe("select tool resize via handles", () => {
 
     // Start resize
     tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
-    tool.onPointerMove(
-      makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }));
 
     // Escape
     expect(tool.onKeyDown).toBeTypeOf("function");
@@ -535,9 +525,7 @@ describe("select tool resize via handles", () => {
     const tool = createSelectTool(store);
 
     // Move over the E handle at (300, 175)
-    tool.onPointerMove(
-      makeEvent({ worldX: 300, worldY: 175, shiftKey: false, altKey: false }),
-    );
+    tool.onPointerMove(makeEvent({ worldX: 300, worldY: 175, shiftKey: false, altKey: false }));
 
     expect(tool.getCursor()).toBe("ew-resize");
   });

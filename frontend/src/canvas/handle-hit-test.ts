@@ -55,8 +55,10 @@ export function hitTestHandle(
   worldY: number,
   zoom: number,
 ): HandleType | null {
+  // RF-004: Guard against non-finite or non-positive zoom to prevent NaN/Infinity threshold.
+  const safeZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
   const { x, y, width, height } = transform;
-  const threshold = HANDLE_HIT_ZONE_PX / zoom;
+  const threshold = HANDLE_HIT_ZONE_PX / safeZoom;
 
   // Handle positions: [handleType, centerX, centerY]
   // Corners first (priority over edges)
