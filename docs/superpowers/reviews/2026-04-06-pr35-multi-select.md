@@ -155,3 +155,44 @@
 ### RF-032 — draggedUuid meaningless in multi-resize
 - **Fix:** Add comment clarifying it's cursor-only.
 - **Status:** `open`
+
+## Additional Findings (from Security, FE, A11y agents)
+
+### RF-033 — Alignment shortcuts conflict with browser shortcuts (HIGH)
+- **Source:** A11y
+- **File:** `Canvas.tsx`
+- **Issue:** Ctrl+Shift+T reopens closed browser tabs. Ctrl+Shift+C opens DevTools element picker. Ctrl+Shift+B toggles bookmarks. These are consumed by the app's alignment shortcuts.
+- **Fix:** Remove conflicting alignment shortcuts. Use a single shortcut to open alignment popover, or use different key combos.
+- **Status:** `open`
+
+### RF-034 — No max selection limit (HIGH)
+- **Source:** Security
+- **Issue:** Ctrl+A on 1000-node doc produces unbounded selectedNodeIds. Downstream computations (compound bounds, batchSetTransform) scale linearly.
+- **Fix:** Define MAX_SELECTION_SIZE constant. For now, document as known limitation rather than silently clamping.
+- **Status:** `open`
+
+### RF-035 — AlignPanel missing roving tabindex (MAJOR)
+- **Source:** A11y
+- **Fix:** Implement roving tabindex on role="toolbar" per WAI-ARIA APG.
+- **Status:** `open`
+
+### RF-036 — Screen reader double-announcement on selection change (CRITICAL)
+- **Source:** A11y
+- **Issue:** Legacy createEffect on selectedNodeId fires "Selection cleared" while multi-select fires simultaneously.
+- **Fix:** Consolidate to single effect reading selectedNodeIds.
+- **Status:** `open`
+
+### RF-037 — Missing AlignPanel.stories.tsx (MEDIUM)
+- **Source:** FE
+- **Fix:** Create stories file per CLAUDE.md §5.
+- **Status:** `open`
+
+### RF-038 — batchSetTransform no NaN guard at store level (HIGH)
+- **Source:** Security
+- **Fix:** Add Number.isFinite validation at entry point.
+- **Status:** `open`
+
+### RF-039 — assertFiniteTransform throws uncaught in render effect (HIGH)
+- **Source:** Security, FE
+- **Fix:** Wrap renderCanvas in try-catch, or change to graceful return.
+- **Status:** `open`
