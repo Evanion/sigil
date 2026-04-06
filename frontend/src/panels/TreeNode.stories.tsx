@@ -52,6 +52,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     batchSetTransform: () => {},
     groupNodes: () => {},
     ungroupNodes: () => {},
+    isNodeSelected: () => false,
     undo: () => {},
     redo: () => {},
     destroy: () => {},

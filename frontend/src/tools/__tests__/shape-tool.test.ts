@@ -14,6 +14,7 @@ function makeEvent(worldX: number, worldY: number): ToolEvent {
     shiftKey: false,
     altKey: false,
     metaKey: false,
+    ctrlKey: false,
   };
 }
 

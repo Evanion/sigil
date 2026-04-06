@@ -396,8 +396,10 @@ export function createSelectTool(store: ToolStore): Tool & {
         } else {
           // RF-002: Multi-node move — apply same delta to all.
           // Skip nodes with missing original transforms instead of falling back to zero-transform.
-          previewTransforms = state.movingUuids.flatMap((uuid) => {
-            const original = state.originalTransforms.get(uuid);
+          // Capture narrowed state in a const to preserve discriminated union narrowing inside the callback.
+          const movingState = state;
+          previewTransforms = movingState.movingUuids.flatMap((uuid) => {
+            const original = movingState.originalTransforms.get(uuid);
             if (!original) return [];
             return [
               {

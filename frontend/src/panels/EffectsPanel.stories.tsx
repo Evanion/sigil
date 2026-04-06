@@ -56,6 +56,7 @@ function createMockStore(
     batchSetTransform: () => {},
     groupNodes: () => {},
     ungroupNodes: () => {},
+    isNodeSelected: () => false,
     undo: () => {},
     redo: () => {},
     destroy: () => {},
