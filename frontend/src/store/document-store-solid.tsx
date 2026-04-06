@@ -71,6 +71,8 @@ export interface DocumentStoreAPI {
   // UI signals
   readonly selectedNodeId: () => string | null;
   readonly setSelectedNodeId: (id: string | null) => void;
+  readonly selectedNodeIds: () => string[];
+  readonly setSelectedNodeIds: (ids: string[]) => void;
   readonly activeTool: () => ToolType;
   readonly setActiveTool: (tool: ToolType) => void;
   readonly viewport: () => Viewport;
@@ -220,8 +222,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     nodes: {},
   });
 
-  // UI signals
-  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
+  // UI signals — multi-select with backwards-compatible single-select accessors
+  const [selectedNodeIds, setSelectedNodeIds] = createSignal<string[]>([]);
+  const selectedNodeId = (): string | null => selectedNodeIds()[0] ?? null;
+  const setSelectedNodeId = (id: string | null): void => {
+    setSelectedNodeIds(id ? [id] : []);
+  };
   const [activeTool, setActiveTool] = createSignal<ToolType>("select");
   const [viewport, setViewport] = createSignal<Viewport>({
     x: 0,
@@ -366,9 +372,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               Reflect.deleteProperty(s.nodes, optimisticUuid);
             }),
           );
-          if (selectedNodeId() === optimisticUuid) {
-            setSelectedNodeId(null);
-          }
+          setSelectedNodeIds(selectedNodeIds().filter((id) => id !== optimisticUuid));
           return;
         }
         const serverUuid = result.data?.createNode?.uuid as string | undefined;
@@ -384,10 +388,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
                 }),
               );
             }
-            // RF-005: Always remap selectedNodeId regardless of whether
+            // RF-005: Always remap selectedNodeIds regardless of whether
             // the optimistic node still exists in state (fetch may have arrived first)
-            if (selectedNodeId() === optimisticUuid) {
-              setSelectedNodeId(serverUuid);
+            if (selectedNodeIds().includes(optimisticUuid)) {
+              setSelectedNodeIds(
+                selectedNodeIds().map((id) => (id === optimisticUuid ? serverUuid : id)),
+              );
             }
           });
         }
@@ -400,9 +406,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             Reflect.deleteProperty(s.nodes, optimisticUuid);
           }),
         );
-        if (selectedNodeId() === optimisticUuid) {
-          setSelectedNodeId(null);
-        }
+        setSelectedNodeIds(selectedNodeIds().filter((id) => id !== optimisticUuid));
       });
 
     return optimisticUuid;
@@ -474,7 +478,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         Reflect.deleteProperty(s.nodes, uuid);
       }),
     );
-    if (selectedNodeId() === uuid) setSelectedNodeId(null);
+    setSelectedNodeIds(selectedNodeIds().filter((id) => id !== uuid));
 
     client
       .mutation(gql(DELETE_NODE_MUTATION), { uuid })
@@ -1124,6 +1128,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     state,
     selectedNodeId,
     setSelectedNodeId,
+    selectedNodeIds,
+    setSelectedNodeIds,
     activeTool,
     setActiveTool,
     viewport,

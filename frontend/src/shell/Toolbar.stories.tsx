@@ -16,6 +16,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     },
     selectedNodeId: () => null,
     setSelectedNodeId: () => {},
+    selectedNodeIds: () => [],
+    setSelectedNodeIds: () => {},
     activeTool,
     setActiveTool,
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),

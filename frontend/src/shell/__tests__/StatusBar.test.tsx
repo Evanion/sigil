@@ -18,6 +18,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     },
     selectedNodeId: () => null,
     setSelectedNodeId: vi.fn(),
+    selectedNodeIds: () => [],
+    setSelectedNodeIds: vi.fn(),
     activeTool,
     setActiveTool: vi.fn(),
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),
