@@ -17,6 +17,8 @@
 
 use async_graphql::{Context, Json, Object, Result};
 
+use agent_designer_core::commands::batch_commands::BatchSetTransform;
+use agent_designer_core::commands::group_commands::{GroupNodes, GroupSnapshot, UngroupNodes};
 use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
 };
@@ -939,6 +941,262 @@ impl MutationRoot {
         });
 
         Ok(node_gql)
+    }
+
+    /// Atomically set transforms for multiple nodes.
+    ///
+    /// Used by multi-select move, align, and distribute operations.
+    /// All transforms are validated before any are applied.
+    async fn batch_set_transform(
+        &self,
+        ctx: &Context<'_>,
+        entries: Vec<Json<serde_json::Value>>,
+    ) -> Result<Vec<NodeGql>> {
+        let state = ctx.data::<ServerState>()?;
+
+        // Parse entries: each is { "uuid": "...", "transform": { ... } }
+        let mut parsed_entries: Vec<(uuid::Uuid, Transform)> = Vec::with_capacity(entries.len());
+        for entry_json in &entries {
+            let obj = entry_json.0.as_object().ok_or_else(|| {
+                async_graphql::Error::new(
+                    "each entry must be a JSON object with uuid and transform",
+                )
+            })?;
+            let uuid_str = obj
+                .get("uuid")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| async_graphql::Error::new("entry missing uuid field"))?;
+            let parsed_uuid: uuid::Uuid = uuid_str
+                .parse()
+                .map_err(|_| async_graphql::Error::new(format!("invalid UUID: {uuid_str}")))?;
+            let transform_val = obj
+                .get("transform")
+                .ok_or_else(|| async_graphql::Error::new("entry missing transform field"))?;
+            let transform: Transform =
+                serde_json::from_value(transform_val.clone()).map_err(|e| {
+                    tracing::warn!("invalid transform in batchSetTransform: {e}");
+                    async_graphql::Error::new("invalid transform in batch entry")
+                })?;
+            parsed_entries.push((parsed_uuid, transform));
+        }
+
+        let result_nodes = {
+            let mut doc_guard = acquire_document_lock(state);
+
+            // Resolve UUIDs to NodeIds and capture old transforms
+            let mut cmd_entries = Vec::with_capacity(parsed_entries.len());
+            let mut old_transforms = Vec::with_capacity(parsed_entries.len());
+
+            for (uuid, new_transform) in &parsed_entries {
+                let node_id = doc_guard
+                    .arena
+                    .id_by_uuid(uuid)
+                    .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))?;
+                let old_transform = doc_guard
+                    .arena
+                    .get(node_id)
+                    .map_err(|_| async_graphql::Error::new("node lookup failed"))?
+                    .transform;
+                cmd_entries.push((node_id, *new_transform));
+                old_transforms.push((node_id, old_transform));
+            }
+
+            let cmd = BatchSetTransform {
+                entries: cmd_entries,
+                old_transforms,
+            };
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("batchSetTransform failed: {e}");
+                async_graphql::Error::new("batch set transform failed")
+            })?;
+
+            // Build response inside lock scope (RF-005)
+            let mut nodes = Vec::with_capacity(parsed_entries.len());
+            for (uuid, _) in &parsed_entries {
+                let node_id = doc_guard.arena.id_by_uuid(uuid).ok_or_else(|| {
+                    async_graphql::Error::new("node disappeared after batch transform")
+                })?;
+                nodes.push(node_to_gql(&doc_guard, node_id, *uuid)?);
+            }
+            nodes
+        };
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: None,
+            data: Some(serde_json::json!({"field": "transform", "batch": true})),
+        });
+
+        Ok(result_nodes)
+    }
+
+    /// Group multiple nodes under a new Group node.
+    ///
+    /// Returns the UUID of the created group node.
+    async fn group_nodes(
+        &self,
+        ctx: &Context<'_>,
+        uuids: Vec<String>,
+        name: String,
+    ) -> Result<String> {
+        let state = ctx.data::<ServerState>()?;
+
+        let mut parsed_uuids: Vec<uuid::Uuid> = Vec::with_capacity(uuids.len());
+        for uuid_str in &uuids {
+            let parsed: uuid::Uuid = uuid_str
+                .parse()
+                .map_err(|_| async_graphql::Error::new(format!("invalid UUID: {uuid_str}")))?;
+            parsed_uuids.push(parsed);
+        }
+
+        let group_uuid = uuid::Uuid::new_v4();
+
+        {
+            let mut doc_guard = acquire_document_lock(state);
+
+            let node_ids: Vec<NodeId> = parsed_uuids
+                .iter()
+                .map(|uuid| {
+                    doc_guard
+                        .arena
+                        .id_by_uuid(uuid)
+                        .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            let cmd = GroupNodes::new(node_ids, name, group_uuid).map_err(|e| {
+                tracing::warn!("groupNodes validation failed: {e}");
+                async_graphql::Error::new("group nodes failed")
+            })?;
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("groupNodes failed: {e}");
+                async_graphql::Error::new("group nodes failed")
+            })?;
+        }
+
+        state.app.signal_dirty();
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::NodeCreated,
+            uuid: Some(group_uuid.to_string()),
+            data: Some(serde_json::json!({"operation": "group"})),
+        });
+
+        Ok(group_uuid.to_string())
+    }
+
+    /// Ungroup one or more group nodes, reparenting their children.
+    ///
+    /// Returns the UUIDs of the ungrouped children.
+    async fn ungroup_nodes(&self, ctx: &Context<'_>, uuids: Vec<String>) -> Result<Vec<String>> {
+        let state = ctx.data::<ServerState>()?;
+
+        let mut parsed_uuids: Vec<uuid::Uuid> = Vec::with_capacity(uuids.len());
+        for uuid_str in &uuids {
+            let parsed: uuid::Uuid = uuid_str
+                .parse()
+                .map_err(|_| async_graphql::Error::new(format!("invalid UUID: {uuid_str}")))?;
+            parsed_uuids.push(parsed);
+        }
+
+        let child_uuids: Vec<String> = {
+            let mut doc_guard = acquire_document_lock(state);
+
+            let group_ids: Vec<NodeId> = parsed_uuids
+                .iter()
+                .map(|uuid| {
+                    doc_guard
+                        .arena
+                        .id_by_uuid(uuid)
+                        .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // Collect child UUIDs before ungroup (for response)
+            let mut all_child_uuids = Vec::new();
+
+            // Capture snapshots for undo (arena operations must preserve identity)
+            let mut group_snapshots = Vec::with_capacity(group_ids.len());
+
+            for &gid in &group_ids {
+                let group = doc_guard
+                    .arena
+                    .get(gid)
+                    .map_err(|_| async_graphql::Error::new("group lookup failed"))?;
+                let group_parent = group.parent;
+
+                // Record child UUIDs for the response
+                for &cid in &group.children {
+                    let child_uuid = doc_guard
+                        .arena
+                        .uuid_of(cid)
+                        .map_err(|_| async_graphql::Error::new("child uuid lookup failed"))?;
+                    all_child_uuids.push(child_uuid.to_string());
+                }
+
+                // Capture children with their current (group-relative) transforms
+                let children_with_transforms: Vec<(NodeId, Transform)> = group
+                    .children
+                    .iter()
+                    .map(|&cid| {
+                        let t = doc_guard.arena.get(cid).map(|n| n.transform);
+                        t.map(|transform| (cid, transform))
+                    })
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(|_| async_graphql::Error::new("child lookup failed"))?;
+
+                // Find group's index in parent
+                let index_in_parent = if let Some(pid) = group_parent {
+                    doc_guard
+                        .arena
+                        .get(pid)
+                        .map_err(|_| async_graphql::Error::new("parent lookup failed"))?
+                        .children
+                        .iter()
+                        .position(|&id| id == gid)
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+
+                let group_uuid = doc_guard
+                    .arena
+                    .uuid_of(gid)
+                    .map_err(|_| async_graphql::Error::new("group uuid lookup failed"))?;
+
+                group_snapshots.push(GroupSnapshot {
+                    uuid: group_uuid,
+                    node_id: gid,
+                    node: group.clone(),
+                    parent_id: group_parent,
+                    index_in_parent,
+                    children: children_with_transforms,
+                });
+            }
+
+            let mut cmd = UngroupNodes::new(group_ids, parsed_uuids.clone());
+            cmd.group_snapshots = group_snapshots;
+
+            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+                tracing::warn!("ungroupNodes failed: {e}");
+                async_graphql::Error::new("ungroup nodes failed")
+            })?;
+
+            all_child_uuids
+        };
+
+        state.app.signal_dirty();
+        for uuid_str in &uuids {
+            state.app.publish_event(MutationEvent {
+                kind: MutationEventKind::NodeDeleted,
+                uuid: Some(uuid_str.clone()),
+                data: Some(serde_json::json!({"operation": "ungroup"})),
+            });
+        }
+
+        Ok(child_uuids)
     }
 
     /// Undo the last command.
