@@ -103,6 +103,9 @@ pub const MAX_TRANSITION_DURATION: f64 = 300.0;
 /// Maximum transitions per document.
 pub const MAX_TRANSITIONS_PER_DOCUMENT: usize = 10_000;
 
+/// Maximum number of entries in a batch transform operation.
+pub const MAX_BATCH_SIZE: usize = 256;
+
 /// Maximum font weight value (CSS range).
 pub const MAX_FONT_WEIGHT: u16 = 1000;
 

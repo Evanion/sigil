@@ -1,3 +1,4 @@
+pub mod batch_commands;
 pub mod component_commands;
 pub mod node_commands;
 pub mod page_commands;
