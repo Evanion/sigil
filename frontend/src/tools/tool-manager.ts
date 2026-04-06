@@ -25,6 +25,8 @@ export interface Tool {
   onPointerMove(event: ToolEvent): void;
   onPointerUp(event: ToolEvent): void;
   getCursor(): string;
+  /** Optional: handle keyboard events (e.g., Escape to cancel). */
+  onKeyDown?(key: string): void;
 }
 
 /** Manages active tool state, event delegation, and change subscriptions. */
@@ -34,6 +36,7 @@ export interface ToolManager {
   onPointerDown(event: ToolEvent): void;
   onPointerMove(event: ToolEvent): void;
   onPointerUp(event: ToolEvent): void;
+  onKeyDown(key: string): void;
   getCursor(): string;
   subscribe(fn: () => void): () => void;
 }
@@ -107,6 +110,13 @@ export function createToolManager(
 
     onPointerUp(event: ToolEvent): void {
       getImpl().onPointerUp(event);
+    },
+
+    onKeyDown(key: string): void {
+      const impl = getImpl();
+      if (impl.onKeyDown) {
+        impl.onKeyDown(key);
+      }
     },
 
     getCursor(): string {

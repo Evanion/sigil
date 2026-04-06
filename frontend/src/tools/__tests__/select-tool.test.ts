@@ -81,6 +81,7 @@ function makeMockStore(initialNodes?: Map<string, DocumentNode>): ToolStore & {
       selectCalls.push(uuid);
     },
     createNode: () => "mock-uuid",
+    getViewportZoom: () => 1,
   };
 }
 
@@ -91,13 +92,14 @@ describe("createSelectTool", () => {
     store = makeMockStore();
   });
 
-  it("should return a Tool implementation with getPreviewTransform", () => {
+  it("should return a Tool implementation with getPreviewTransform and getSnapGuides", () => {
     const tool = createSelectTool(store);
     expect(tool.onPointerDown).toBeTypeOf("function");
     expect(tool.onPointerMove).toBeTypeOf("function");
     expect(tool.onPointerUp).toBeTypeOf("function");
     expect(tool.getCursor).toBeTypeOf("function");
     expect(tool.getPreviewTransform).toBeTypeOf("function");
+    expect(tool.getSnapGuides).toBeTypeOf("function");
   });
 
   it("should return 'default' cursor when idle", () => {
@@ -108,6 +110,11 @@ describe("createSelectTool", () => {
   it("should return null preview transform when idle", () => {
     const tool = createSelectTool(store);
     expect(tool.getPreviewTransform()).toBeNull();
+  });
+
+  it("should return empty snap guides when idle", () => {
+    const tool = createSelectTool(store);
+    expect(tool.getSnapGuides()).toEqual([]);
   });
 });
 
@@ -357,5 +364,181 @@ describe("select tool drag to move (RF-005: single setTransform on pointerUp)", 
 
     // No move means no preview transform, so no setTransform
     expect(store.setTransformCalls).toHaveLength(0);
+  });
+});
+
+describe("select tool resize via handles", () => {
+  it("should enter resize mode when clicking a handle on the selected node", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    // Pre-select the node so handle hit-test is performed
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Click on the SE corner handle (x + width, y + height) = (300, 250)
+    tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
+
+    // Should show a resize cursor, not grabbing
+    const cursorVal = tool.getCursor();
+    expect(cursorVal).toContain("resize");
+  });
+
+  it("should update preview transform when dragging a resize handle", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Click SE handle at (300, 250)
+    tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
+    // Drag 20px to the right and 10px down
+    tool.onPointerMove(
+      makeEvent({ worldX: 320, worldY: 260, shiftKey: false, altKey: false }),
+    );
+
+    const preview = tool.getPreviewTransform();
+    expect(preview).not.toBeNull();
+    expect(preview?.uuid).toBe("rect-1");
+    // SE handle: x and y stay, width grows, height grows
+    expect(preview?.transform.width).toBe(220); // 200 + 20
+    expect(preview?.transform.height).toBe(160); // 150 + 10
+    // Origin should not move for SE handle
+    expect(preview?.transform.x).toBe(100);
+    expect(preview?.transform.y).toBe(100);
+  });
+
+  it("should commit setTransform on pointer up after resize", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Click SE handle
+    tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
+    tool.onPointerMove(
+      makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }),
+    );
+    tool.onPointerUp(makeEvent({ worldX: 350, worldY: 300 }));
+
+    expect(store.setTransformCalls).toHaveLength(1);
+    const call = store.setTransformCalls[0];
+    expect(call.uuid).toBe("rect-1");
+    expect(call.transform.width).toBe(250); // 200 + 50
+    expect(call.transform.height).toBe(200); // 150 + 50
+  });
+
+  it("should lock aspect ratio when shift is held during resize (corner handle)", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 0, y: 0, width: 200, height: 100 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Click SE handle at (200, 100)
+    tool.onPointerDown(makeEvent({ worldX: 200, worldY: 100 }));
+    // Drag with shift held — dominant axis is X (dx=40 > dy=5)
+    tool.onPointerMove(
+      makeEvent({ worldX: 240, worldY: 105, shiftKey: true, altKey: false }),
+    );
+
+    const preview = tool.getPreviewTransform();
+    expect(preview).not.toBeNull();
+    // Aspect ratio is 2:1. Width grows by 40, so height should grow by 20.
+    expect(preview?.transform.width).toBe(240); // 200 + 40
+    expect(preview?.transform.height).toBe(120); // 100 + 20 (240/2)
+  });
+
+  it("should fall through to move when clicking inside node body (not on handle)", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Click in the center of the node, well away from handles
+    tool.onPointerDown(makeEvent({ worldX: 200, worldY: 175 }));
+
+    // Should enter moving state (grabbing cursor)
+    expect(tool.getCursor()).toBe("grabbing");
+
+    // Move and verify it moves position, not resizes
+    tool.onPointerMove(
+      makeEvent({ worldX: 210, worldY: 185, shiftKey: false, altKey: false }),
+    );
+    const preview = tool.getPreviewTransform();
+    expect(preview).not.toBeNull();
+    expect(preview?.transform.x).toBe(110); // 100 + 10
+    expect(preview?.transform.y).toBe(110); // 100 + 10
+    // Width and height should not change
+    expect(preview?.transform.width).toBe(200);
+    expect(preview?.transform.height).toBe(150);
+  });
+
+  it("should cancel resize and clear state on Escape", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Start resize
+    tool.onPointerDown(makeEvent({ worldX: 300, worldY: 250 }));
+    tool.onPointerMove(
+      makeEvent({ worldX: 350, worldY: 300, shiftKey: false, altKey: false }),
+    );
+
+    // Escape
+    expect(tool.onKeyDown).toBeTypeOf("function");
+    if (tool.onKeyDown) {
+      tool.onKeyDown("Escape");
+    }
+
+    // Should return to idle
+    expect(tool.getCursor()).toBe("default");
+    expect(tool.getPreviewTransform()).toBeNull();
+    expect(tool.getSnapGuides()).toEqual([]);
+
+    // Pointer up should not commit anything
+    tool.onPointerUp(makeEvent({ worldX: 350, worldY: 300 }));
+    expect(store.setTransformCalls).toHaveLength(0);
+  });
+
+  it("should show resize cursor when hovering over a handle while idle", () => {
+    const node = makeNode({
+      uuid: "rect-1",
+      transform: makeTransform({ x: 100, y: 100, width: 200, height: 150 }),
+    });
+    const nodes = new Map([["rect-1", node]]);
+    const store = makeMockStore(nodes);
+    store.select("rect-1");
+    const tool = createSelectTool(store);
+
+    // Move over the E handle at (300, 175)
+    tool.onPointerMove(
+      makeEvent({ worldX: 300, worldY: 175, shiftKey: false, altKey: false }),
+    );
+
+    expect(tool.getCursor()).toBe("ew-resize");
   });
 });

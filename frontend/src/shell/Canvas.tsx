@@ -25,6 +25,7 @@ import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
 import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-manager";
 import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
+import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
@@ -61,6 +62,9 @@ function createStoreAdapter(
     createNode(kind: NodeKind, name: string, transform: Transform): string {
       return store.createNode(kind, name, transform);
     },
+    getViewportZoom(): number {
+      return store.viewport().zoom;
+    },
   };
 }
 
@@ -85,6 +89,7 @@ export const Canvas: Component = () => {
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
   const [previewTransform, setPreviewTransform] = createSignal<PreviewTransform | null>(null);
   const [previewRect, setPreviewRect] = createSignal<PreviewRect | null>(null);
+  const [snapGuides, setSnapGuides] = createSignal<readonly SnapGuide[]>([]);
   const [cursor, setCursor] = createSignal("default");
 
   // Space key tracking for grab cursor
@@ -205,6 +210,7 @@ export const Canvas: Component = () => {
 
       // Update preview signals
       setPreviewTransform(selectTool.getPreviewTransform());
+      setSnapGuides(selectTool.getSnapGuides());
       const activeTool = toolImpls.get(store.activeTool());
       if (activeTool && "getPreviewRect" in activeTool) {
         setPreviewRect((activeTool as ReturnType<typeof createShapeTool>).getPreviewRect());
@@ -300,6 +306,15 @@ export const Canvas: Component = () => {
         const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, -200));
       },
+      Escape: (e: KeyboardEvent) => {
+        if (!isTyping()) {
+          e.preventDefault();
+          toolManager.onKeyDown("Escape");
+          setPreviewTransform(null);
+          setSnapGuides([]);
+          setCursor(toolManager.getCursor());
+        }
+      },
     });
 
     // Space key for grab cursor
@@ -342,6 +357,10 @@ export const Canvas: Component = () => {
       const vp = store.viewport();
       const preview = previewTransform();
       const prevRect = previewRect();
+      // Read snap guides so the effect re-triggers when they change.
+      // The renderer will use these once guide line rendering is added (Task 5).
+      const _guides = snapGuides();
+      void _guides;
       // RF-013: Read canvasSize to track resize/DPR changes as a dependency
       const size = canvasSize();
       const dpr = size.dpr;
