@@ -100,6 +100,8 @@ This project uses Rust Edition 2024. Be aware of:
 - Arena undo operations must use `reinsert()` to preserve the original key — never `insert()` in an undo path.
 - When popping from a stack/queue and the subsequent operation may fail, push the item back before returning the error.
 - Both `apply` and `undo` must validate inputs — asymmetric validation allows undo to corrupt state.
+- Command undo paths that restore items to ordered collections (Vec of children, Vec of siblings) must use `insert(index, element)` at the recorded original position — never `push(element)`. Verify this for every undo method you write.
+- Command structs must be self-contained: all undo state (snapshots, indices) must be captured during `apply`, never pre-populated by the caller. Fields on command structs must be private.
 - Every `f64` field from external input must be checked for NaN/infinity and domain range.
 - Prefer `VecDeque` over `Vec` for FIFO queues. `Vec::remove(0)` is O(n). Consider access patterns during review.
 - Never `#[derive(Deserialize)]` on types with validating constructors — implement `Deserialize` manually through the constructor. Fields must be private.

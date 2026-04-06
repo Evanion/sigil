@@ -56,6 +56,11 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     },
     selectedNodeId,
     setSelectedNodeId,
+    selectedNodeIds: () => {
+      const id = selectedNodeId();
+      return id ? [id] : [];
+    },
+    setSelectedNodeIds: vi.fn(),
     activeTool,
     setActiveTool,
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),
@@ -77,6 +82,9 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setStrokes: vi.fn(),
     setEffects: vi.fn(),
     setCornerRadii: vi.fn(),
+    batchSetTransform: vi.fn(),
+    groupNodes: vi.fn(),
+    ungroupNodes: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
     destroy: vi.fn(),

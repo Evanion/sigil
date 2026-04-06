@@ -27,6 +27,11 @@ function createMockStore(
     },
     selectedNodeId,
     setSelectedNodeId,
+    selectedNodeIds: () => {
+      const id = selectedNodeId();
+      return id ? [id] : [];
+    },
+    setSelectedNodeIds: () => {},
     activeTool,
     setActiveTool,
     viewport: () => ({ x: 0, y: 0, zoom: 1 }),
@@ -48,6 +53,9 @@ function createMockStore(
     setStrokes: () => {},
     setEffects: () => {},
     setCornerRadii: () => {},
+    batchSetTransform: () => {},
+    groupNodes: () => {},
+    ungroupNodes: () => {},
     undo: () => {},
     redo: () => {},
     destroy: () => {},

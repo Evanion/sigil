@@ -32,6 +32,9 @@ import {
   SET_STROKES_MUTATION,
   SET_EFFECTS_MUTATION,
   SET_CORNER_RADII_MUTATION,
+  BATCH_SET_TRANSFORM_MUTATION,
+  GROUP_NODES_MUTATION,
+  UNGROUP_NODES_MUTATION,
 } from "../graphql/mutations";
 import { DOCUMENT_CHANGED_SUBSCRIPTION } from "../graphql/subscriptions";
 
@@ -71,6 +74,8 @@ export interface DocumentStoreAPI {
   // UI signals
   readonly selectedNodeId: () => string | null;
   readonly setSelectedNodeId: (id: string | null) => void;
+  readonly selectedNodeIds: () => string[];
+  readonly setSelectedNodeIds: (ids: string[]) => void;
   readonly activeTool: () => ToolType;
   readonly setActiveTool: (tool: ToolType) => void;
   readonly viewport: () => Viewport;
@@ -96,6 +101,9 @@ export interface DocumentStoreAPI {
   setStrokes(uuid: string, strokes: Stroke[]): void;
   setEffects(uuid: string, effects: Effect[]): void;
   setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
+  batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
+  groupNodes(uuids: string[], name: string): void;
+  ungroupNodes(uuids: string[]): void;
   undo(): void;
   redo(): void;
 
@@ -205,6 +213,10 @@ function parsePagesResponse(data: unknown): {
 // ── Store factory ─────────────────────────────────────────────────────
 
 export function createDocumentStoreSolid(): DocumentStoreAPI {
+  // RF-010: Visible error notifications deferred until toast/notification system
+  // is implemented. console.error provides diagnostic trail per CLAUDE.md
+  // minimum requirement.
+
   // Client session ID for self-echo suppression (RF-004)
   const clientSessionId = crypto.randomUUID();
 
@@ -220,8 +232,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     nodes: {},
   });
 
-  // UI signals
-  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(null);
+  // UI signals — multi-select with backwards-compatible single-select accessors
+  const [selectedNodeIds, setSelectedNodeIds] = createSignal<string[]>([]);
+  const selectedNodeId = (): string | null => selectedNodeIds()[0] ?? null;
+  const setSelectedNodeId = (id: string | null): void => {
+    setSelectedNodeIds(id ? [id] : []);
+  };
   const [activeTool, setActiveTool] = createSignal<ToolType>("select");
   const [viewport, setViewport] = createSignal<Viewport>({
     x: 0,
@@ -366,8 +382,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               Reflect.deleteProperty(s.nodes, optimisticUuid);
             }),
           );
-          if (selectedNodeId() === optimisticUuid) {
-            setSelectedNodeId(null);
+          const filteredAfterError = selectedNodeIds().filter((id) => id !== optimisticUuid);
+          if (filteredAfterError.length !== selectedNodeIds().length) {
+            setSelectedNodeIds(filteredAfterError);
           }
           return;
         }
@@ -384,10 +401,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
                 }),
               );
             }
-            // RF-005: Always remap selectedNodeId regardless of whether
+            // RF-005: Always remap selectedNodeIds regardless of whether
             // the optimistic node still exists in state (fetch may have arrived first)
-            if (selectedNodeId() === optimisticUuid) {
-              setSelectedNodeId(serverUuid);
+            if (selectedNodeIds().includes(optimisticUuid)) {
+              setSelectedNodeIds(
+                selectedNodeIds().map((id) => (id === optimisticUuid ? serverUuid : id)),
+              );
             }
           });
         }
@@ -400,8 +419,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             Reflect.deleteProperty(s.nodes, optimisticUuid);
           }),
         );
-        if (selectedNodeId() === optimisticUuid) {
-          setSelectedNodeId(null);
+        const filteredAfterCatch = selectedNodeIds().filter((id) => id !== optimisticUuid);
+        if (filteredAfterCatch.length !== selectedNodeIds().length) {
+          setSelectedNodeIds(filteredAfterCatch);
         }
       });
 
@@ -474,7 +494,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         Reflect.deleteProperty(s.nodes, uuid);
       }),
     );
-    if (selectedNodeId() === uuid) setSelectedNodeId(null);
+    const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
+    if (filteredIds.length !== selectedNodeIds().length) {
+      setSelectedNodeIds(filteredIds);
+    }
 
     client
       .mutation(gql(DELETE_NODE_MUTATION), { uuid })
@@ -1056,6 +1079,120 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
+    // Capture previous values for rollback
+    const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
+    for (const entry of entries) {
+      const node = state.nodes[entry.uuid];
+      if (node?.transform) {
+        // JSON clone: Solid proxy not structuredClone-safe
+        rollbackEntries.push({ uuid: entry.uuid, transform: deepClone(node.transform) });
+      }
+    }
+
+    // Optimistic update: apply all transforms immediately
+    batch(() => {
+      for (const entry of entries) {
+        if (state.nodes[entry.uuid]) {
+          setState("nodes", entry.uuid, "transform", entry.transform);
+        }
+      }
+    });
+
+    client
+      .mutation(gql(BATCH_SET_TRANSFORM_MUTATION), {
+        entries: entries.map((e) => ({
+          uuid: e.uuid,
+          transform: { ...e.transform },
+        })),
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("batchSetTransform error:", r.error.message);
+          batch(() => {
+            for (const entry of rollbackEntries) {
+              if (state.nodes[entry.uuid]) {
+                setState("nodes", entry.uuid, "transform", entry.transform);
+              }
+            }
+          });
+        } else {
+          // Reconcile with server-canonical values
+          const data = r.data as Record<string, unknown> | undefined;
+          const results = data?.batchSetTransform as Array<Record<string, unknown>> | undefined;
+          if (results) {
+            batch(() => {
+              for (const node of results) {
+                const uuid = node.uuid as string;
+                const transform = node.transform as Transform | undefined;
+                if (uuid && transform && state.nodes[uuid]) {
+                  setState("nodes", uuid, "transform", transform);
+                }
+              }
+            });
+          }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("batchSetTransform exception:", err);
+        batch(() => {
+          for (const entry of rollbackEntries) {
+            if (state.nodes[entry.uuid]) {
+              setState("nodes", entry.uuid, "transform", entry.transform);
+            }
+          }
+        });
+      });
+  }
+
+  // RF-005 optimistic update deferred: Grouping creates a new node requiring
+  // server-generated UUID. Ungrouping involves complex tree reparenting. Both
+  // are discrete one-shot operations (Ctrl+G), not continuous drag operations.
+  // Subscription handler triggers refetch within one round-trip. Full optimistic
+  // implementation deferred to reduce complexity — latency is bounded and
+  // acceptable for the action frequency.
+  function groupNodes(uuids: string[], name: string): void {
+    client
+      .mutation(gql(GROUP_NODES_MUTATION), { uuids, name })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("groupNodes error:", r.error.message);
+          return;
+        }
+        const data = r.data as Record<string, unknown> | undefined;
+        const groupUuid = data?.groupNodes as string | undefined;
+        if (groupUuid) {
+          setSelectedNodeIds([groupUuid]);
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("groupNodes exception:", err);
+      });
+  }
+
+  // RF-005 optimistic update deferred: see groupNodes comment above.
+  function ungroupNodes(uuids: string[]): void {
+    client
+      .mutation(gql(UNGROUP_NODES_MUTATION), { uuids })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("ungroupNodes error:", r.error.message);
+          return;
+        }
+        const data = r.data as Record<string, unknown> | undefined;
+        const childUuids = data?.ungroupNodes as string[] | undefined;
+        if (childUuids && childUuids.length > 0) {
+          setSelectedNodeIds(childUuids.filter(Boolean));
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("ungroupNodes exception:", err);
+      });
+  }
+
   function undo(): void {
     client
       .mutation(gql(UNDO_MUTATION), {})
@@ -1124,6 +1261,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     state,
     selectedNodeId,
     setSelectedNodeId,
+    selectedNodeIds,
+    setSelectedNodeIds,
     activeTool,
     setActiveTool,
     viewport,
@@ -1145,6 +1284,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setStrokes,
     setEffects,
     setCornerRadii,
+    batchSetTransform,
+    groupNodes,
+    ungroupNodes,
     undo,
     redo,
     destroy,
