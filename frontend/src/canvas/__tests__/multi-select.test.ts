@@ -98,7 +98,7 @@ describe("computeRelativePositions", () => {
   it("should return 0-1 fractional positions for nodes within bounds", () => {
     const bounds = makeTransform({ x: 0, y: 0, width: 200, height: 100 });
     const transforms = [
-      makeTransform({ x: 0, y: 0, width: 100, height: 50 }),   // left half, top half
+      makeTransform({ x: 0, y: 0, width: 100, height: 50 }), // left half, top half
       makeTransform({ x: 100, y: 50, width: 100, height: 50 }), // right half, bottom half
     ];
     const positions = computeRelativePositions(transforms, bounds);

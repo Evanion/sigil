@@ -32,7 +32,15 @@ export interface RelativePosition {
 
 /** Assert that every field of a Transform contains a finite number. */
 function assertFiniteTransform(t: Transform): void {
-  const fields: (keyof Transform)[] = ["x", "y", "width", "height", "rotation", "scale_x", "scale_y"];
+  const fields: (keyof Transform)[] = [
+    "x",
+    "y",
+    "width",
+    "height",
+    "rotation",
+    "scale_x",
+    "scale_y",
+  ];
   for (const field of fields) {
     if (!Number.isFinite(t[field])) {
       throw new RangeError(
@@ -145,7 +153,12 @@ export function applyProportionalResize(
     assertFiniteTransform(original);
     const pos = positions[i];
 
-    if (!Number.isFinite(pos.rx) || !Number.isFinite(pos.ry) || !Number.isFinite(pos.rw) || !Number.isFinite(pos.rh)) {
+    if (
+      !Number.isFinite(pos.rx) ||
+      !Number.isFinite(pos.ry) ||
+      !Number.isFinite(pos.rw) ||
+      !Number.isFinite(pos.rh)
+    ) {
       throw new RangeError(
         `applyProportionalResize: RelativePosition at index ${i} contains non-finite value`,
       );

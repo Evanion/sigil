@@ -96,7 +96,7 @@ export const Canvas: Component = () => {
   });
 
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
-  const [previewTransform, setPreviewTransform] = createSignal<PreviewTransform | null>(null);
+  const [previewTransforms, setPreviewTransforms] = createSignal<PreviewTransform[]>([]);
   const [previewRect, setPreviewRect] = createSignal<PreviewRect | null>(null);
   const [snapGuides, setSnapGuides] = createSignal<readonly SnapGuide[]>([]);
   const [cursor, setCursor] = createSignal("default");
@@ -210,7 +210,7 @@ export const Canvas: Component = () => {
 
       toolManager.onPointerDown(makeToolEvent(e));
       // Update preview from select tool
-      setPreviewTransform(selectTool.getPreviewTransform());
+      setPreviewTransforms(selectTool.getPreviewTransforms());
     }
 
     function handlePointerMove(e: PointerEvent): void {
@@ -228,7 +228,7 @@ export const Canvas: Component = () => {
       toolManager.onPointerMove(makeToolEvent(e));
 
       // Update preview signals
-      setPreviewTransform(selectTool.getPreviewTransform());
+      setPreviewTransforms(selectTool.getPreviewTransforms());
       // RF-011: Only query snap guides when the select tool is active.
       if (store.activeTool() === "select") {
         setSnapGuides(selectTool.getSnapGuides());
@@ -249,7 +249,7 @@ export const Canvas: Component = () => {
       }
 
       toolManager.onPointerUp(makeToolEvent(e));
-      setPreviewTransform(null);
+      setPreviewTransforms([]);
       setPreviewRect(null);
       // RF-003: Clear snap guides when pointer is released.
       setSnapGuides([]);
@@ -335,7 +335,7 @@ export const Canvas: Component = () => {
         if (!isTyping()) {
           e.preventDefault();
           toolManager.onKeyDown("Escape");
-          setPreviewTransform(null);
+          setPreviewTransforms([]);
           setSnapGuides([]);
           setCursor(toolManager.getCursor());
         }
@@ -380,7 +380,7 @@ export const Canvas: Component = () => {
       const nodesObj = store.state.nodes;
       const selected = store.selectedNodeId();
       const vp = store.viewport();
-      const preview = previewTransform();
+      const previews = previewTransforms();
       const prevRect = previewRect();
       // RF-001: Read snap guides and pass them to the renderer as the 8th argument.
       const guides = snapGuides();
@@ -395,6 +395,8 @@ export const Canvas: Component = () => {
       const keys = Object.keys(nodesObj);
       const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
+      // Pass first preview transform for backward compat until Task 4 updates the renderer.
+      const preview = previews.length > 0 ? previews[0] : null;
       renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview, guides);
     });
 
