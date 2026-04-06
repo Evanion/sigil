@@ -5,6 +5,8 @@
 // trigger this lint unnecessarily.
 #![allow(clippy::unnecessary_literal_bound)]
 
+use std::collections::HashSet;
+
 use crate::command::{Command, SideEffect};
 use crate::commands::style_commands::validate_transform;
 use crate::document::Document;
@@ -21,9 +23,64 @@ use crate::validate::MAX_BATCH_SIZE;
 #[derive(Debug)]
 pub struct BatchSetTransform {
     /// `(node_id, new_transform)` pairs to apply.
-    pub entries: Vec<(NodeId, Transform)>,
+    entries: Vec<(NodeId, Transform)>,
     /// `(node_id, old_transform)` pairs used for undo.
-    pub old_transforms: Vec<(NodeId, Transform)>,
+    old_transforms: Vec<(NodeId, Transform)>,
+}
+
+impl BatchSetTransform {
+    /// Creates a new `BatchSetTransform` command.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if:
+    /// - Batch size exceeds `MAX_BATCH_SIZE`
+    /// - `entries` and `old_transforms` have different lengths
+    /// - Duplicate `NodeId` values appear in `entries`
+    pub fn new(
+        entries: Vec<(NodeId, Transform)>,
+        old_transforms: Vec<(NodeId, Transform)>,
+    ) -> Result<Self, CoreError> {
+        // RF-006: Validate MAX_BATCH_SIZE
+        if entries.len() > MAX_BATCH_SIZE {
+            return Err(CoreError::ValidationError(format!(
+                "batch size {} exceeds maximum of {MAX_BATCH_SIZE}",
+                entries.len()
+            )));
+        }
+        // RF-013: Validate entries/old_transforms length equality
+        if entries.len() != old_transforms.len() {
+            return Err(CoreError::ValidationError(format!(
+                "entries length ({}) must match old_transforms length ({})",
+                entries.len(),
+                old_transforms.len()
+            )));
+        }
+        // RF-015: Detect duplicate NodeIds
+        let mut seen = HashSet::with_capacity(entries.len());
+        for (node_id, _) in &entries {
+            if !seen.insert(*node_id) {
+                return Err(CoreError::ValidationError(format!(
+                    "duplicate NodeId in batch entries: {node_id:?}"
+                )));
+            }
+        }
+        Ok(Self {
+            entries,
+            old_transforms,
+        })
+    }
+
+    /// Returns the entries.
+    #[must_use]
+    pub fn entries(&self) -> &[(NodeId, Transform)] {
+        &self.entries
+    }
+
+    /// Returns the old transforms.
+    #[must_use]
+    pub fn old_transforms(&self) -> &[(NodeId, Transform)] {
+        &self.old_transforms
+    }
 }
 
 impl Command for BatchSetTransform {
@@ -35,8 +92,10 @@ impl Command for BatchSetTransform {
             )));
         }
 
-        // Validate ALL transforms before touching any node (atomicity).
+        // Validate ALL transforms AND node existence before touching any node (atomicity).
+        // RF-002: Check node existence in the validation loop.
         for (node_id, transform) in &self.entries {
+            doc.arena.get(*node_id)?;
             validate_transform(transform).map_err(|e| {
                 CoreError::ValidationError(format!("invalid transform for node {node_id}: {e}"))
             })?;
@@ -51,6 +110,14 @@ impl Command for BatchSetTransform {
     }
 
     fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+        // RF-018: Enforce MAX_BATCH_SIZE in undo path
+        if self.old_transforms.len() > MAX_BATCH_SIZE {
+            return Err(CoreError::ValidationError(format!(
+                "batch size {} exceeds maximum of {MAX_BATCH_SIZE} in undo",
+                self.old_transforms.len()
+            )));
+        }
+
         // Symmetric validation: validate all old transforms before restoring any.
         for (node_id, transform) in &self.old_transforms {
             validate_transform(transform).map_err(|e| {
@@ -121,10 +188,11 @@ mod tests {
         let new_b = transform_at(30.0, 40.0);
         let new_c = transform_at(50.0, 60.0);
 
-        let cmd = BatchSetTransform {
-            entries: vec![(id_a, new_a), (id_b, new_b), (id_c, new_c)],
-            old_transforms: vec![(id_a, orig_a), (id_b, orig_b), (id_c, orig_c)],
-        };
+        let cmd = BatchSetTransform::new(
+            vec![(id_a, new_a), (id_b, new_b), (id_c, new_c)],
+            vec![(id_a, orig_a), (id_b, orig_b), (id_c, orig_c)],
+        )
+        .expect("create cmd");
 
         // Execute
         doc.execute(Box::new(cmd)).expect("execute");
@@ -179,10 +247,11 @@ mod tests {
             scale_y: 1.0,
         };
 
-        let cmd = BatchSetTransform {
-            entries: vec![(id_good, good_transform), (id_bad, bad_transform)],
-            old_transforms: vec![(id_good, orig_good), (id_bad, orig_bad)],
-        };
+        let cmd = BatchSetTransform::new(
+            vec![(id_good, good_transform), (id_bad, bad_transform)],
+            vec![(id_good, orig_good), (id_bad, orig_bad)],
+        )
+        .expect("create cmd");
 
         let result = cmd.apply(&mut doc);
         assert!(result.is_err(), "batch with invalid entry must fail");
@@ -204,24 +273,17 @@ mod tests {
 
     #[test]
     fn test_max_batch_size_enforced() {
-        let mut doc = Document::new("Test".to_string());
-        // Create one real node for old_transforms; new entries use a placeholder id.
-        let id = make_frame(&mut doc, 1, "Node");
         let t = transform_at(0.0, 0.0);
 
         let entries: Vec<(NodeId, Transform)> = (0..=MAX_BATCH_SIZE)
             .map(|i| (NodeId::new(i as u32, 0), t))
             .collect();
+        let old_transforms: Vec<(NodeId, Transform)> = entries.clone();
 
-        let cmd = BatchSetTransform {
-            entries,
-            old_transforms: vec![(id, t)],
-        };
-
-        let result = cmd.apply(&mut doc);
+        let result = BatchSetTransform::new(entries, old_transforms);
         assert!(
             result.is_err(),
-            "batch with {MAX_BATCH_SIZE}+1 entries must be rejected"
+            "constructor must reject batch with {MAX_BATCH_SIZE}+1 entries"
         );
     }
 
@@ -233,10 +295,7 @@ mod tests {
         let id = make_frame(&mut doc, 1, "Node");
         let orig = doc.arena.get(id).expect("get").transform;
 
-        let cmd = BatchSetTransform {
-            entries: vec![],
-            old_transforms: vec![],
-        };
+        let cmd = BatchSetTransform::new(vec![], vec![]).expect("create cmd");
 
         doc.execute(Box::new(cmd)).expect("execute empty batch");
         assert_eq!(
@@ -254,15 +313,38 @@ mod tests {
         let ghost_id = NodeId::new(9999, 9999);
         let t = transform_at(0.0, 0.0);
 
-        let cmd = BatchSetTransform {
-            entries: vec![(ghost_id, t)],
-            old_transforms: vec![(ghost_id, t)],
-        };
+        let cmd =
+            BatchSetTransform::new(vec![(ghost_id, t)], vec![(ghost_id, t)]).expect("create cmd");
 
         let result = cmd.apply(&mut doc);
         assert!(
             result.is_err(),
             "batch referencing a non-existent node must fail"
+        );
+    }
+
+    // ── RF-015: Duplicate NodeId detection ─────────────────────────────
+
+    #[test]
+    fn test_batch_set_transform_rejects_duplicate_node_ids() {
+        let id = NodeId::new(1, 0);
+        let t = transform_at(0.0, 0.0);
+
+        let result = BatchSetTransform::new(vec![(id, t), (id, t)], vec![(id, t), (id, t)]);
+        assert!(result.is_err(), "constructor must reject duplicate NodeIds");
+    }
+
+    // ── RF-013: Mismatched entries/old_transforms lengths ──────────────
+
+    #[test]
+    fn test_batch_set_transform_rejects_mismatched_lengths() {
+        let id = NodeId::new(1, 0);
+        let t = transform_at(0.0, 0.0);
+
+        let result = BatchSetTransform::new(vec![(id, t)], vec![]);
+        assert!(
+            result.is_err(),
+            "constructor must reject mismatched lengths"
         );
     }
 }

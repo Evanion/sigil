@@ -18,15 +18,17 @@
 use async_graphql::{Context, Json, Object, Result};
 
 use agent_designer_core::commands::batch_commands::BatchSetTransform;
-use agent_designer_core::commands::group_commands::{GroupNodes, GroupSnapshot, UngroupNodes};
+use agent_designer_core::commands::group_commands::{GroupNodes, UngroupNodes};
 use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
 };
+use agent_designer_core::commands::style_commands::validate_transform;
 use agent_designer_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
+use agent_designer_core::validate::MAX_BATCH_SIZE;
 use agent_designer_core::{NodeId, PageId};
 use agent_designer_state::{MutationEvent, MutationEventKind};
 
@@ -954,6 +956,14 @@ impl MutationRoot {
     ) -> Result<Vec<NodeGql>> {
         let state = ctx.data::<ServerState>()?;
 
+        // RF-009: Early MAX_BATCH_SIZE check before parsing loop
+        if entries.len() > MAX_BATCH_SIZE {
+            return Err(async_graphql::Error::new(format!(
+                "batch size {} exceeds maximum of {MAX_BATCH_SIZE}",
+                entries.len()
+            )));
+        }
+
         // Parse entries: each is { "uuid": "...", "transform": { ... } }
         let mut parsed_entries: Vec<(uuid::Uuid, Transform)> = Vec::with_capacity(entries.len());
         for entry_json in &entries {
@@ -972,12 +982,17 @@ impl MutationRoot {
             let transform_val = obj
                 .get("transform")
                 .ok_or_else(|| async_graphql::Error::new("entry missing transform field"))?;
-            let transform: Transform =
+            let new_transform: Transform =
                 serde_json::from_value(transform_val.clone()).map_err(|e| {
                     tracing::warn!("invalid transform in batchSetTransform: {e}");
                     async_graphql::Error::new("invalid transform in batch entry")
                 })?;
-            parsed_entries.push((parsed_uuid, transform));
+            // RF-011: Validate transform immediately after deserialization
+            validate_transform(&new_transform).map_err(|e| {
+                tracing::warn!("invalid transform values in batchSetTransform: {e}");
+                async_graphql::Error::new("invalid transform values in batch entry")
+            })?;
+            parsed_entries.push((parsed_uuid, new_transform));
         }
 
         let result_nodes = {
@@ -1001,10 +1016,11 @@ impl MutationRoot {
                 old_transforms.push((node_id, old_transform));
             }
 
-            let cmd = BatchSetTransform {
-                entries: cmd_entries,
-                old_transforms,
-            };
+            // RF-006: Use validating constructor
+            let cmd = BatchSetTransform::new(cmd_entries, old_transforms).map_err(|e| {
+                tracing::warn!("batchSetTransform validation failed: {e}");
+                async_graphql::Error::new("batch set transform validation failed")
+            })?;
 
             doc_guard.execute(Box::new(cmd)).map_err(|e| {
                 tracing::warn!("batchSetTransform failed: {e}");
@@ -1022,11 +1038,21 @@ impl MutationRoot {
             nodes
         };
 
+        // RF-019: Include affected UUIDs in the batch broadcast event
+        let affected_uuids: Vec<String> = parsed_entries
+            .iter()
+            .map(|(uuid, _)| uuid.to_string())
+            .collect();
+
         state.app.signal_dirty();
         state.app.publish_event(MutationEvent {
             kind: MutationEventKind::NodeUpdated,
             uuid: None,
-            data: Some(serde_json::json!({"field": "transform", "batch": true})),
+            data: Some(serde_json::json!({
+                "field": "transform",
+                "batch": true,
+                "affected_uuids": affected_uuids,
+            })),
         });
 
         Ok(result_nodes)
@@ -1116,18 +1142,11 @@ impl MutationRoot {
 
             // Collect child UUIDs before ungroup (for response)
             let mut all_child_uuids = Vec::new();
-
-            // Capture snapshots for undo (arena operations must preserve identity)
-            let mut group_snapshots = Vec::with_capacity(group_ids.len());
-
             for &gid in &group_ids {
                 let group = doc_guard
                     .arena
                     .get(gid)
                     .map_err(|_| async_graphql::Error::new("group lookup failed"))?;
-                let group_parent = group.parent;
-
-                // Record child UUIDs for the response
                 for &cid in &group.children {
                     let child_uuid = doc_guard
                         .arena
@@ -1135,49 +1154,14 @@ impl MutationRoot {
                         .map_err(|_| async_graphql::Error::new("child uuid lookup failed"))?;
                     all_child_uuids.push(child_uuid.to_string());
                 }
-
-                // Capture children with their current (group-relative) transforms
-                let children_with_transforms: Vec<(NodeId, Transform)> = group
-                    .children
-                    .iter()
-                    .map(|&cid| {
-                        let t = doc_guard.arena.get(cid).map(|n| n.transform);
-                        t.map(|transform| (cid, transform))
-                    })
-                    .collect::<std::result::Result<Vec<_>, _>>()
-                    .map_err(|_| async_graphql::Error::new("child lookup failed"))?;
-
-                // Find group's index in parent
-                let index_in_parent = if let Some(pid) = group_parent {
-                    doc_guard
-                        .arena
-                        .get(pid)
-                        .map_err(|_| async_graphql::Error::new("parent lookup failed"))?
-                        .children
-                        .iter()
-                        .position(|&id| id == gid)
-                        .unwrap_or(0)
-                } else {
-                    0
-                };
-
-                let group_uuid = doc_guard
-                    .arena
-                    .uuid_of(gid)
-                    .map_err(|_| async_graphql::Error::new("group uuid lookup failed"))?;
-
-                group_snapshots.push(GroupSnapshot {
-                    uuid: group_uuid,
-                    node_id: gid,
-                    node: group.clone(),
-                    parent_id: group_parent,
-                    index_in_parent,
-                    children: children_with_transforms,
-                });
             }
 
-            let mut cmd = UngroupNodes::new(group_ids, parsed_uuids.clone());
-            cmd.group_snapshots = group_snapshots;
+            // RF-003/RF-006: Use validating constructor. Snapshots are now
+            // captured automatically inside apply() via interior mutability.
+            let cmd = UngroupNodes::new(group_ids, parsed_uuids.clone()).map_err(|e| {
+                tracing::warn!("ungroupNodes validation failed: {e}");
+                async_graphql::Error::new("ungroup nodes validation failed")
+            })?;
 
             doc_guard.execute(Box::new(cmd)).map_err(|e| {
                 tracing::warn!("ungroupNodes failed: {e}");

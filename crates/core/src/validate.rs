@@ -106,6 +106,9 @@ pub const MAX_TRANSITIONS_PER_DOCUMENT: usize = 10_000;
 /// Maximum number of entries in a batch transform operation.
 pub const MAX_BATCH_SIZE: usize = 256;
 
+/// Minimum number of nodes required to form a group.
+pub const MIN_GROUP_MEMBERS: usize = 2;
+
 /// Maximum font weight value (CSS range).
 pub const MAX_FONT_WEIGHT: u16 = 1000;
 
