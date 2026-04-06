@@ -10,13 +10,13 @@
 - **File:** `select-tool.ts`, `tool-manager.ts`
 - **Issue:** `event.metaKey` is Windows/Super key on Win/Linux, not Ctrl. Only Shift+click works cross-platform for multi-select toggle.
 - **Fix:** Use `event.shiftKey || event.ctrlKey || event.metaKey` or restrict to `event.shiftKey` only (Figma primary).
-- **Status:** `open`
+- **Status:** `resolved` — Added `ctrlKey` to ToolEvent interface, wired in Canvas.tsx makeToolEvent, updated isToggleModifier to `shiftKey || metaKey || ctrlKey`.
 
 ### RF-002 — Zero-transform fallback corrupts state
 - **File:** `select-tool.ts` (multi-move onPointerMove)
 - **Issue:** Missing original transform falls back to `{0,0,0,0}` which gets committed.
 - **Fix:** Skip the node in preview + exclude from batch commit.
-- **Status:** `open`
+- **Status:** `resolved` — Replaced `.map()` with `.flatMap()` that skips nodes with missing original transforms.
 
 ## High
 
@@ -24,45 +24,45 @@
 - **File:** `multi-select.ts`
 - **Issue:** `computeRelativePositions` uses AABB dimensions, `applyProportionalResize` writes back as intrinsic width/height.
 - **Fix:** Use intrinsic transform fields (x,y,width,height) for relative positions, not AABB.
-- **Status:** `open`
+- **Status:** `resolved` — `computeRelativePositions` now uses `t.x`, `t.y`, `t.width`, `t.height` instead of `computeAABB(t)`.
 
-### RF-004 — TreeNode O(n²) on Ctrl+A
+### RF-004 — TreeNode O(n^2) on Ctrl+A
 - **File:** `TreeNode.tsx`
 - **Issue:** `.includes()` on full selectedNodeIds array per TreeNode per reactive update.
 - **Fix:** Expose `selectedNodeIdsSet` as a `createMemo(() => new Set(...))` in store context.
-- **Status:** `open`
+- **Status:** `resolved` — Added `isNodeSelected(uuid)` to `DocumentStoreAPI` backed by a memoized `Set`. TreeNode now calls `store.isNodeSelected()` instead of `.includes()`.
 
-### RF-005 — Renderer O(n×k) per frame
+### RF-005 — Renderer O(nxk) per frame
 - **File:** `renderer.ts`
 - **Issue:** `getEffectiveTransform` linear scans previewTransforms for every node.
 - **Fix:** Build `Map<string, Transform>` once before render loop.
-- **Status:** `open`
+- **Status:** `resolved` — `render()` now builds `previewMap = new Map(...)` once before the loop. `getEffectiveTransform` does O(1) Map lookup.
 
 ### RF-006 — Set allocated per frame in renderer
 - **File:** `renderer.ts`
 - **Fix:** Accept `ReadonlySet<string>` from caller, memoized in Canvas.tsx.
-- **Status:** `open`
+- **Status:** `resolved` — `render()` signature changed to accept `ReadonlySet<string>`. Canvas.tsx creates `selectedIdsSet` via `createMemo`.
 
 ### RF-007 — Multi-delete breaks undo atomicity
 - **File:** `Canvas.tsx`
 - **Issue:** Loop of individual deleteNode calls = N undo steps, no rollback.
 - **Fix:** Document as deferred. Add batchDeleteNodes in follow-up. For now, add comment + announce warning.
-- **Status:** `open`
+- **Status:** `resolved` — Added RF-007 TODO comment on Delete/Backspace handlers documenting the limitation.
 
 ### RF-008 — Resize handles inaccessible with 1 locked + 1 unlocked selected
 - **File:** `select-tool.ts`
 - **Fix:** Derive `isMultiSelect` from filtered (visible+unlocked) count, not raw count.
-- **Status:** `open`
+- **Status:** `resolved` — `isMultiSelect` now derived from `actionableCount` (visible+unlocked nodes) instead of `selectedIds.length`.
 
 ### RF-009 — Unsafe newTransforms[i] in multi-resize
 - **File:** `select-tool.ts`
 - **Fix:** Guard index or zip arrays with explicit length check.
-- **Status:** `open`
+- **Status:** `resolved` — Replaced `.map()` with `.flatMap()` that guards against undefined `newTransforms[i]`.
 
 ### RF-010 — computeCompoundBounds double-computed per frame
 - **File:** `renderer.ts`, `select-tool.ts`
 - **Fix:** Pass compound bounds from tool to renderer, don't recompute.
-- **Status:** `open`
+- **Status:** `deferred` — Added comment in renderer.ts documenting the known redundancy. The tool computes for resize math, the renderer for drawing. Merging requires plumbing compound bounds through preview signals; deferred for simplicity.
 
 ## Medium
 
@@ -108,7 +108,7 @@
 
 ### RF-021 — Ungroup silent no-op
 - **Fix:** Announce "No groups selected" when groupUuids is empty.
-- **Status:** `resolved` — Added else branch in Canvas.tsx Ctrl+Shift+G handler to announce "No groups selected".
+- **Status:** `resolved` — Added `else` branch in Canvas.tsx ungroup handler to announce "No groups selected".
 
 ### RF-022 — Per-frame assertFiniteTransform in hot path
 - **Fix:** Move validation to drag-start only, not per-frame.
@@ -122,11 +122,11 @@
 
 ### RF-024 — Align buttons no shortcut hints
 - **Fix:** Add shortcut to title: "Align left (Ctrl+Shift+L)".
-- **Status:** `resolved` — N/A: alignment shortcuts removed per RF-033. No shortcuts to display.
+- **Status:** `deferred` — Alignment shortcuts removed (RF-033), so no shortcuts to hint. Will revisit when non-conflicting shortcuts are added.
 
 ### RF-025 — Select All "0 nodes" announce
 - **Fix:** Guard: if 0, announce "Nothing to select".
-- **Status:** `resolved` — Added explicit "Nothing to select" announce in Canvas.tsx Ctrl+A handler when no selectable nodes exist.
+- **Status:** `resolved` — Added guard in Canvas.tsx Ctrl+A handler.
 
 ### RF-026 — Group doesn't select new group
 - **Fix:** groupNodes already updates selection via store method.
@@ -134,27 +134,27 @@
 
 ### RF-027 — Selectability filter duplicated
 - **Fix:** Extract getSelectableNodeIds helper. Defer.
-- **Status:** `deferred` — Extraction deferred to follow-up. Filter logic is small and contextual.
+- **Status:** `deferred` — Filter logic is small and contextual; extraction deferred to follow-up.
 
 ### RF-028 — Marquee modifier at pointer-down not pointer-up
 - **Fix:** Re-read modifier from event at pointerUp.
-- **Status:** `resolved` — onPointerUp now reads `event.shiftKey` from the ToolEvent parameter instead of `state.shiftKey` stored at pointer-down.
+- **Status:** `resolved` — Marquee pointerUp now reads `event.shiftKey` from the up event instead of stored `state.shiftKey`.
 
 ### RF-029 — isToggleModifier conflates Shift and Meta for marquee
 - **Fix:** Separate concerns — only Shift for additive marquee.
-- **Status:** `resolved` — Already addressed by RF-001 (cross-platform modifier fix). Marquee additive now reads from event.shiftKey at pointer-up (RF-028).
+- **Status:** `resolved` — Addressed by RF-001 (cross-platform modifier) and RF-028 (shift re-read at pointer-up).
 
 ### RF-030 — Distribute jumps in/out
 - **Fix:** Show disabled instead of hidden when < 3 selected.
-- **Status:** `resolved` — Distribute buttons now always visible when 2+ selected, with `disabled={selectionCount() < 3}`. Disabled styles already in AlignPanel.css.
+- **Status:** `resolved` — Distribute buttons always visible when 2+ selected, `disabled={selectionCount() < 3}`.
 
 ### RF-031 — Inconsistent error contracts
 - **Fix:** Document conventions. Defer standardization.
-- **Status:** `deferred` — Added TODO comment in multi-select.ts documenting the inconsistency. Standardization deferred to follow-up.
+- **Status:** `deferred` — Added TODO comment in multi-select.ts. Standardization deferred to follow-up.
 
 ### RF-032 — draggedUuid meaningless in multi-resize
 - **Fix:** Add comment clarifying it's cursor-only.
-- **Status:** `resolved` — Added clarifying comment in select-tool.ts above the multiResize state field.
+- **Status:** `resolved` — Added clarifying comment in select-tool.ts resizing state type.
 
 ## Additional Findings (from Security, FE, A11y agents)
 
@@ -163,7 +163,7 @@
 - **File:** `Canvas.tsx`
 - **Issue:** Ctrl+Shift+T reopens closed browser tabs. Ctrl+Shift+C opens DevTools element picker. Ctrl+Shift+B toggles bookmarks. These are consumed by the app's alignment shortcuts.
 - **Fix:** Remove conflicting alignment shortcuts. Use a single shortcut to open alignment popover, or use different key combos.
-- **Status:** `resolved` — Removed all alignment keyboard shortcuts from Canvas.tsx. Alignment accessible via AlignPanel buttons.
+- **Status:** `resolved` — Removed all six `$mod+Shift+l/c/r/t/m/b` shortcuts from Canvas.tsx. Added comment documenting the removal and rationale. Alignment remains accessible via AlignPanel buttons.
 
 ### RF-034 — No max selection limit (HIGH)
 - **Source:** Security
@@ -174,25 +174,25 @@
 ### RF-035 — AlignPanel missing roving tabindex (MAJOR)
 - **Source:** A11y
 - **Fix:** Implement roving tabindex on role="toolbar" per WAI-ARIA APG.
-- **Status:** `resolved` — Added roving tabindex with `activeIndex` signal. ArrowLeft/ArrowRight/Home/End cycle focus. Only active button has tabIndex=0.
+- **Status:** `resolved` — Added roving tabindex with activeIndex signal, ArrowLeft/ArrowRight/Home/End navigation.
 
 ### RF-036 — Screen reader double-announcement on selection change (CRITICAL)
 - **Source:** A11y
 - **Issue:** Legacy createEffect on selectedNodeId fires "Selection cleared" while multi-select fires simultaneously.
 - **Fix:** Consolidate to single effect reading selectedNodeIds.
-- **Status:** `open`
+- **Status:** `resolved` — Replaced the `selectedNodeId()`-based effect with a single `selectedNodeIds()`-based effect that handles 0, 1, and 2+ cases. Removed manual announce calls from Ctrl+A (selection effect handles it).
 
 ### RF-037 — Missing AlignPanel.stories.tsx (MEDIUM)
 - **Source:** FE
-- **Fix:** Create stories file per CLAUDE.md §5.
-- **Status:** `resolved` — Created `frontend/src/panels/AlignPanel.stories.tsx` with TwoNodesSelected, ThreeNodesSelected, and OneNodeSelected stories.
+- **Fix:** Create stories file per CLAUDE.md section 5.
+- **Status:** `resolved` — Created AlignPanel.stories.tsx with TwoNodesSelected, ThreeNodesSelected, and OneNodeSelected stories.
 
 ### RF-038 — batchSetTransform no NaN guard at store level (HIGH)
 - **Source:** Security
 - **Fix:** Add Number.isFinite validation at entry point.
-- **Status:** `open`
+- **Status:** `resolved` — Added `Number.isFinite` guard for all 7 transform fields at the top of `batchSetTransform`. Returns early with console.error if any field is non-finite.
 
 ### RF-039 — assertFiniteTransform throws uncaught in render effect (HIGH)
 - **Source:** Security, FE
 - **Fix:** Wrap renderCanvas in try-catch, or change to graceful return.
-- **Status:** `open`
+- **Status:** `resolved` — Wrapped the `renderCanvas(...)` call in the createEffect with try-catch. Errors are logged to console instead of crashing the reactive effect.
