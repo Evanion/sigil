@@ -21,4 +21,6 @@ export interface ToolStore {
   setTransform(uuid: string, transform: Transform): void;
   createNode(kind: NodeKind, name: string, transform: Transform): string;
   getSelectedNodeId(): string | null;
+  /** Current viewport zoom level, needed for handle hit-testing and snapping. */
+  getViewportZoom(): number;
 }

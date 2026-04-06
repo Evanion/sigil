@@ -9,3 +9,17 @@
   width: 100%;
   height: 100%;
 }
+
+/* RF-018: Focus-visible style for keyboard accessibility */
+.sigil-canvas-container__canvas:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: -2px;
+}
+
+/* RF-019: Reduced motion guard for canvas rendering */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-canvas-container__canvas {
+    /* Canvas animations are rendered imperatively; guide lines should be
+       suppressed in JavaScript when reduced motion is preferred. */
+  }
+}

@@ -1,5 +1,6 @@
 /**
- * Tests for the canvas renderer — selection handles and preview drawing.
+ * Tests for the canvas renderer — selection handles, preview drawing,
+ * and snap guide line rendering.
  *
  * @vitest-environment jsdom
  */
@@ -8,6 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
+import type { SnapGuide } from "../snap-engine";
 
 /** Create a minimal DocumentNode for testing. */
 function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
@@ -135,6 +137,112 @@ describe("renderer", () => {
       const fillRectCalls = calls.filter((c) => c.method === "fillRect");
       const hasPreviewPosition = fillRectCalls.some((c) => c.args[0] === 200 && c.args[1] === 200);
       expect(hasPreviewPosition).toBe(true);
+    });
+  });
+
+  describe("drawGuideLines (via render)", () => {
+    it("should not call stroke when no snap guides are provided", () => {
+      const node = createTestNode();
+
+      render(ctx, viewport, [node], null, 1, null, null, []);
+
+      const calls = getCalls(ctx);
+      // With empty guides the guide color should never be set
+      const guideColorSets = calls.filter(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorSets.length).toBe(0);
+    });
+
+    it("should set stroke style to guide color when x-axis snap guide is present", () => {
+      const guides: SnapGuide[] = [{ axis: "x", position: 150 }];
+
+      render(ctx, viewport, [], null, 1, null, null, guides);
+
+      const calls = getCalls(ctx);
+      const guideColorSets = calls.filter(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorSets.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should call stroke once per guide", () => {
+      const guides: SnapGuide[] = [
+        { axis: "x", position: 100 },
+        { axis: "y", position: 200 },
+      ];
+
+      render(ctx, viewport, [], null, 1, null, null, guides);
+
+      const calls = getCalls(ctx);
+      // Count stroke calls that occur after guide color is set
+      const guideColorIdx = calls.findIndex(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorIdx).toBeGreaterThanOrEqual(0);
+
+      const strokesAfterGuideColor = calls
+        .slice(guideColorIdx)
+        .filter((c) => c.method === "stroke");
+      // Two guides => two stroke calls
+      expect(strokesAfterGuideColor.length).toBe(2);
+    });
+
+    it("should draw a vertical line for an x-axis guide using moveTo / lineTo with guide position as x", () => {
+      const guides: SnapGuide[] = [{ axis: "x", position: 300 }];
+      // Viewport at origin, zoom 1 — canvas is 800x600 logical px
+      const vp: Viewport = { x: 0, y: 0, zoom: 1 };
+
+      render(ctx, vp, [], null, 1, null, null, guides);
+
+      const calls = getCalls(ctx);
+      const guideColorIdx = calls.findIndex(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorIdx).toBeGreaterThanOrEqual(0);
+
+      const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
+      // x-axis guide → vertical line → moveTo(guide.position, worldTop)
+      expect(moveToAfterColor).toBeDefined();
+      expect(moveToAfterColor?.args[0]).toBe(300);
+    });
+
+    it("should draw a horizontal line for a y-axis guide using moveTo / lineTo with guide position as y", () => {
+      const guides: SnapGuide[] = [{ axis: "y", position: 250 }];
+      const vp: Viewport = { x: 0, y: 0, zoom: 1 };
+
+      render(ctx, vp, [], null, 1, null, null, guides);
+
+      const calls = getCalls(ctx);
+      const guideColorIdx = calls.findIndex(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorIdx).toBeGreaterThanOrEqual(0);
+
+      const moveToAfterColor = calls.slice(guideColorIdx).find((c) => c.method === "moveTo");
+      // y-axis guide → horizontal line → moveTo(worldLeft, guide.position)
+      expect(moveToAfterColor).toBeDefined();
+      expect(moveToAfterColor?.args[1]).toBe(250);
+    });
+
+    it("should use a 1px screen-space line width (scaled by zoom inverse)", () => {
+      const guides: SnapGuide[] = [{ axis: "x", position: 100 }];
+      const vp: Viewport = { x: 0, y: 0, zoom: 2 };
+
+      render(ctx, vp, [], null, 1, null, null, guides);
+
+      const calls = getCalls(ctx);
+      const guideColorIdx = calls.findIndex(
+        (c) => c.method === "set:strokeStyle" && c.args[0] === "#ff3366",
+      );
+      expect(guideColorIdx).toBeGreaterThanOrEqual(0);
+
+      // lineWidth should be set to 1 / zoom = 0.5 at zoom=2
+      const lineWidthSetAfterColor = calls
+        .slice(guideColorIdx)
+        .find((c) => c.method === "set:lineWidth");
+      expect(lineWidthSetAfterColor).toBeDefined();
+      expect(lineWidthSetAfterColor?.args[0]).toBe(0.5);
     });
   });
 });

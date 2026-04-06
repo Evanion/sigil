@@ -25,6 +25,7 @@ import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
 import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-manager";
 import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform } from "../tools/select-tool";
+import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
@@ -61,6 +62,9 @@ function createStoreAdapter(
     createNode(kind: NodeKind, name: string, transform: Transform): string {
       return store.createNode(kind, name, transform);
     },
+    getViewportZoom(): number {
+      return store.viewport().zoom;
+    },
   };
 }
 
@@ -85,6 +89,7 @@ export const Canvas: Component = () => {
   // Preview state for tool feedback (signals so the canvas effect re-triggers)
   const [previewTransform, setPreviewTransform] = createSignal<PreviewTransform | null>(null);
   const [previewRect, setPreviewRect] = createSignal<PreviewRect | null>(null);
+  const [snapGuides, setSnapGuides] = createSignal<readonly SnapGuide[]>([]);
   const [cursor, setCursor] = createSignal("default");
 
   // Space key tracking for grab cursor
@@ -101,6 +106,15 @@ export const Canvas: Component = () => {
       map.set(uuid, node as DocumentNode);
     }
     return map;
+  });
+
+  // RF-020 (a11y): Dynamic aria-label reflecting the selected node.
+  const canvasAriaLabel = createMemo((): string => {
+    const selectedId = store.selectedNodeId();
+    if (selectedId === null) return "Design canvas";
+    const node = store.state.nodes[selectedId];
+    if (node) return `Design canvas — ${node.name} selected`;
+    return "Design canvas";
   });
 
   onMount(() => {
@@ -205,10 +219,15 @@ export const Canvas: Component = () => {
 
       // Update preview signals
       setPreviewTransform(selectTool.getPreviewTransform());
+      // RF-011: Only query snap guides when the select tool is active.
+      if (store.activeTool() === "select") {
+        setSnapGuides(selectTool.getSnapGuides());
+      }
       const activeTool = toolImpls.get(store.activeTool());
       if (activeTool && "getPreviewRect" in activeTool) {
         setPreviewRect((activeTool as ReturnType<typeof createShapeTool>).getPreviewRect());
       }
+      // RF-015: Update cursor after the tool's onPointerMove to reflect hover state changes.
       setCursor(toolManager.getCursor());
     }
 
@@ -222,6 +241,8 @@ export const Canvas: Component = () => {
       toolManager.onPointerUp(makeToolEvent(e));
       setPreviewTransform(null);
       setPreviewRect(null);
+      // RF-003: Clear snap guides when pointer is released.
+      setSnapGuides([]);
       setCursor(toolManager.getCursor());
     }
 
@@ -300,6 +321,15 @@ export const Canvas: Component = () => {
         const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, -200));
       },
+      Escape: (e: KeyboardEvent) => {
+        if (!isTyping()) {
+          e.preventDefault();
+          toolManager.onKeyDown("Escape");
+          setPreviewTransform(null);
+          setSnapGuides([]);
+          setCursor(toolManager.getCursor());
+        }
+      },
     });
 
     // Space key for grab cursor
@@ -342,6 +372,8 @@ export const Canvas: Component = () => {
       const vp = store.viewport();
       const preview = previewTransform();
       const prevRect = previewRect();
+      // RF-001: Read snap guides and pass them to the renderer as the 8th argument.
+      const guides = snapGuides();
       // RF-013: Read canvasSize to track resize/DPR changes as a dependency
       const size = canvasSize();
       const dpr = size.dpr;
@@ -353,7 +385,7 @@ export const Canvas: Component = () => {
       const keys = Object.keys(nodesObj);
       const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
 
-      renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview);
+      renderCanvas(ctx, vp, nodesArray, selected, dpr, prevRect, preview, guides);
     });
 
     // -- Cleanup --------------------------------------------------------------
@@ -371,6 +403,8 @@ export const Canvas: Component = () => {
     });
   });
 
+  // TODO(a11y): Add discrete aria-live announcements for resize start/commit/cancel
+
   return (
     <canvas
       ref={(el) => {
@@ -378,7 +412,7 @@ export const Canvas: Component = () => {
       }}
       class="sigil-canvas-container__canvas"
       role="application"
-      aria-label="Design canvas"
+      aria-label={canvasAriaLabel()}
       tabindex={0}
       style={{ cursor: cursor() }}
     />

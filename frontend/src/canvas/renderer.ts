@@ -12,6 +12,7 @@ import type { DocumentNode, Transform } from "../types/document";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { Viewport } from "./viewport";
+import type { SnapGuide } from "./snap-engine";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -215,6 +216,57 @@ function drawPreviewRect(ctx: CanvasRenderingContext2D, preview: PreviewRect, zo
   ctx.setLineDash([]);
 }
 
+/** Smart guide line color (pink/red). */
+const GUIDE_COLOR = "#ff3366";
+
+/** Smart guide line width in screen pixels. */
+const GUIDE_LINE_WIDTH = 1;
+
+/**
+ * Draw smart guide lines when snapping is active.
+ *
+ * Each guide is drawn as a full-extent line across the canvas:
+ * - X guides are vertical lines (full canvas height).
+ * - Y guides are horizontal lines (full canvas width).
+ *
+ * Lines are drawn in world coordinates but with a 1px screen-space width
+ * so they remain visually crisp regardless of zoom.
+ */
+function drawGuideLines(
+  ctx: CanvasRenderingContext2D,
+  guides: readonly SnapGuide[],
+  viewport: Viewport,
+  canvasWidth: number,
+  canvasHeight: number,
+): void {
+  if (guides.length === 0) return;
+
+  const lineWidth = GUIDE_LINE_WIDTH / viewport.zoom;
+  ctx.strokeStyle = GUIDE_COLOR;
+  ctx.lineWidth = lineWidth;
+
+  // Compute the world-space extent visible on screen.
+  // screenX = worldX * zoom + offsetX => worldX = (screenX - offsetX) / zoom
+  const worldLeft = -viewport.x / viewport.zoom;
+  const worldTop = -viewport.y / viewport.zoom;
+  const worldRight = (canvasWidth - viewport.x) / viewport.zoom;
+  const worldBottom = (canvasHeight - viewport.y) / viewport.zoom;
+
+  for (const guide of guides) {
+    ctx.beginPath();
+    if (guide.axis === "x") {
+      // Vertical line at world x = guide.position
+      ctx.moveTo(guide.position, worldTop);
+      ctx.lineTo(guide.position, worldBottom);
+    } else {
+      // Horizontal line at world y = guide.position
+      ctx.moveTo(worldLeft, guide.position);
+      ctx.lineTo(worldRight, guide.position);
+    }
+    ctx.stroke();
+  }
+}
+
 /**
  * Render the document onto the canvas.
  *
@@ -232,6 +284,7 @@ export function render(
   dpr = 1,
   previewRect: PreviewRect | null = null,
   previewTransform: PreviewTransform | null = null,
+  snapGuides: readonly SnapGuide[] = [],
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -276,6 +329,11 @@ export function render(
   // Draw shape tool preview rectangle if active.
   if (previewRect !== null) {
     drawPreviewRect(ctx, previewRect, viewport.zoom);
+  }
+
+  // Draw smart guide lines (after nodes and selection, before transform reset).
+  if (snapGuides.length > 0) {
+    drawGuideLines(ctx, snapGuides, viewport, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
   }
 
   // Reset transform to identity.

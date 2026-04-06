@@ -39,6 +39,7 @@ function makeMockStore(): ToolStore & {
     select: (uuid: string | null) => {
       selectCalls.push(uuid);
     },
+    getViewportZoom: () => 1,
   };
 }
 
