@@ -3,6 +3,7 @@ import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
 import { AppearancePanel } from "./AppearancePanel";
 import { EffectsPanel } from "./EffectsPanel";
+import { AlignPanel } from "./AlignPanel";
 import "./DesignPanel.css";
 
 type DesignTab = "layout" | "appearance" | "effects";
@@ -75,6 +76,7 @@ export const DesignPanel: Component = () => {
         aria-labelledby={`design-tab-${activeTab()}`}
       >
         <Show when={activeTab() === "layout"}>
+          <AlignPanel />
           <SchemaPanel schema={designSchema} />
         </Show>
         <Show when={activeTab() === "appearance"}>
