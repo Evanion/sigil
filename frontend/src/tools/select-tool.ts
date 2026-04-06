@@ -506,7 +506,8 @@ export function createSelectTool(store: ToolStore): Tool & {
     },
 
     onKeyDown(key: string): void {
-      // TODO: Add Alt+Arrow resize nudge for keyboard accessibility (tracking issue needed)
+      // TODO(a11y): Add Alt+Arrow resize nudge for keyboard accessibility
+      // TODO(a11y): Add Arrow key nudge for multi-select move
       if (key === "Escape" && state.kind !== "idle") {
         resetToIdle();
       }

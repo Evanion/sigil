@@ -29,6 +29,15 @@ import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
+import type { AlignEntry } from "../canvas/align-math";
+import {
+  alignLeft,
+  alignCenter,
+  alignRight,
+  alignTop,
+  alignMiddle,
+  alignBottom,
+} from "../canvas/align-math";
 import { useAnnounce } from "./AnnounceProvider";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";
@@ -302,6 +311,25 @@ export const Canvas: Component = () => {
       );
     };
 
+    /**
+     * Execute an alignment function on the currently selected nodes.
+     * Shared helper used by both AlignPanel buttons and keyboard shortcuts.
+     */
+    function executeAlign(alignFn: (nodes: readonly AlignEntry[]) => readonly AlignEntry[]): void {
+      const ids = store.selectedNodeIds();
+      if (ids.length < 2) return;
+      const entries: AlignEntry[] = [];
+      for (const id of ids) {
+        const node = store.state.nodes[id];
+        if (node?.transform) {
+          entries.push({ uuid: id, transform: node.transform });
+        }
+      }
+      if (entries.length < 2) return;
+      const result = alignFn(entries);
+      store.batchSetTransform(result.map((r) => ({ uuid: r.uuid, transform: r.transform })));
+    }
+
     const unbindKeys = tinykeys(window, {
       "$mod+z": (e: KeyboardEvent) => {
         if (!isTyping()) {
@@ -346,6 +374,110 @@ export const Canvas: Component = () => {
           setSnapGuides([]);
           setCursor(toolManager.getCursor());
         }
+      },
+
+      // -- Group / Ungroup --
+      "$mod+g": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        const ids = store.selectedNodeIds();
+        if (ids.length >= 2) {
+          store.groupNodes(ids, "Group");
+          announce(`Grouped ${String(ids.length)} nodes`);
+        }
+      },
+      "$mod+Shift+g": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        const ids = store.selectedNodeIds();
+        const groupUuids = ids.filter((id) => {
+          const node = store.state.nodes[id];
+          return node?.kind.type === "group";
+        });
+        if (groupUuids.length > 0) {
+          store.ungroupNodes(groupUuids);
+          announce("Ungrouped");
+        }
+      },
+
+      // -- Select all --
+      "$mod+a": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        const allIds: string[] = [];
+        const nodes = store.state.nodes;
+        for (const uuid of Object.keys(nodes)) {
+          const node = nodes[uuid];
+          if (node && node.visible && !node.locked) {
+            allIds.push(uuid);
+          }
+        }
+        store.setSelectedNodeIds(allIds);
+        announce(`Selected all (${String(allIds.length)} nodes)`);
+      },
+
+      // -- Delete selected --
+      Delete: (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        const ids = store.selectedNodeIds();
+        if (ids.length === 0) return;
+        const count = ids.length;
+        for (const uuid of ids) {
+          store.deleteNode(uuid);
+        }
+        store.setSelectedNodeIds([]);
+        announce(`Deleted ${String(count)} nodes`);
+      },
+      Backspace: (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        const ids = store.selectedNodeIds();
+        if (ids.length === 0) return;
+        const count = ids.length;
+        for (const uuid of ids) {
+          store.deleteNode(uuid);
+        }
+        store.setSelectedNodeIds([]);
+        announce(`Deleted ${String(count)} nodes`);
+      },
+
+      // -- Alignment shortcuts --
+      "$mod+Shift+l": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignLeft);
+        announce("Aligned left");
+      },
+      "$mod+Shift+c": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignCenter);
+        announce("Aligned center");
+      },
+      "$mod+Shift+r": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignRight);
+        announce("Aligned right");
+      },
+      "$mod+Shift+t": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignTop);
+        announce("Aligned top");
+      },
+      "$mod+Shift+m": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignMiddle);
+        announce("Aligned middle");
+      },
+      "$mod+Shift+b": (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        e.preventDefault();
+        executeAlign(alignBottom);
+        announce("Aligned bottom");
       },
     });
 

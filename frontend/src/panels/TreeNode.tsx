@@ -51,7 +51,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
   const [isRenaming, setIsRenaming] = createSignal(false);
   let inputRef: HTMLInputElement | undefined;
 
-  const isSelected = () => store.selectedNodeId() === props.node.uuid;
+  const isSelected = () => store.selectedNodeIds().includes(props.node.uuid);
   const indentPx = () => props.depth * INDENT_WIDTH;
 
   // DnD: draggable
