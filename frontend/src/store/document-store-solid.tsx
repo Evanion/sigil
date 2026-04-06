@@ -255,6 +255,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   const canUndo = () => state.info.can_undo;
   const canRedo = () => state.info.can_redo;
 
+  /**
+   * Mark undo/redo state after a successful mutation that was processed by
+   * doc.execute() on the server. Self-echo suppression (RF-004) skips the
+   * subscription refetch for our own mutations, so the client must update
+   * can_undo/can_redo optimistically after every successful mutation.
+   */
+  function markUndoAvailable(): void {
+    setState("info", "can_undo", true);
+    setState("info", "can_redo", false);
+  }
+
   // ── WebSocket client with connection tracking (RF-025) ──────────────
 
   const wsClient = createWSClient({
@@ -415,6 +426,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
           });
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("createNode exception:", err);
@@ -453,7 +465,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           if (previousTransform && state.nodes[uuid]) {
             setState("nodes", uuid, "transform", previousTransform);
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setTransform exception:", err);
@@ -477,7 +491,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           if (previousName !== undefined && state.nodes[uuid]) {
             setState("nodes", uuid, "name", previousName);
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("renameNode exception:", err);
@@ -517,7 +533,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               setSelectedNodeId(previousSelectedId);
             }
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("deleteNode exception:", err);
@@ -544,7 +562,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           if (previousVisible !== undefined && state.nodes[uuid]) {
             setState("nodes", uuid, "visible", previousVisible);
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setVisible exception:", err);
@@ -568,7 +588,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           if (previousLocked !== undefined && state.nodes[uuid]) {
             setState("nodes", uuid, "locked", previousLocked);
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setLocked exception:", err);
@@ -638,7 +660,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }
             }),
           );
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
@@ -686,7 +710,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }
             }),
           );
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
@@ -729,7 +755,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }),
             );
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setOpacity exception:", err);
@@ -773,7 +801,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }),
             );
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setBlendMode exception:", err);
@@ -851,7 +881,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
                 }),
               );
             }
+            return;
           }
+          markUndoAvailable();
         })
         .catch((err: unknown) => {
           console.error("setFills exception:", err);
@@ -930,7 +962,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
                 }),
               );
             }
+            return;
           }
+          markUndoAvailable();
         })
         .catch((err: unknown) => {
           console.error("setStrokes exception:", err);
@@ -1009,7 +1043,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
                 }),
               );
             }
+            return;
           }
+          markUndoAvailable();
         })
         .catch((err: unknown) => {
           console.error("setEffects exception:", err);
@@ -1068,7 +1104,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               }),
             );
           }
+          return;
         }
+        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setCornerRadii exception:", err);
@@ -1142,6 +1180,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
           });
         } else {
+          // Any successful mutation that goes through doc.execute() enables undo.
+          // Self-echo suppression skips the subscription refetch for our own
+          // mutations, so we must update can_undo/can_redo optimistically here.
+          markUndoAvailable();
           // Reconcile with server-canonical values
           const data = r.data as Record<string, unknown> | undefined;
           const results = data?.batchSetTransform as Array<Record<string, unknown>> | undefined;
@@ -1185,6 +1227,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("groupNodes error:", r.error.message);
           return;
         }
+        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const groupUuid = data?.groupNodes as string | undefined;
         if (groupUuid) {
@@ -1206,6 +1249,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("ungroupNodes error:", r.error.message);
           return;
         }
+        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const childUuids = data?.ungroupNodes as string[] | undefined;
         if (childUuids && childUuids.length > 0) {
