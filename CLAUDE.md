@@ -324,6 +324,10 @@ When using generational arenas, removing and re-inserting an entity produces a N
 
 When an item is removed from a collection (popped from a stack, removed from a vec, taken from a map) and a subsequent operation on that item may fail, the item MUST be restored to its original position before returning the error. Pattern: pop, attempt operation, push back on failure. Using `?` after a destructive removal without restoration loses the item permanently.
 
+### Multi-Item Mutations Must Roll Back on Partial Failure
+
+When a single command's `apply` or `undo` method loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This is distinct from `CompoundCommand` rollback, which handles inter-command failures — this rule applies to loops WITHIN a single command. A loop that modifies 5 of 10 items and then returns an error has corrupted the document, because the history stack will not undo the partial modifications.
+
 ### No Silent Error Suppression in Rollback Paths
 
 Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppressed errors in rollback can leave the document in a corrupted state with no diagnostic trail. Instead: collect errors into a `Vec<Error>` and return a compound error (e.g., `RollbackFailed { original_error, rollback_errors }`). The only acceptable use of `let _ =` is for non-fallible return values.
@@ -359,6 +363,14 @@ When a type has fields that must be mutually consistent (e.g., a discriminant en
 ### No Derive Deserialize on Validated Types
 
 Any type in `crates/core/` that has validation logic in its constructor MUST NOT use `#[derive(Deserialize)]`. Instead, implement `Deserialize` manually (or via a helper) that routes through the validating constructor. Fields on validated types MUST be private to prevent direct construction. This prevents `#[derive(Deserialize)]` from creating an invisible second construction path that bypasses all validation.
+
+### Validated Types Must Have Private Fields
+
+Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to command structs, value objects, and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. If a command needs internal mutable state (snapshots, cached indices), those fields must be private and populated by the command's own `execute`/`apply` method, never by the caller.
+
+### Commands Must Be Self-Contained
+
+A command struct's `execute` (or `apply`) method must be callable immediately after construction without the caller performing any additional setup. All internal state needed for undo (snapshots of previous values, recorded indices, saved references) must be captured by the command itself during `execute`, not passed in by the caller or populated via public field mutation before execution. The constructor receives the operation's parameters (what to do); the execute method captures the undo state (what was there before). If a command's undo path depends on state that was not captured during execute, the command is broken — it cannot be replayed from the history stack. This rule exists because caller-populated snapshots create an implicit contract that is invisible to the type system, untestable in isolation, and guaranteed to be forgotten by future callers.
 
 ### Constant Enforcement Tests
 
