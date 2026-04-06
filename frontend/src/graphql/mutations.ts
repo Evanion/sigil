@@ -114,3 +114,21 @@ export const SET_CORNER_RADII_MUTATION = `
     setCornerRadii(uuid: $uuid, radii: $radii) { uuid kind }
   }
 `;
+
+export const BATCH_SET_TRANSFORM_MUTATION = `
+  mutation BatchSetTransform($entries: JSON!) {
+    batchSetTransform(entries: $entries) { uuid transform }
+  }
+`;
+
+export const GROUP_NODES_MUTATION = `
+  mutation GroupNodes($uuids: [String!]!, $name: String!) {
+    groupNodes(uuids: $uuids, name: $name) { uuid name kind transform }
+  }
+`;
+
+export const UNGROUP_NODES_MUTATION = `
+  mutation UngroupNodes($uuids: [String!]!) {
+    ungroupNodes(uuids: $uuids) { uuid }
+  }
+`;
