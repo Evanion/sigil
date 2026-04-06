@@ -45,6 +45,7 @@ function createMockStore(
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
     selectedNodeIds: () => (selectedId ? [selectedId] : []),
+    isNodeSelected: () => false,
     setSelectedNodeIds: vi.fn(),
     activeTool,
     setActiveTool: vi.fn(),

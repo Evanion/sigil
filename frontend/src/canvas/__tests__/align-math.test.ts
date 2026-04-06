@@ -8,14 +8,8 @@ import {
   alignBottom,
   distributeHorizontal,
   distributeVertical,
+  type AlignEntry,
 } from "../align-math";
-
-// ── Helpers ──────────────────────────────────────────────────────────────
-
-interface AlignEntry {
-  uuid: string;
-  transform: Transform;
-}
 
 function makeEntry(uuid: string, x: number, y: number, w: number, h: number): AlignEntry {
   return {
