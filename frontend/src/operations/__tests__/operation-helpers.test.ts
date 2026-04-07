@@ -74,8 +74,8 @@ describe("createReorderOp", () => {
     expect(op.type).toBe("reorder");
     expect(op.nodeUuid).toBe("node-1");
     expect(op.path).toBe("");
-    expect(op.value).toEqual({ newPosition: 3 });
-    expect(op.previousValue).toEqual({ oldPosition: 1 });
+    expect(op.value).toEqual({ position: 3 });
+    expect(op.previousValue).toEqual({ position: 1 });
   });
 });
 
@@ -137,8 +137,10 @@ describe("createInverse", () => {
     const op = createReorderOp(USER_ID, "node-1", 3, 1);
     const inv = createInverse(op);
     expect(inv.type).toBe("reorder");
-    expect(inv.value).toEqual({ oldPosition: 1 });
-    expect(inv.previousValue).toEqual({ newPosition: 3 });
+    // RF-002: After inversion, value/previousValue are swapped.
+    // With unified `position` field, the inverse reads correctly.
+    expect(inv.value).toEqual({ position: 1 });
+    expect(inv.previousValue).toEqual({ position: 3 });
   });
 
   it("preserves seq = 0 on inverse", () => {

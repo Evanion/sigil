@@ -12,6 +12,7 @@
 import { batch } from "solid-js";
 import type { HistoryManager } from "./history-manager";
 import type { Operation, Transaction } from "./types";
+import { createInverseTransaction } from "./operation-helpers";
 import {
   applyOperationToStore,
   type StoreStateSetter,
@@ -21,6 +22,16 @@ import {
 export interface StoreHistoryBridge {
   /** Apply a single operation to the store and track it as a discrete undo step. */
   applyAndTrack(op: Operation, description: string): void;
+
+  /**
+   * RF-001: Rollback the last optimistic mutation on server error.
+   *
+   * Pops the last entry from the undo stack WITHOUT pushing to redo,
+   * then applies the inverse to the store to revert visually. This prevents
+   * ghost entries in the redo stack that would otherwise accumulate from
+   * calling undo() in error handlers.
+   */
+  rollbackLast(): void;
 
   /** Begin an explicit transaction (multi-operation undo step). */
   beginTransaction(description: string): void;
@@ -86,6 +97,28 @@ export function createStoreHistoryBridge(
     applyAndTrack(op: Operation, description: string): void {
       applyOperationToStore(op, setState, reader);
       historyManager.apply(op, description);
+    },
+
+    rollbackLast(): void {
+      // RF-001: Pop from undo stack WITHOUT pushing to redo (no ghost entries).
+      const tx = historyManager.popLastUndo();
+      if (!tx) return;
+
+      let inverseTx: Transaction;
+      try {
+        inverseTx = createInverseTransaction(tx);
+      } catch {
+        // If inverse creation fails, we cannot revert. The undo entry is already
+        // removed, so at least we don't have a ghost. Log for diagnostics.
+        console.error("rollbackLast: failed to create inverse transaction, store may be inconsistent");
+        return;
+      }
+
+      batch(() => {
+        for (const op of inverseTx.operations) {
+          applyOperationToStore(op, setState, reader);
+        }
+      });
     },
 
     beginTransaction(description: string): void {

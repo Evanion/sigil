@@ -454,8 +454,8 @@ describe("applyOperationToStore — reorder", () => {
       type: "reorder",
       nodeUuid: "node-1",
       path: "",
-      value: { newPosition: 2 },
-      previousValue: { oldPosition: 0 },
+      value: { position: 2 },
+      previousValue: { position: 0 },
     });
 
     applyOperationToStore(op, setter, reader);
@@ -477,8 +477,8 @@ describe("applyOperationToStore — reorder", () => {
       type: "reorder",
       nodeUuid: "node-1",
       path: "",
-      value: { newPosition: 2 },
-      previousValue: { oldPosition: 0 },
+      value: { position: 2 },
+      previousValue: { position: 0 },
     });
 
     applyOperationToStore(op, setter, reader);
@@ -501,8 +501,8 @@ describe("applyOperationToStore — reorder", () => {
       type: "reorder",
       nodeUuid: "node-1",
       path: "",
-      value: { newPosition: 1 },
-      previousValue: { oldPosition: 0 },
+      value: { position: 1 },
+      previousValue: { position: 0 },
     });
 
     applyOperationToStore(op, setter, reader);

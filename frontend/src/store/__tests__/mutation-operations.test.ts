@@ -583,8 +583,9 @@ describe("mutation operations — structural mutations (Task 5)", () => {
 
       expect(op.type).toBe("reorder");
       expect(op.nodeUuid).toBe("node-1");
-      expect(op.value).toEqual({ newPosition: 2 });
-      expect(op.previousValue).toEqual({ oldPosition: 0 });
+      // RF-002: unified `position` field
+      expect(op.value).toEqual({ position: 2 });
+      expect(op.previousValue).toEqual({ position: 0 });
     });
 
     it("should track in HistoryManager — undo restores original position", () => {
@@ -599,9 +600,9 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       expect(inverseTx).not.toBeNull();
       if (inverseTx === null) throw new Error("unreachable");
       expect(inverseTx.operations).toHaveLength(1);
-      // Inverse swaps value/previousValue for reorder
-      expect(inverseTx.operations[0].value).toEqual({ oldPosition: 0 });
-      expect(inverseTx.operations[0].previousValue).toEqual({ newPosition: 2 });
+      // RF-002: Inverse swaps value/previousValue; unified `position` field
+      expect(inverseTx.operations[0].value).toEqual({ position: 0 });
+      expect(inverseTx.operations[0].previousValue).toEqual({ position: 2 });
       expect(history.canRedo()).toBe(true);
     });
   });

@@ -397,9 +397,11 @@ function applyReorder(
     return;
   }
 
-  const payload = value as { newPosition?: number };
-  if (typeof payload.newPosition !== "number") {
-    console.warn("Remote reorder: missing newPosition");
+  // RF-002: Accept both `position` (new unified format) and `newPosition` (legacy server format)
+  const payload = value as { position?: number; newPosition?: number };
+  const reorderPosition = payload.position ?? payload.newPosition;
+  if (typeof reorderPosition !== "number") {
+    console.warn("Remote reorder: missing position/newPosition");
     return;
   }
 
@@ -418,6 +420,6 @@ function applyReorder(
 
   // Remove from current position and insert at new position
   const newChildren = parent.childrenUuids.filter((id) => id !== nodeUuid);
-  newChildren.splice(payload.newPosition, 0, nodeUuid);
+  newChildren.splice(reorderPosition, 0, nodeUuid);
   setState("nodes", parentUuid, "childrenUuids", newChildren);
 }

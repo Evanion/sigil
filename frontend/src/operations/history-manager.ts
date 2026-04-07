@@ -267,6 +267,21 @@ export class HistoryManager {
     return this.redoStack.length > 0;
   }
 
+  /**
+   * Pop the last undo entry WITHOUT pushing to the redo stack.
+   *
+   * RF-001: Used by rollbackLast() to revert an optimistic mutation on server
+   * error. Unlike undo(), this does not push to redo — the failed mutation
+   * should not appear in the redo stack as a "ghost" entry.
+   *
+   * Returns the popped transaction (for applying its inverse to the store),
+   * or null if the undo stack is empty.
+   */
+  popLastUndo(): Transaction | null {
+    const tx = this.undoStack.pop();
+    return tx ?? null;
+  }
+
   // ── Clear ──────────────────────────────────────────────────────
 
   /** Clear both undo and redo stacks. */

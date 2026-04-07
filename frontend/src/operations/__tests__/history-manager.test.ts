@@ -415,4 +415,47 @@ describe("HistoryManager", () => {
       expect(redo.operations[0].value).toEqual(nodeData);
     });
   });
+
+  // ── popLastUndo (RF-001) ─────────────────────────────────────────
+
+  describe("popLastUndo", () => {
+    it("should return null when undo stack is empty", () => {
+      expect(hm.popLastUndo()).toBeNull();
+    });
+
+    it("should pop the last transaction from undo stack", () => {
+      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      hm.apply(op, "Rename");
+      expect(hm.canUndo()).toBe(true);
+
+      const popped = hm.popLastUndo();
+      expect(popped).not.toBeNull();
+      expect(popped?.operations[0].value).toBe("B");
+      expect(hm.canUndo()).toBe(false);
+    });
+
+    it("should NOT push to redo stack (unlike undo)", () => {
+      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      hm.apply(op, "Rename");
+
+      hm.popLastUndo();
+
+      // The critical difference from undo(): redo stack stays empty
+      expect(hm.canRedo()).toBe(false);
+    });
+
+    it("should not affect existing redo stack entries", () => {
+      const op1 = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      hm.apply(op1, "Step 1");
+      hm.undo(); // Pushes to redo
+      expect(hm.canRedo()).toBe(true);
+
+      const op2 = createSetFieldOp(USER_ID, "node-1", "name", "C", "A");
+      hm.apply(op2, "Step 2"); // Clears redo
+
+      // Now popLastUndo should not affect redo
+      hm.popLastUndo();
+      expect(hm.canRedo()).toBe(false);
+    });
+  });
 });

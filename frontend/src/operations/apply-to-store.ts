@@ -248,6 +248,7 @@ function applyReorder(
   reader: StoreStateReader,
 ): void {
   const { nodeUuid } = op;
+  // RF-002: Use the unified `position` field from ReorderValue.
   const reorder = op.value as ReorderValue;
   const node = reader.getNode(nodeUuid);
   const parentUuid = node?.["parentUuid"] as string | null | undefined;
@@ -265,7 +266,7 @@ function applyReorder(
   const children = ((parent["childrenUuids"] as string[] | undefined) ?? []).filter(
     (c) => c !== nodeUuid,
   );
-  const insertAt = Math.min(reorder.newPosition, children.length);
+  const insertAt = Math.min(reorder.position, children.length);
   const updated = [...children];
   updated.splice(insertAt, 0, nodeUuid);
   setState("nodes", parentUuid, "childrenUuids", updated);

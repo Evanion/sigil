@@ -359,6 +359,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // ── Mutations ────────────────────────────────────────────────────────
 
+  // TODO(RF-005): createNode redo UUID mismatch — when a createNode is undone then
+  // redone, the redo re-applies the operation with the original optimistic UUID, but
+  // the server will assign a new UUID. The redo path needs to handle UUID remapping
+  // similar to the initial create success handler. Deferred to Phase 15d.
   function createNode(kind: NodeKind, name: string, transform: Transform): string {
     const optimisticUuid = crypto.randomUUID();
     const pageId = state.pages[0]?.id ?? null;
@@ -396,7 +400,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((result) => {
         if (result.error) {
           console.error("createNode error:", result.error.message);
-          history.undo();
+          history.rollbackLast();
           const filteredAfterError = selectedNodeIds().filter((id) => id !== optimisticUuid);
           if (filteredAfterError.length !== selectedNodeIds().length) {
             setSelectedNodeIds(filteredAfterError);
@@ -428,7 +432,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       })
       .catch((err: unknown) => {
         console.error("createNode exception:", err);
-        history.undo();
+        history.rollbackLast();
         const filteredAfterCatch = selectedNodeIds().filter((id) => id !== optimisticUuid);
         if (filteredAfterCatch.length !== selectedNodeIds().length) {
           setSelectedNodeIds(filteredAfterCatch);
@@ -438,10 +442,15 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     return optimisticUuid;
   }
 
+  // RF-003: setTransform is called once per drag on pointerUp (not during drag),
+  // so the applyAndTrack call creates exactly one undo entry per drag. The select
+  // tool uses local preview transforms during drag, not store mutations.
   function setTransform(uuid: string, transform: Transform): void {
     const node = state.nodes[uuid];
     if (!node) return;
-    const previous = deepClone(node.transform);
+    // RF-007: Transform is a flat 7-number struct — shallow spread is sufficient,
+    // no need for deepClone's JSON round-trip overhead.
+    const previous = { ...node.transform };
 
     const op = createSetFieldOp(clientSessionId, uuid, "transform", transform, previous);
     history.applyAndTrack(op, `Move ${node.name}`);
@@ -457,12 +466,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setTransform error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setTransform exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -480,12 +489,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("renameNode error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("renameNode exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -511,7 +520,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("deleteNode error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
           if (previousSelectedId === uuid) {
             setSelectedNodeId(previousSelectedId);
           }
@@ -519,7 +528,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       })
       .catch((err: unknown) => {
         console.error("deleteNode exception:", err);
-        history.undo();
+        history.rollbackLast();
         if (previousSelectedId === uuid) {
           setSelectedNodeId(previousSelectedId);
         }
@@ -540,12 +549,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setVisible error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setVisible exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -563,12 +572,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setLocked error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setLocked exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -606,12 +615,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reparentNode error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -645,12 +654,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reorderChildren error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -676,12 +685,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setOpacity error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setOpacity exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -699,12 +708,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setBlendMode error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setBlendMode exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -731,12 +740,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setFills error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setFills exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -767,12 +776,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setStrokes error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setStrokes exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -803,12 +812,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setEffects error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setEffects exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -838,12 +847,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setCornerRadii error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         }
       })
       .catch((err: unknown) => {
         console.error("setCornerRadii exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -869,6 +878,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     history.beginTransaction(`Align ${String(entries.length)} nodes`);
 
+    let opsAdded = 0;
     for (const entry of entries) {
       const node = state.nodes[entry.uuid];
       if (!node) continue;
@@ -876,8 +886,15 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       const previous = deepClone(node.transform);
       const op = createSetFieldOp(clientSessionId, entry.uuid, "transform", entry.transform, previous);
       history.applyInTransaction(op);
+      opsAdded++;
     }
 
+    // RF-006: If no ops were added (all nodes missing), cancel the transaction
+    // to avoid an empty undo entry.
+    if (opsAdded === 0) {
+      history.cancelTransaction();
+      return;
+    }
     history.commitTransaction();
 
     // Send batch to server
@@ -893,7 +910,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("batchSetTransform error:", r.error.message);
-          history.undo();
+          history.rollbackLast();
         } else {
           // Reconcile with server-canonical values
           const data = r.data as Record<string, unknown> | undefined;
@@ -913,7 +930,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       })
       .catch((err: unknown) => {
         console.error("batchSetTransform exception:", err);
-        history.undo();
+        history.rollbackLast();
       });
   }
 
@@ -953,6 +970,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // NOTE: ungroupNodes is server-driven like groupNodes. We track a
   // placeholder delete_node operation after refetch so undo knows what
   // happened. Full undo support deferred to Phase 15d.
+  // TODO(RF-009): ungroupNodes undo does not restore the group node's children
+  // back into the group. The delete_node inverse (create_node) recreates the group
+  // but its children have already been reparented. Full compound undo requires
+  // tracking reparent ops for each child. Deferred to Phase 15d.
   function ungroupNodes(uuids: string[]): void {
     // Capture group node snapshots before the server deletes them
     const groupSnapshots: Array<{ uuid: string; snapshot: Record<string, unknown> }> = [];
@@ -999,6 +1020,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
    * This function maps each operation back to the appropriate mutation.
    * In Phase 15d, this will be replaced with a single APPLY_OPERATIONS_MUTATION.
    */
+  // TODO(Phase 15d): Replace with single APPLY_OPERATIONS_MUTATION to reduce N round-trips per undo/redo
   function sendTransactionToServer(tx: Transaction): void {
     for (const op of tx.operations) {
       sendOperationToServer(op);
@@ -1059,11 +1081,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         break;
       }
       case "reorder": {
+        // RF-002: ReorderValue now uses unified `position` field
         const reorder = op.value as ReorderValue;
         client
           .mutation(gql(REORDER_CHILDREN_MUTATION), {
             uuid: op.nodeUuid,
-            newPosition: reorder.newPosition,
+            newPosition: reorder.position,
             userId: clientSessionId,
           })
           .toPromise()
@@ -1083,7 +1106,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     switch (path) {
       case "transform":
-        client.mutation(gql(SET_TRANSFORM_MUTATION), { uuid: nodeUuid, transform: deepClone(value), userId: clientSessionId }).toPromise()
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client.mutation(gql(SET_TRANSFORM_MUTATION), { uuid: nodeUuid, transform: value, userId: clientSessionId }).toPromise()
           .then((r) => { if (r.error) console.error("sendSetField transform error:", r.error.message); })
           .catch((err: unknown) => console.error("sendSetField transform:", err));
         break;
@@ -1115,17 +1139,20 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           .catch((err: unknown) => console.error("sendSetField blend_mode:", err));
         break;
       case "style.fills":
-        client.mutation(gql(SET_FILLS_MUTATION), { uuid: nodeUuid, fills: deepClone(value), userId: clientSessionId }).toPromise()
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client.mutation(gql(SET_FILLS_MUTATION), { uuid: nodeUuid, fills: value, userId: clientSessionId }).toPromise()
           .then((r) => { if (r.error) console.error("sendSetField fills error:", r.error.message); })
           .catch((err: unknown) => console.error("sendSetField fills:", err));
         break;
       case "style.strokes":
-        client.mutation(gql(SET_STROKES_MUTATION), { uuid: nodeUuid, strokes: deepClone(value), userId: clientSessionId }).toPromise()
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client.mutation(gql(SET_STROKES_MUTATION), { uuid: nodeUuid, strokes: value, userId: clientSessionId }).toPromise()
           .then((r) => { if (r.error) console.error("sendSetField strokes error:", r.error.message); })
           .catch((err: unknown) => console.error("sendSetField strokes:", err));
         break;
       case "style.effects":
-        client.mutation(gql(SET_EFFECTS_MUTATION), { uuid: nodeUuid, effects: deepClone(value), userId: clientSessionId }).toPromise()
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client.mutation(gql(SET_EFFECTS_MUTATION), { uuid: nodeUuid, effects: value, userId: clientSessionId }).toPromise()
           .then((r) => { if (r.error) console.error("sendSetField effects error:", r.error.message); })
           .catch((err: unknown) => console.error("sendSetField effects:", err));
         break;

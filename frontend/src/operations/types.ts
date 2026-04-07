@@ -72,17 +72,23 @@ export interface ReparentValue {
 /**
  * Reorder operation value payload.
  * Stored in Operation.value for type="reorder".
+ *
+ * RF-002: Uses a unified `position` field so that createInverse (which swaps
+ * value/previousValue) produces a payload that applyReorder can always read
+ * without field-name mismatch.
  */
 export interface ReorderValue {
-  readonly newPosition: number;
+  readonly position: number;
 }
 
 /**
  * Reorder operation previousValue payload.
  * Stored in Operation.previousValue for type="reorder".
+ *
+ * RF-002: Uses the same `position` field as ReorderValue for symmetry.
  */
 export interface ReorderPreviousValue {
-  readonly oldPosition: number;
+  readonly position: number;
 }
 
 /** Maximum number of transactions in the undo or redo stack. */

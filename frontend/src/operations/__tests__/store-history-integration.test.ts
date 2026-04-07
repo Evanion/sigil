@@ -215,4 +215,58 @@ describe("StoreHistoryBridge", () => {
     expect(calls[0]).toBe("visible"); // inverse of op2 first
     expect(calls[1]).toBe("name");    // inverse of op1 second
   });
+
+  // ── rollbackLast (RF-001) ─────────────────────────────────────
+
+  describe("rollbackLast", () => {
+    it("should revert the last operation in the store without pushing to redo", () => {
+      const op = createSetFieldOp(USER_ID, "node-1", "name", "New Name", "Old Name");
+      bridge.applyAndTrack(op, "Rename");
+
+      setState.mockClear();
+      bridge.rollbackLast();
+
+      // Should have applied the inverse (set name back to "Old Name")
+      expect(setState).toHaveBeenCalledWith("nodes", "node-1", "name", "Old Name");
+      // Undo stack should be empty
+      expect(bridge.canUndo()).toBe(false);
+      // Redo stack should be empty — this is the key difference from undo()
+      expect(bridge.canRedo()).toBe(false);
+    });
+
+    it("should be a no-op when undo stack is empty", () => {
+      bridge.rollbackLast();
+      expect(setState).not.toHaveBeenCalled();
+      expect(bridge.canUndo()).toBe(false);
+      expect(bridge.canRedo()).toBe(false);
+    });
+
+    it("should not pollute redo stack even after multiple rollbacks", () => {
+      const op1 = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      const op2 = createSetFieldOp(USER_ID, "node-1", "name", "C", "B");
+      bridge.applyAndTrack(op1, "Step 1");
+      bridge.applyAndTrack(op2, "Step 2");
+
+      bridge.rollbackLast(); // Reverts "C" -> "B"
+      bridge.rollbackLast(); // Reverts "B" -> "A"
+
+      expect(bridge.canUndo()).toBe(false);
+      expect(bridge.canRedo()).toBe(false);
+    });
+
+    it("should not affect existing redo stack entries from prior undo()", () => {
+      const op1 = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      bridge.applyAndTrack(op1, "Step 1");
+      bridge.undo(); // Pushes to redo
+      expect(bridge.canRedo()).toBe(true);
+
+      // Apply a new operation then rollback
+      const op2 = createSetFieldOp(USER_ID, "node-1", "name", "C", "A");
+      bridge.applyAndTrack(op2, "Step 2"); // Clears redo (normal behavior)
+
+      bridge.rollbackLast();
+      // Redo was already cleared by applyAndTrack, so still empty
+      expect(bridge.canRedo()).toBe(false);
+    });
+  });
 });
