@@ -263,18 +263,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   const canUndo = () => history.canUndo();
   const canRedo = () => history.canRedo();
 
-  /**
-   * Mark undo/redo state after a successful mutation that was processed by
-   * doc.execute() on the server. Used by mutations not yet migrated to the
-   * Operation + HistoryManager pattern (createNode, deleteNode, reparentNode,
-   * reorderChildren, batchSetTransform, groupNodes, ungroupNodes).
-   * Will be removed when those methods are migrated in later tasks.
-   */
-  function markUndoAvailable(): void {
-    setState("info", "can_undo", true);
-    setState("info", "can_redo", false);
-  }
-
   // ── WebSocket client with connection tracking (RF-025) ──────────────
 
   const wsClient = createWSClient({
@@ -875,25 +863,20 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }
     }
 
-    // Capture previous values for rollback
-    const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
+    history.beginTransaction(`Align ${String(entries.length)} nodes`);
+
     for (const entry of entries) {
       const node = state.nodes[entry.uuid];
-      if (node?.transform) {
-        // JSON clone: Solid proxy not structuredClone-safe
-        rollbackEntries.push({ uuid: entry.uuid, transform: deepClone(node.transform) });
-      }
+      if (!node) continue;
+      // JSON clone: Solid proxy not structuredClone-safe
+      const previous = deepClone(node.transform);
+      const op = createSetFieldOp(clientSessionId, entry.uuid, "transform", entry.transform, previous);
+      history.applyInTransaction(op);
     }
 
-    // Optimistic update: apply all transforms immediately
-    batch(() => {
-      for (const entry of entries) {
-        if (state.nodes[entry.uuid]) {
-          setState("nodes", entry.uuid, "transform", entry.transform);
-        }
-      }
-    });
+    history.commitTransaction();
 
+    // Send batch to server
     client
       .mutation(gql(BATCH_SET_TRANSFORM_MUTATION), {
         entries: entries.map((e) => ({
@@ -906,18 +889,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("batchSetTransform error:", r.error.message);
-          batch(() => {
-            for (const entry of rollbackEntries) {
-              if (state.nodes[entry.uuid]) {
-                setState("nodes", entry.uuid, "transform", entry.transform);
-              }
-            }
-          });
+          history.undo();
         } else {
-          // Any successful mutation that goes through doc.execute() enables undo.
-          // Self-echo suppression skips the subscription refetch for our own
-          // mutations, so we must update can_undo/can_redo optimistically here.
-          markUndoAvailable();
           // Reconcile with server-canonical values
           const data = r.data as Record<string, unknown> | undefined;
           const results = data?.batchSetTransform as Array<Record<string, unknown>> | undefined;
@@ -936,22 +909,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       })
       .catch((err: unknown) => {
         console.error("batchSetTransform exception:", err);
-        batch(() => {
-          for (const entry of rollbackEntries) {
-            if (state.nodes[entry.uuid]) {
-              setState("nodes", entry.uuid, "transform", entry.transform);
-            }
-          }
-        });
+        history.undo();
       });
   }
 
-  // RF-005 optimistic update deferred: Grouping creates a new node requiring
-  // server-generated UUID. Ungrouping involves complex tree reparenting. Both
-  // are discrete one-shot operations (Ctrl+G), not continuous drag operations.
-  // Subscription handler triggers refetch within one round-trip. Full optimistic
-  // implementation deferred to reduce complexity — latency is bounded and
-  // acceptable for the action frequency.
+  // NOTE: groupNodes cannot be fully optimistic because the server creates
+  // the group node with a new UUID. We track a placeholder operation after
+  // server response and refetch so undo knows about it. Full undo support
+  // deferred to Phase 15d when the server accepts operation-based mutations.
   function groupNodes(uuids: string[], name: string): void {
     client
       .mutation(gql(GROUP_NODES_MUTATION), { uuids, name, userId: clientSessionId })
@@ -961,10 +926,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("groupNodes error:", r.error.message);
           return;
         }
-        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const groupUuid = data?.groupNodes as string | undefined;
         if (groupUuid) {
+          // After server response, refetch to get complete state, then track
+          void fetchPages().then(() => {
+            // Track a create_node operation for the group so undo knows about it
+            const groupNode = state.nodes[groupUuid];
+            if (groupNode) {
+              const op = createCreateNodeOp(clientSessionId, deepClone(groupNode));
+              history.applyAndTrack(op, `Group ${name}`);
+            }
+          });
           setSelectedNodeIds([groupUuid]);
         }
       })
@@ -973,8 +946,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
-  // RF-005 optimistic update deferred: see groupNodes comment above.
+  // NOTE: ungroupNodes is server-driven like groupNodes. We track a
+  // placeholder delete_node operation after refetch so undo knows what
+  // happened. Full undo support deferred to Phase 15d.
   function ungroupNodes(uuids: string[]): void {
+    // Capture group node snapshots before the server deletes them
+    const groupSnapshots: Array<{ uuid: string; snapshot: Record<string, unknown> }> = [];
+    for (const uuid of uuids) {
+      const node = state.nodes[uuid];
+      if (node) {
+        groupSnapshots.push({ uuid, snapshot: deepClone(node) as Record<string, unknown> });
+      }
+    }
+
     client
       .mutation(gql(UNGROUP_NODES_MUTATION), { uuids, userId: clientSessionId })
       .toPromise()
@@ -983,12 +967,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("ungroupNodes error:", r.error.message);
           return;
         }
-        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const childUuids = data?.ungroupNodes as string[] | undefined;
         if (childUuids && childUuids.length > 0) {
           setSelectedNodeIds(childUuids.filter(Boolean));
         }
+        // After server response, refetch to get complete state, then track
+        void fetchPages().then(() => {
+          // Track delete_node operations for the removed groups so undo knows
+          for (const group of groupSnapshots) {
+            const op = createDeleteNodeOp(clientSessionId, group.uuid, group.snapshot);
+            history.applyAndTrack(op, `Ungroup ${(group.snapshot["name"] as string) ?? "nodes"}`);
+          }
+        });
       })
       .catch((err: unknown) => {
         console.error("ungroupNodes exception:", err);

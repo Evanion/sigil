@@ -606,3 +606,145 @@ describe("mutation operations — structural mutations (Task 5)", () => {
     });
   });
 });
+
+describe("mutation operations — multi-node mutations (Task 6)", () => {
+  let historyManager: HistoryManager;
+  let setState: ReturnType<typeof vi.fn>;
+  let reader: StoreStateReader;
+  let history: StoreHistoryBridge;
+  let nodes: Record<string, Record<string, unknown>>;
+
+  beforeEach(() => {
+    historyManager = new HistoryManager(TEST_USER_ID);
+    setState = vi.fn();
+    nodes = {
+      "node-1": makeTestNode(),
+      "node-2": makeTestNode({
+        uuid: "node-2",
+        name: "Rectangle 2",
+        transform: { x: 100, y: 100, width: 50, height: 50, rotation: 0, scale_x: 1, scale_y: 1 },
+      }),
+      "node-3": makeTestNode({
+        uuid: "node-3",
+        name: "Rectangle 3",
+        transform: { x: 200, y: 200, width: 75, height: 75, rotation: 0, scale_x: 1, scale_y: 1 },
+      }),
+    };
+    reader = {
+      getNode: (uuid: string) => nodes[uuid] as Record<string, unknown> | undefined,
+    };
+    history = createStoreHistoryBridge(historyManager, setState, reader);
+  });
+
+  describe("batchSetTransform — transaction tracking", () => {
+    it("should wrap N transforms in a single transaction", () => {
+      const newT1 = { x: 10, y: 10, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newT2 = { x: 20, y: 20, width: 50, height: 50, rotation: 0, scale_x: 1, scale_y: 1 };
+
+      history.beginTransaction(`Align ${String(2)} nodes`);
+
+      const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newT1, deepClone(nodes["node-1"]["transform"]));
+      history.applyInTransaction(op1);
+
+      const op2 = createSetFieldOp(TEST_USER_ID, "node-2", "transform", newT2, deepClone(nodes["node-2"]["transform"]));
+      history.applyInTransaction(op2);
+
+      history.commitTransaction();
+
+      // Both ops applied to store
+      expect(setState).toHaveBeenCalledWith("nodes", "node-1", "transform", newT1);
+      expect(setState).toHaveBeenCalledWith("nodes", "node-2", "transform", newT2);
+
+      // Only one undo step
+      expect(history.canUndo()).toBe(true);
+    });
+
+    it("should revert all transforms with single undo", () => {
+      const originalT1 = deepClone(nodes["node-1"]["transform"]);
+      const originalT2 = deepClone(nodes["node-2"]["transform"]);
+      const newT1 = { x: 10, y: 10, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newT2 = { x: 20, y: 20, width: 50, height: 50, rotation: 0, scale_x: 1, scale_y: 1 };
+
+      history.beginTransaction("Align 2 nodes");
+
+      const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newT1, originalT1);
+      history.applyInTransaction(op1);
+
+      const op2 = createSetFieldOp(TEST_USER_ID, "node-2", "transform", newT2, originalT2);
+      history.applyInTransaction(op2);
+
+      history.commitTransaction();
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      // Inverse transaction should have 2 ops in reverse order
+      expect(inverseTx.operations).toHaveLength(2);
+
+      // After undo, previous values should be restored
+      expect(setState).toHaveBeenCalledWith("nodes", "node-2", "transform", originalT2);
+      expect(setState).toHaveBeenCalledWith("nodes", "node-1", "transform", originalT1);
+
+      expect(history.canUndo()).toBe(false);
+      expect(history.canRedo()).toBe(true);
+    });
+  });
+
+  describe("groupNodes — operation tracking", () => {
+    it("should create a create_node operation for tracking group creation", () => {
+      // groupNodes is server-driven, but after the server responds and refetch
+      // completes, we track a create_node op so undo knows about it.
+      const groupData = {
+        uuid: "group-uuid",
+        name: "Group 1",
+        kind: { type: "frame" },
+        transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 },
+        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        visible: true,
+        locked: false,
+        parentUuid: null,
+        childrenUuids: ["node-1", "node-2"],
+      };
+
+      const op = createCreateNodeOp(TEST_USER_ID, groupData);
+      history.applyAndTrack(op, "Group Group 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      expect(inverseTx.operations[0].type).toBe("delete_node");
+    });
+  });
+
+  describe("ungroupNodes — operation tracking", () => {
+    it("should create a delete_node operation for tracking ungroup", () => {
+      // ungroupNodes is server-driven. After refetch, we track a delete_node
+      // op for the removed group so undo can restore it.
+      const groupSnapshot = {
+        uuid: "group-uuid",
+        name: "Group 1",
+        kind: { type: "frame" },
+        childrenUuids: ["node-1", "node-2"],
+      };
+
+      const op = createDeleteNodeOp(TEST_USER_ID, "group-uuid", groupSnapshot);
+      history.applyAndTrack(op, "Ungroup Group 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      expect(inverseTx.operations[0].type).toBe("create_node");
+      expect(inverseTx.operations[0].value).toEqual(groupSnapshot);
+    });
+  });
+});
