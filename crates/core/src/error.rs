@@ -57,20 +57,6 @@ pub enum CoreError {
 
     #[error("page not found: {0:?}")]
     PageNotFound(PageId),
-
-    #[error("nothing to undo")]
-    NothingToUndo,
-
-    #[error("nothing to redo")]
-    NothingToRedo,
-
-    #[error(
-        "rollback failed during compound command: original error: {original}, rollback errors: {rollback_errors:?}"
-    )]
-    RollbackFailed {
-        original: Box<CoreError>,
-        rollback_errors: Vec<CoreError>,
-    },
 }
 
 #[cfg(test)]
@@ -200,19 +186,5 @@ mod tests {
         };
         let b = a;
         assert_eq!(a, b); // a is still usable — Copy
-    }
-
-    #[test]
-    fn test_nothing_to_undo_error() {
-        let err = CoreError::NothingToUndo;
-        let msg = format!("{err}");
-        assert!(msg.contains("nothing to undo"), "expected message: {msg}");
-    }
-
-    #[test]
-    fn test_nothing_to_redo_error() {
-        let err = CoreError::NothingToRedo;
-        let msg = format!("{err}");
-        assert!(msg.contains("nothing to redo"), "expected message: {msg}");
     }
 }
