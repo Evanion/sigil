@@ -47,14 +47,6 @@ export const SET_LOCKED_MUTATION = `
   }
 `;
 
-export const UNDO_MUTATION = `
-  mutation Undo($userId: String) { undo(userId: $userId) { canUndo canRedo } }
-`;
-
-export const REDO_MUTATION = `
-  mutation Redo($userId: String) { redo(userId: $userId) { canUndo canRedo } }
-`;
-
 export const REPARENT_NODE_MUTATION = `
   mutation ReparentNode($uuid: String!, $newParentUuid: String!, $position: Int!, $userId: String) {
     reparentNode(uuid: $uuid, newParentUuid: $newParentUuid, position: $position, userId: $userId) {

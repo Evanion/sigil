@@ -105,8 +105,11 @@ export function createReorderOp(
   newPosition: number,
   oldPosition: number,
 ): Operation {
-  const value: ReorderValue = { newPosition };
-  const previousValue: ReorderPreviousValue = { oldPosition };
+  // RF-002: Both value and previousValue use the unified `position` field
+  // so that createInverse (which swaps value/previousValue) produces a
+  // payload that applyReorder can always read without field-name mismatch.
+  const value: ReorderValue = { position: newPosition };
+  const previousValue: ReorderPreviousValue = { position: oldPosition };
   return makeOp(userId, nodeUuid, "reorder", "", value, previousValue);
 }
 

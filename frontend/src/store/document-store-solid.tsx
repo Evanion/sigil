@@ -22,8 +22,6 @@ import {
   SET_TRANSFORM_MUTATION,
   SET_VISIBLE_MUTATION,
   SET_LOCKED_MUTATION,
-  UNDO_MUTATION,
-  REDO_MUTATION,
   REPARENT_NODE_MUTATION,
   REORDER_CHILDREN_MUTATION,
   SET_OPACITY_MUTATION,
@@ -36,8 +34,19 @@ import {
   GROUP_NODES_MUTATION,
   UNGROUP_NODES_MUTATION,
 } from "../graphql/mutations";
+import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
+import { HistoryManager } from "../operations/history-manager";
+import { createStoreHistoryBridge } from "../operations/store-history";
+import {
+  createSetFieldOp,
+  createCreateNodeOp,
+  createDeleteNodeOp,
+  createReparentOp,
+  createReorderOp,
+} from "../operations/operation-helpers";
+import type { StoreStateReader } from "../operations/apply-to-store";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -110,6 +119,11 @@ export interface DocumentStoreAPI {
   undo(): void;
   redo(): void;
 
+  // Drag coalescing
+  beginDrag(nodeUuid: string, path: string): void;
+  commitDrag(): void;
+  cancelDrag(): void;
+
   // Lifecycle
   destroy(): void;
 }
@@ -117,7 +131,6 @@ export interface DocumentStoreAPI {
 // ── Constants ─────────────────────────────────────────────────────────
 
 const PLACEHOLDER_NODE_ID: NodeId = { index: 0, generation: 0 };
-const DEBOUNCE_MS = 100;
 const MAX_NODE_NAME_LENGTH = 1024;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -225,6 +238,68 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     nodes: {},
   });
 
+  // ── History Manager ───────────────────────────────────────────────────
+  const historyManager = new HistoryManager(clientSessionId);
+  const storeReader: StoreStateReader = {
+    getNode: (uuid: string) => state.nodes[uuid] as Record<string, unknown> | undefined,
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DocumentState is structurally compatible with StoreStateSetter
+  const rawBridge = createStoreHistoryBridge(historyManager, setState as any, storeReader);
+
+  // RF-012: Wrap bridge so every history-mutating method syncs the reactive signals.
+  // This avoids adding syncHistorySignals() to 30+ individual call sites.
+  const history: typeof rawBridge = {
+    applyAndTrack(op, description) {
+      rawBridge.applyAndTrack(op, description);
+      syncHistorySignals();
+    },
+    rollbackLast() {
+      rawBridge.rollbackLast();
+      syncHistorySignals();
+    },
+    beginTransaction(description) {
+      rawBridge.beginTransaction(description);
+    },
+    applyInTransaction(op) {
+      rawBridge.applyInTransaction(op);
+    },
+    commitTransaction() {
+      rawBridge.commitTransaction();
+      syncHistorySignals();
+    },
+    cancelTransaction() {
+      rawBridge.cancelTransaction();
+      syncHistorySignals();
+    },
+    beginDrag(nodeUuid, path) {
+      rawBridge.beginDrag(nodeUuid, path);
+    },
+    updateDrag(op) {
+      rawBridge.updateDrag(op);
+    },
+    commitDrag() {
+      const result = rawBridge.commitDrag();
+      syncHistorySignals();
+      return result;
+    },
+    cancelDrag() {
+      rawBridge.cancelDrag();
+      syncHistorySignals();
+    },
+    undo() {
+      const result = rawBridge.undo();
+      syncHistorySignals();
+      return result;
+    },
+    redo() {
+      const result = rawBridge.redo();
+      syncHistorySignals();
+      return result;
+    },
+    canUndo: rawBridge.canUndo,
+    canRedo: rawBridge.canRedo,
+  };
+
   // UI signals — multi-select with backwards-compatible single-select accessors
   const [selectedNodeIds, setSelectedNodeIds] = createSignal<string[]>([]);
   const selectedNodeId = (): string | null => selectedNodeIds()[0] ?? null;
@@ -242,20 +317,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   });
   const [connected, setConnected] = createSignal(false);
 
-  // Derived
-  const canUndo = () => state.info.can_undo;
-  const canRedo = () => state.info.can_redo;
-
-  /**
-   * Mark undo/redo state after a successful mutation that was processed by
-   * doc.execute() on the server. Self-echo suppression (RF-004) skips the
-   * subscription refetch for our own mutations, so the client must update
-   * can_undo/can_redo optimistically after every successful mutation.
-   */
-  function markUndoAvailable(): void {
-    setState("info", "can_undo", true);
-    setState("info", "can_redo", false);
+  // RF-012: Reactive undo/redo availability signals.
+  // HistoryManager is a plain class — its canUndo()/canRedo() don't trigger Solid reactivity.
+  // We maintain signals that the bridge updates after every history-mutating operation.
+  const [canUndoSignal, setCanUndoSignal] = createSignal(false);
+  const [canRedoSignal, setCanRedoSignal] = createSignal(false);
+  /** Sync the reactive signals with the current HistoryManager state. */
+  function syncHistorySignals(): void {
+    setCanUndoSignal(historyManager.canUndo());
+    setCanRedoSignal(historyManager.canRedo());
   }
+  const canUndo = canUndoSignal;
+  const canRedo = canRedoSignal;
 
   // ── WebSocket client with connection tracking (RF-025) ──────────────
 
@@ -349,33 +422,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // ── Mutations ────────────────────────────────────────────────────────
 
+  // TODO(RF-005): createNode redo UUID mismatch — when a createNode is undone then
+  // redone, the redo re-applies the operation with the original optimistic UUID, but
+  // the server will assign a new UUID. The redo path needs to handle UUID remapping
+  // similar to the initial create success handler. Deferred to Phase 15d.
   function createNode(kind: NodeKind, name: string, transform: Transform): string {
     const optimisticUuid = crypto.randomUUID();
     const pageId = state.pages[0]?.id ?? null;
 
-    // Optimistic insert
-    setState("nodes", optimisticUuid, {
-      id: PLACEHOLDER_NODE_ID,
+    const nodeData = {
       uuid: optimisticUuid,
       kind,
       name: name.slice(0, MAX_NODE_NAME_LENGTH),
-      parent: null,
-      children: [],
       transform,
       style: {
         fills: [],
         strokes: [],
-        opacity: { type: "literal", value: 1 },
-        blend_mode: "normal",
+        opacity: { type: "literal" as const, value: 1 },
+        blend_mode: "normal" as const,
         effects: [],
       },
-      constraints: { horizontal: "start", vertical: "start" },
-      grid_placement: null,
       visible: true,
       locked: false,
       parentUuid: null,
       childrenUuids: [],
-    } satisfies MutableDocumentNode);
+    };
+
+    const op = createCreateNodeOp(clientSessionId, nodeData);
+    history.applyAndTrack(op, `Create ${name}`);
 
     client
       .mutation(gql(CREATE_NODE_MUTATION), {
@@ -389,12 +463,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((result) => {
         if (result.error) {
           console.error("createNode error:", result.error.message);
-          // Remove optimistic node
-          setState(
-            produce((s) => {
-              Reflect.deleteProperty(s.nodes, optimisticUuid);
-            }),
-          );
+          history.rollbackLast();
           const filteredAfterError = selectedNodeIds().filter((id) => id !== optimisticUuid);
           if (filteredAfterError.length !== selectedNodeIds().length) {
             setSelectedNodeIds(filteredAfterError);
@@ -423,16 +492,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
           });
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("createNode exception:", err);
-        // Revert optimistic state
-        setState(
-          produce((s) => {
-            Reflect.deleteProperty(s.nodes, optimisticUuid);
-          }),
-        );
+        history.rollbackLast();
         const filteredAfterCatch = selectedNodeIds().filter((id) => id !== optimisticUuid);
         if (filteredAfterCatch.length !== selectedNodeIds().length) {
           setSelectedNodeIds(filteredAfterCatch);
@@ -442,13 +505,20 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     return optimisticUuid;
   }
 
+  // RF-003: setTransform is called once per drag on pointerUp (not during drag),
+  // so the applyAndTrack call creates exactly one undo entry per drag. The select
+  // tool uses local preview transforms during drag, not store mutations.
   function setTransform(uuid: string, transform: Transform): void {
-    // RF-003: Capture previous value for rollback
     const node = state.nodes[uuid];
-    const previousTransform = node?.transform ? { ...node.transform } : undefined;
+    if (!node) return;
+    // RF-007: Transform is a flat 7-number struct — shallow spread is sufficient,
+    // no need for deepClone's JSON round-trip overhead.
+    const previous = { ...node.transform };
 
-    // Optimistic update
-    setState("nodes", uuid, "transform", transform);
+    const op = createSetFieldOp(clientSessionId, uuid, "transform", transform, previous);
+    history.applyAndTrack(op, `Move ${node.name}`);
+
+    // Send to server (existing mutation — server compat during transition)
     client
       .mutation(gql(SET_TRANSFORM_MUTATION), {
         uuid,
@@ -459,60 +529,49 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setTransform error:", r.error.message);
-          // RF-003: Revert optimistic update
-          if (previousTransform && state.nodes[uuid]) {
-            setState("nodes", uuid, "transform", previousTransform);
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setTransform exception:", err);
-        if (previousTransform && state.nodes[uuid]) {
-          setState("nodes", uuid, "transform", previousTransform);
-        }
+        history.rollbackLast();
       });
   }
 
   function renameNode(uuid: string, newName: string): void {
-    // RF-003: Capture previous value for rollback
-    const previousName = state.nodes[uuid]?.name;
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const previous = node.name;
 
-    setState("nodes", uuid, "name", newName);
+    const op = createSetFieldOp(clientSessionId, uuid, "name", newName, previous);
+    history.applyAndTrack(op, `Rename ${previous} to ${newName}`);
+
     client
       .mutation(gql(RENAME_NODE_MUTATION), { uuid, newName, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
           console.error("renameNode error:", r.error.message);
-          if (previousName !== undefined && state.nodes[uuid]) {
-            setState("nodes", uuid, "name", previousName);
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("renameNode exception:", err);
-        if (previousName !== undefined && state.nodes[uuid]) {
-          setState("nodes", uuid, "name", previousName);
-        }
+        history.rollbackLast();
       });
   }
 
   function deleteNode(uuid: string): void {
-    // RF-003: Capture full node and selection for rollback
-    const previousNode = state.nodes[uuid]
-      ? (deepClone(state.nodes[uuid]) as MutableDocumentNode)
-      : undefined;
+    const node = state.nodes[uuid];
+    if (!node) return;
+
+    const previousNode = deepClone(node);
     const previousSelectedId = selectedNodeId();
 
-    setState(
-      produce((s) => {
-        Reflect.deleteProperty(s.nodes, uuid);
-      }),
-    );
+    const op = createDeleteNodeOp(clientSessionId, uuid, previousNode);
+    history.applyAndTrack(op, `Delete ${node.name}`);
+
+    // Clear selection if the deleted node was selected
     const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
     if (filteredIds.length !== selectedNodeIds().length) {
       setSelectedNodeIds(filteredIds);
@@ -524,115 +583,89 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("deleteNode error:", r.error.message);
-          // RF-003: Restore deleted node
-          if (previousNode) {
-            setState("nodes", uuid, previousNode);
-            if (previousSelectedId === uuid) {
-              setSelectedNodeId(previousSelectedId);
-            }
-          }
-          return;
-        }
-        markUndoAvailable();
-      })
-      .catch((err: unknown) => {
-        console.error("deleteNode exception:", err);
-        if (previousNode) {
-          setState("nodes", uuid, previousNode);
+          history.rollbackLast();
           if (previousSelectedId === uuid) {
             setSelectedNodeId(previousSelectedId);
           }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("deleteNode exception:", err);
+        history.rollbackLast();
+        if (previousSelectedId === uuid) {
+          setSelectedNodeId(previousSelectedId);
         }
       });
   }
 
   function setVisible(uuid: string, visible: boolean): void {
-    // RF-003: Capture previous value for rollback
-    const previousVisible = state.nodes[uuid]?.visible;
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const previous = node.visible;
 
-    setState("nodes", uuid, "visible", visible);
+    const op = createSetFieldOp(clientSessionId, uuid, "visible", visible, previous);
+    history.applyAndTrack(op, `${visible ? "Show" : "Hide"} ${node.name}`);
+
     client
       .mutation(gql(SET_VISIBLE_MUTATION), { uuid, visible, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
           console.error("setVisible error:", r.error.message);
-          if (previousVisible !== undefined && state.nodes[uuid]) {
-            setState("nodes", uuid, "visible", previousVisible);
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setVisible exception:", err);
-        if (previousVisible !== undefined && state.nodes[uuid]) {
-          setState("nodes", uuid, "visible", previousVisible);
-        }
+        history.rollbackLast();
       });
   }
 
   function setLocked(uuid: string, locked: boolean): void {
-    // RF-003: Capture previous value for rollback
-    const previousLocked = state.nodes[uuid]?.locked;
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const previous = node.locked;
 
-    setState("nodes", uuid, "locked", locked);
+    const op = createSetFieldOp(clientSessionId, uuid, "locked", locked, previous);
+    history.applyAndTrack(op, `${locked ? "Lock" : "Unlock"} ${node.name}`);
+
     client
       .mutation(gql(SET_LOCKED_MUTATION), { uuid, locked, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
           console.error("setLocked error:", r.error.message);
-          if (previousLocked !== undefined && state.nodes[uuid]) {
-            setState("nodes", uuid, "locked", previousLocked);
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setLocked exception:", err);
-        if (previousLocked !== undefined && state.nodes[uuid]) {
-          setState("nodes", uuid, "locked", previousLocked);
-        }
+        history.rollbackLast();
       });
   }
 
   function reparentNode(uuid: string, newParentUuid: string, position: number): void {
     if (!Number.isFinite(position)) return;
-
-    // Capture previous state for rollback
     const node = state.nodes[uuid];
     if (!node) return;
+
     const oldParentUuid = node.parentUuid;
-    const oldParentChildren = oldParentUuid
-      ? [...(state.nodes[oldParentUuid]?.childrenUuids ?? [])]
-      : [];
-    const newParentChildren = [...(state.nodes[newParentUuid]?.childrenUuids ?? [])];
     const clampedPos = Math.max(0, Math.round(position));
 
-    // Optimistic update: move node from old parent to new parent
-    setState(
-      produce((s) => {
-        // Remove from old parent's childrenUuids
-        if (oldParentUuid && s.nodes[oldParentUuid]) {
-          s.nodes[oldParentUuid].childrenUuids = s.nodes[oldParentUuid].childrenUuids.filter(
-            (c: string) => c !== uuid,
-          );
-        }
-        // Insert into new parent's childrenUuids
-        if (s.nodes[newParentUuid]) {
-          const children = s.nodes[newParentUuid].childrenUuids.filter((c: string) => c !== uuid);
-          const insertAt = Math.min(clampedPos, children.length);
-          children.splice(insertAt, 0, uuid);
-          s.nodes[newParentUuid].childrenUuids = children;
-        }
-        // Update node's parentUuid
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].parentUuid = newParentUuid;
-        }
-      }),
+    // Determine old position within old parent
+    const oldPosition = oldParentUuid
+      ? (state.nodes[oldParentUuid]?.childrenUuids ?? []).indexOf(uuid)
+      : 0;
+
+    const op = createReparentOp(
+      clientSessionId,
+      uuid,
+      newParentUuid,
+      clampedPos,
+      oldParentUuid ?? "",
+      Math.max(0, oldPosition),
     );
+    history.applyAndTrack(op, `Move ${node.name}`);
 
     client
       .mutation(gql(REPARENT_NODE_MUTATION), {
@@ -645,52 +678,29 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reparentNode error:", r.error.message);
-          // Rollback: restore previous parent relationships
-          setState(
-            produce((s) => {
-              if (oldParentUuid && s.nodes[oldParentUuid]) {
-                s.nodes[oldParentUuid].childrenUuids = oldParentChildren;
-              }
-              if (s.nodes[newParentUuid]) {
-                s.nodes[newParentUuid].childrenUuids = newParentChildren;
-              }
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].parentUuid = oldParentUuid;
-              }
-            }),
-          );
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
-        void fetchPages();
+        history.rollbackLast();
       });
   }
 
   function reorderChildren(uuid: string, newPosition: number): void {
     if (!Number.isFinite(newPosition)) return;
-
-    // Capture previous state for rollback
     const node = state.nodes[uuid];
     if (!node) return;
     const parentUuid = node.parentUuid;
     if (!parentUuid) return;
-    const previousChildren = [...(state.nodes[parentUuid]?.childrenUuids ?? [])];
+
     const clampedPos = Math.max(0, Math.round(newPosition));
 
-    // Optimistic update: reorder within parent's childrenUuids
-    setState(
-      produce((s) => {
-        if (s.nodes[parentUuid]) {
-          const children = s.nodes[parentUuid].childrenUuids.filter((c: string) => c !== uuid);
-          const insertAt = Math.min(clampedPos, children.length);
-          children.splice(insertAt, 0, uuid);
-          s.nodes[parentUuid].childrenUuids = children;
-        }
-      }),
-    );
+    // Determine old position within parent
+    const oldPosition = (state.nodes[parentUuid]?.childrenUuids ?? []).indexOf(uuid);
+
+    const op = createReorderOp(clientSessionId, uuid, clampedPos, Math.max(0, oldPosition));
+    history.applyAndTrack(op, `Reorder ${node.name}`);
 
     client
       .mutation(gql(REORDER_CHILDREN_MUTATION), {
@@ -702,43 +712,32 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reorderChildren error:", r.error.message);
-          // Rollback: restore previous children order
-          setState(
-            produce((s) => {
-              if (s.nodes[parentUuid]) {
-                s.nodes[parentUuid].childrenUuids = previousChildren;
-              }
-            }),
-          );
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
-        void fetchPages();
+        history.rollbackLast();
       });
   }
 
   function setOpacity(uuid: string, opacity: number): void {
     if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return;
 
-    // Snapshot previous value for rollback
-    const previousOpacity = state.nodes[uuid]?.style?.opacity
-      ? deepClone(state.nodes[uuid].style.opacity)
-      : undefined;
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const previousOpacity = node.style?.opacity
+      ? deepClone(node.style.opacity)
+      : { type: "literal" as const, value: 1 };
 
-    // Optimistic update
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].style = {
-            ...s.nodes[uuid].style,
-            opacity: { type: "literal", value: opacity },
-          };
-        }
-      }),
+    const op = createSetFieldOp(
+      clientSessionId,
+      uuid,
+      "style.opacity",
+      { type: "literal", value: opacity },
+      previousOpacity,
     );
+    history.applyAndTrack(op, `Set opacity on ${node.name}`);
 
     client
       .mutation(gql(SET_OPACITY_MUTATION), { uuid, opacity, userId: clientSessionId })
@@ -746,45 +745,22 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setOpacity error:", r.error.message);
-          if (previousOpacity !== undefined && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, opacity: previousOpacity };
-                }
-              }),
-            );
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setOpacity exception:", err);
-        if (previousOpacity !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, opacity: previousOpacity };
-              }
-            }),
-          );
-        }
+        history.rollbackLast();
       });
   }
 
   function setBlendMode(uuid: string, blendMode: BlendMode): void {
-    // Snapshot previous value for rollback
-    const previousBlendMode = state.nodes[uuid]?.style?.blend_mode;
+    const node = state.nodes[uuid];
+    if (!node) return;
+    const previous = node.style?.blend_mode ?? "normal";
 
-    // Optimistic update
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: blendMode };
-        }
-      }),
-    );
+    const op = createSetFieldOp(clientSessionId, uuid, "style.blend_mode", blendMode, previous);
+    history.applyAndTrack(op, `Set blend mode on ${node.name}`);
 
     client
       .mutation(gql(SET_BLEND_MODE_MUTATION), { uuid, blendMode, userId: clientSessionId })
@@ -792,39 +768,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setBlendMode error:", r.error.message);
-          if (previousBlendMode !== undefined && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: previousBlendMode };
-                }
-              }),
-            );
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setBlendMode exception:", err);
-        if (previousBlendMode !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].style = { ...s.nodes[uuid].style, blend_mode: previousBlendMode };
-              }
-            }),
-          );
-        }
+        history.rollbackLast();
       });
   }
 
-  // Debounce timers and rollback snapshots for style mutations
-  // (prevents 60Hz network spam during drag while preserving rollback)
-  let fillsMutationTimer: ReturnType<typeof setTimeout> | null = null;
-  let fillsRollbackSnapshot: Fill[] | null = null;
-
   function setFills(uuid: string, fills: Fill[]): void {
+    const node = state.nodes[uuid];
+    if (!node) return;
+
     let clonedFills: Fill[];
     try {
       clonedFills = deepClone(fills);
@@ -833,80 +789,30 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Capture rollback snapshot on first call of debounce window
-    if (fillsMutationTimer === null) {
-      try {
-        fillsRollbackSnapshot = state.nodes[uuid]?.style?.fills
-          ? (deepClone(state.nodes[uuid].style.fills) as Fill[])
-          : [];
-      } catch {
-        fillsRollbackSnapshot = [];
-      }
-    }
+    const previousFills = node.style?.fills ? deepClone(node.style.fills) : [];
 
-    // Optimistic update (instant — no network delay)
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].style = {
-            ...s.nodes[uuid].style,
-            fills: clonedFills,
-          } as (typeof s.nodes)[string]["style"];
+    const op = createSetFieldOp(clientSessionId, uuid, "style.fills", clonedFills, previousFills);
+    history.applyAndTrack(op, `Update fills on ${node.name}`);
+
+    client
+      .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills, userId: clientSessionId })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setFills error:", r.error.message);
+          history.rollbackLast();
         }
-      }),
-    );
-
-    // Debounce the mutation — only send after 100ms of inactivity
-    if (fillsMutationTimer) clearTimeout(fillsMutationTimer);
-    const snapshot = fillsRollbackSnapshot;
-    fillsMutationTimer = setTimeout(() => {
-      fillsMutationTimer = null;
-      fillsRollbackSnapshot = null;
-      client
-        .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills, userId: clientSessionId })
-        .toPromise()
-        .then((r) => {
-          if (r.error) {
-            console.error("setFills error:", r.error.message);
-            // Rollback to pre-debounce-window state
-            if (snapshot && state.nodes[uuid]) {
-              setState(
-                produce((s) => {
-                  if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = {
-                      ...s.nodes[uuid].style,
-                      fills: snapshot,
-                    } as (typeof s.nodes)[string]["style"];
-                  }
-                }),
-              );
-            }
-            return;
-          }
-          markUndoAvailable();
-        })
-        .catch((err: unknown) => {
-          console.error("setFills exception:", err);
-          if (snapshot && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = {
-                    ...s.nodes[uuid].style,
-                    fills: snapshot,
-                  } as (typeof s.nodes)[string]["style"];
-                }
-              }),
-            );
-          }
-        });
-    }, DEBOUNCE_MS);
+      })
+      .catch((err: unknown) => {
+        console.error("setFills exception:", err);
+        history.rollbackLast();
+      });
   }
 
-  let strokesMutationTimer: ReturnType<typeof setTimeout> | null = null;
-  let strokesRollbackSnapshot: Stroke[] | null = null;
-
   function setStrokes(uuid: string, strokes: Stroke[]): void {
+    const node = state.nodes[uuid];
+    if (!node) return;
+
     let clonedStrokes: Stroke[];
     try {
       clonedStrokes = deepClone(strokes);
@@ -915,83 +821,40 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Capture rollback snapshot on first call of debounce window
-    if (strokesMutationTimer === null) {
-      try {
-        strokesRollbackSnapshot = state.nodes[uuid]?.style?.strokes
-          ? (deepClone(state.nodes[uuid].style.strokes) as Stroke[])
-          : [];
-      } catch {
-        strokesRollbackSnapshot = [];
-      }
-    }
+    const previousStrokes = node.style?.strokes ? deepClone(node.style.strokes) : [];
 
-    // Optimistic update (instant — no network delay)
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].style = {
-            ...s.nodes[uuid].style,
-            strokes: clonedStrokes,
-          } as (typeof s.nodes)[string]["style"];
-        }
-      }),
+    const op = createSetFieldOp(
+      clientSessionId,
+      uuid,
+      "style.strokes",
+      clonedStrokes,
+      previousStrokes,
     );
+    history.applyAndTrack(op, `Update strokes on ${node.name}`);
 
-    // Debounce the mutation — only send after 100ms of inactivity
-    if (strokesMutationTimer) clearTimeout(strokesMutationTimer);
-    const snapshot = strokesRollbackSnapshot;
-    strokesMutationTimer = setTimeout(() => {
-      strokesMutationTimer = null;
-      strokesRollbackSnapshot = null;
-      client
-        .mutation(gql(SET_STROKES_MUTATION), {
-          uuid,
-          strokes: clonedStrokes,
-          userId: clientSessionId,
-        })
-        .toPromise()
-        .then((r) => {
-          if (r.error) {
-            console.error("setStrokes error:", r.error.message);
-            if (snapshot && state.nodes[uuid]) {
-              setState(
-                produce((s) => {
-                  if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = {
-                      ...s.nodes[uuid].style,
-                      strokes: snapshot,
-                    } as (typeof s.nodes)[string]["style"];
-                  }
-                }),
-              );
-            }
-            return;
-          }
-          markUndoAvailable();
-        })
-        .catch((err: unknown) => {
-          console.error("setStrokes exception:", err);
-          if (snapshot && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = {
-                    ...s.nodes[uuid].style,
-                    strokes: snapshot,
-                  } as (typeof s.nodes)[string]["style"];
-                }
-              }),
-            );
-          }
-        });
-    }, DEBOUNCE_MS);
+    client
+      .mutation(gql(SET_STROKES_MUTATION), {
+        uuid,
+        strokes: clonedStrokes,
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setStrokes error:", r.error.message);
+          history.rollbackLast();
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setStrokes exception:", err);
+        history.rollbackLast();
+      });
   }
 
-  let effectsMutationTimer: ReturnType<typeof setTimeout> | null = null;
-  let effectsRollbackSnapshot: Effect[] | null = null;
-
   function setEffects(uuid: string, effects: Effect[]): void {
+    const node = state.nodes[uuid];
+    if (!node) return;
+
     let clonedEffects: Effect[];
     try {
       clonedEffects = deepClone(effects);
@@ -1000,77 +863,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Capture rollback snapshot on first call of debounce window
-    if (effectsMutationTimer === null) {
-      try {
-        effectsRollbackSnapshot = state.nodes[uuid]?.style?.effects
-          ? (deepClone(state.nodes[uuid].style.effects) as Effect[])
-          : [];
-      } catch {
-        effectsRollbackSnapshot = [];
-      }
-    }
+    const previousEffects = node.style?.effects ? deepClone(node.style.effects) : [];
 
-    // Optimistic update (instant — no network delay)
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].style = {
-            ...s.nodes[uuid].style,
-            effects: clonedEffects,
-          } as (typeof s.nodes)[string]["style"];
-        }
-      }),
+    const op = createSetFieldOp(
+      clientSessionId,
+      uuid,
+      "style.effects",
+      clonedEffects,
+      previousEffects,
     );
+    history.applyAndTrack(op, `Update effects on ${node.name}`);
 
-    // Debounce the mutation — only send after 100ms of inactivity
-    if (effectsMutationTimer) clearTimeout(effectsMutationTimer);
-    const snapshot = effectsRollbackSnapshot;
-    effectsMutationTimer = setTimeout(() => {
-      effectsMutationTimer = null;
-      effectsRollbackSnapshot = null;
-      client
-        .mutation(gql(SET_EFFECTS_MUTATION), {
-          uuid,
-          effects: clonedEffects,
-          userId: clientSessionId,
-        })
-        .toPromise()
-        .then((r) => {
-          if (r.error) {
-            console.error("setEffects error:", r.error.message);
-            if (snapshot && state.nodes[uuid]) {
-              setState(
-                produce((s) => {
-                  if (s.nodes[uuid]) {
-                    s.nodes[uuid].style = {
-                      ...s.nodes[uuid].style,
-                      effects: snapshot,
-                    } as (typeof s.nodes)[string]["style"];
-                  }
-                }),
-              );
-            }
-            return;
-          }
-          markUndoAvailable();
-        })
-        .catch((err: unknown) => {
-          console.error("setEffects exception:", err);
-          if (snapshot && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].style = {
-                    ...s.nodes[uuid].style,
-                    effects: snapshot,
-                  } as (typeof s.nodes)[string]["style"];
-                }
-              }),
-            );
-          }
-        });
-    }, DEBOUNCE_MS);
+    client
+      .mutation(gql(SET_EFFECTS_MUTATION), {
+        uuid,
+        effects: clonedEffects,
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("setEffects error:", r.error.message);
+          history.rollbackLast();
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("setEffects exception:", err);
+        history.rollbackLast();
+      });
   }
 
   function setCornerRadii(uuid: string, radii: [number, number, number, number]): void {
@@ -1080,22 +900,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     // Early return if node is not a rectangle — before snapshot to avoid spurious mutations
-    const targetNode = state.nodes[uuid];
-    if (!targetNode || targetNode.kind.type !== "rectangle") return;
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "rectangle") return;
 
-    // Snapshot previous value for rollback
-    const previousKind = state.nodes[uuid]?.kind ? deepClone(state.nodes[uuid].kind) : undefined;
+    const previousKind = deepClone(node.kind);
+    const newKind = { ...previousKind, corner_radii: radii };
 
-    // Optimistic update — kind.type guard is required for TypeScript narrowing even
-    // though the early return above already guarantees we only reach this point for
-    // rectangle nodes; the produce draft is typed as the full NodeKind union.
-    setState(
-      produce((s) => {
-        if (s.nodes[uuid] && s.nodes[uuid].kind.type === "rectangle") {
-          s.nodes[uuid].kind = { ...s.nodes[uuid].kind, corner_radii: radii };
-        }
-      }),
-    );
+    const op = createSetFieldOp(clientSessionId, uuid, "kind", newKind, previousKind);
+    history.applyAndTrack(op, `Set corner radii on ${node.name}`);
 
     client
       .mutation(gql(SET_CORNER_RADII_MUTATION), {
@@ -1107,30 +919,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("setCornerRadii error:", r.error.message);
-          if (previousKind !== undefined && state.nodes[uuid]) {
-            setState(
-              produce((s) => {
-                if (s.nodes[uuid]) {
-                  s.nodes[uuid].kind = previousKind;
-                }
-              }),
-            );
-          }
-          return;
+          history.rollbackLast();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("setCornerRadii exception:", err);
-        if (previousKind !== undefined && state.nodes[uuid]) {
-          setState(
-            produce((s) => {
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].kind = previousKind;
-              }
-            }),
-          );
-        }
+        history.rollbackLast();
       });
   }
 
@@ -1154,25 +948,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }
     }
 
-    // Capture previous values for rollback
-    const rollbackEntries: Array<{ uuid: string; transform: Transform }> = [];
+    history.beginTransaction(`Align ${String(entries.length)} nodes`);
+
+    let opsAdded = 0;
     for (const entry of entries) {
       const node = state.nodes[entry.uuid];
-      if (node?.transform) {
-        // JSON clone: Solid proxy not structuredClone-safe
-        rollbackEntries.push({ uuid: entry.uuid, transform: deepClone(node.transform) });
-      }
+      if (!node) continue;
+      // JSON clone: Solid proxy not structuredClone-safe
+      const previous = deepClone(node.transform);
+      const op = createSetFieldOp(
+        clientSessionId,
+        entry.uuid,
+        "transform",
+        entry.transform,
+        previous,
+      );
+      history.applyInTransaction(op);
+      opsAdded++;
     }
 
-    // Optimistic update: apply all transforms immediately
-    batch(() => {
-      for (const entry of entries) {
-        if (state.nodes[entry.uuid]) {
-          setState("nodes", entry.uuid, "transform", entry.transform);
-        }
-      }
-    });
+    // RF-006: If no ops were added (all nodes missing), cancel the transaction
+    // to avoid an empty undo entry.
+    if (opsAdded === 0) {
+      history.cancelTransaction();
+      return;
+    }
+    history.commitTransaction();
 
+    // Send batch to server
     client
       .mutation(gql(BATCH_SET_TRANSFORM_MUTATION), {
         entries: entries.map((e) => ({
@@ -1185,18 +988,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("batchSetTransform error:", r.error.message);
-          batch(() => {
-            for (const entry of rollbackEntries) {
-              if (state.nodes[entry.uuid]) {
-                setState("nodes", entry.uuid, "transform", entry.transform);
-              }
-            }
-          });
+          history.rollbackLast();
         } else {
-          // Any successful mutation that goes through doc.execute() enables undo.
-          // Self-echo suppression skips the subscription refetch for our own
-          // mutations, so we must update can_undo/can_redo optimistically here.
-          markUndoAvailable();
           // Reconcile with server-canonical values
           const data = r.data as Record<string, unknown> | undefined;
           const results = data?.batchSetTransform as Array<Record<string, unknown>> | undefined;
@@ -1215,22 +1008,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       })
       .catch((err: unknown) => {
         console.error("batchSetTransform exception:", err);
-        batch(() => {
-          for (const entry of rollbackEntries) {
-            if (state.nodes[entry.uuid]) {
-              setState("nodes", entry.uuid, "transform", entry.transform);
-            }
-          }
-        });
+        history.rollbackLast();
       });
   }
 
-  // RF-005 optimistic update deferred: Grouping creates a new node requiring
-  // server-generated UUID. Ungrouping involves complex tree reparenting. Both
-  // are discrete one-shot operations (Ctrl+G), not continuous drag operations.
-  // Subscription handler triggers refetch within one round-trip. Full optimistic
-  // implementation deferred to reduce complexity — latency is bounded and
-  // acceptable for the action frequency.
+  // NOTE: groupNodes cannot be fully optimistic because the server creates
+  // the group node with a new UUID. We track a placeholder operation after
+  // server response and refetch so undo knows about it. Full undo support
+  // deferred to Phase 15d when the server accepts operation-based mutations.
   function groupNodes(uuids: string[], name: string): void {
     client
       .mutation(gql(GROUP_NODES_MUTATION), { uuids, name, userId: clientSessionId })
@@ -1240,10 +1025,21 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("groupNodes error:", r.error.message);
           return;
         }
-        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const groupUuid = data?.groupNodes as string | undefined;
         if (groupUuid) {
+          // After server response, refetch to get complete state, then track
+          void fetchPages().then(() => {
+            // RF-011: Track in history only — fetchPages already populated the store.
+            // Using historyManager.apply() instead of history.applyAndTrack() to
+            // avoid double-writing the node to the store.
+            const groupNode = state.nodes[groupUuid];
+            if (groupNode) {
+              const op = createCreateNodeOp(clientSessionId, deepClone(groupNode));
+              historyManager.apply(op, `Group ${name}`);
+              syncHistorySignals();
+            }
+          });
           setSelectedNodeIds([groupUuid]);
         }
       })
@@ -1252,8 +1048,23 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
-  // RF-005 optimistic update deferred: see groupNodes comment above.
+  // NOTE: ungroupNodes is server-driven like groupNodes. We track a
+  // placeholder delete_node operation after refetch so undo knows what
+  // happened. Full undo support deferred to Phase 15d.
+  // TODO(RF-009): ungroupNodes undo does not restore the group node's children
+  // back into the group. The delete_node inverse (create_node) recreates the group
+  // but its children have already been reparented. Full compound undo requires
+  // tracking reparent ops for each child. Deferred to Phase 15d.
   function ungroupNodes(uuids: string[]): void {
+    // Capture group node snapshots before the server deletes them
+    const groupSnapshots: Array<{ uuid: string; snapshot: Record<string, unknown> }> = [];
+    for (const uuid of uuids) {
+      const node = state.nodes[uuid];
+      if (node) {
+        groupSnapshots.push({ uuid, snapshot: deepClone(node) as Record<string, unknown> });
+      }
+    }
+
     client
       .mutation(gql(UNGROUP_NODES_MUTATION), { uuids, userId: clientSessionId })
       .toPromise()
@@ -1262,78 +1073,306 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("ungroupNodes error:", r.error.message);
           return;
         }
-        markUndoAvailable();
         const data = r.data as Record<string, unknown> | undefined;
         const childUuids = data?.ungroupNodes as string[] | undefined;
         if (childUuids && childUuids.length > 0) {
           setSelectedNodeIds(childUuids.filter(Boolean));
         }
+        // After server response, refetch to get complete state, then track
+        void fetchPages().then(() => {
+          // RF-011: Track in history only — fetchPages already populated the store.
+          // Using historyManager.apply() avoids double-writing.
+          for (const group of groupSnapshots) {
+            const op = createDeleteNodeOp(clientSessionId, group.uuid, group.snapshot);
+            historyManager.apply(op, `Ungroup ${(group.snapshot["name"] as string) ?? "nodes"}`);
+          }
+          syncHistorySignals();
+        });
       })
       .catch((err: unknown) => {
         console.error("ungroupNodes exception:", err);
       });
   }
 
+  // ── Undo/Redo (local-first via HistoryManager) ───────────────────────
+
+  /**
+   * Send a transaction's operations to the server using existing GraphQL mutations.
+   *
+   * During the 15c->15d transition, the server still expects individual mutations.
+   * This function maps each operation back to the appropriate mutation.
+   * In Phase 15d, this will be replaced with a single APPLY_OPERATIONS_MUTATION.
+   */
+  // TODO(Phase 15d): Replace with single APPLY_OPERATIONS_MUTATION to reduce N round-trips per undo/redo
+  function sendTransactionToServer(tx: Transaction): void {
+    for (const op of tx.operations) {
+      sendOperationToServer(op);
+    }
+  }
+
+  function sendOperationToServer(op: Operation): void {
+    switch (op.type) {
+      case "set_field":
+        sendSetFieldToServer(op);
+        break;
+      case "create_node": {
+        const nodeData = op.value as Record<string, unknown>;
+        client
+          .mutation(gql(CREATE_NODE_MUTATION), {
+            kind: deepClone(nodeData["kind"]),
+            name: nodeData["name"],
+            pageId: state.pages[0]?.id ?? null,
+            transform: deepClone(nodeData["transform"]),
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer create_node error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer create_node:", err));
+        break;
+      }
+      case "delete_node":
+        client
+          .mutation(gql(DELETE_NODE_MUTATION), { uuid: op.nodeUuid, userId: clientSessionId })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer delete_node error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer delete_node:", err));
+        break;
+      case "reparent": {
+        const rv = op.value as ReparentValue;
+        client
+          .mutation(gql(REPARENT_NODE_MUTATION), {
+            uuid: op.nodeUuid,
+            newParentUuid: rv.parentUuid,
+            position: rv.position,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer reparent error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer reparent:", err));
+        break;
+      }
+      case "reorder": {
+        // RF-002: ReorderValue now uses unified `position` field
+        const reorder = op.value as ReorderValue;
+        client
+          .mutation(gql(REORDER_CHILDREN_MUTATION), {
+            uuid: op.nodeUuid,
+            newPosition: reorder.position,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer reorder error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer reorder:", err));
+        break;
+      }
+    }
+  }
+
+  function sendSetFieldToServer(op: Operation): void {
+    const { nodeUuid, path, value } = op;
+
+    switch (path) {
+      case "transform":
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client
+          .mutation(gql(SET_TRANSFORM_MUTATION), {
+            uuid: nodeUuid,
+            transform: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField transform error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField transform:", err));
+        break;
+      case "name":
+        client
+          .mutation(gql(RENAME_NODE_MUTATION), {
+            uuid: nodeUuid,
+            newName: value as string,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField name error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField name:", err));
+        break;
+      case "visible":
+        client
+          .mutation(gql(SET_VISIBLE_MUTATION), {
+            uuid: nodeUuid,
+            visible: value as boolean,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField visible error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField visible:", err));
+        break;
+      case "locked":
+        client
+          .mutation(gql(SET_LOCKED_MUTATION), {
+            uuid: nodeUuid,
+            locked: value as boolean,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField locked error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField locked:", err));
+        break;
+      case "style.opacity": {
+        const opVal = value as { type: string; value: number };
+        client
+          .mutation(gql(SET_OPACITY_MUTATION), {
+            uuid: nodeUuid,
+            opacity: opVal.value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField opacity error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField opacity:", err));
+        break;
+      }
+      case "style.blend_mode":
+        client
+          .mutation(gql(SET_BLEND_MODE_MUTATION), {
+            uuid: nodeUuid,
+            blendMode: value as string,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField blend_mode error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField blend_mode:", err));
+        break;
+      case "style.fills":
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client
+          .mutation(gql(SET_FILLS_MUTATION), {
+            uuid: nodeUuid,
+            fills: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField fills error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField fills:", err));
+        break;
+      case "style.strokes":
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client
+          .mutation(gql(SET_STROKES_MUTATION), {
+            uuid: nodeUuid,
+            strokes: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField strokes error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField strokes:", err));
+        break;
+      case "style.effects":
+        // RF-010: value is already plain data in the Operation object, not a Solid proxy
+        client
+          .mutation(gql(SET_EFFECTS_MUTATION), {
+            uuid: nodeUuid,
+            effects: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField effects error:", r.error.message);
+          })
+          .catch((err: unknown) => console.error("sendSetField effects:", err));
+        break;
+      case "kind":
+        // For corner radii changes on rectangles
+        if (
+          value &&
+          typeof value === "object" &&
+          "corner_radii" in (value as Record<string, unknown>)
+        ) {
+          const radii = (value as Record<string, unknown>)["corner_radii"] as [
+            number,
+            number,
+            number,
+            number,
+          ];
+          client
+            .mutation(gql(SET_CORNER_RADII_MUTATION), {
+              uuid: nodeUuid,
+              radii: [...radii],
+              userId: clientSessionId,
+            })
+            .toPromise()
+            .then((r) => {
+              if (r.error) console.error("sendSetField kind error:", r.error.message);
+            })
+            .catch((err: unknown) => console.error("sendSetField kind:", err));
+        }
+        break;
+    }
+  }
+
   function undo(): void {
-    client
-      .mutation(gql(UNDO_MUTATION), { userId: clientSessionId })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("undo error:", r.error.message);
-          return;
-        }
-        const data = r.data?.undo as { canUndo: boolean; canRedo: boolean } | undefined;
-        if (data) {
-          setState("info", "can_undo", data.canUndo);
-          setState("info", "can_redo", data.canRedo);
-        }
-        // RF-017: Use direct fetch, not debounced, for undo
-        void fetchPages();
-      })
-      .catch((err: unknown) => {
-        console.error("undo exception:", err);
-      });
+    const inverseTx = history.undo();
+    if (!inverseTx) return;
+
+    // Send inverse operations to server so other clients see the revert
+    sendTransactionToServer(inverseTx);
   }
 
   function redo(): void {
-    client
-      .mutation(gql(REDO_MUTATION), { userId: clientSessionId })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("redo error:", r.error.message);
-          return;
-        }
-        const data = r.data?.redo as { canUndo: boolean; canRedo: boolean } | undefined;
-        if (data) {
-          setState("info", "can_undo", data.canUndo);
-          setState("info", "can_redo", data.canRedo);
-        }
-        // RF-017: Use direct fetch, not debounced, for redo
-        void fetchPages();
-      })
-      .catch((err: unknown) => {
-        console.error("redo exception:", err);
-      });
+    const redoTx = history.redo();
+    if (!redoTx) return;
+
+    // Send redo operations to server so other clients see the re-application
+    sendTransactionToServer(redoTx);
+  }
+
+  // ── Drag coalescing ──────────────────────────────────────────────────
+
+  function beginDrag(nodeUuid: string, path: string): void {
+    history.beginDrag(nodeUuid, path);
+  }
+
+  function commitDrag(): void {
+    history.commitDrag();
+  }
+
+  function cancelDrag(): void {
+    history.cancelDrag();
   }
 
   // ── Lifecycle (RF-002) ──────────────────────────────────────────────
 
   function destroy(): void {
-    // Clear debounce timers to prevent post-dispose mutations
-    if (fillsMutationTimer) {
-      clearTimeout(fillsMutationTimer);
-      fillsMutationTimer = null;
-    }
-    if (strokesMutationTimer) {
-      clearTimeout(strokesMutationTimer);
-      strokesMutationTimer = null;
-    }
-    if (effectsMutationTimer) {
-      clearTimeout(effectsMutationTimer);
-      effectsMutationTimer = null;
-    }
     subscriptionHandle.unsubscribe();
     void wsClient.dispose();
   }
@@ -1371,6 +1410,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     ungroupNodes,
     undo,
     redo,
+    beginDrag,
+    commitDrag,
+    cancelDrag,
     destroy,
   };
 }
