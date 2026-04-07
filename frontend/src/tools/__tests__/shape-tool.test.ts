@@ -45,6 +45,9 @@ function makeMockStore(): ToolStore & {
     getSelectedNodeIds: () => [],
     setSelectedNodeIds: () => undefined,
     batchSetTransform: () => undefined,
+    beginDrag: () => undefined,
+    commitDrag: () => undefined,
+    cancelDrag: () => undefined,
   };
 }
 

@@ -22,8 +22,6 @@ import {
   SET_TRANSFORM_MUTATION,
   SET_VISIBLE_MUTATION,
   SET_LOCKED_MUTATION,
-  UNDO_MUTATION,
-  REDO_MUTATION,
   REPARENT_NODE_MUTATION,
   REORDER_CHILDREN_MUTATION,
   SET_OPACITY_MUTATION,
@@ -36,6 +34,7 @@ import {
   GROUP_NODES_MUTATION,
   UNGROUP_NODES_MUTATION,
 } from "../graphql/mutations";
+import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
 import { HistoryManager } from "../operations/history-manager";
@@ -119,6 +118,11 @@ export interface DocumentStoreAPI {
   ungroupNodes(uuids: string[]): void;
   undo(): void;
   redo(): void;
+
+  // Drag coalescing
+  beginDrag(nodeUuid: string, path: string): void;
+  commitDrag(): void;
+  cancelDrag(): void;
 
   // Lifecycle
   destroy(): void;
@@ -1030,6 +1034,20 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  // ── Drag coalescing ──────────────────────────────────────────────────
+
+  function beginDrag(nodeUuid: string, path: string): void {
+    history.beginDrag(nodeUuid, path);
+  }
+
+  function commitDrag(): void {
+    history.commitDrag();
+  }
+
+  function cancelDrag(): void {
+    history.cancelDrag();
+  }
+
   // ── Lifecycle (RF-002) ──────────────────────────────────────────────
 
   function destroy(): void {
@@ -1070,6 +1088,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     ungroupNodes,
     undo,
     redo,
+    beginDrag,
+    commitDrag,
+    cancelDrag,
     destroy,
   };
 }
