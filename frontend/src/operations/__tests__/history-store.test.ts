@@ -42,10 +42,7 @@ describe("HistoryStore", () => {
 
   describe("saveStack / loadStack", () => {
     it("should save and load undo and redo stacks", async () => {
-      const undoStack = [
-        makeTx("u1", "user-1", 1000),
-        makeTx("u2", "user-1", 2000),
-      ];
+      const undoStack = [makeTx("u1", "user-1", 1000), makeTx("u2", "user-1", 2000)];
       const redoStack = [makeTx("r1", "user-1", 3000)];
 
       await store.saveStack("doc-1", "user-1", undoStack, redoStack);
@@ -59,18 +56,8 @@ describe("HistoryStore", () => {
     });
 
     it("should overwrite previous data on save", async () => {
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u1", "user-1", 1000)],
-        [],
-      );
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u2", "user-1", 2000)],
-        [],
-      );
+      await store.saveStack("doc-1", "user-1", [makeTx("u1", "user-1", 1000)], []);
+      await store.saveStack("doc-1", "user-1", [makeTx("u2", "user-1", 2000)], []);
 
       const result = assertLoaded(await store.loadStack("doc-1", "user-1"));
       expect(result.undoStack).toHaveLength(1);
@@ -83,18 +70,8 @@ describe("HistoryStore", () => {
     });
 
     it("should isolate data by documentId", async () => {
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u1", "user-1", 1000)],
-        [],
-      );
-      await store.saveStack(
-        "doc-2",
-        "user-1",
-        [makeTx("u2", "user-1", 2000)],
-        [],
-      );
+      await store.saveStack("doc-1", "user-1", [makeTx("u1", "user-1", 1000)], []);
+      await store.saveStack("doc-2", "user-1", [makeTx("u2", "user-1", 2000)], []);
 
       const r1 = assertLoaded(await store.loadStack("doc-1", "user-1"));
       const r2 = assertLoaded(await store.loadStack("doc-2", "user-1"));
@@ -103,18 +80,8 @@ describe("HistoryStore", () => {
     });
 
     it("should isolate data by userId", async () => {
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u1", "user-1", 1000)],
-        [],
-      );
-      await store.saveStack(
-        "doc-1",
-        "user-2",
-        [makeTx("u2", "user-2", 2000)],
-        [],
-      );
+      await store.saveStack("doc-1", "user-1", [makeTx("u1", "user-1", 1000)], []);
+      await store.saveStack("doc-1", "user-2", [makeTx("u2", "user-2", 2000)], []);
 
       const r1 = assertLoaded(await store.loadStack("doc-1", "user-1"));
       const r2 = assertLoaded(await store.loadStack("doc-1", "user-2"));
@@ -125,12 +92,7 @@ describe("HistoryStore", () => {
 
   describe("clearStack", () => {
     it("should remove all data for a document/user pair", async () => {
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u1", "user-1", 1000)],
-        [],
-      );
+      await store.saveStack("doc-1", "user-1", [makeTx("u1", "user-1", 1000)], []);
       await store.clearStack("doc-1", "user-1");
 
       const result = await store.loadStack("doc-1", "user-1");
@@ -138,18 +100,8 @@ describe("HistoryStore", () => {
     });
 
     it("should not affect other document/user pairs", async () => {
-      await store.saveStack(
-        "doc-1",
-        "user-1",
-        [makeTx("u1", "user-1", 1000)],
-        [],
-      );
-      await store.saveStack(
-        "doc-1",
-        "user-2",
-        [makeTx("u2", "user-2", 2000)],
-        [],
-      );
+      await store.saveStack("doc-1", "user-1", [makeTx("u1", "user-1", 1000)], []);
+      await store.saveStack("doc-1", "user-2", [makeTx("u2", "user-2", 2000)], []);
 
       await store.clearStack("doc-1", "user-1");
 
@@ -160,9 +112,7 @@ describe("HistoryStore", () => {
     });
 
     it("should not throw when clearing non-existent data", async () => {
-      await expect(
-        store.clearStack("nonexistent", "nobody"),
-      ).resolves.not.toThrow();
+      await expect(store.clearStack("nonexistent", "nobody")).resolves.not.toThrow();
     });
   });
 
@@ -178,9 +128,9 @@ describe("HistoryStore", () => {
   describe("requireDb guard", () => {
     it("should throw when calling saveStack before open", async () => {
       const unopened = new HistoryStore();
-      await expect(
-        unopened.saveStack("doc-1", "user-1", [], []),
-      ).rejects.toThrow("HistoryStore is not open");
+      await expect(unopened.saveStack("doc-1", "user-1", [], [])).rejects.toThrow(
+        "HistoryStore is not open",
+      );
     });
 
     it("should throw when calling loadStack before open", async () => {
@@ -194,21 +144,19 @@ describe("HistoryStore", () => {
   // RF-014: makeKey collision guard
   describe("makeKey collision guard", () => {
     it("should throw when documentId contains '::'", async () => {
-      await expect(
-        store.saveStack("doc::evil", "user-1", [], []),
-      ).rejects.toThrow('must not contain "::"');
+      await expect(store.saveStack("doc::evil", "user-1", [], [])).rejects.toThrow(
+        'must not contain "::"',
+      );
     });
 
     it("should throw when userId contains '::'", async () => {
-      await expect(
-        store.saveStack("doc-1", "user::evil", [], []),
-      ).rejects.toThrow('must not contain "::"');
+      await expect(store.saveStack("doc-1", "user::evil", [], [])).rejects.toThrow(
+        'must not contain "::"',
+      );
     });
 
     it("should throw on load when documentId contains '::'", async () => {
-      await expect(store.loadStack("doc::evil", "user-1")).rejects.toThrow(
-        'must not contain "::"',
-      );
+      await expect(store.loadStack("doc::evil", "user-1")).rejects.toThrow('must not contain "::"');
     });
   });
 });

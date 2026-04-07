@@ -8,12 +8,7 @@
  */
 
 /** Discriminant for the kind of mutation an operation represents. */
-export type OperationType =
-  | "set_field"
-  | "create_node"
-  | "delete_node"
-  | "reparent"
-  | "reorder";
+export type OperationType = "set_field" | "create_node" | "delete_node" | "reparent" | "reorder";
 
 /**
  * A single field-level mutation.

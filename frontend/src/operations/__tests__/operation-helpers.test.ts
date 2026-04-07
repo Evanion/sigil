@@ -29,9 +29,7 @@ describe("createSetFieldOp", () => {
     const op2 = createSetFieldOp(USER_ID, "node-1", "name", "new", "old");
     expect(op1.id).not.toBe(op2.id);
     // UUID format: 8-4-4-4-12 hex chars
-    expect(op1.id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-    );
+    expect(op1.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 });
 

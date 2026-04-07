@@ -145,10 +145,7 @@ describe("HistoryManager", () => {
     // RF-008: Named test for constant enforcement
     it("test_max_history_size_enforced", () => {
       for (let i = 0; i < MAX_HISTORY_SIZE + 10; i++) {
-        hm.apply(
-          createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
-          `Step ${i}`,
-        );
+        hm.apply(createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`), `Step ${i}`);
       }
 
       // Should only be able to undo MAX_HISTORY_SIZE times
@@ -162,10 +159,7 @@ describe("HistoryManager", () => {
     it("should evict oldest transactions when redo stack exceeds MAX_HISTORY_SIZE", () => {
       // Fill the undo stack
       for (let i = 0; i < MAX_HISTORY_SIZE + 10; i++) {
-        hm.apply(
-          createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
-          `Step ${i}`,
-        );
+        hm.apply(createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`), `Step ${i}`);
       }
       // Undo all to fill redo stack
       while (hm.undo() !== null) {
@@ -250,15 +244,11 @@ describe("HistoryManager", () => {
     it("test_max_operations_per_transaction_enforced", () => {
       hm.beginTransaction("Big transaction");
       for (let i = 0; i < MAX_OPERATIONS_PER_TRANSACTION; i++) {
-        hm.addOperation(
-          createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
-        );
+        hm.addOperation(createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`));
       }
       // The next one should throw
       expect(() =>
-        hm.addOperation(
-          createSetFieldOp(USER_ID, "node-overflow", "name", "x", "y"),
-        ),
+        hm.addOperation(createSetFieldOp(USER_ID, "node-overflow", "name", "x", "y")),
       ).toThrow("MAX_OPERATIONS_PER_TRANSACTION");
     });
   });

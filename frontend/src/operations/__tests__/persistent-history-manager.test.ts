@@ -73,10 +73,7 @@ describe("PersistentHistoryManager", () => {
     });
 
     it("should clear persisted data from IndexedDB", async () => {
-      phm.apply(
-        createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-        "Rename",
-      );
+      phm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Rename");
       await phm.persist(DOC_ID);
       await phm.clearPersisted(DOC_ID);
 
@@ -93,10 +90,7 @@ describe("PersistentHistoryManager", () => {
     it("should debounce multiple persistAsync calls", async () => {
       vi.useFakeTimers();
       try {
-        phm.apply(
-          createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-          "Step 1",
-        );
+        phm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Step 1");
         phm.persistAsync(DOC_ID);
         phm.persistAsync(DOC_ID);
         phm.persistAsync(DOC_ID);
@@ -122,9 +116,7 @@ describe("PersistentHistoryManager", () => {
       // Close the underlying store to simulate an error
       phm.dispose();
 
-      const consoleSpy = vi
-        .spyOn(console, "error")
-        .mockImplementation(() => {});
+      const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
       // Re-init a new phm that we'll break
       phm = new PersistentHistoryManager(USER_ID);
@@ -145,10 +137,7 @@ describe("PersistentHistoryManager", () => {
       expect(phm.canUndo()).toBe(false);
       expect(phm.canRedo()).toBe(false);
 
-      phm.apply(
-        createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-        "Rename",
-      );
+      phm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Rename");
 
       expect(phm.canUndo()).toBe(true);
       expect(phm.canRedo()).toBe(false);
@@ -159,10 +148,7 @@ describe("PersistentHistoryManager", () => {
     });
 
     it("should delegate clear correctly", () => {
-      phm.apply(
-        createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-        "Rename",
-      );
+      phm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Rename");
       expect(phm.canUndo()).toBe(true);
 
       phm.clear();
@@ -172,12 +158,8 @@ describe("PersistentHistoryManager", () => {
 
     it("should delegate transaction methods correctly", () => {
       phm.beginTransaction("Multi-op");
-      phm.addOperation(
-        createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-      );
-      phm.addOperation(
-        createSetFieldOp(USER_ID, "node-2", "name", "D", "C"),
-      );
+      phm.addOperation(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"));
+      phm.addOperation(createSetFieldOp(USER_ID, "node-2", "name", "D", "C"));
       phm.commitTransaction();
 
       expect(phm.canUndo()).toBe(true);
@@ -188,9 +170,7 @@ describe("PersistentHistoryManager", () => {
 
     it("should delegate cancelTransaction correctly", () => {
       phm.beginTransaction("Cancelled");
-      phm.addOperation(
-        createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
-      );
+      phm.addOperation(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"));
       phm.cancelTransaction();
 
       expect(phm.canUndo()).toBe(false);
@@ -198,12 +178,8 @@ describe("PersistentHistoryManager", () => {
 
     it("should delegate drag methods correctly", () => {
       phm.beginDrag("node-1", "transform.x");
-      phm.updateDrag(
-        createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0),
-      );
-      phm.updateDrag(
-        createSetFieldOp(USER_ID, "node-1", "transform.x", 20, 10),
-      );
+      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0));
+      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 20, 10));
       phm.commitDrag();
 
       expect(phm.canUndo()).toBe(true);
@@ -211,9 +187,7 @@ describe("PersistentHistoryManager", () => {
 
     it("should delegate cancelDrag correctly", () => {
       phm.beginDrag("node-1", "transform.x");
-      phm.updateDrag(
-        createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0),
-      );
+      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0));
       phm.cancelDrag();
 
       expect(phm.canUndo()).toBe(false);

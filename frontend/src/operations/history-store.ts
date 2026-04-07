@@ -55,10 +55,7 @@ function isValidStackRecord(data: unknown): data is StackRecord {
   if (typeof data !== "object" || data === null) return false;
   const record = data as Record<string, unknown>;
   if (!Array.isArray(record.undoStack) || !Array.isArray(record.redoStack)) return false;
-  if (
-    record.undoStack.length > MAX_HISTORY_SIZE ||
-    record.redoStack.length > MAX_HISTORY_SIZE
-  ) {
+  if (record.undoStack.length > MAX_HISTORY_SIZE || record.redoStack.length > MAX_HISTORY_SIZE) {
     return false;
   }
   return true;
@@ -87,11 +84,7 @@ export class HistoryStore {
       };
 
       request.onerror = () => {
-        reject(
-          new Error(
-            `Failed to open IndexedDB "${DB_NAME}": ${String(request.error)}`,
-          ),
-        );
+        reject(new Error(`Failed to open IndexedDB "${DB_NAME}": ${String(request.error)}`));
       };
 
       request.onblocked = () => {
@@ -136,10 +129,8 @@ export class HistoryStore {
 
       // RF-005: Resolve on transaction commit, not request success
       tx.oncomplete = () => resolve();
-      tx.onerror = () =>
-        reject(new Error(`Failed to save stack: ${String(tx.error)}`));
-      tx.onabort = () =>
-        reject(new Error(`Save stack transaction aborted: ${String(tx.error)}`));
+      tx.onerror = () => reject(new Error(`Failed to save stack: ${String(tx.error)}`));
+      tx.onabort = () => reject(new Error(`Save stack transaction aborted: ${String(tx.error)}`));
     });
   }
 
@@ -147,10 +138,7 @@ export class HistoryStore {
    * Load undo and redo stacks for a document+user pair.
    * Returns null if no data exists for the given key or if the data is malformed.
    */
-  async loadStack(
-    documentId: string,
-    userId: string,
-  ): Promise<LoadedStacks | null> {
+  async loadStack(documentId: string, userId: string): Promise<LoadedStacks | null> {
     const db = this.requireDb();
     const key = makeKey(documentId, userId);
 
@@ -177,8 +165,7 @@ export class HistoryStore {
         }
       };
 
-      request.onerror = () =>
-        reject(new Error(`Failed to load stack: ${String(request.error)}`));
+      request.onerror = () => reject(new Error(`Failed to load stack: ${String(request.error)}`));
     });
   }
 
@@ -196,10 +183,8 @@ export class HistoryStore {
 
       // RF-005: Resolve on transaction commit, not request success
       tx.oncomplete = () => resolve();
-      tx.onerror = () =>
-        reject(new Error(`Failed to clear stack: ${String(tx.error)}`));
-      tx.onabort = () =>
-        reject(new Error(`Clear stack transaction aborted: ${String(tx.error)}`));
+      tx.onerror = () => reject(new Error(`Failed to clear stack: ${String(tx.error)}`));
+      tx.onabort = () => reject(new Error(`Clear stack transaction aborted: ${String(tx.error)}`));
     });
   }
 

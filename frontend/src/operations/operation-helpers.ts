@@ -64,10 +64,7 @@ export function createSetFieldOp(
  * Create a create_node operation.
  * `nodeData` is the full node object to create.
  */
-export function createCreateNodeOp(
-  userId: string,
-  nodeData: unknown,
-): Operation {
+export function createCreateNodeOp(userId: string, nodeData: unknown): Operation {
   return makeOp(userId, "", "create_node", "", nodeData, null);
 }
 
