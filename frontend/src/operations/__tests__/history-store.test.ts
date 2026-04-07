@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import "fake-indexeddb/auto";
 import { HistoryStore } from "../history-store";
+import type { LoadedStacks } from "../history-store";
 import type { Transaction } from "../types";
 
 function makeTx(id: string, userId: string, timestamp: number): Transaction {
@@ -12,6 +13,17 @@ function makeTx(id: string, userId: string, timestamp: number): Transaction {
     timestamp,
     seq: 0,
   };
+}
+
+/**
+ * Assert that a LoadedStacks value is not null and return it narrowed.
+ */
+function assertLoaded(value: LoadedStacks | null): LoadedStacks {
+  expect(value).not.toBeNull();
+  if (value === null) {
+    throw new Error("Unexpected null");
+  }
+  return value;
 }
 
 describe("HistoryStore", () => {
@@ -37,14 +49,13 @@ describe("HistoryStore", () => {
       const redoStack = [makeTx("r1", "user-1", 3000)];
 
       await store.saveStack("doc-1", "user-1", undoStack, redoStack);
-      const result = await store.loadStack("doc-1", "user-1");
+      const result = assertLoaded(await store.loadStack("doc-1", "user-1"));
 
-      expect(result).not.toBeNull();
-      expect(result!.undoStack).toHaveLength(2);
-      expect(result!.redoStack).toHaveLength(1);
-      expect(result!.undoStack[0].id).toBe("u1");
-      expect(result!.undoStack[1].id).toBe("u2");
-      expect(result!.redoStack[0].id).toBe("r1");
+      expect(result.undoStack).toHaveLength(2);
+      expect(result.redoStack).toHaveLength(1);
+      expect(result.undoStack[0].id).toBe("u1");
+      expect(result.undoStack[1].id).toBe("u2");
+      expect(result.redoStack[0].id).toBe("r1");
     });
 
     it("should overwrite previous data on save", async () => {
@@ -61,9 +72,9 @@ describe("HistoryStore", () => {
         [],
       );
 
-      const result = await store.loadStack("doc-1", "user-1");
-      expect(result!.undoStack).toHaveLength(1);
-      expect(result!.undoStack[0].id).toBe("u2");
+      const result = assertLoaded(await store.loadStack("doc-1", "user-1"));
+      expect(result.undoStack).toHaveLength(1);
+      expect(result.undoStack[0].id).toBe("u2");
     });
 
     it("should return null for non-existent document/user pair", async () => {
@@ -85,10 +96,10 @@ describe("HistoryStore", () => {
         [],
       );
 
-      const r1 = await store.loadStack("doc-1", "user-1");
-      const r2 = await store.loadStack("doc-2", "user-1");
-      expect(r1!.undoStack[0].id).toBe("u1");
-      expect(r2!.undoStack[0].id).toBe("u2");
+      const r1 = assertLoaded(await store.loadStack("doc-1", "user-1"));
+      const r2 = assertLoaded(await store.loadStack("doc-2", "user-1"));
+      expect(r1.undoStack[0].id).toBe("u1");
+      expect(r2.undoStack[0].id).toBe("u2");
     });
 
     it("should isolate data by userId", async () => {
@@ -105,10 +116,10 @@ describe("HistoryStore", () => {
         [],
       );
 
-      const r1 = await store.loadStack("doc-1", "user-1");
-      const r2 = await store.loadStack("doc-1", "user-2");
-      expect(r1!.undoStack[0].id).toBe("u1");
-      expect(r2!.undoStack[0].id).toBe("u2");
+      const r1 = assertLoaded(await store.loadStack("doc-1", "user-1"));
+      const r2 = assertLoaded(await store.loadStack("doc-1", "user-2"));
+      expect(r1.undoStack[0].id).toBe("u1");
+      expect(r2.undoStack[0].id).toBe("u2");
     });
   });
 
@@ -158,10 +169,9 @@ describe("HistoryStore", () => {
   describe("handles empty stacks", () => {
     it("should save and load empty stacks", async () => {
       await store.saveStack("doc-1", "user-1", [], []);
-      const result = await store.loadStack("doc-1", "user-1");
-      expect(result).not.toBeNull();
-      expect(result!.undoStack).toHaveLength(0);
-      expect(result!.redoStack).toHaveLength(0);
+      const result = assertLoaded(await store.loadStack("doc-1", "user-1"));
+      expect(result.undoStack).toHaveLength(0);
+      expect(result.redoStack).toHaveLength(0);
     });
   });
 

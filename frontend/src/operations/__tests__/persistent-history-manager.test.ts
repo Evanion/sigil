@@ -2,9 +2,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
 import { PersistentHistoryManager } from "../persistent-history-manager";
 import { createSetFieldOp } from "../operation-helpers";
+import type { Transaction } from "../types";
 
 const USER_ID = "test-user";
 const DOC_ID = "doc-1";
+
+/**
+ * Assert that a Transaction value is not null and return it narrowed.
+ */
+function assertNonNull(value: Transaction | null): Transaction {
+  expect(value).not.toBeNull();
+  if (value === null) {
+    throw new Error("Unexpected null");
+  }
+  return value;
+}
 
 describe("PersistentHistoryManager", () => {
   let phm: PersistentHistoryManager;
@@ -32,9 +44,8 @@ describe("PersistentHistoryManager", () => {
       await phm2.restore(DOC_ID);
 
       expect(phm2.canUndo()).toBe(true);
-      const inv = phm2.undo();
-      expect(inv).not.toBeNull();
-      expect(inv!.operations[0].value).toBe("A");
+      const inv = assertNonNull(phm2.undo());
+      expect(inv.operations[0].value).toBe("A");
 
       phm2.dispose();
     });
@@ -138,10 +149,9 @@ describe("PersistentHistoryManager", () => {
       phm.commitTransaction();
 
       expect(phm.canUndo()).toBe(true);
-      const inv = phm.undo();
-      expect(inv).not.toBeNull();
+      const inv = assertNonNull(phm.undo());
       // Inverse transaction should have 2 operations in reverse order
-      expect(inv!.operations).toHaveLength(2);
+      expect(inv.operations).toHaveLength(2);
     });
 
     it("should delegate cancelTransaction correctly", () => {
