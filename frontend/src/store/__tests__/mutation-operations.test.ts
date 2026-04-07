@@ -9,7 +9,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
 import { createStoreHistoryBridge, type StoreHistoryBridge } from "../../operations/store-history";
-import { createSetFieldOp } from "../../operations/operation-helpers";
+import {
+  createSetFieldOp,
+  createCreateNodeOp,
+  createDeleteNodeOp,
+  createReparentOp,
+  createReorderOp,
+} from "../../operations/operation-helpers";
 import type { StoreStateReader } from "../../operations/apply-to-store";
 
 // ── Test helpers ────────────────────────────────────────────────────────
@@ -366,7 +372,7 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
     });
   });
 
-  describe("undo/redo cycle — full round-trip", () => {
+  describe("undo/redo cycle — full round-trip (Task 4)", () => {
     it("should support undo then redo for a set_field operation", () => {
       const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
       const previous = deepClone(testNode["transform"]);
@@ -421,6 +427,181 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
       expect(setState).toHaveBeenCalledWith("nodes", "node-1", "name", "Rectangle 1");
 
       expect(history.canUndo()).toBe(false);
+      expect(history.canRedo()).toBe(true);
+    });
+  });
+});
+
+describe("mutation operations — structural mutations (Task 5)", () => {
+  let historyManager: HistoryManager;
+  let setState: ReturnType<typeof vi.fn>;
+  let reader: StoreStateReader;
+  let history: StoreHistoryBridge;
+  let nodes: Record<string, Record<string, unknown>>;
+
+  beforeEach(() => {
+    historyManager = new HistoryManager(TEST_USER_ID);
+    setState = vi.fn();
+    nodes = {
+      "node-1": makeTestNode(),
+      "parent-a": makeTestNode({
+        uuid: "parent-a",
+        name: "Frame A",
+        kind: { type: "frame" },
+        childrenUuids: ["node-1"],
+      }),
+      "parent-b": makeTestNode({
+        uuid: "parent-b",
+        name: "Frame B",
+        kind: { type: "frame" },
+        childrenUuids: ["child-x", "child-y"],
+      }),
+    };
+    // Wire node-1's parentUuid to parent-a
+    nodes["node-1"]["parentUuid"] = "parent-a";
+    reader = {
+      getNode: (uuid: string) => nodes[uuid] as Record<string, unknown> | undefined,
+    };
+    history = createStoreHistoryBridge(historyManager, setState, reader);
+  });
+
+  describe("createNode — operation tracking", () => {
+    it("should create a create_node operation with full node data as value", () => {
+      const nodeData = {
+        uuid: "new-uuid",
+        name: "Rect 1",
+        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
+        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        visible: true,
+        locked: false,
+        parentUuid: null,
+        childrenUuids: [],
+      };
+      const op = createCreateNodeOp(TEST_USER_ID, nodeData);
+
+      expect(op.type).toBe("create_node");
+      expect(op.nodeUuid).toBe("");
+      expect(op.value).toEqual(nodeData);
+      expect(op.previousValue).toBeNull();
+    });
+
+    it("should track in HistoryManager — undo removes the node", () => {
+      const nodeData = {
+        uuid: "new-uuid",
+        name: "Rect 1",
+        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
+        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        visible: true,
+        locked: false,
+        parentUuid: null,
+        childrenUuids: [],
+      };
+      const op = createCreateNodeOp(TEST_USER_ID, nodeData);
+      history.applyAndTrack(op, "Create Rect 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      // Inverse of create_node is delete_node
+      expect(inverseTx.operations).toHaveLength(1);
+      expect(inverseTx.operations[0].type).toBe("delete_node");
+      expect(inverseTx.operations[0].nodeUuid).toBe("new-uuid");
+      expect(history.canUndo()).toBe(false);
+      expect(history.canRedo()).toBe(true);
+    });
+  });
+
+  describe("deleteNode — operation tracking", () => {
+    it("should create a delete_node operation with full node snapshot as previousValue", () => {
+      const snapshot = deepClone(nodes["node-1"]);
+      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
+
+      expect(op.type).toBe("delete_node");
+      expect(op.nodeUuid).toBe("node-1");
+      expect(op.previousValue).toEqual(snapshot);
+      expect(op.value).toBeNull();
+    });
+
+    it("should track in HistoryManager — undo restores the node", () => {
+      const snapshot = deepClone(nodes["node-1"]);
+      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
+      history.applyAndTrack(op, "Delete Rectangle 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      // Inverse of delete_node is create_node
+      expect(inverseTx.operations).toHaveLength(1);
+      expect(inverseTx.operations[0].type).toBe("create_node");
+      expect(inverseTx.operations[0].value).toEqual(snapshot);
+      expect(history.canRedo()).toBe(true);
+    });
+  });
+
+  describe("reparentNode — operation tracking", () => {
+    it("should create a reparent operation with old and new parent info", () => {
+      const op = createReparentOp(TEST_USER_ID, "node-1", "parent-b", 1, "parent-a", 0);
+
+      expect(op.type).toBe("reparent");
+      expect(op.nodeUuid).toBe("node-1");
+      expect(op.value).toEqual({ parentUuid: "parent-b", position: 1 });
+      expect(op.previousValue).toEqual({ parentUuid: "parent-a", position: 0 });
+    });
+
+    it("should track in HistoryManager — undo restores original parent", () => {
+      const op = createReparentOp(TEST_USER_ID, "node-1", "parent-b", 1, "parent-a", 0);
+      history.applyAndTrack(op, "Move Rectangle 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      expect(inverseTx.operations).toHaveLength(1);
+      // Inverse swaps value/previousValue
+      expect(inverseTx.operations[0].value).toEqual({ parentUuid: "parent-a", position: 0 });
+      expect(inverseTx.operations[0].previousValue).toEqual({ parentUuid: "parent-b", position: 1 });
+      expect(history.canRedo()).toBe(true);
+    });
+  });
+
+  describe("reorderChildren — operation tracking", () => {
+    it("should create a reorder operation with old and new positions", () => {
+      const op = createReorderOp(TEST_USER_ID, "node-1", 2, 0);
+
+      expect(op.type).toBe("reorder");
+      expect(op.nodeUuid).toBe("node-1");
+      expect(op.value).toEqual({ newPosition: 2 });
+      expect(op.previousValue).toEqual({ oldPosition: 0 });
+    });
+
+    it("should track in HistoryManager — undo restores original position", () => {
+      const op = createReorderOp(TEST_USER_ID, "node-1", 2, 0);
+      history.applyAndTrack(op, "Reorder Rectangle 1");
+
+      expect(history.canUndo()).toBe(true);
+
+      setState.mockClear();
+      const inverseTx = history.undo();
+
+      expect(inverseTx).not.toBeNull();
+      if (inverseTx === null) throw new Error("unreachable");
+      expect(inverseTx.operations).toHaveLength(1);
+      // Inverse swaps value/previousValue for reorder
+      expect(inverseTx.operations[0].value).toEqual({ oldPosition: 0 });
+      expect(inverseTx.operations[0].previousValue).toEqual({ newPosition: 2 });
       expect(history.canRedo()).toBe(true);
     });
   });

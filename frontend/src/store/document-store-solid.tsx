@@ -40,7 +40,13 @@ import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
 import { HistoryManager } from "../operations/history-manager";
 import { createStoreHistoryBridge } from "../operations/store-history";
-import { createSetFieldOp } from "../operations/operation-helpers";
+import {
+  createSetFieldOp,
+  createCreateNodeOp,
+  createDeleteNodeOp,
+  createReparentOp,
+  createReorderOp,
+} from "../operations/operation-helpers";
 import type { StoreStateReader } from "../operations/apply-to-store";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -365,29 +371,26 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const optimisticUuid = crypto.randomUUID();
     const pageId = state.pages[0]?.id ?? null;
 
-    // Optimistic insert
-    setState("nodes", optimisticUuid, {
-      id: PLACEHOLDER_NODE_ID,
+    const nodeData = {
       uuid: optimisticUuid,
       kind,
       name: name.slice(0, MAX_NODE_NAME_LENGTH),
-      parent: null,
-      children: [],
       transform,
       style: {
         fills: [],
         strokes: [],
-        opacity: { type: "literal", value: 1 },
-        blend_mode: "normal",
+        opacity: { type: "literal" as const, value: 1 },
+        blend_mode: "normal" as const,
         effects: [],
       },
-      constraints: { horizontal: "start", vertical: "start" },
-      grid_placement: null,
       visible: true,
       locked: false,
       parentUuid: null,
       childrenUuids: [],
-    } satisfies MutableDocumentNode);
+    };
+
+    const op = createCreateNodeOp(clientSessionId, nodeData);
+    history.applyAndTrack(op, `Create ${name}`);
 
     client
       .mutation(gql(CREATE_NODE_MUTATION), {
@@ -401,12 +404,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((result) => {
         if (result.error) {
           console.error("createNode error:", result.error.message);
-          // Remove optimistic node
-          setState(
-            produce((s) => {
-              Reflect.deleteProperty(s.nodes, optimisticUuid);
-            }),
-          );
+          history.undo();
           const filteredAfterError = selectedNodeIds().filter((id) => id !== optimisticUuid);
           if (filteredAfterError.length !== selectedNodeIds().length) {
             setSelectedNodeIds(filteredAfterError);
@@ -435,16 +433,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
           });
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("createNode exception:", err);
-        // Revert optimistic state
-        setState(
-          produce((s) => {
-            Reflect.deleteProperty(s.nodes, optimisticUuid);
-          }),
-        );
+        history.undo();
         const filteredAfterCatch = selectedNodeIds().filter((id) => id !== optimisticUuid);
         if (filteredAfterCatch.length !== selectedNodeIds().length) {
           setSelectedNodeIds(filteredAfterCatch);
@@ -506,17 +498,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   }
 
   function deleteNode(uuid: string): void {
-    // RF-003: Capture full node and selection for rollback
-    const previousNode = state.nodes[uuid]
-      ? (deepClone(state.nodes[uuid]) as MutableDocumentNode)
-      : undefined;
+    const node = state.nodes[uuid];
+    if (!node) return;
+
+    const previousNode = deepClone(node);
     const previousSelectedId = selectedNodeId();
 
-    setState(
-      produce((s) => {
-        Reflect.deleteProperty(s.nodes, uuid);
-      }),
-    );
+    const op = createDeleteNodeOp(clientSessionId, uuid, previousNode);
+    history.applyAndTrack(op, `Delete ${node.name}`);
+
+    // Clear selection if the deleted node was selected
     const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
     if (filteredIds.length !== selectedNodeIds().length) {
       setSelectedNodeIds(filteredIds);
@@ -528,24 +519,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("deleteNode error:", r.error.message);
-          // RF-003: Restore deleted node
-          if (previousNode) {
-            setState("nodes", uuid, previousNode);
-            if (previousSelectedId === uuid) {
-              setSelectedNodeId(previousSelectedId);
-            }
-          }
-          return;
-        }
-        markUndoAvailable();
-      })
-      .catch((err: unknown) => {
-        console.error("deleteNode exception:", err);
-        if (previousNode) {
-          setState("nodes", uuid, previousNode);
+          history.undo();
           if (previousSelectedId === uuid) {
             setSelectedNodeId(previousSelectedId);
           }
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("deleteNode exception:", err);
+        history.undo();
+        if (previousSelectedId === uuid) {
+          setSelectedNodeId(previousSelectedId);
         }
       });
   }
@@ -598,39 +582,26 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function reparentNode(uuid: string, newParentUuid: string, position: number): void {
     if (!Number.isFinite(position)) return;
-
-    // Capture previous state for rollback
     const node = state.nodes[uuid];
     if (!node) return;
+
     const oldParentUuid = node.parentUuid;
-    const oldParentChildren = oldParentUuid
-      ? [...(state.nodes[oldParentUuid]?.childrenUuids ?? [])]
-      : [];
-    const newParentChildren = [...(state.nodes[newParentUuid]?.childrenUuids ?? [])];
     const clampedPos = Math.max(0, Math.round(position));
 
-    // Optimistic update: move node from old parent to new parent
-    setState(
-      produce((s) => {
-        // Remove from old parent's childrenUuids
-        if (oldParentUuid && s.nodes[oldParentUuid]) {
-          s.nodes[oldParentUuid].childrenUuids = s.nodes[oldParentUuid].childrenUuids.filter(
-            (c: string) => c !== uuid,
-          );
-        }
-        // Insert into new parent's childrenUuids
-        if (s.nodes[newParentUuid]) {
-          const children = s.nodes[newParentUuid].childrenUuids.filter((c: string) => c !== uuid);
-          const insertAt = Math.min(clampedPos, children.length);
-          children.splice(insertAt, 0, uuid);
-          s.nodes[newParentUuid].childrenUuids = children;
-        }
-        // Update node's parentUuid
-        if (s.nodes[uuid]) {
-          s.nodes[uuid].parentUuid = newParentUuid;
-        }
-      }),
+    // Determine old position within old parent
+    const oldPosition = oldParentUuid
+      ? (state.nodes[oldParentUuid]?.childrenUuids ?? []).indexOf(uuid)
+      : 0;
+
+    const op = createReparentOp(
+      clientSessionId,
+      uuid,
+      newParentUuid,
+      clampedPos,
+      oldParentUuid ?? "",
+      Math.max(0, oldPosition),
     );
+    history.applyAndTrack(op, `Move ${node.name}`);
 
     client
       .mutation(gql(REPARENT_NODE_MUTATION), {
@@ -643,52 +614,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reparentNode error:", r.error.message);
-          // Rollback: restore previous parent relationships
-          setState(
-            produce((s) => {
-              if (oldParentUuid && s.nodes[oldParentUuid]) {
-                s.nodes[oldParentUuid].childrenUuids = oldParentChildren;
-              }
-              if (s.nodes[newParentUuid]) {
-                s.nodes[newParentUuid].childrenUuids = newParentChildren;
-              }
-              if (s.nodes[uuid]) {
-                s.nodes[uuid].parentUuid = oldParentUuid;
-              }
-            }),
-          );
-          return;
+          history.undo();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reparentNode exception:", err);
-        void fetchPages();
+        history.undo();
       });
   }
 
   function reorderChildren(uuid: string, newPosition: number): void {
     if (!Number.isFinite(newPosition)) return;
-
-    // Capture previous state for rollback
     const node = state.nodes[uuid];
     if (!node) return;
     const parentUuid = node.parentUuid;
     if (!parentUuid) return;
-    const previousChildren = [...(state.nodes[parentUuid]?.childrenUuids ?? [])];
+
     const clampedPos = Math.max(0, Math.round(newPosition));
 
-    // Optimistic update: reorder within parent's childrenUuids
-    setState(
-      produce((s) => {
-        if (s.nodes[parentUuid]) {
-          const children = s.nodes[parentUuid].childrenUuids.filter((c: string) => c !== uuid);
-          const insertAt = Math.min(clampedPos, children.length);
-          children.splice(insertAt, 0, uuid);
-          s.nodes[parentUuid].childrenUuids = children;
-        }
-      }),
+    // Determine old position within parent
+    const oldPosition = (state.nodes[parentUuid]?.childrenUuids ?? []).indexOf(uuid);
+
+    const op = createReorderOp(
+      clientSessionId,
+      uuid,
+      clampedPos,
+      Math.max(0, oldPosition),
     );
+    history.applyAndTrack(op, `Reorder ${node.name}`);
 
     client
       .mutation(gql(REORDER_CHILDREN_MUTATION), {
@@ -700,21 +653,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("reorderChildren error:", r.error.message);
-          // Rollback: restore previous children order
-          setState(
-            produce((s) => {
-              if (s.nodes[parentUuid]) {
-                s.nodes[parentUuid].childrenUuids = previousChildren;
-              }
-            }),
-          );
-          return;
+          history.undo();
         }
-        markUndoAvailable();
       })
       .catch((err: unknown) => {
         console.error("reorderChildren exception:", err);
-        void fetchPages();
+        history.undo();
       });
   }
 
