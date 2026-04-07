@@ -5,27 +5,14 @@ import {
   applyRemoteTransaction,
   type RemoteTransactionPayload,
   type RemoteOperationPayload,
+  type StoreState,
+  type StoreDocumentNode,
 } from "../apply-remote";
-import type { DocumentNode, Transform, Fill, Stroke, Effect, NodeKind } from "../../types/document";
-
-// ── Helpers ───────────────────────────────────────────────────────────
-
-/** Mutable document node matching the store shape. */
-type MutableDocumentNode = {
-  -readonly [K in keyof DocumentNode]: DocumentNode[K];
-} & {
-  parentUuid: string | null;
-  childrenUuids: string[];
-};
-
-interface StoreState {
-  nodes: Record<string, MutableDocumentNode>;
-  pages: Array<{ id: string; name: string; root_nodes: unknown[] }>;
-}
+import type { Transform, Fill, Stroke, Effect, NodeKind } from "../../types/document";
 
 const PLACEHOLDER_NODE_ID = { index: 0, generation: 0 };
 
-function makeNode(uuid: string, overrides?: Partial<MutableDocumentNode>): MutableDocumentNode {
+function makeNode(uuid: string, overrides?: Partial<StoreDocumentNode>): StoreDocumentNode {
   return {
     id: PLACEHOLDER_NODE_ID,
     uuid,

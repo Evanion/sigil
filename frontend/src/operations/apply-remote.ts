@@ -48,7 +48,7 @@ export interface RemoteOperationPayload {
 // ── Store shape types (mirrors document-store-solid.tsx) ──────────────
 
 /** Mutable version of DocumentNode used in the Solid store. */
-interface StoreDocumentNode {
+export interface StoreDocumentNode {
   id: NodeId;
   uuid: string;
   kind: NodeKind;
@@ -71,7 +71,7 @@ interface StoreDocumentNode {
   childrenUuids: string[];
 }
 
-interface StoreState {
+export interface StoreState {
   nodes: Record<string, StoreDocumentNode>;
   pages: unknown[];
 }
