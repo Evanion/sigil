@@ -231,7 +231,10 @@ describe("applyRemoteTransaction", () => {
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newFills: Fill[] = [
-          { type: "solid", color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+          {
+            type: "solid",
+            color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+          },
         ];
 
         applyRemoteTransaction(
@@ -419,6 +422,161 @@ describe("applyRemoteTransaction", () => {
         dispose();
       });
     });
+
+    it("should update parent's childrenUuids when new node has a parent", () => {
+      createRoot((dispose) => {
+        const parent = makeNode("parent-1", { childrenUuids: ["existing-child"] });
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "parent-1": parent, "existing-child": makeNode("existing-child") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+        const newNodeData = {
+          uuid: "new-child",
+          kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+          name: "New Child",
+          parent: "parent-1",
+          children: [],
+        };
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "create_node",
+              nodeUuid: "new-child",
+              path: null,
+              value: newNodeData,
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["new-child"]).toBeDefined();
+        expect(state.nodes["parent-1"].childrenUuids).toContain("new-child");
+        expect(state.nodes["parent-1"].childrenUuids).toContain("existing-child");
+        dispose();
+      });
+    });
+
+    it("should reject create_node when transform has NaN fields", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const newNodeData = {
+          uuid: "bad-node",
+          transform: { x: NaN, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
+        };
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "create_node",
+              nodeUuid: "bad-node",
+              path: null,
+              value: newNodeData,
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["bad-node"]).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("transform.x is not a finite number"),
+        );
+        warnSpy.mockRestore();
+        dispose();
+      });
+    });
+
+    it("should reject create_node when transform has Infinity fields", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const newNodeData = {
+          uuid: "bad-node",
+          transform: {
+            x: 0,
+            y: 0,
+            width: Infinity,
+            height: 100,
+            rotation: 0,
+            scale_x: 1,
+            scale_y: 1,
+          },
+        };
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "create_node",
+              nodeUuid: "bad-node",
+              path: null,
+              value: newNodeData,
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["bad-node"]).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("transform.width is not a finite number"),
+        );
+        warnSpy.mockRestore();
+        dispose();
+      });
+    });
+
+    it("should reject create_node when transform is not an object", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        const newNodeData = {
+          uuid: "bad-node",
+          transform: "not-an-object",
+        };
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "create_node",
+              nodeUuid: "bad-node",
+              path: null,
+              value: newNodeData,
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["bad-node"]).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("transform is not an object"));
+        warnSpy.mockRestore();
+        dispose();
+      });
+    });
   });
 
   describe("delete_node", () => {
@@ -597,9 +755,7 @@ describe("applyRemoteTransaction", () => {
           fetchPages,
         );
 
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining("Unknown field path"),
-        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Unknown field path"));
         warnSpy.mockRestore();
         dispose();
       });

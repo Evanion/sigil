@@ -111,7 +111,10 @@ export function applyRemoteTransaction(
     return seq;
   }
 
-  // Legacy fallback: no operations means the server hasn't been updated yet
+  // Legacy fallback: no operations means the server hasn't been updated yet.
+  // This calls fetchPages() immediately (not debounced) because it only fires for
+  // legacy events that lack operation payloads — expected to be rare during the
+  // transition period. Will be removed in Phase 15d when all events carry operations.
   if (tx.operations.length === 0) {
     void fetchPages();
     return seq;
@@ -138,7 +141,7 @@ function applyRemoteOperation(
       applyFieldSet(op.nodeUuid, op.path, op.value, setState, getNode);
       break;
     case "create_node":
-      applyCreateNode(op.value, setState);
+      applyCreateNode(op.value, setState, getNode);
       break;
     case "delete_node":
       applyDeleteNode(op.nodeUuid, setState, getNode);
@@ -213,6 +216,7 @@ function applyFieldSet(
 function applyCreateNode(
   value: unknown,
   setState: SetStoreFunction<StoreState>,
+  getNode: (uuid: string) => StoreDocumentNode | undefined,
 ): void {
   if (!value || typeof value !== "object") {
     console.warn("Remote create_node: missing or invalid node data");
@@ -220,10 +224,32 @@ function applyCreateNode(
   }
 
   const raw = value as Record<string, unknown>;
-  const uuid = raw["uuid"] as string | undefined;
+
+  // Shape validation: uuid must be a non-empty string (CLAUDE.md: defensive message parsing)
+  const uuid = raw["uuid"];
   if (!uuid || typeof uuid !== "string") {
-    console.warn("Remote create_node: missing uuid in node data");
+    console.warn("Remote create_node: missing or non-string uuid in node data");
     return;
+  }
+
+  // Shape validation: if transform is present, verify it has numeric fields
+  // (CLAUDE.md: floating-point validation — guard against NaN/Infinity from external source)
+  const rawTransform = raw["transform"];
+  if (rawTransform !== undefined && rawTransform !== null) {
+    if (typeof rawTransform !== "object") {
+      console.warn("Remote create_node: transform is not an object, skipping node");
+      return;
+    }
+    const t = rawTransform as Record<string, unknown>;
+    const transformFields = ["x", "y", "width", "height", "rotation", "scale_x", "scale_y"];
+    for (const field of transformFields) {
+      if (field in t && (typeof t[field] !== "number" || !Number.isFinite(t[field] as number))) {
+        console.warn(
+          `Remote create_node: transform.${field} is not a finite number, skipping node`,
+        );
+        return;
+      }
+    }
   }
 
   // Build a store-compatible node from the raw payload
@@ -241,7 +267,7 @@ function applyCreateNode(
     name: (raw["name"] as string) ?? "",
     parent: null,
     children: [],
-    transform: (raw["transform"] as Transform) ?? {
+    transform: (rawTransform as Transform) ?? {
       x: 0,
       y: 0,
       width: 100,
@@ -265,9 +291,19 @@ function applyCreateNode(
     childrenUuids,
   };
 
-  setState(produce((s) => {
-    s.nodes[uuid] = node;
-  }));
+  setState(
+    produce((s) => {
+      s.nodes[uuid] = node;
+    }),
+  );
+
+  // Wire up parent's childrenUuids so the tree stays consistent
+  if (parentUuid) {
+    const parent = getNode(parentUuid);
+    if (parent && !parent.childrenUuids.includes(uuid)) {
+      setState("nodes", parentUuid, "childrenUuids", [...parent.childrenUuids, uuid]);
+    }
+  }
 }
 
 // ── Internal: delete_node ─────────────────────────────────────────────
@@ -291,9 +327,11 @@ function applyDeleteNode(
 
   // Remove the node from the store.
   // Using produce + Reflect.deleteProperty to satisfy no-dynamic-delete lint rule.
-  setState(produce((s) => {
-    Reflect.deleteProperty(s.nodes, nodeUuid);
-  }));
+  setState(
+    produce((s) => {
+      Reflect.deleteProperty(s.nodes, nodeUuid);
+    }),
+  );
 }
 
 // ── Internal: reparent ────────────────────────────────────────────────
@@ -335,7 +373,8 @@ function applyReparent(
   // Add to new parent's childrenUuids at specified position
   const newParent = getNode(newParentUuid);
   if (newParent) {
-    const position = typeof payload.position === "number" ? payload.position : newParent.childrenUuids.length;
+    const position =
+      typeof payload.position === "number" ? payload.position : newParent.childrenUuids.length;
     const newChildren = [...newParent.childrenUuids];
     newChildren.splice(position, 0, nodeUuid);
     setState("nodes", newParentUuid, "childrenUuids", newChildren);

@@ -1,3 +1,4 @@
+/** @deprecated Phase 15d removes this. Use TRANSACTION_APPLIED_SUBSCRIPTION instead. */
 export const DOCUMENT_CHANGED_SUBSCRIPTION = `
   subscription DocumentChanged {
     documentChanged {
