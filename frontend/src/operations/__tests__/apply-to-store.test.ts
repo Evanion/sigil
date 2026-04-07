@@ -199,9 +199,7 @@ describe("applyOperationToStore — set_field", () => {
 
     applyOperationToStore(op, setter, reader);
 
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('unknown path "unknown.field"'),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('unknown path "unknown.field"'));
     warnSpy.mockRestore();
   });
 
@@ -417,7 +415,12 @@ describe("applyOperationToStore — reparent", () => {
     // Old parent should have node-1 removed
     expect(calls).toContainEqual(["nodes", "parent-a", "childrenUuids", ["node-2"]]);
     // New parent should have node-1 inserted at position 1
-    expect(calls).toContainEqual(["nodes", "parent-b", "childrenUuids", ["node-3", "node-1", "node-4"]]);
+    expect(calls).toContainEqual([
+      "nodes",
+      "parent-b",
+      "childrenUuids",
+      ["node-3", "node-1", "node-4"],
+    ]);
     // Node should have updated parentUuid
     expect(calls).toContainEqual(["nodes", "node-1", "parentUuid", "parent-b"]);
   });

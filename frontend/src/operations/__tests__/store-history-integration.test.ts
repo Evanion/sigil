@@ -8,10 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HistoryManager } from "../history-manager";
-import {
-  createStoreHistoryBridge,
-  type StoreHistoryBridge,
-} from "../store-history";
+import { createStoreHistoryBridge, type StoreHistoryBridge } from "../store-history";
 import { createSetFieldOp } from "../operation-helpers";
 
 const USER_ID = "test-user";
@@ -213,7 +210,7 @@ describe("StoreHistoryBridge", () => {
 
     // Inverse should be: [inverse(op2), inverse(op1)] — reversed order
     expect(calls[0]).toBe("visible"); // inverse of op2 first
-    expect(calls[1]).toBe("name");    // inverse of op1 second
+    expect(calls[1]).toBe("name"); // inverse of op1 second
   });
 
   // ── rollbackLast (RF-001) ─────────────────────────────────────

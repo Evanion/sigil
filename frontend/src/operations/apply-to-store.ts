@@ -55,11 +55,7 @@ export function applyOperationToStore(
   }
 }
 
-function applySetField(
-  op: Operation,
-  setState: StoreStateSetter,
-  reader: StoreStateReader,
-): void {
+function applySetField(op: Operation, setState: StoreStateSetter, reader: StoreStateReader): void {
   const { nodeUuid, path, value } = op;
 
   // Guard: skip if node not in store
@@ -181,7 +177,12 @@ function applyDeleteNode(
       const parent = reader.getNode(parentUuid);
       if (parent) {
         const children = (parent["childrenUuids"] as string[] | undefined) ?? [];
-        setState("nodes", parentUuid, "childrenUuids", children.filter((c) => c !== nodeUuid));
+        setState(
+          "nodes",
+          parentUuid,
+          "childrenUuids",
+          children.filter((c) => c !== nodeUuid),
+        );
       }
     }
   }
@@ -194,19 +195,13 @@ function applyDeleteNode(
   );
 }
 
-function applyReparent(
-  op: Operation,
-  setState: StoreStateSetter,
-  reader: StoreStateReader,
-): void {
+function applyReparent(op: Operation, setState: StoreStateSetter, reader: StoreStateReader): void {
   const { nodeUuid } = op;
   const newParent = op.value as ReparentValue;
 
   const node = reader.getNode(nodeUuid);
   if (!node) {
-    console.warn(
-      `applyReparent: node "${nodeUuid}" not found in store, skipping reparent`,
-    );
+    console.warn(`applyReparent: node "${nodeUuid}" not found in store, skipping reparent`);
     return;
   }
 
@@ -242,11 +237,7 @@ function applyReparent(
   setState("nodes", nodeUuid, "parentUuid", newParent.parentUuid);
 }
 
-function applyReorder(
-  op: Operation,
-  setState: StoreStateSetter,
-  reader: StoreStateReader,
-): void {
+function applyReorder(op: Operation, setState: StoreStateSetter, reader: StoreStateReader): void {
   const { nodeUuid } = op;
   // RF-002: Use the unified `position` field from ReorderValue.
   const reorder = op.value as ReorderValue;
@@ -254,9 +245,7 @@ function applyReorder(
   const parentUuid = node?.["parentUuid"] as string | null | undefined;
 
   if (!parentUuid) {
-    console.warn(
-      `applyReorder: node "${nodeUuid}" has no parent, skipping reorder`,
-    );
+    console.warn(`applyReorder: node "${nodeUuid}" has no parent, skipping reorder`);
     return;
   }
 

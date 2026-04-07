@@ -68,10 +68,24 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
 
   describe("setTransform — operation tracking", () => {
     it("should create a set_field operation with path 'transform'", () => {
-      const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newTransform = {
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+      };
       const previousTransform = deepClone(testNode["transform"]);
 
-      const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, previousTransform);
+      const op = createSetFieldOp(
+        TEST_USER_ID,
+        "node-1",
+        "transform",
+        newTransform,
+        previousTransform,
+      );
 
       expect(op.type).toBe("set_field");
       expect(op.path).toBe("transform");
@@ -82,7 +96,15 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     });
 
     it("should track in HistoryManager after applyAndTrack", () => {
-      const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newTransform = {
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+      };
       const previous = deepClone(testNode["transform"]);
 
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, previous);
@@ -93,7 +115,15 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     });
 
     it("should apply to store via setState when tracked", () => {
-      const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newTransform = {
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+      };
       const previous = deepClone(testNode["transform"]);
 
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, previous);
@@ -103,7 +133,15 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     });
 
     it("should restore previous value on undo", () => {
-      const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newTransform = {
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+      };
       const previous = deepClone(testNode["transform"]);
 
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, previous);
@@ -194,7 +232,13 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     it("should create a set_field operation with path 'style.opacity'", () => {
       const previousOpacity = { type: "literal", value: 1 };
       const newOpacity = { type: "literal", value: 0.5 };
-      const op = createSetFieldOp(TEST_USER_ID, "node-1", "style.opacity", newOpacity, previousOpacity);
+      const op = createSetFieldOp(
+        TEST_USER_ID,
+        "node-1",
+        "style.opacity",
+        newOpacity,
+        previousOpacity,
+      );
 
       expect(op.type).toBe("set_field");
       expect(op.path).toBe("style.opacity");
@@ -205,7 +249,13 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     it("should track in HistoryManager and can undo", () => {
       const previousOpacity = { type: "literal", value: 1 };
       const newOpacity = { type: "literal", value: 0.5 };
-      const op = createSetFieldOp(TEST_USER_ID, "node-1", "style.opacity", newOpacity, previousOpacity);
+      const op = createSetFieldOp(
+        TEST_USER_ID,
+        "node-1",
+        "style.opacity",
+        newOpacity,
+        previousOpacity,
+      );
       history.applyAndTrack(op, "Set opacity on Rectangle 1");
 
       expect(history.canUndo()).toBe(true);
@@ -291,7 +341,10 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
     it("should create a set_field operation with path 'style.fills'", () => {
       const previousFills: unknown[] = [];
       const newFills = [
-        { type: "solid", color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+        {
+          type: "solid",
+          color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+        },
       ];
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "style.fills", newFills, previousFills);
 
@@ -303,7 +356,10 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
 
     it("should track in HistoryManager and can undo", () => {
       const newFills = [
-        { type: "solid", color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+        {
+          type: "solid",
+          color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+        },
       ];
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "style.fills", newFills, []);
       history.applyAndTrack(op, "Update fills on Rectangle 1");
@@ -322,7 +378,13 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
 
   describe("setStrokes — operation tracking", () => {
     it("should create a set_field operation with path 'style.strokes'", () => {
-      const newStrokes = [{ type: "solid", color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } }, width: 1 }];
+      const newStrokes = [
+        {
+          type: "solid",
+          color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
+          width: 1,
+        },
+      ];
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "style.strokes", newStrokes, []);
 
       expect(op.type).toBe("set_field");
@@ -374,7 +436,15 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
 
   describe("undo/redo cycle — full round-trip (Task 4)", () => {
     it("should support undo then redo for a set_field operation", () => {
-      const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+      const newTransform = {
+        x: 50,
+        y: 50,
+        width: 200,
+        height: 200,
+        rotation: 0,
+        scale_x: 1,
+        scale_y: 1,
+      };
       const previous = deepClone(testNode["transform"]);
 
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, previous);
@@ -472,7 +542,13 @@ describe("mutation operations — structural mutations (Task 5)", () => {
         name: "Rect 1",
         kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
         visible: true,
         locked: false,
         parentUuid: null,
@@ -492,7 +568,13 @@ describe("mutation operations — structural mutations (Task 5)", () => {
         name: "Rect 1",
         kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
         visible: true,
         locked: false,
         parentUuid: null,
@@ -572,7 +654,10 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       expect(inverseTx.operations).toHaveLength(1);
       // Inverse swaps value/previousValue
       expect(inverseTx.operations[0].value).toEqual({ parentUuid: "parent-a", position: 0 });
-      expect(inverseTx.operations[0].previousValue).toEqual({ parentUuid: "parent-b", position: 1 });
+      expect(inverseTx.operations[0].previousValue).toEqual({
+        parentUuid: "parent-b",
+        position: 1,
+      });
       expect(history.canRedo()).toBe(true);
     });
   });
@@ -644,10 +729,22 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
 
       history.beginTransaction(`Align ${String(2)} nodes`);
 
-      const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newT1, deepClone(nodes["node-1"]["transform"]));
+      const op1 = createSetFieldOp(
+        TEST_USER_ID,
+        "node-1",
+        "transform",
+        newT1,
+        deepClone(nodes["node-1"]["transform"]),
+      );
       history.applyInTransaction(op1);
 
-      const op2 = createSetFieldOp(TEST_USER_ID, "node-2", "transform", newT2, deepClone(nodes["node-2"]["transform"]));
+      const op2 = createSetFieldOp(
+        TEST_USER_ID,
+        "node-2",
+        "transform",
+        newT2,
+        deepClone(nodes["node-2"]["transform"]),
+      );
       history.applyInTransaction(op2);
 
       history.commitTransaction();
@@ -702,7 +799,13 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
         name: "Group 1",
         kind: { type: "frame" },
         transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: { fills: [], strokes: [], opacity: { type: "literal", value: 1 }, blend_mode: "normal", effects: [] },
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
         visible: true,
         locked: false,
         parentUuid: null,

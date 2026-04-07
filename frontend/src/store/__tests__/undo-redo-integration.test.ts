@@ -9,10 +9,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
 import { createStoreHistoryBridge, type StoreHistoryBridge } from "../../operations/store-history";
-import {
-  createSetFieldOp,
-  createDeleteNodeOp,
-} from "../../operations/operation-helpers";
+import { createSetFieldOp, createDeleteNodeOp } from "../../operations/operation-helpers";
 import type { StoreStateReader } from "../../operations/apply-to-store";
 
 // ── Test helpers ────────────────────────────────────────────────────────
@@ -24,7 +21,15 @@ function deepClone<T>(value: T): T {
 
 const TEST_USER_ID = "test-user-session";
 
-const DEFAULT_TRANSFORM = { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 };
+const DEFAULT_TRANSFORM = {
+  x: 0,
+  y: 0,
+  width: 100,
+  height: 100,
+  rotation: 0,
+  scale_x: 1,
+  scale_y: 1,
+};
 const DEFAULT_STYLE = {
   fills: [],
   strokes: [],
@@ -121,10 +126,24 @@ describe("undo/redo integration", () => {
 
   it("should restore previous transform on undo after setTransform", () => {
     const originalTransform = deepClone(store.getNodes()["node-1"]["transform"]);
-    const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+    const newTransform = {
+      x: 50,
+      y: 50,
+      width: 200,
+      height: 200,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
 
     // Apply setTransform
-    const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, originalTransform);
+    const op = createSetFieldOp(
+      TEST_USER_ID,
+      "node-1",
+      "transform",
+      newTransform,
+      originalTransform,
+    );
     history.applyAndTrack(op, "Move Rectangle 1");
 
     // Verify new value applied
@@ -208,10 +227,24 @@ describe("undo/redo integration", () => {
 
   it("should undo multiple mutations in reverse order", () => {
     const originalTransform = deepClone(store.getNodes()["node-1"]["transform"]);
-    const newTransform = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
+    const newTransform = {
+      x: 50,
+      y: 50,
+      width: 200,
+      height: 200,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+    };
 
     // Mutation 1: setTransform
-    const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newTransform, originalTransform);
+    const op1 = createSetFieldOp(
+      TEST_USER_ID,
+      "node-1",
+      "transform",
+      newTransform,
+      originalTransform,
+    );
     history.applyAndTrack(op1, "Move Rectangle 1");
 
     // Mutation 2: rename

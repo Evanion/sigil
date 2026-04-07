@@ -110,7 +110,9 @@ export function createStoreHistoryBridge(
       } catch {
         // If inverse creation fails, we cannot revert. The undo entry is already
         // removed, so at least we don't have a ghost. Log for diagnostics.
-        console.error("rollbackLast: failed to create inverse transaction, store may be inconsistent");
+        console.error(
+          "rollbackLast: failed to create inverse transaction, store may be inconsistent",
+        );
         return;
       }
 

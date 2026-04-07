@@ -636,12 +636,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Determine old position within parent
     const oldPosition = (state.nodes[parentUuid]?.childrenUuids ?? []).indexOf(uuid);
 
-    const op = createReorderOp(
-      clientSessionId,
-      uuid,
-      clampedPos,
-      Math.max(0, oldPosition),
-    );
+    const op = createReorderOp(clientSessionId, uuid, clampedPos, Math.max(0, oldPosition));
     history.applyAndTrack(op, `Reorder ${node.name}`);
 
     client
@@ -668,7 +663,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     const node = state.nodes[uuid];
     if (!node) return;
-    const previousOpacity = node.style?.opacity ? deepClone(node.style.opacity) : { type: "literal" as const, value: 1 };
+    const previousOpacity = node.style?.opacity
+      ? deepClone(node.style.opacity)
+      : { type: "literal" as const, value: 1 };
 
     const op = createSetFieldOp(
       clientSessionId,
@@ -763,7 +760,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     const previousStrokes = node.style?.strokes ? deepClone(node.style.strokes) : [];
 
-    const op = createSetFieldOp(clientSessionId, uuid, "style.strokes", clonedStrokes, previousStrokes);
+    const op = createSetFieldOp(
+      clientSessionId,
+      uuid,
+      "style.strokes",
+      clonedStrokes,
+      previousStrokes,
+    );
     history.applyAndTrack(op, `Update strokes on ${node.name}`);
 
     client
@@ -799,7 +802,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     const previousEffects = node.style?.effects ? deepClone(node.style.effects) : [];
 
-    const op = createSetFieldOp(clientSessionId, uuid, "style.effects", clonedEffects, previousEffects);
+    const op = createSetFieldOp(
+      clientSessionId,
+      uuid,
+      "style.effects",
+      clonedEffects,
+      previousEffects,
+    );
     history.applyAndTrack(op, `Update effects on ${node.name}`);
 
     client
@@ -884,7 +893,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       if (!node) continue;
       // JSON clone: Solid proxy not structuredClone-safe
       const previous = deepClone(node.transform);
-      const op = createSetFieldOp(clientSessionId, entry.uuid, "transform", entry.transform, previous);
+      const op = createSetFieldOp(
+        clientSessionId,
+        entry.uuid,
+        "transform",
+        entry.transform,
+        previous,
+      );
       history.applyInTransaction(op);
       opsAdded++;
     }
@@ -1107,61 +1122,150 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     switch (path) {
       case "transform":
         // RF-010: value is already plain data in the Operation object, not a Solid proxy
-        client.mutation(gql(SET_TRANSFORM_MUTATION), { uuid: nodeUuid, transform: value, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField transform error:", r.error.message); })
+        client
+          .mutation(gql(SET_TRANSFORM_MUTATION), {
+            uuid: nodeUuid,
+            transform: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField transform error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField transform:", err));
         break;
       case "name":
-        client.mutation(gql(RENAME_NODE_MUTATION), { uuid: nodeUuid, newName: value as string, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField name error:", r.error.message); })
+        client
+          .mutation(gql(RENAME_NODE_MUTATION), {
+            uuid: nodeUuid,
+            newName: value as string,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField name error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField name:", err));
         break;
       case "visible":
-        client.mutation(gql(SET_VISIBLE_MUTATION), { uuid: nodeUuid, visible: value as boolean, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField visible error:", r.error.message); })
+        client
+          .mutation(gql(SET_VISIBLE_MUTATION), {
+            uuid: nodeUuid,
+            visible: value as boolean,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField visible error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField visible:", err));
         break;
       case "locked":
-        client.mutation(gql(SET_LOCKED_MUTATION), { uuid: nodeUuid, locked: value as boolean, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField locked error:", r.error.message); })
+        client
+          .mutation(gql(SET_LOCKED_MUTATION), {
+            uuid: nodeUuid,
+            locked: value as boolean,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField locked error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField locked:", err));
         break;
       case "style.opacity": {
         const opVal = value as { type: string; value: number };
-        client.mutation(gql(SET_OPACITY_MUTATION), { uuid: nodeUuid, opacity: opVal.value, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField opacity error:", r.error.message); })
+        client
+          .mutation(gql(SET_OPACITY_MUTATION), {
+            uuid: nodeUuid,
+            opacity: opVal.value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField opacity error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField opacity:", err));
         break;
       }
       case "style.blend_mode":
-        client.mutation(gql(SET_BLEND_MODE_MUTATION), { uuid: nodeUuid, blendMode: value as string, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField blend_mode error:", r.error.message); })
+        client
+          .mutation(gql(SET_BLEND_MODE_MUTATION), {
+            uuid: nodeUuid,
+            blendMode: value as string,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField blend_mode error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField blend_mode:", err));
         break;
       case "style.fills":
         // RF-010: value is already plain data in the Operation object, not a Solid proxy
-        client.mutation(gql(SET_FILLS_MUTATION), { uuid: nodeUuid, fills: value, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField fills error:", r.error.message); })
+        client
+          .mutation(gql(SET_FILLS_MUTATION), {
+            uuid: nodeUuid,
+            fills: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField fills error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField fills:", err));
         break;
       case "style.strokes":
         // RF-010: value is already plain data in the Operation object, not a Solid proxy
-        client.mutation(gql(SET_STROKES_MUTATION), { uuid: nodeUuid, strokes: value, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField strokes error:", r.error.message); })
+        client
+          .mutation(gql(SET_STROKES_MUTATION), {
+            uuid: nodeUuid,
+            strokes: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField strokes error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField strokes:", err));
         break;
       case "style.effects":
         // RF-010: value is already plain data in the Operation object, not a Solid proxy
-        client.mutation(gql(SET_EFFECTS_MUTATION), { uuid: nodeUuid, effects: value, userId: clientSessionId }).toPromise()
-          .then((r) => { if (r.error) console.error("sendSetField effects error:", r.error.message); })
+        client
+          .mutation(gql(SET_EFFECTS_MUTATION), {
+            uuid: nodeUuid,
+            effects: value,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) console.error("sendSetField effects error:", r.error.message);
+          })
           .catch((err: unknown) => console.error("sendSetField effects:", err));
         break;
       case "kind":
         // For corner radii changes on rectangles
-        if (value && typeof value === "object" && "corner_radii" in (value as Record<string, unknown>)) {
-          const radii = (value as Record<string, unknown>)["corner_radii"] as [number, number, number, number];
-          client.mutation(gql(SET_CORNER_RADII_MUTATION), { uuid: nodeUuid, radii: [...radii], userId: clientSessionId }).toPromise()
-            .then((r) => { if (r.error) console.error("sendSetField kind error:", r.error.message); })
+        if (
+          value &&
+          typeof value === "object" &&
+          "corner_radii" in (value as Record<string, unknown>)
+        ) {
+          const radii = (value as Record<string, unknown>)["corner_radii"] as [
+            number,
+            number,
+            number,
+            number,
+          ];
+          client
+            .mutation(gql(SET_CORNER_RADII_MUTATION), {
+              uuid: nodeUuid,
+              radii: [...radii],
+              userId: clientSessionId,
+            })
+            .toPromise()
+            .then((r) => {
+              if (r.error) console.error("sendSetField kind error:", r.error.message);
+            })
             .catch((err: unknown) => console.error("sendSetField kind:", err));
         }
         break;
