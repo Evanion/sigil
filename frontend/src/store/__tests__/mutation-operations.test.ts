@@ -16,7 +16,7 @@ import {
   createReparentOp,
   createReorderOp,
 } from "../../operations/operation-helpers";
-import type { StoreStateReader } from "../../operations/apply-to-store";
+import type { StoreStateReader, StoreStateSetter } from "../../operations/apply-to-store";
 
 // ── Test helpers ────────────────────────────────────────────────────────
 
@@ -63,7 +63,11 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     reader = {
       getNode: (uuid: string) => (uuid === "node-1" ? testNode : undefined),
     };
-    history = createStoreHistoryBridge(historyManager, setState, reader);
+    history = createStoreHistoryBridge(
+      historyManager,
+      setState as unknown as StoreStateSetter,
+      reader,
+    );
   });
 
   describe("setTransform — operation tracking", () => {
@@ -334,7 +338,11 @@ describe("mutation operations — debounced style mutations (Task 4)", () => {
     reader = {
       getNode: (uuid: string) => (uuid === "node-1" ? testNode : undefined),
     };
-    history = createStoreHistoryBridge(historyManager, setState, reader);
+    history = createStoreHistoryBridge(
+      historyManager,
+      setState as unknown as StoreStateSetter,
+      reader,
+    );
   });
 
   describe("setFills — operation tracking", () => {
@@ -532,7 +540,11 @@ describe("mutation operations — structural mutations (Task 5)", () => {
     reader = {
       getNode: (uuid: string) => nodes[uuid] as Record<string, unknown> | undefined,
     };
-    history = createStoreHistoryBridge(historyManager, setState, reader);
+    history = createStoreHistoryBridge(
+      historyManager,
+      setState as unknown as StoreStateSetter,
+      reader,
+    );
   });
 
   describe("createNode — operation tracking", () => {
@@ -719,7 +731,11 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
     reader = {
       getNode: (uuid: string) => nodes[uuid] as Record<string, unknown> | undefined,
     };
-    history = createStoreHistoryBridge(historyManager, setState, reader);
+    history = createStoreHistoryBridge(
+      historyManager,
+      setState as unknown as StoreStateSetter,
+      reader,
+    );
   });
 
   describe("batchSetTransform — transaction tracking", () => {

@@ -59,6 +59,9 @@ function createMockStore(
     undo: () => {},
     redo: () => {},
     destroy: () => {},
+    beginDrag: () => {},
+    commitDrag: () => {},
+    cancelDrag: () => {},
   } as DocumentStoreAPI;
 }
 

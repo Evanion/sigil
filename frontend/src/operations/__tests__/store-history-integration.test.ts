@@ -8,6 +8,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HistoryManager } from "../history-manager";
+import type { StoreStateSetter, StoreStateReader } from "../apply-to-store";
 import { createStoreHistoryBridge, type StoreHistoryBridge } from "../store-history";
 import { createSetFieldOp } from "../operation-helpers";
 
@@ -39,7 +40,11 @@ describe("StoreHistoryBridge", () => {
         kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
       }),
     };
-    bridge = createStoreHistoryBridge(historyManager, setState, reader);
+    bridge = createStoreHistoryBridge(
+      historyManager,
+      setState as unknown as StoreStateSetter,
+      reader as unknown as StoreStateReader,
+    );
   });
 
   it("applyAndTrack applies operation to store and tracks in history", () => {
