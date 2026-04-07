@@ -129,6 +129,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeCreated,
             uuid: Some(node_uuid.to_string()),
             data: None,
+            transaction: None,
         });
 
         Ok(CreateNodeResult {
@@ -200,6 +201,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeDeleted,
             uuid: Some(parsed_uuid.to_string()),
             data: None,
+            transaction: None,
         });
 
         Ok(true)
@@ -251,6 +253,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "name"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -306,6 +309,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "transform"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -351,6 +355,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "visible"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -396,6 +401,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "locked"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -480,6 +486,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "parent"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -554,6 +561,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "order"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -614,6 +622,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "opacity"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -675,6 +684,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "blend_mode"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -736,6 +746,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "fills"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -797,6 +808,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "strokes"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -858,6 +870,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "effects"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -940,6 +953,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some(parsed_uuid.to_string()),
             data: Some(serde_json::json!({"field": "corner_radii"})),
+            transaction: None,
         });
 
         Ok(node_gql)
@@ -1053,6 +1067,7 @@ impl MutationRoot {
                 "batch": true,
                 "affected_uuids": affected_uuids,
             })),
+            transaction: None,
         });
 
         Ok(result_nodes)
@@ -1108,6 +1123,7 @@ impl MutationRoot {
             kind: MutationEventKind::NodeCreated,
             uuid: Some(group_uuid.to_string()),
             data: Some(serde_json::json!({"operation": "group"})),
+            transaction: None,
         });
 
         Ok(group_uuid.to_string())
@@ -1177,6 +1193,7 @@ impl MutationRoot {
                 kind: MutationEventKind::NodeDeleted,
                 uuid: Some(uuid_str.clone()),
                 data: Some(serde_json::json!({"operation": "ungroup"})),
+                transaction: None,
             });
         }
 
@@ -1201,6 +1218,7 @@ impl MutationRoot {
             kind: MutationEventKind::UndoRedo,
             uuid: None,
             data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+            transaction: None,
         });
 
         Ok(UndoRedoResult { can_undo, can_redo })
@@ -1224,6 +1242,7 @@ impl MutationRoot {
             kind: MutationEventKind::UndoRedo,
             uuid: None,
             data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+            transaction: None,
         });
 
         Ok(UndoRedoResult { can_undo, can_redo })

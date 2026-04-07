@@ -68,6 +68,7 @@ mod tests {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
+            transaction: None,
         });
 
         let received = rx.recv().await.expect("should receive event");
@@ -86,6 +87,7 @@ mod tests {
             kind: MutationEventKind::NodeDeleted,
             uuid: Some("def-456".to_string()),
             data: None,
+            transaction: None,
         });
     }
 
@@ -100,6 +102,7 @@ mod tests {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some("ghi-789".to_string()),
             data: Some(serde_json::json!({"field": "transform"})),
+            transaction: None,
         });
 
         let r1 = DocumentEvent::from_mutation_event(
@@ -147,6 +150,7 @@ mod tests {
                 kind: *kind,
                 uuid: None,
                 data: None,
+                transaction: None,
             });
         }
 
@@ -224,6 +228,7 @@ mod tests {
                 kind,
                 uuid: Some("test-uuid".to_string()),
                 data: None,
+                transaction: None,
             };
             let doc_event = DocumentEvent::from_mutation_event(mutation_event);
             assert_eq!(doc_event.event_type, expected_type, "mismatch for {kind:?}");

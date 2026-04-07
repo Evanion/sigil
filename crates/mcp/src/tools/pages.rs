@@ -62,6 +62,7 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
         kind: MutationEventKind::PageCreated,
         uuid: Some(page_uuid.to_string()),
         data: None,
+        transaction: None,
     });
 
     Ok(PageInfo {
@@ -113,6 +114,7 @@ pub fn delete_page_impl(
         kind: MutationEventKind::PageDeleted,
         uuid: Some(page_uuid_str.to_string()),
         data: None,
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -169,6 +171,7 @@ pub fn rename_page_impl(
         kind: MutationEventKind::PageUpdated,
         uuid: Some(page_uuid_str.to_string()),
         data: Some(serde_json::json!({"field": "name"})),
+        transaction: None,
     });
 
     Ok(PageInfo {

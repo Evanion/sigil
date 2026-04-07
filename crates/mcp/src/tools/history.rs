@@ -39,6 +39,7 @@ pub fn undo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
             "can_undo": result.can_undo,
             "can_redo": result.can_redo,
         })),
+        transaction: None,
     });
     Ok(result)
 }
@@ -68,6 +69,7 @@ pub fn redo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
             "can_undo": result.can_undo,
             "can_redo": result.can_redo,
         })),
+        transaction: None,
     });
     Ok(result)
 }

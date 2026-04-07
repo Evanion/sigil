@@ -8,6 +8,7 @@
 
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_designer_core::Document;
@@ -22,6 +23,43 @@ use tokio::task::JoinHandle;
 /// subscribers.
 pub const MUTATION_BROADCAST_CAPACITY: usize = 256;
 
+/// A single field-level operation payload for broadcast.
+///
+/// This is the transport-agnostic representation that flows through
+/// the broadcast channel. The server converts it to GraphQL types;
+/// the MCP crate can use it directly.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct OperationPayload {
+    /// Unique operation ID (UUID string).
+    pub id: String,
+    /// Target node UUID.
+    pub node_uuid: String,
+    /// Operation type: `set_field`, `create_node`, `delete_node`, `reparent`, `reorder`.
+    pub op_type: String,
+    /// Field path for `set_field` operations (e.g., "transform", "style.fills", "name").
+    /// Empty for structural operations.
+    pub path: String,
+    /// New value as JSON. Full node data for `create_node`.
+    pub value: Option<serde_json::Value>,
+}
+
+/// A complete transaction payload for broadcast.
+///
+/// Groups one or more operations into a single broadcast message.
+/// Carries the user ID and server-assigned sequence number.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct TransactionPayload {
+    /// Unique transaction ID (UUID string).
+    pub transaction_id: String,
+    /// Session ID of the user who originated this transaction.
+    pub user_id: String,
+    /// Server-assigned monotonically increasing sequence number.
+    /// Set to 0 at construction; assigned by [`AppState::publish_transaction`].
+    pub seq: u64,
+    /// Ordered list of operations in this transaction.
+    pub operations: Vec<OperationPayload>,
+}
+
 /// Type-erased mutation event for broadcasting to connected clients.
 ///
 /// This lives in the state crate so that both the server (GraphQL subscriptions)
@@ -29,12 +67,15 @@ pub const MUTATION_BROADCAST_CAPACITY: usize = 256;
 /// The server converts these into its own `DocumentEvent` type for GraphQL.
 #[derive(Clone, Debug)]
 pub struct MutationEvent {
-    /// The kind of mutation that occurred.
+    /// The kind of mutation that occurred (legacy, kept for backwards compat).
     pub kind: MutationEventKind,
-    /// UUID of the affected entity, if applicable.
+    /// UUID of the affected entity, if applicable (legacy).
     pub uuid: Option<String>,
-    /// Additional structured data about the event (JSON-serialized).
+    /// Additional structured data about the event (JSON-serialized, legacy).
     pub data: Option<serde_json::Value>,
+    /// Typed operation payload (new). When present, subscribers should use this
+    /// instead of the legacy fields.
+    pub transaction: Option<TransactionPayload>,
 }
 
 /// Discriminator for mutation events.
@@ -135,6 +176,10 @@ pub struct AppState {
     /// subscription streams). `None` when broadcasting is not configured
     /// (e.g. in MCP-only or test scenarios without a server).
     event_tx: Option<broadcast::Sender<MutationEvent>>,
+    /// Monotonically increasing sequence counter for operation ordering.
+    /// Each transaction broadcast increments this counter.
+    /// Starts at 1 (0 is reserved as "unconfirmed" on the client).
+    seq_counter: Arc<AtomicU64>,
 }
 
 impl AppState {
@@ -151,6 +196,7 @@ impl AppState {
             dirty_tx: None,
             persistence_handle: Arc::new(Mutex::new(None)),
             event_tx: None,
+            seq_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -171,6 +217,7 @@ impl AppState {
             dirty_tx: Some(dirty_tx),
             persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
             event_tx: None,
+            seq_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
@@ -203,6 +250,33 @@ impl AppState {
         {
             tracing::debug!("no mutation event listeners");
         }
+    }
+
+    /// Returns the next sequence number, incrementing the counter atomically.
+    ///
+    /// Sequence numbers start at 1 (0 is reserved as "unconfirmed" on the client).
+    #[must_use]
+    pub fn next_seq(&self) -> u64 {
+        self.seq_counter.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Publishes a transaction as a mutation event with the operation payload.
+    ///
+    /// Assigns the next sequence number, wraps the transaction in a `MutationEvent`
+    /// with the appropriate legacy kind, and broadcasts to all subscribers.
+    pub fn publish_transaction(
+        &self,
+        kind: MutationEventKind,
+        uuid: Option<String>,
+        mut transaction: TransactionPayload,
+    ) {
+        transaction.seq = self.next_seq();
+        self.publish_event(MutationEvent {
+            kind,
+            uuid,
+            data: None,
+            transaction: Some(transaction),
+        });
     }
 
     /// Signals the persistence task that the document has been modified.
@@ -296,6 +370,7 @@ mod tests {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("test".to_string()),
             data: None,
+            transaction: None,
         });
     }
 
@@ -310,6 +385,7 @@ mod tests {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
+            transaction: None,
         });
 
         let received = rx.try_recv().expect("should receive event");
@@ -338,5 +414,107 @@ mod tests {
             state.event_tx().is_some(),
             "event_tx should be Some after configuration"
         );
+    }
+
+    #[test]
+    fn test_next_seq_starts_at_one() {
+        let state = AppState::new();
+        assert_eq!(state.next_seq(), 1, "first sequence number should be 1");
+    }
+
+    #[test]
+    fn test_next_seq_monotonically_increases() {
+        let state = AppState::new();
+        let values: Vec<u64> = (0..10).map(|_| state.next_seq()).collect();
+        let expected: Vec<u64> = (1..=10).collect();
+        assert_eq!(values, expected, "sequence numbers should be 1..=10");
+    }
+
+    #[test]
+    fn test_publish_transaction_assigns_seq() {
+        let mut state = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        let mut rx = tx.subscribe();
+        state.set_event_tx(tx);
+
+        state.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some("node-abc".to_string()),
+            TransactionPayload {
+                transaction_id: "tx-1".to_string(),
+                user_id: "user-1".to_string(),
+                seq: 0,
+                operations: vec![OperationPayload {
+                    id: "op-1".to_string(),
+                    node_uuid: "node-abc".to_string(),
+                    op_type: "set_field".to_string(),
+                    path: "transform".to_string(),
+                    value: Some(serde_json::json!({"x": 10})),
+                }],
+            },
+        );
+
+        let received = rx.try_recv().expect("should receive event");
+        let tx_payload = received.transaction.expect("event should have transaction");
+        assert!(
+            tx_payload.seq > 0,
+            "seq should be assigned a positive value"
+        );
+        assert_eq!(tx_payload.seq, 1, "first transaction should get seq 1");
+    }
+
+    #[test]
+    fn test_publish_transaction_preserves_legacy_kind() {
+        let mut state = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        let mut rx = tx.subscribe();
+        state.set_event_tx(tx);
+
+        state.publish_transaction(
+            MutationEventKind::NodeCreated,
+            Some("node-xyz".to_string()),
+            TransactionPayload {
+                transaction_id: "tx-2".to_string(),
+                user_id: "user-2".to_string(),
+                seq: 0,
+                operations: vec![],
+            },
+        );
+
+        let received = rx.try_recv().expect("should receive event");
+        assert_eq!(
+            received.kind,
+            MutationEventKind::NodeCreated,
+            "legacy kind should be preserved"
+        );
+        assert_eq!(received.uuid.as_deref(), Some("node-xyz"));
+        assert!(
+            received.transaction.is_some(),
+            "transaction should be present"
+        );
+    }
+
+    #[test]
+    fn test_mutation_event_without_transaction_is_backwards_compatible() {
+        let mut state = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        let mut rx = tx.subscribe();
+        state.set_event_tx(tx);
+
+        // Legacy publish_event without transaction
+        state.publish_event(MutationEvent {
+            kind: MutationEventKind::UndoRedo,
+            uuid: None,
+            data: Some(serde_json::json!({"action": "undo"})),
+            transaction: None,
+        });
+
+        let received = rx.try_recv().expect("should receive event");
+        assert_eq!(received.kind, MutationEventKind::UndoRedo);
+        assert!(
+            received.transaction.is_none(),
+            "transaction should be None for legacy events"
+        );
+        assert!(received.data.is_some(), "legacy data should be preserved");
     }
 }
