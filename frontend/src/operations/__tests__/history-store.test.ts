@@ -190,4 +190,25 @@ describe("HistoryStore", () => {
       );
     });
   });
+
+  // RF-014: makeKey collision guard
+  describe("makeKey collision guard", () => {
+    it("should throw when documentId contains '::'", async () => {
+      await expect(
+        store.saveStack("doc::evil", "user-1", [], []),
+      ).rejects.toThrow('must not contain "::"');
+    });
+
+    it("should throw when userId contains '::'", async () => {
+      await expect(
+        store.saveStack("doc-1", "user::evil", [], []),
+      ).rejects.toThrow('must not contain "::"');
+    });
+
+    it("should throw on load when documentId contains '::'", async () => {
+      await expect(store.loadStack("doc::evil", "user-1")).rejects.toThrow(
+        'must not contain "::"',
+      );
+    });
+  });
 });

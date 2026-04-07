@@ -99,13 +99,22 @@ describe("createInverse", () => {
     expect(inv.id).not.toBe(op.id);
   });
 
-  it("flips create_node to delete_node", () => {
+  it("flips create_node to delete_node and extracts nodeUuid from value", () => {
     const nodeData = { uuid: "new-node", kind: { type: "rectangle" } };
     const op = createCreateNodeOp(USER_ID, nodeData);
     const inv = createInverse(op);
     expect(inv.type).toBe("delete_node");
     expect(inv.value).toBeNull();
     expect(inv.previousValue).toEqual(nodeData);
+    // RF-002: inverse of create_node should carry the node UUID
+    expect(inv.nodeUuid).toBe("new-node");
+  });
+
+  it("falls back to empty nodeUuid when create_node value has no uuid field", () => {
+    const nodeData = { kind: { type: "rectangle" } };
+    const op = createCreateNodeOp(USER_ID, nodeData);
+    const inv = createInverse(op);
+    expect(inv.type).toBe("delete_node");
     expect(inv.nodeUuid).toBe("");
   });
 

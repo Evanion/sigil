@@ -12,10 +12,14 @@ import type { Operation, Transaction } from "./types";
 import { HistoryManager } from "./history-manager";
 import { HistoryStore } from "./history-store";
 
+/** Debounce delay for persistAsync in milliseconds. */
+const PERSIST_DEBOUNCE_MS = 500;
+
 export class PersistentHistoryManager {
   private readonly manager: HistoryManager;
   private readonly store: HistoryStore;
   private readonly userId: string;
+  private persistTimerId: ReturnType<typeof setTimeout> | null = null;
 
   constructor(userId: string) {
     this.userId = userId;
@@ -28,8 +32,12 @@ export class PersistentHistoryManager {
     await this.store.open();
   }
 
-  /** Close the IndexedDB database. */
+  /** Close the IndexedDB database and clear pending timers. */
   dispose(): void {
+    if (this.persistTimerId !== null) {
+      clearTimeout(this.persistTimerId);
+      this.persistTimerId = null;
+    }
     this.store.close();
   }
 
@@ -107,13 +115,21 @@ export class PersistentHistoryManager {
   }
 
   /**
-   * Fire-and-forget persist. Logs errors to console.error.
-   * Called after every state-changing operation for non-blocking persistence.
+   * Debounced fire-and-forget persist. Logs errors to console.error.
+   * Uses a 500ms trailing debounce to avoid serializing the full stack
+   * on every mutation. Called after every state-changing operation for
+   * non-blocking persistence.
    */
   persistAsync(documentId: string): void {
-    this.persist(documentId).catch((err: unknown) => {
-      console.error("Failed to persist history to IndexedDB:", err);
-    });
+    if (this.persistTimerId !== null) {
+      clearTimeout(this.persistTimerId);
+    }
+    this.persistTimerId = setTimeout(() => {
+      this.persistTimerId = null;
+      this.persist(documentId).catch((err: unknown) => {
+        console.error("Failed to persist history to IndexedDB:", err);
+      });
+    }, PERSIST_DEBOUNCE_MS);
   }
 
   /**

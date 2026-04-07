@@ -89,7 +89,35 @@ describe("PersistentHistoryManager", () => {
     });
   });
 
-  describe("persist errors are logged, not thrown", () => {
+  describe("persistAsync debounce", () => {
+    it("should debounce multiple persistAsync calls", async () => {
+      vi.useFakeTimers();
+      try {
+        phm.apply(
+          createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
+          "Step 1",
+        );
+        phm.persistAsync(DOC_ID);
+        phm.persistAsync(DOC_ID);
+        phm.persistAsync(DOC_ID);
+
+        // Before the debounce fires, nothing should be persisted yet
+        // Advance past the debounce delay (500ms) and flush promises
+        await vi.advanceTimersByTimeAsync(600);
+
+        vi.useRealTimers();
+
+        // Now check the data was persisted
+        const phm2 = new PersistentHistoryManager(USER_ID);
+        await phm2.init();
+        await phm2.restore(DOC_ID);
+        expect(phm2.canUndo()).toBe(true);
+        phm2.dispose();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("should not throw from persistAsync on error", async () => {
       // Close the underlying store to simulate an error
       phm.dispose();
@@ -98,11 +126,15 @@ describe("PersistentHistoryManager", () => {
         .spyOn(console, "error")
         .mockImplementation(() => {});
 
+      // Re-init a new phm that we'll break
+      phm = new PersistentHistoryManager(USER_ID);
+      // Don't call init() — store is not open
+
       // This should not throw
       phm.persistAsync(DOC_ID);
 
-      // Give the microtask time to settle
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Give the debounce + microtask time to settle
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
       consoleSpy.mockRestore();
     });

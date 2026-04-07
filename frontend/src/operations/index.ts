@@ -14,7 +14,7 @@ export type {
   ReorderValue,
   ReorderPreviousValue,
 } from "./types";
-export { MAX_HISTORY_SIZE } from "./types";
+export { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "./types";
 
 // Helpers
 export {

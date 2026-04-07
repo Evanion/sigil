@@ -13,6 +13,7 @@
  */
 
 import type { Transaction } from "./types";
+import { MAX_HISTORY_SIZE } from "./types";
 
 /** Database name. */
 const DB_NAME = "sigil-history";
@@ -38,7 +39,29 @@ interface StackRecord {
 
 /** Build the compound key string from document and user IDs. */
 function makeKey(documentId: string, userId: string): string {
+  if (documentId.includes("::") || userId.includes("::")) {
+    throw new Error(
+      `Invalid key component: documentId and userId must not contain "::" (got documentId="${documentId}", userId="${userId}")`,
+    );
+  }
   return `${documentId}::${userId}`;
+}
+
+/**
+ * Validate that data loaded from IndexedDB has the expected shape.
+ * Returns true if the data is a valid StackRecord, false otherwise.
+ */
+function isValidStackRecord(data: unknown): data is StackRecord {
+  if (typeof data !== "object" || data === null) return false;
+  const record = data as Record<string, unknown>;
+  if (!Array.isArray(record.undoStack) || !Array.isArray(record.redoStack)) return false;
+  if (
+    record.undoStack.length > MAX_HISTORY_SIZE ||
+    record.redoStack.length > MAX_HISTORY_SIZE
+  ) {
+    return false;
+  }
+  return true;
 }
 
 export class HistoryStore {
@@ -69,6 +92,10 @@ export class HistoryStore {
             `Failed to open IndexedDB "${DB_NAME}": ${String(request.error)}`,
           ),
         );
+      };
+
+      request.onblocked = () => {
+        reject(new Error("IndexedDB upgrade blocked"));
       };
     });
   }
@@ -105,17 +132,20 @@ export class HistoryStore {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STACKS_STORE, "readwrite");
       const objectStore = tx.objectStore(STACKS_STORE);
-      const request = objectStore.put(record);
+      objectStore.put(record);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () =>
-        reject(new Error(`Failed to save stack: ${String(request.error)}`));
+      // RF-005: Resolve on transaction commit, not request success
+      tx.oncomplete = () => resolve();
+      tx.onerror = () =>
+        reject(new Error(`Failed to save stack: ${String(tx.error)}`));
+      tx.onabort = () =>
+        reject(new Error(`Save stack transaction aborted: ${String(tx.error)}`));
     });
   }
 
   /**
    * Load undo and redo stacks for a document+user pair.
-   * Returns null if no data exists for the given key.
+   * Returns null if no data exists for the given key or if the data is malformed.
    */
   async loadStack(
     documentId: string,
@@ -130,8 +160,14 @@ export class HistoryStore {
       const request = objectStore.get(key);
 
       request.onsuccess = () => {
-        const result = request.result as StackRecord | undefined;
+        const result: unknown = request.result;
         if (result === undefined) {
+          resolve(null);
+        } else if (!isValidStackRecord(result)) {
+          console.warn(
+            "HistoryStore: loaded data failed shape validation, treating as missing",
+            result,
+          );
           resolve(null);
         } else {
           resolve({
@@ -156,11 +192,14 @@ export class HistoryStore {
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STACKS_STORE, "readwrite");
       const objectStore = tx.objectStore(STACKS_STORE);
-      const request = objectStore.delete(key);
+      objectStore.delete(key);
 
-      request.onsuccess = () => resolve();
-      request.onerror = () =>
-        reject(new Error(`Failed to clear stack: ${String(request.error)}`));
+      // RF-005: Resolve on transaction commit, not request success
+      tx.oncomplete = () => resolve();
+      tx.onerror = () =>
+        reject(new Error(`Failed to clear stack: ${String(tx.error)}`));
+      tx.onabort = () =>
+        reject(new Error(`Clear stack transaction aborted: ${String(tx.error)}`));
     });
   }
 

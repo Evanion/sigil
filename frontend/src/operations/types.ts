@@ -41,10 +41,7 @@ export interface Operation {
   readonly value: unknown;
   /** Old value (full node snapshot for delete_node). */
   readonly previousValue: unknown;
-  /**
-   * Server-assigned sequence number. 0 until confirmed by the server.
-   * Mutable because it is assigned after creation.
-   */
+  // INTENTIONAL: mutable — server assigns seq after creation
   seq: number;
 }
 
@@ -64,10 +61,7 @@ export interface Transaction {
   readonly description: string;
   /** Wall clock timestamp (Date.now()). */
   readonly timestamp: number;
-  /**
-   * Server-assigned sequence number for the transaction. 0 until confirmed.
-   * Mutable because it is assigned after creation.
-   */
+  // INTENTIONAL: mutable — server assigns seq after creation
   seq: number;
 }
 
@@ -98,3 +92,6 @@ export interface ReorderPreviousValue {
 
 /** Maximum number of transactions in the undo or redo stack. */
 export const MAX_HISTORY_SIZE = 500;
+
+/** Maximum number of operations allowed in a single transaction. */
+export const MAX_OPERATIONS_PER_TRANSACTION = 1000;

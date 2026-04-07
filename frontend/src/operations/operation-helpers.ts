@@ -120,10 +120,19 @@ export function createReorderOp(
  * The inverse gets a fresh id and seq=0.
  */
 export function createInverse(op: Operation): Operation {
+  // When inverting create_node → delete_node, the original op has nodeUuid=""
+  // because the node didn't exist yet. Extract the UUID from the value payload
+  // so the delete_node inverse knows which node to delete.
+  let nodeUuid = op.nodeUuid;
+  if (op.type === "create_node" && nodeUuid === "") {
+    const val = op.value as Record<string, unknown> | null;
+    nodeUuid = (typeof val?.uuid === "string" ? val.uuid : "") as string;
+  }
+
   return {
     id: crypto.randomUUID(),
     userId: op.userId,
-    nodeUuid: op.nodeUuid,
+    nodeUuid,
     type: inverseType(op.type),
     path: op.path,
     value: op.previousValue,

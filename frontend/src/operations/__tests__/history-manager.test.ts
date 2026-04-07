@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../history-manager";
 import { createSetFieldOp, createCreateNodeOp } from "../operation-helpers";
-import { MAX_HISTORY_SIZE } from "../types";
+import { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "../types";
 import type { Transaction } from "../types";
 
 const USER_ID = "test-user";
@@ -142,7 +142,8 @@ describe("HistoryManager", () => {
   // ── MAX_HISTORY_SIZE eviction ────────────────────────────────────
 
   describe("max history size", () => {
-    it("should evict oldest transactions when undo stack exceeds MAX_HISTORY_SIZE", () => {
+    // RF-008: Named test for constant enforcement
+    it("test_max_history_size_enforced", () => {
       for (let i = 0; i < MAX_HISTORY_SIZE + 10; i++) {
         hm.apply(
           createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
@@ -156,6 +157,25 @@ describe("HistoryManager", () => {
         undoCount++;
       }
       expect(undoCount).toBe(MAX_HISTORY_SIZE);
+    });
+
+    it("should evict oldest transactions when redo stack exceeds MAX_HISTORY_SIZE", () => {
+      // Fill the undo stack
+      for (let i = 0; i < MAX_HISTORY_SIZE + 10; i++) {
+        hm.apply(
+          createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
+          `Step ${i}`,
+        );
+      }
+      // Undo all to fill redo stack
+      while (hm.undo() !== null) {
+        // drain
+      }
+      let redoCount = 0;
+      while (hm.redo() !== null) {
+        redoCount++;
+      }
+      expect(redoCount).toBeLessThanOrEqual(MAX_HISTORY_SIZE);
     });
   });
 
@@ -201,6 +221,17 @@ describe("HistoryManager", () => {
       expect(hm.canRedo()).toBe(false);
     });
 
+    // RF-004: Empty transaction commit still clears redo
+    it("should clear redo stack even when committing an empty transaction", () => {
+      hm.apply(createSetFieldOp(USER_ID, "n1", "name", "B", "A"), "Step 1");
+      hm.undo();
+      expect(hm.canRedo()).toBe(true);
+
+      hm.beginTransaction("Empty");
+      hm.commitTransaction();
+      expect(hm.canRedo()).toBe(false);
+    });
+
     it("should throw when calling addOperation without beginTransaction", () => {
       const op = createSetFieldOp(USER_ID, "n1", "name", "B", "A");
       expect(() => hm.addOperation(op)).toThrow();
@@ -213,6 +244,31 @@ describe("HistoryManager", () => {
     it("should throw when calling beginTransaction while one is active", () => {
       hm.beginTransaction("First");
       expect(() => hm.beginTransaction("Second")).toThrow();
+    });
+
+    // RF-006: MAX_OPERATIONS_PER_TRANSACTION enforcement
+    it("test_max_operations_per_transaction_enforced", () => {
+      hm.beginTransaction("Big transaction");
+      for (let i = 0; i < MAX_OPERATIONS_PER_TRANSACTION; i++) {
+        hm.addOperation(
+          createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`),
+        );
+      }
+      // The next one should throw
+      expect(() =>
+        hm.addOperation(
+          createSetFieldOp(USER_ID, "node-overflow", "name", "x", "y"),
+        ),
+      ).toThrow("MAX_OPERATIONS_PER_TRANSACTION");
+    });
+  });
+
+  // ── cancelTransaction guard ─────────────────────────────────────
+
+  describe("cancelTransaction guard", () => {
+    // RF-012: cancelTransaction throws when no active transaction
+    it("should throw when calling cancelTransaction without beginTransaction", () => {
+      expect(() => hm.cancelTransaction()).toThrow("no active transaction");
     });
   });
 
@@ -275,6 +331,24 @@ describe("HistoryManager", () => {
       hm.commitDrag();
       expect(hm.canUndo()).toBe(false);
     });
+
+    // RF-012: cancelDrag guard
+    it("should throw when calling cancelDrag without beginDrag", () => {
+      expect(() => hm.cancelDrag()).toThrow("no active drag");
+    });
+
+    // updateDrag node/path mismatch guard
+    it("should throw when updateDrag operation has mismatched node/path", () => {
+      hm.beginDrag("node-1", "transform");
+      const op = createSetFieldOp(USER_ID, "node-2", "transform", { x: 5 }, { x: 0 });
+      expect(() => hm.updateDrag(op)).toThrow("does not match drag");
+    });
+
+    it("should throw when updateDrag operation has mismatched path", () => {
+      hm.beginDrag("node-1", "transform");
+      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      expect(() => hm.updateDrag(op)).toThrow("does not match drag");
+    });
   });
 
   // ── clear ────────────────────────────────────────────────────────
@@ -293,6 +367,41 @@ describe("HistoryManager", () => {
     });
   });
 
+  // ── restoreStacks enforces MAX_HISTORY_SIZE ──────────────────────
+
+  describe("restoreStacks", () => {
+    it("should truncate restored stacks to MAX_HISTORY_SIZE", () => {
+      const bigUndo: Transaction[] = [];
+      const bigRedo: Transaction[] = [];
+      for (let i = 0; i < MAX_HISTORY_SIZE + 50; i++) {
+        bigUndo.push({
+          id: `u-${i}`,
+          userId: USER_ID,
+          operations: [],
+          description: `undo-${i}`,
+          timestamp: i,
+          seq: 0,
+        });
+        bigRedo.push({
+          id: `r-${i}`,
+          userId: USER_ID,
+          operations: [],
+          description: `redo-${i}`,
+          timestamp: i,
+          seq: 0,
+        });
+      }
+      hm.restoreStacks(bigUndo, bigRedo);
+
+      // Should only be able to undo MAX_HISTORY_SIZE times
+      let undoCount = 0;
+      while (hm.undo() !== null) {
+        undoCount++;
+      }
+      expect(undoCount).toBe(MAX_HISTORY_SIZE);
+    });
+  });
+
   // ── create/delete inverse flipping through undo ──────────────────
 
   describe("create/delete undo round-trip", () => {
@@ -303,6 +412,8 @@ describe("HistoryManager", () => {
       const inv = assertNonNull(hm.undo());
       expect(inv.operations[0].type).toBe("delete_node");
       expect(inv.operations[0].previousValue).toEqual(nodeData);
+      // RF-002: nodeUuid should be extracted from create_node value
+      expect(inv.operations[0].nodeUuid).toBe("new-1");
     });
 
     it("should produce create_node again when redoing after undo of create_node", () => {
