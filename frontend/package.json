@@ -25,6 +25,7 @@
     "@types/jsdom": "^28.0.1",
     "@types/node": "^25.5.0",
     "eslint": "^10.1.0",
+    "fake-indexeddb": "^6.2.5",
     "globals": "^17.4.0",
     "jsdom": "^29.0.1",
     "postcss-jit-props": "^1.0.16",

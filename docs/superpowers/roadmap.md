@@ -1,6 +1,6 @@
 # Sigil Roadmap
 
-> Last updated: 2026-04-06
+> Last updated: 2026-04-07
 
 ## Spec Status
 
@@ -17,6 +17,7 @@
 | 08 | Solid Shell + Panels | ✅ Done | Schema-driven panel system |
 | 09 | Properties Panel | ✅ Done | Style mutations, color picker, panel UI |
 | 10 | Layers + Pages + DnD | ⚠️ Partial | Layers done, **pages panel not implemented** |
+| 11a | Viewport Interactions | ✅ Done | Resize, snap, multi-select, align, group (PRs #33, #34, #35) |
 
 ---
 
@@ -24,16 +25,18 @@
 
 **Goal:** A designer can open Sigil, create shapes, move/resize them, style them, and it feels like a real tool — not a demo.
 
-**Why first:** Everything else (tokens, components, export) requires a working canvas editor as the foundation. Right now you can create shapes and color them, but you can't resize or move them interactively.
+**Why first:** Everything else (tokens, components, export) requires a working canvas editor as the foundation. The undo system must be reliable for all editing operations.
 
 | # | Item | Type | Depends on | Effort |
 |---|------|------|-----------|--------|
-| 1.1 | **Viewport interactions** — move, resize, snap, align, distribute, multi-select | New spec (11) | — | L |
+| 1.0 | **Undo/redo system redesign** — CRITICAL. Client optimistic state diverges from server after undo. `fetchPages()` + Solid `reconcile()` doesn't re-render. Undo stack granularity doesn't match user expectations. Needs spec exploring: server returns full affected state in responses, or client-side command mirror (brokkr-inspired), or event-sourced with versions. Blocks reliable editing. | New spec (15) | Spec 02 | L |
+| 1.1 | ~~**Viewport interactions**~~ — DONE (PRs #33, #34, #35) | Spec 11a | — | ~~L~~ |
 | 1.2 | **Pages panel** — CRUD, thumbnails, navigation, reorder | Plan 10c (exists) | — | M |
 | 1.3 | **i18n framework** — set up before more strings accumulate | New spec (12) | — | S |
 | 1.4 | **Gradient fill editing** — stop editor, linear/radial controls | New spec (09d) | Spec 09 | M |
+| 1.5 | **Text tool** — create, edit, canvas display + HTML overlay, typography | Spec 11b | — | L |
 
-**Exit criteria:** User can create a multi-page document, draw shapes, move/resize with snapping, apply solid + gradient fills, strokes, effects, and manage layers/pages.
+**Exit criteria:** User can create a multi-page document, draw shapes, move/resize with snapping, apply solid + gradient fills, strokes, effects, manage layers/pages, and reliably undo/redo all operations.
 
 ---
 
@@ -104,7 +107,8 @@
 
 ```
 M1 (Usable Editor)
-├── 1.1 Viewport interactions ← nothing (can start now)
+├── 1.0 Undo/redo redesign ← Spec 02 (server) — CRITICAL, blocks reliable editing
+├── 1.1 Viewport interactions ← DONE (PRs #33, #34, #35)
 ├── 1.2 Pages panel ← Plan 10c exists
 ├── 1.3 i18n ← nothing (can start now)
 └── 1.4 Gradient editing ← Spec 09 ✅
@@ -137,6 +141,7 @@ M4 (Platform) ← M2, M3
 
 ## Next Actions
 
-1. **Start Spec 11 (Viewport Interactions)** — the biggest gap for M1
+1. **Spec 15 (Undo/Redo Redesign)** — CRITICAL, blocks reliable editing for all features
 2. **Execute Plan 10c (Pages Panel)** — plan already exists
 3. **Brainstorm Spec 12 (i18n)** — quick setup, prevents tech debt
+4. **Spec 11b (Text Tool)** — fundamental editing feature
