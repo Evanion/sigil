@@ -1,6 +1,6 @@
 export const CREATE_NODE_MUTATION = `
-  mutation CreateNode($kind: JSON!, $name: String!, $pageId: String, $transform: JSON) {
-    createNode(kind: $kind, name: $name, pageId: $pageId, transform: $transform) {
+  mutation CreateNode($kind: JSON!, $name: String!, $pageId: String, $transform: JSON, $userId: String) {
+    createNode(kind: $kind, name: $name, pageId: $pageId, transform: $transform, userId: $userId) {
       uuid
       node {
         uuid
@@ -18,46 +18,46 @@ export const CREATE_NODE_MUTATION = `
 `;
 
 export const DELETE_NODE_MUTATION = `
-  mutation DeleteNode($uuid: String!) {
-    deleteNode(uuid: $uuid)
+  mutation DeleteNode($uuid: String!, $userId: String) {
+    deleteNode(uuid: $uuid, userId: $userId)
   }
 `;
 
 export const RENAME_NODE_MUTATION = `
-  mutation RenameNode($uuid: String!, $newName: String!) {
-    renameNode(uuid: $uuid, newName: $newName) { uuid name }
+  mutation RenameNode($uuid: String!, $newName: String!, $userId: String) {
+    renameNode(uuid: $uuid, newName: $newName, userId: $userId) { uuid name }
   }
 `;
 
 export const SET_TRANSFORM_MUTATION = `
-  mutation SetTransform($uuid: String!, $transform: JSON!) {
-    setTransform(uuid: $uuid, transform: $transform) { uuid transform }
+  mutation SetTransform($uuid: String!, $transform: JSON!, $userId: String) {
+    setTransform(uuid: $uuid, transform: $transform, userId: $userId) { uuid transform }
   }
 `;
 
 export const SET_VISIBLE_MUTATION = `
-  mutation SetVisible($uuid: String!, $visible: Boolean!) {
-    setVisible(uuid: $uuid, visible: $visible) { uuid visible }
+  mutation SetVisible($uuid: String!, $visible: Boolean!, $userId: String) {
+    setVisible(uuid: $uuid, visible: $visible, userId: $userId) { uuid visible }
   }
 `;
 
 export const SET_LOCKED_MUTATION = `
-  mutation SetLocked($uuid: String!, $locked: Boolean!) {
-    setLocked(uuid: $uuid, locked: $locked) { uuid locked }
+  mutation SetLocked($uuid: String!, $locked: Boolean!, $userId: String) {
+    setLocked(uuid: $uuid, locked: $locked, userId: $userId) { uuid locked }
   }
 `;
 
 export const UNDO_MUTATION = `
-  mutation Undo { undo { canUndo canRedo } }
+  mutation Undo($userId: String) { undo(userId: $userId) { canUndo canRedo } }
 `;
 
 export const REDO_MUTATION = `
-  mutation Redo { redo { canUndo canRedo } }
+  mutation Redo($userId: String) { redo(userId: $userId) { canUndo canRedo } }
 `;
 
 export const REPARENT_NODE_MUTATION = `
-  mutation ReparentNode($uuid: String!, $newParentUuid: String!, $position: Int!) {
-    reparentNode(uuid: $uuid, newParentUuid: $newParentUuid, position: $position) {
+  mutation ReparentNode($uuid: String!, $newParentUuid: String!, $position: Int!, $userId: String) {
+    reparentNode(uuid: $uuid, newParentUuid: $newParentUuid, position: $position, userId: $userId) {
       uuid
       name
       kind
@@ -72,63 +72,63 @@ export const REPARENT_NODE_MUTATION = `
 `;
 
 export const REORDER_CHILDREN_MUTATION = `
-  mutation ReorderChildren($uuid: String!, $newPosition: Int!) {
-    reorderChildren(uuid: $uuid, newPosition: $newPosition) {
+  mutation ReorderChildren($uuid: String!, $newPosition: Int!, $userId: String) {
+    reorderChildren(uuid: $uuid, newPosition: $newPosition, userId: $userId) {
       uuid
     }
   }
 `;
 
 export const SET_OPACITY_MUTATION = `
-  mutation SetOpacity($uuid: String!, $opacity: Float!) {
-    setOpacity(uuid: $uuid, opacity: $opacity) { uuid }
+  mutation SetOpacity($uuid: String!, $opacity: Float!, $userId: String) {
+    setOpacity(uuid: $uuid, opacity: $opacity, userId: $userId) { uuid }
   }
 `;
 
 export const SET_BLEND_MODE_MUTATION = `
-  mutation SetBlendMode($uuid: String!, $blendMode: String!) {
-    setBlendMode(uuid: $uuid, blendMode: $blendMode) { uuid }
+  mutation SetBlendMode($uuid: String!, $blendMode: String!, $userId: String) {
+    setBlendMode(uuid: $uuid, blendMode: $blendMode, userId: $userId) { uuid }
   }
 `;
 
 export const SET_FILLS_MUTATION = `
-  mutation SetFills($uuid: String!, $fills: JSON!) {
-    setFills(uuid: $uuid, fills: $fills) { uuid style }
+  mutation SetFills($uuid: String!, $fills: JSON!, $userId: String) {
+    setFills(uuid: $uuid, fills: $fills, userId: $userId) { uuid style }
   }
 `;
 
 export const SET_STROKES_MUTATION = `
-  mutation SetStrokes($uuid: String!, $strokes: JSON!) {
-    setStrokes(uuid: $uuid, strokes: $strokes) { uuid style }
+  mutation SetStrokes($uuid: String!, $strokes: JSON!, $userId: String) {
+    setStrokes(uuid: $uuid, strokes: $strokes, userId: $userId) { uuid style }
   }
 `;
 
 export const SET_EFFECTS_MUTATION = `
-  mutation SetEffects($uuid: String!, $effects: JSON!) {
-    setEffects(uuid: $uuid, effects: $effects) { uuid style }
+  mutation SetEffects($uuid: String!, $effects: JSON!, $userId: String) {
+    setEffects(uuid: $uuid, effects: $effects, userId: $userId) { uuid style }
   }
 `;
 
 export const SET_CORNER_RADII_MUTATION = `
-  mutation SetCornerRadii($uuid: String!, $radii: [Float!]!) {
-    setCornerRadii(uuid: $uuid, radii: $radii) { uuid kind }
+  mutation SetCornerRadii($uuid: String!, $radii: [Float!]!, $userId: String) {
+    setCornerRadii(uuid: $uuid, radii: $radii, userId: $userId) { uuid kind }
   }
 `;
 
 export const BATCH_SET_TRANSFORM_MUTATION = `
-  mutation BatchSetTransform($entries: JSON!) {
-    batchSetTransform(entries: $entries) { uuid transform }
+  mutation BatchSetTransform($entries: JSON!, $userId: String) {
+    batchSetTransform(entries: $entries, userId: $userId) { uuid transform }
   }
 `;
 
 export const GROUP_NODES_MUTATION = `
-  mutation GroupNodes($uuids: [String!]!, $name: String!) {
-    groupNodes(uuids: $uuids, name: $name)
+  mutation GroupNodes($uuids: [String!]!, $name: String!, $userId: String) {
+    groupNodes(uuids: $uuids, name: $name, userId: $userId)
   }
 `;
 
 export const UNGROUP_NODES_MUTATION = `
-  mutation UngroupNodes($uuids: [String!]!) {
-    ungroupNodes(uuids: $uuids)
+  mutation UngroupNodes($uuids: [String!]!, $userId: String) {
+    ungroupNodes(uuids: $uuids, userId: $userId)
   }
 `;

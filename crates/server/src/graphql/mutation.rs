@@ -30,13 +30,105 @@ use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode
 use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
 use agent_designer_core::validate::MAX_BATCH_SIZE;
 use agent_designer_core::{NodeId, PageId};
-use agent_designer_state::{MutationEvent, MutationEventKind};
+use agent_designer_state::{
+    MutationEvent, MutationEventKind, OperationPayload, TransactionPayload,
+};
 
 use crate::state::ServerState;
 
 use super::types::{CreateNodeResult, NodeGql, UndoRedoResult, node_to_gql};
 
 pub struct MutationRoot;
+
+/// Creates a single-operation transaction payload for a field set mutation.
+fn field_set_transaction(
+    user_id: Option<String>,
+    node_uuid: &str,
+    path: &str,
+    value: serde_json::Value,
+) -> TransactionPayload {
+    TransactionPayload {
+        transaction_id: uuid::Uuid::new_v4().to_string(),
+        user_id: user_id.unwrap_or_else(|| "anonymous".to_string()),
+        seq: 0,
+        operations: vec![OperationPayload {
+            id: uuid::Uuid::new_v4().to_string(),
+            node_uuid: node_uuid.to_string(),
+            op_type: "set_field".to_string(),
+            path: path.to_string(),
+            value: Some(value),
+        }],
+    }
+}
+
+/// Creates a transaction payload with multiple operations.
+fn multi_op_transaction(
+    user_id: Option<String>,
+    operations: Vec<OperationPayload>,
+) -> TransactionPayload {
+    TransactionPayload {
+        transaction_id: uuid::Uuid::new_v4().to_string(),
+        user_id: user_id.unwrap_or_else(|| "anonymous".to_string()),
+        seq: 0,
+        operations,
+    }
+}
+
+/// Builds reparent operation payloads for children after an ungroup.
+///
+/// Reads each child's new parent UUID and sibling position from the document
+/// so the broadcast carries the data that `applyReparent` expects.
+fn build_ungroup_reparent_ops(
+    doc: &agent_designer_core::Document,
+    child_uuid_strs: &[String],
+) -> async_graphql::Result<Vec<OperationPayload>> {
+    let mut ops = Vec::with_capacity(child_uuid_strs.len());
+    for child_uuid_str in child_uuid_strs {
+        let child_uuid: uuid::Uuid = child_uuid_str
+            .parse()
+            .map_err(|_| async_graphql::Error::new("child uuid parse failed"))?;
+        let child_id = doc
+            .arena
+            .id_by_uuid(&child_uuid)
+            .ok_or_else(|| async_graphql::Error::new("child not found after ungroup"))?;
+        let child_node = doc
+            .arena
+            .get(child_id)
+            .map_err(|_| async_graphql::Error::new("child lookup failed"))?;
+
+        let (parent_uuid_str, position) = match child_node.parent {
+            Some(pid) => {
+                let pu = doc
+                    .arena
+                    .uuid_of(pid)
+                    .map_err(|_| async_graphql::Error::new("parent uuid lookup failed"))?;
+                let parent_node = doc
+                    .arena
+                    .get(pid)
+                    .map_err(|_| async_graphql::Error::new("parent lookup failed"))?;
+                let pos = parent_node
+                    .children
+                    .iter()
+                    .position(|&c| c == child_id)
+                    .unwrap_or(0);
+                (pu.to_string(), pos)
+            }
+            None => (String::new(), 0),
+        };
+
+        ops.push(OperationPayload {
+            id: uuid::Uuid::new_v4().to_string(),
+            node_uuid: child_uuid_str.clone(),
+            op_type: "reparent".to_string(),
+            path: String::new(),
+            value: Some(serde_json::json!({
+                "parentUuid": parent_uuid_str,
+                "position": position,
+            })),
+        });
+    }
+    Ok(ops)
+}
 
 /// Acquires the document lock, recovering from mutex poisoning.
 fn acquire_document_lock(
@@ -65,6 +157,7 @@ impl MutationRoot {
         name: String,
         page_id: Option<String>,
         transform: Option<Json<serde_json::Value>>,
+        user_id: Option<String>,
     ) -> Result<CreateNodeResult> {
         let state = ctx.data::<ServerState>()?;
 
@@ -109,7 +202,7 @@ impl MutationRoot {
         };
 
         // RF-005: build the response inside the lock scope to avoid TOCTOU
-        let node_gql = {
+        let (node_gql, node_json) = {
             let mut doc_guard = acquire_document_lock(state);
             doc_guard.execute(Box::new(cmd)).map_err(|e| {
                 tracing::warn!("createNode failed: {e}");
@@ -121,15 +214,31 @@ impl MutationRoot {
                 .id_by_uuid(&node_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node created but UUID not found"))?;
 
-            node_to_gql(&doc_guard, node_id, node_uuid)?
+            let gql = node_to_gql(&doc_guard, node_id, node_uuid)?;
+
+            // RF-004: Serialize the GraphQL representation (which uses UUIDs)
+            // instead of the raw arena Node (which contains arena-local NodeId
+            // structs that are meaningless outside a running session).
+            let json = serde_json::to_value(&gql)
+                .map_err(|e| async_graphql::Error::new(format!("serialization failed: {e}")))?;
+            (gql, json)
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeCreated,
-            uuid: Some(node_uuid.to_string()),
-            data: None,
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeCreated,
+            Some(node_uuid.to_string()),
+            multi_op_transaction(
+                user_id,
+                vec![OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: node_uuid.to_string(),
+                    op_type: "create_node".to_string(),
+                    path: String::new(),
+                    value: Some(node_json),
+                }],
+            ),
+        );
 
         Ok(CreateNodeResult {
             uuid: node_uuid.to_string(),
@@ -138,7 +247,12 @@ impl MutationRoot {
     }
 
     /// Delete a node by UUID.
-    async fn delete_node(&self, ctx: &Context<'_>, uuid: String) -> Result<bool> {
+    async fn delete_node(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        user_id: Option<String>,
+    ) -> Result<bool> {
         let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
@@ -196,11 +310,20 @@ impl MutationRoot {
         }
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeDeleted,
-            uuid: Some(parsed_uuid.to_string()),
-            data: None,
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeDeleted,
+            Some(parsed_uuid.to_string()),
+            multi_op_transaction(
+                user_id,
+                vec![OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: parsed_uuid.to_string(),
+                    op_type: "delete_node".to_string(),
+                    path: String::new(),
+                    value: None,
+                }],
+            ),
+        );
 
         Ok(true)
     }
@@ -211,11 +334,15 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         new_name: String,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
+
+        // Clone new_name before it is moved into the command
+        let broadcast_name = new_name.clone();
 
         // RF-005: execute and build response in a single lock scope
         let node_gql = {
@@ -247,11 +374,16 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "name"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "name",
+                serde_json::Value::String(broadcast_name),
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -262,6 +394,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         transform: Json<serde_json::Value>,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
@@ -272,6 +405,10 @@ impl MutationRoot {
             tracing::warn!("invalid transform in setTransform: {e}");
             async_graphql::Error::new("invalid transform")
         })?;
+
+        // Serialize transform for broadcast before it's consumed
+        let transform_json = serde_json::to_value(new_transform)
+            .map_err(|e| async_graphql::Error::new(format!("serialization failed: {e}")))?;
 
         // RF-005: execute and build response in a single lock scope
         let node_gql = {
@@ -302,17 +439,28 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "transform"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "transform",
+                transform_json,
+            ),
+        );
 
         Ok(node_gql)
     }
 
     /// Set the visibility of a node by UUID.
-    async fn set_visible(&self, ctx: &Context<'_>, uuid: String, visible: bool) -> Result<NodeGql> {
+    async fn set_visible(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        visible: bool,
+        user_id: Option<String>,
+    ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
@@ -347,17 +495,28 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "visible"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "visible",
+                serde_json::Value::Bool(visible),
+            ),
+        );
 
         Ok(node_gql)
     }
 
     /// Set the locked state of a node by UUID.
-    async fn set_locked(&self, ctx: &Context<'_>, uuid: String, locked: bool) -> Result<NodeGql> {
+    async fn set_locked(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        locked: bool,
+        user_id: Option<String>,
+    ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
         let parsed_uuid: uuid::Uuid = uuid
             .parse()
@@ -392,11 +551,16 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "locked"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "locked",
+                serde_json::Value::Bool(locked),
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -412,6 +576,7 @@ impl MutationRoot {
         uuid: String,
         new_parent_uuid: String,
         position: i32,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
 
@@ -476,11 +641,23 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "parent"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            multi_op_transaction(
+                user_id,
+                vec![OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: parsed_uuid.to_string(),
+                    op_type: "reparent".to_string(),
+                    path: String::new(),
+                    value: Some(serde_json::json!({
+                        "parentUuid": new_parent_uuid,
+                        "position": position,
+                    })),
+                }],
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -495,6 +672,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         new_position: i32,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
 
@@ -550,11 +728,22 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "order"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            multi_op_transaction(
+                user_id,
+                vec![OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: parsed_uuid.to_string(),
+                    op_type: "reorder".to_string(),
+                    path: String::new(),
+                    value: Some(serde_json::json!({
+                        "newPosition": new_position,
+                    })),
+                }],
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -562,7 +751,13 @@ impl MutationRoot {
     /// Set the opacity of a node by UUID.
     ///
     /// Opacity must be a finite f64 in the range [0.0, 1.0].
-    async fn set_opacity(&self, ctx: &Context<'_>, uuid: String, opacity: f64) -> Result<NodeGql> {
+    async fn set_opacity(
+        &self,
+        ctx: &Context<'_>,
+        uuid: String,
+        opacity: f64,
+        user_id: Option<String>,
+    ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
 
         // Validate input BEFORE lock acquisition (CLAUDE.md: floating-point validation)
@@ -609,12 +804,20 @@ impl MutationRoot {
             node_to_gql(&doc_guard, node_id, parsed_uuid)?
         };
 
+        let opacity_json = serde_json::to_value(&StyleValue::Literal { value: opacity })
+            .map_err(|e| async_graphql::Error::new(format!("serialization failed: {e}")))?;
+
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "opacity"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "style.opacity",
+                opacity_json,
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -627,12 +830,13 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         blend_mode: String,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
 
         // Parse blend mode string before lock acquisition
         let new_blend_mode: BlendMode =
-            serde_json::from_value(serde_json::Value::String(blend_mode)).map_err(|e| {
+            serde_json::from_value(serde_json::Value::String(blend_mode.clone())).map_err(|e| {
                 tracing::warn!("invalid blend mode in setBlendMode: {e}");
                 async_graphql::Error::new("invalid blend mode")
             })?;
@@ -671,11 +875,16 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "blend_mode"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "style.blend_mode",
+                serde_json::Value::String(blend_mode),
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -688,8 +897,12 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         fills: Json<serde_json::Value>,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
+
+        // Clone for broadcast before deserialization consumes the value
+        let fills_json = fills.0.clone();
 
         // Deserialize fills before lock acquisition
         let new_fills: Vec<Fill> = serde_json::from_value(fills.0).map_err(|e| {
@@ -732,11 +945,11 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "fills"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(user_id, &parsed_uuid.to_string(), "style.fills", fills_json),
+        );
 
         Ok(node_gql)
     }
@@ -749,8 +962,12 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         strokes: Json<serde_json::Value>,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
+
+        // Clone for broadcast before deserialization consumes the value
+        let strokes_json = strokes.0.clone();
 
         // Deserialize strokes before lock acquisition
         let new_strokes: Vec<Stroke> = serde_json::from_value(strokes.0).map_err(|e| {
@@ -793,11 +1010,16 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "strokes"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "style.strokes",
+                strokes_json,
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -810,8 +1032,12 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         effects: Json<serde_json::Value>,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
+
+        // Clone for broadcast before deserialization consumes the value
+        let effects_json = effects.0.clone();
 
         // Deserialize effects before lock acquisition
         let new_effects: Vec<Effect> = serde_json::from_value(effects.0).map_err(|e| {
@@ -854,11 +1080,16 @@ impl MutationRoot {
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "effects"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(
+                user_id,
+                &parsed_uuid.to_string(),
+                "style.effects",
+                effects_json,
+            ),
+        );
 
         Ok(node_gql)
     }
@@ -872,6 +1103,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuid: String,
         radii: Vec<f64>,
+        user_id: Option<String>,
     ) -> Result<NodeGql> {
         let state = ctx.data::<ServerState>()?;
 
@@ -900,7 +1132,7 @@ impl MutationRoot {
             .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
 
         // RF-005: execute and build response in a single lock scope
-        let node_gql = {
+        let (node_gql, kind_json) = {
             let mut doc_guard = acquire_document_lock(state);
             let node_id = doc_guard
                 .arena
@@ -932,15 +1164,25 @@ impl MutationRoot {
                 async_graphql::Error::new("set corner radii failed")
             })?;
 
-            node_to_gql(&doc_guard, node_id, parsed_uuid)?
+            let node_gql = node_to_gql(&doc_guard, node_id, parsed_uuid)?;
+
+            // Serialize updated kind for broadcast while still holding lock
+            let updated_node = doc_guard
+                .arena
+                .get(node_id)
+                .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
+            let kind_json = serde_json::to_value(&updated_node.kind)
+                .map_err(|e| async_graphql::Error::new(format!("serialization failed: {e}")))?;
+
+            (node_gql, kind_json)
         };
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some(parsed_uuid.to_string()),
-            data: Some(serde_json::json!({"field": "corner_radii"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some(parsed_uuid.to_string()),
+            field_set_transaction(user_id, &parsed_uuid.to_string(), "kind", kind_json),
+        );
 
         Ok(node_gql)
     }
@@ -953,6 +1195,7 @@ impl MutationRoot {
         &self,
         ctx: &Context<'_>,
         entries: Vec<Json<serde_json::Value>>,
+        user_id: Option<String>,
     ) -> Result<Vec<NodeGql>> {
         let state = ctx.data::<ServerState>()?;
 
@@ -1038,22 +1281,31 @@ impl MutationRoot {
             nodes
         };
 
-        // RF-019: Include affected UUIDs in the batch broadcast event
-        let affected_uuids: Vec<String> = parsed_entries
+        // RF-005: Build per-node operation payloads, propagating serialization
+        // errors instead of silently replacing with null.
+        let operations: Vec<OperationPayload> = parsed_entries
             .iter()
-            .map(|(uuid, _)| uuid.to_string())
-            .collect();
+            .map(|(node_uuid, transform)| {
+                let transform_json = serde_json::to_value(transform).map_err(|e| {
+                    tracing::warn!("batch transform serialization failed: {e}");
+                    async_graphql::Error::new("serialization failed")
+                })?;
+                Ok(OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: node_uuid.to_string(),
+                    op_type: "set_field".to_string(),
+                    path: "transform".to_string(),
+                    value: Some(transform_json),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
 
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: None,
-            data: Some(serde_json::json!({
-                "field": "transform",
-                "batch": true,
-                "affected_uuids": affected_uuids,
-            })),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            None,
+            multi_op_transaction(user_id, operations),
+        );
 
         Ok(result_nodes)
     }
@@ -1066,6 +1318,7 @@ impl MutationRoot {
         ctx: &Context<'_>,
         uuids: Vec<String>,
         name: String,
+        user_id: Option<String>,
     ) -> Result<String> {
         let state = ctx.data::<ServerState>()?;
 
@@ -1103,12 +1356,30 @@ impl MutationRoot {
             })?;
         }
 
+        // Build operations: create_node for the group + reparent for each child
+        let mut operations = vec![OperationPayload {
+            id: uuid::Uuid::new_v4().to_string(),
+            node_uuid: group_uuid.to_string(),
+            op_type: "create_node".to_string(),
+            path: String::new(),
+            value: Some(serde_json::json!({"operation": "group", "childUuids": uuids})),
+        }];
+        for child_uuid in &parsed_uuids {
+            operations.push(OperationPayload {
+                id: uuid::Uuid::new_v4().to_string(),
+                node_uuid: child_uuid.to_string(),
+                op_type: "reparent".to_string(),
+                path: String::new(),
+                value: Some(serde_json::json!({"parentUuid": group_uuid.to_string()})),
+            });
+        }
+
         state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::NodeCreated,
-            uuid: Some(group_uuid.to_string()),
-            data: Some(serde_json::json!({"operation": "group"})),
-        });
+        state.app.publish_transaction(
+            MutationEventKind::NodeCreated,
+            Some(group_uuid.to_string()),
+            multi_op_transaction(user_id, operations),
+        );
 
         Ok(group_uuid.to_string())
     }
@@ -1116,7 +1387,12 @@ impl MutationRoot {
     /// Ungroup one or more group nodes, reparenting their children.
     ///
     /// Returns the UUIDs of the ungrouped children.
-    async fn ungroup_nodes(&self, ctx: &Context<'_>, uuids: Vec<String>) -> Result<Vec<String>> {
+    async fn ungroup_nodes(
+        &self,
+        ctx: &Context<'_>,
+        uuids: Vec<String>,
+        user_id: Option<String>,
+    ) -> Result<Vec<String>> {
         let state = ctx.data::<ServerState>()?;
 
         let mut parsed_uuids: Vec<uuid::Uuid> = Vec::with_capacity(uuids.len());
@@ -1127,7 +1403,10 @@ impl MutationRoot {
             parsed_uuids.push(parsed);
         }
 
-        let child_uuids: Vec<String> = {
+        // RF-003: capture child UUIDs and their new parent/position inside the
+        // lock scope so the reparent broadcast payload matches applyReparent's
+        // expected format: { "parentUuid": "...", "position": N }
+        let (child_uuids, operations): (Vec<String>, Vec<OperationPayload>) = {
             let mut doc_guard = acquire_document_lock(state);
 
             let group_ids: Vec<NodeId> = parsed_uuids
@@ -1168,22 +1447,35 @@ impl MutationRoot {
                 async_graphql::Error::new("ungroup nodes failed")
             })?;
 
-            all_child_uuids
+            // RF-003: After ungroup, read each child's new parent UUID and
+            // position so the broadcast payload carries the data that
+            // applyReparent expects.
+            let mut ops = build_ungroup_reparent_ops(&doc_guard, &all_child_uuids)?;
+            for group_uuid in &parsed_uuids {
+                ops.push(OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: group_uuid.to_string(),
+                    op_type: "delete_node".to_string(),
+                    path: String::new(),
+                    value: None,
+                });
+            }
+
+            (all_child_uuids, ops)
         };
 
         state.app.signal_dirty();
-        for uuid_str in &uuids {
-            state.app.publish_event(MutationEvent {
-                kind: MutationEventKind::NodeDeleted,
-                uuid: Some(uuid_str.clone()),
-                data: Some(serde_json::json!({"operation": "ungroup"})),
-            });
-        }
+        state.app.publish_transaction(
+            MutationEventKind::NodeDeleted,
+            None,
+            multi_op_transaction(user_id, operations),
+        );
 
         Ok(child_uuids)
     }
 
     /// Undo the last command.
+    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
     async fn undo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
         let state = ctx.data::<ServerState>()?;
 
@@ -1201,12 +1493,14 @@ impl MutationRoot {
             kind: MutationEventKind::UndoRedo,
             uuid: None,
             data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+            transaction: None,
         });
 
         Ok(UndoRedoResult { can_undo, can_redo })
     }
 
     /// Redo the last undone command.
+    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
     async fn redo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
         let state = ctx.data::<ServerState>()?;
 
@@ -1224,6 +1518,7 @@ impl MutationRoot {
             kind: MutationEventKind::UndoRedo,
             uuid: None,
             data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
+            transaction: None,
         });
 
         Ok(UndoRedoResult { can_undo, can_redo })

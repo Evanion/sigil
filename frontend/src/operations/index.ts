@@ -36,3 +36,7 @@ export type { LoadedStacks } from "./history-store";
 
 // Persistent wrapper
 export { PersistentHistoryManager } from "./persistent-history-manager";
+
+// Remote transaction application
+export { applyRemoteTransaction } from "./apply-remote";
+export type { RemoteTransactionPayload, RemoteOperationPayload } from "./apply-remote";

@@ -15,6 +15,8 @@ use crate::types::UndoRedoResult;
 
 // ── Tool implementations ─────────────────────────────────────────────────────
 
+// TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
+
 /// Undoes the most recent command and returns updated undo/redo availability.
 ///
 /// # Errors
@@ -39,6 +41,7 @@ pub fn undo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
             "can_undo": result.can_undo,
             "can_redo": result.can_redo,
         })),
+        transaction: None,
     });
     Ok(result)
 }
@@ -68,6 +71,7 @@ pub fn redo_impl(state: &AppState) -> Result<UndoRedoResult, McpToolError> {
             "can_undo": result.can_undo,
             "can_redo": result.can_redo,
         })),
+        transaction: None,
     });
     Ok(result)
 }

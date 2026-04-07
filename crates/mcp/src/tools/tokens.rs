@@ -136,6 +136,7 @@ pub fn create_token_impl(
         kind: MutationEventKind::TokenCreated,
         uuid: None,
         data: Some(serde_json::json!({"name": input.name})),
+        transaction: None,
     });
     Ok(info)
 }
@@ -192,6 +193,7 @@ pub fn update_token_impl(
         kind: MutationEventKind::TokenUpdated,
         uuid: None,
         data: Some(serde_json::json!({"name": input.name})),
+        transaction: None,
     });
     Ok(info)
 }
@@ -230,6 +232,7 @@ pub fn delete_token_impl(
         kind: MutationEventKind::TokenDeleted,
         uuid: None,
         data: Some(serde_json::json!({"name": token_name})),
+        transaction: None,
     });
     Ok(MutationResult {
         success: true,

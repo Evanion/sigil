@@ -36,7 +36,8 @@ import {
   GROUP_NODES_MUTATION,
   UNGROUP_NODES_MUTATION,
 } from "../graphql/mutations";
-import { DOCUMENT_CHANGED_SUBSCRIPTION } from "../graphql/subscriptions";
+import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
+import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -128,16 +129,6 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  */
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
-}
-
-// ── Debounce helper ────────────────────────────────────────────────────
-
-function debounce(fn: () => void, ms: number): () => void {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  return () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(fn, ms);
-  };
 }
 
 // ── Parse GraphQL response ────────────────────────────────────────────
@@ -323,29 +314,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
   }
 
-  const debouncedFetchPages = debounce(fetchPages, DEBOUNCE_MS);
+  // Track last received sequence number for future reconnect protocol (Plan 15d)
+  // @ts-expect-error -- lastSeq is written but read will be used in reconnect/gap-fill protocol
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let _lastSeq = 0;
 
   // ── Subscription (RF-002: capture for cleanup, RF-004: self-echo) ───
 
   const subscriptionHandle = client
-    .subscription(gql(DOCUMENT_CHANGED_SUBSCRIPTION), {})
+    .subscription(gql(TRANSACTION_APPLIED_SUBSCRIPTION), {})
     .subscribe((result) => {
       if (result.error) {
         console.error("subscription error:", result.error.message);
         return;
       }
 
-      // RF-004: Self-echo suppression
-      const senderId = (result.data as Record<string, Record<string, unknown>> | undefined)
-        ?.documentChanged?.senderId as string | null | undefined;
+      const data = result.data as Record<string, unknown> | undefined;
+      if (!data?.transactionApplied) return;
 
-      // If senderId matches our session, skip re-fetch (we already applied optimistically).
-      // If senderId is null/undefined (server doesn't populate yet), always re-fetch.
-      if (senderId != null && senderId === clientSessionId) {
-        return;
-      }
+      const payload = data.transactionApplied as RemoteTransactionPayload;
 
-      debouncedFetchPages();
+      _lastSeq = applyRemoteTransaction(
+        payload,
+        clientSessionId,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DocumentState is structurally compatible with StoreState
+        setState as any,
+        (uuid: string) => state.nodes[uuid],
+        fetchPages,
+      );
     });
 
   // Initial load
@@ -387,6 +383,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         name,
         pageId,
         transform: deepClone(transform),
+        userId: clientSessionId,
       })
       .toPromise()
       .then((result) => {
@@ -456,6 +453,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .mutation(gql(SET_TRANSFORM_MUTATION), {
         uuid,
         transform: { ...transform },
+        userId: clientSessionId,
       })
       .toPromise()
       .then((r) => {
@@ -483,7 +481,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     setState("nodes", uuid, "name", newName);
     client
-      .mutation(gql(RENAME_NODE_MUTATION), { uuid, newName })
+      .mutation(gql(RENAME_NODE_MUTATION), { uuid, newName, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -521,7 +519,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     client
-      .mutation(gql(DELETE_NODE_MUTATION), { uuid })
+      .mutation(gql(DELETE_NODE_MUTATION), { uuid, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -554,7 +552,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     setState("nodes", uuid, "visible", visible);
     client
-      .mutation(gql(SET_VISIBLE_MUTATION), { uuid, visible })
+      .mutation(gql(SET_VISIBLE_MUTATION), { uuid, visible, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -580,7 +578,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     setState("nodes", uuid, "locked", locked);
     client
-      .mutation(gql(SET_LOCKED_MUTATION), { uuid, locked })
+      .mutation(gql(SET_LOCKED_MUTATION), { uuid, locked, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -641,6 +639,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         uuid,
         newParentUuid,
         position: clampedPos,
+        userId: clientSessionId,
       })
       .toPromise()
       .then((r) => {
@@ -697,6 +696,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .mutation(gql(REORDER_CHILDREN_MUTATION), {
         uuid,
         newPosition: clampedPos,
+        userId: clientSessionId,
       })
       .toPromise()
       .then((r) => {
@@ -741,7 +741,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     );
 
     client
-      .mutation(gql(SET_OPACITY_MUTATION), { uuid, opacity })
+      .mutation(gql(SET_OPACITY_MUTATION), { uuid, opacity, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -787,7 +787,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     );
 
     client
-      .mutation(gql(SET_BLEND_MODE_MUTATION), { uuid, blendMode })
+      .mutation(gql(SET_BLEND_MODE_MUTATION), { uuid, blendMode, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -863,7 +863,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       fillsMutationTimer = null;
       fillsRollbackSnapshot = null;
       client
-        .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills })
+        .mutation(gql(SET_FILLS_MUTATION), { uuid, fills: clonedFills, userId: clientSessionId })
         .toPromise()
         .then((r) => {
           if (r.error) {
@@ -945,7 +945,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       strokesMutationTimer = null;
       strokesRollbackSnapshot = null;
       client
-        .mutation(gql(SET_STROKES_MUTATION), { uuid, strokes: clonedStrokes })
+        .mutation(gql(SET_STROKES_MUTATION), {
+          uuid,
+          strokes: clonedStrokes,
+          userId: clientSessionId,
+        })
         .toPromise()
         .then((r) => {
           if (r.error) {
@@ -1026,7 +1030,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       effectsMutationTimer = null;
       effectsRollbackSnapshot = null;
       client
-        .mutation(gql(SET_EFFECTS_MUTATION), { uuid, effects: clonedEffects })
+        .mutation(gql(SET_EFFECTS_MUTATION), {
+          uuid,
+          effects: clonedEffects,
+          userId: clientSessionId,
+        })
         .toPromise()
         .then((r) => {
           if (r.error) {
@@ -1090,7 +1098,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     );
 
     client
-      .mutation(gql(SET_CORNER_RADII_MUTATION), { uuid, radii: [...radii] })
+      .mutation(gql(SET_CORNER_RADII_MUTATION), {
+        uuid,
+        radii: [...radii],
+        userId: clientSessionId,
+      })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -1167,6 +1179,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           uuid: e.uuid,
           transform: { ...e.transform },
         })),
+        userId: clientSessionId,
       })
       .toPromise()
       .then((r) => {
@@ -1220,7 +1233,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // acceptable for the action frequency.
   function groupNodes(uuids: string[], name: string): void {
     client
-      .mutation(gql(GROUP_NODES_MUTATION), { uuids, name })
+      .mutation(gql(GROUP_NODES_MUTATION), { uuids, name, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -1242,7 +1255,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // RF-005 optimistic update deferred: see groupNodes comment above.
   function ungroupNodes(uuids: string[]): void {
     client
-      .mutation(gql(UNGROUP_NODES_MUTATION), { uuids })
+      .mutation(gql(UNGROUP_NODES_MUTATION), { uuids, userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -1263,7 +1276,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function undo(): void {
     client
-      .mutation(gql(UNDO_MUTATION), {})
+      .mutation(gql(UNDO_MUTATION), { userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {
@@ -1285,7 +1298,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function redo(): void {
     client
-      .mutation(gql(REDO_MUTATION), {})
+      .mutation(gql(REDO_MUTATION), { userId: clientSessionId })
       .toPromise()
       .then((r) => {
         if (r.error) {

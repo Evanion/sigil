@@ -263,6 +263,7 @@ pub fn create_node_impl(
         kind: MutationEventKind::NodeCreated,
         uuid: Some(node_uuid.to_string()),
         data: None,
+        transaction: None,
     });
 
     Ok(CreateNodeResult {
@@ -336,6 +337,7 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
         kind: MutationEventKind::NodeDeleted,
         uuid: Some(node_uuid.to_string()),
         data: None,
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -390,6 +392,7 @@ pub fn rename_node_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "name"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -447,6 +450,7 @@ pub fn set_transform_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "transform"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -496,6 +500,7 @@ pub fn set_visible_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "visible"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -545,6 +550,7 @@ pub fn set_locked_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "locked"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -615,6 +621,7 @@ pub fn reparent_node_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "parent"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -679,6 +686,7 @@ pub fn reorder_children_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "order"})),
+        transaction: None,
     });
     Ok(node_info)
 }
@@ -742,6 +750,7 @@ pub fn set_opacity_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "opacity"})),
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -808,6 +817,7 @@ pub fn set_blend_mode_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "blend_mode"})),
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -880,6 +890,7 @@ pub fn set_fills_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "fills"})),
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -952,6 +963,7 @@ pub fn set_strokes_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "strokes"})),
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -1024,6 +1036,7 @@ pub fn set_effects_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "effects"})),
+        transaction: None,
     });
 
     Ok(MutationResult {
@@ -1106,6 +1119,7 @@ pub fn set_corner_radii_impl(
         kind: MutationEventKind::NodeUpdated,
         uuid: Some(node_uuid.to_string()),
         data: Some(serde_json::json!({"field": "corner_radii"})),
+        transaction: None,
     });
 
     Ok(MutationResult {

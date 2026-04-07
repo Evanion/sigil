@@ -3,14 +3,15 @@ use futures_util::Stream;
 
 use crate::state::ServerState;
 
-use super::types::DocumentEvent;
+use super::types::{DocumentEvent, TransactionAppliedEvent};
 
 pub struct SubscriptionRoot;
 
 #[Subscription]
 #[allow(clippy::unused_async)]
 impl SubscriptionRoot {
-    /// Stream of document change events.
+    // TODO(Phase 15d): remove legacy document_changed subscription
+    /// Stream of document change events (legacy).
     ///
     /// Yields a [`DocumentEvent`] every time a mutation modifies the document.
     /// Subscribes to the [`MutationEvent`](agent_designer_state::MutationEvent)
@@ -24,6 +25,10 @@ impl SubscriptionRoot {
     /// RF-011: The `GraphQLSubscription` service from async-graphql-axum does
     /// not expose message size configuration easily. If RF-002's fix switches
     /// to `GraphQLWebSocket` directly, message size can be configured there.
+    ///
+    /// **Deprecated:** Prefer `transaction_applied` for new clients. This
+    /// subscription is retained for backwards compatibility during the transition
+    /// period (Phase 15d will remove it).
     // TODO(RF-011): configure max WS message size when switching to GraphQLWebSocket
     async fn document_changed(
         &self,
@@ -50,6 +55,40 @@ impl SubscriptionRoot {
             }
         })
     }
+
+    /// Stream of typed transaction events.
+    ///
+    /// Yields a [`TransactionAppliedEvent`] for every mutation that carries
+    /// operation payloads. Clients use this to apply changes directly to their
+    /// local store without refetching.
+    ///
+    /// Events without a transaction payload (legacy mutations not yet migrated)
+    /// are converted to a synthetic single-operation transaction so the client
+    /// always receives a consistent format (empty operations list, seq=0).
+    async fn transaction_applied(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<impl Stream<Item = TransactionAppliedEvent>> {
+        let state = ctx.data::<ServerState>()?;
+        let event_tx = state
+            .app
+            .event_tx()
+            .ok_or_else(|| async_graphql::Error::new("event broadcast channel not configured"))?;
+        let mut rx = event_tx.subscribe();
+        Ok(async_stream::stream! {
+            loop {
+                match rx.recv().await {
+                    Ok(mutation_event) => {
+                        yield TransactionAppliedEvent::from_mutation_event(mutation_event);
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        tracing::warn!("transaction subscription client lagged by {n} messages");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        })
+    }
 }
 
 #[cfg(test)]
@@ -57,6 +96,7 @@ mod tests {
     use super::*;
     use crate::graphql::types::DocumentEventType;
     use crate::state::{MutationEvent, MutationEventKind};
+    use agent_designer_state::{OperationPayload, TransactionPayload};
 
     #[tokio::test]
     async fn test_publish_event_delivers_to_subscriber() {
@@ -68,6 +108,7 @@ mod tests {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
+            transaction: None,
         });
 
         let received = rx.recv().await.expect("should receive event");
@@ -86,6 +127,7 @@ mod tests {
             kind: MutationEventKind::NodeDeleted,
             uuid: Some("def-456".to_string()),
             data: None,
+            transaction: None,
         });
     }
 
@@ -100,6 +142,7 @@ mod tests {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some("ghi-789".to_string()),
             data: Some(serde_json::json!({"field": "transform"})),
+            transaction: None,
         });
 
         let r1 = DocumentEvent::from_mutation_event(
@@ -147,6 +190,7 @@ mod tests {
                 kind: *kind,
                 uuid: None,
                 data: None,
+                transaction: None,
             });
         }
 
@@ -224,9 +268,155 @@ mod tests {
                 kind,
                 uuid: Some("test-uuid".to_string()),
                 data: None,
+                transaction: None,
             };
             let doc_event = DocumentEvent::from_mutation_event(mutation_event);
             assert_eq!(doc_event.event_type, expected_type, "mismatch for {kind:?}");
         }
+    }
+
+    // --- Task 3 tests: transaction_applied subscription ---
+
+    #[tokio::test]
+    async fn test_transaction_applied_yields_full_payload() {
+        let state = ServerState::new();
+        let event_tx = state.app.event_tx().expect("event_tx configured");
+        let mut rx = event_tx.subscribe();
+
+        state.app.publish_transaction(
+            MutationEventKind::NodeUpdated,
+            Some("node-abc".to_string()),
+            TransactionPayload {
+                transaction_id: "tx-sub-1".to_string(),
+                user_id: "user-sub-1".to_string(),
+                seq: 0,
+                operations: vec![OperationPayload {
+                    id: "op-sub-1".to_string(),
+                    node_uuid: "node-abc".to_string(),
+                    op_type: "set_field".to_string(),
+                    path: "transform".to_string(),
+                    value: Some(serde_json::json!({"x": 42})),
+                }],
+            },
+        );
+
+        let received = rx.recv().await.expect("should receive event");
+        let event = TransactionAppliedEvent::from_mutation_event(received);
+
+        assert_eq!(event.transaction_id, "tx-sub-1");
+        assert_eq!(event.user_id, "user-sub-1");
+        assert_ne!(
+            event.seq, "0",
+            "seq should be assigned by publish_transaction"
+        );
+        assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
+        assert_eq!(event.uuid.as_deref(), Some("node-abc"));
+        assert_eq!(event.operations.len(), 1);
+        assert_eq!(event.operations[0].op_type, "set_field");
+        assert_eq!(event.operations[0].path.as_deref(), Some("transform"));
+    }
+
+    #[tokio::test]
+    async fn test_transaction_applied_legacy_fallback() {
+        let state = ServerState::new();
+        let event_tx = state.app.event_tx().expect("event_tx configured");
+        let mut rx = event_tx.subscribe();
+
+        // Publish a legacy event without a transaction payload
+        state.app.publish_event(MutationEvent {
+            kind: MutationEventKind::UndoRedo,
+            uuid: None,
+            data: Some(serde_json::json!({"can_undo": true})),
+            transaction: None,
+        });
+
+        let received = rx.recv().await.expect("should receive event");
+        let event = TransactionAppliedEvent::from_mutation_event(received);
+
+        assert!(
+            event.transaction_id.is_empty(),
+            "legacy fallback should have empty transaction_id"
+        );
+        assert_eq!(event.seq, "0", "legacy fallback should have seq 0");
+        assert!(
+            event.operations.is_empty(),
+            "legacy fallback should have no operations"
+        );
+        assert_eq!(event.event_type, DocumentEventType::UndoRedo);
+    }
+
+    #[tokio::test]
+    async fn test_transaction_applied_preserves_order() {
+        let state = ServerState::new();
+        let event_tx = state.app.event_tx().expect("event_tx configured");
+        let mut rx = event_tx.subscribe();
+
+        // Publish three transactions
+        for i in 1..=3 {
+            state.app.publish_transaction(
+                MutationEventKind::NodeUpdated,
+                Some(format!("node-{i}")),
+                TransactionPayload {
+                    transaction_id: format!("tx-order-{i}"),
+                    user_id: "user-order".to_string(),
+                    seq: 0,
+                    operations: vec![],
+                },
+            );
+        }
+
+        let mut seq_values = Vec::new();
+        for _ in 0..3 {
+            let received = rx.recv().await.expect("should receive event");
+            let event = TransactionAppliedEvent::from_mutation_event(received);
+            let seq: u64 = event.seq.parse().expect("seq should be a number");
+            seq_values.push(seq);
+        }
+
+        // Verify monotonically increasing
+        for window in seq_values.windows(2) {
+            assert!(
+                window[1] > window[0],
+                "seq values should be monotonically increasing: {seq_values:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_document_changed_still_works_alongside_transaction_applied() {
+        let state = ServerState::new();
+        let event_tx = state.app.event_tx().expect("event_tx configured");
+        let mut rx = event_tx.subscribe();
+
+        // Publish an event with a transaction payload
+        state.app.publish_transaction(
+            MutationEventKind::NodeCreated,
+            Some("node-compat".to_string()),
+            TransactionPayload {
+                transaction_id: "tx-compat".to_string(),
+                user_id: "user-compat".to_string(),
+                seq: 0,
+                operations: vec![OperationPayload {
+                    id: "op-compat".to_string(),
+                    node_uuid: "node-compat".to_string(),
+                    op_type: "create_node".to_string(),
+                    path: String::new(),
+                    value: Some(serde_json::json!({"kind": "frame"})),
+                }],
+            },
+        );
+
+        let received = rx.recv().await.expect("should receive event");
+
+        // The old subscription path still works
+        let doc_event = DocumentEvent::from_mutation_event(received.clone());
+        assert_eq!(doc_event.event_type, DocumentEventType::NodeCreated);
+        assert_eq!(doc_event.uuid.as_deref(), Some("node-compat"));
+
+        // The new subscription path also works
+        let tx_event = TransactionAppliedEvent::from_mutation_event(received);
+        assert_eq!(tx_event.event_type, DocumentEventType::NodeCreated);
+        assert_eq!(tx_event.transaction_id, "tx-compat");
+        assert_eq!(tx_event.operations.len(), 1);
     }
 }
