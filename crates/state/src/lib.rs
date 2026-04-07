@@ -257,7 +257,7 @@ impl AppState {
     /// Sequence numbers start at 1 (0 is reserved as "unconfirmed" on the client).
     #[must_use]
     pub fn next_seq(&self) -> u64 {
-        self.seq_counter.fetch_add(1, Ordering::SeqCst)
+        self.seq_counter.fetch_add(1, Ordering::AcqRel)
     }
 
     /// Publishes a transaction as a mutation event with the operation payload.

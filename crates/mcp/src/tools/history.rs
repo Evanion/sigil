@@ -15,6 +15,8 @@ use crate::types::UndoRedoResult;
 
 // ── Tool implementations ─────────────────────────────────────────────────────
 
+// TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
+
 /// Undoes the most recent command and returns updated undo/redo availability.
 ///
 /// # Errors

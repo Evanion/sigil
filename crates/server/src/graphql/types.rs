@@ -191,7 +191,7 @@ pub struct DocumentInfoGql {
 }
 
 /// GraphQL representation of a serialized node.
-#[derive(SimpleObject)]
+#[derive(SimpleObject, serde::Serialize)]
 pub struct NodeGql {
     pub uuid: String,
     pub name: String,

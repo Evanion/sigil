@@ -74,6 +74,62 @@ fn multi_op_transaction(
     }
 }
 
+/// Builds reparent operation payloads for children after an ungroup.
+///
+/// Reads each child's new parent UUID and sibling position from the document
+/// so the broadcast carries the data that `applyReparent` expects.
+fn build_ungroup_reparent_ops(
+    doc: &agent_designer_core::Document,
+    child_uuid_strs: &[String],
+) -> async_graphql::Result<Vec<OperationPayload>> {
+    let mut ops = Vec::with_capacity(child_uuid_strs.len());
+    for child_uuid_str in child_uuid_strs {
+        let child_uuid: uuid::Uuid = child_uuid_str
+            .parse()
+            .map_err(|_| async_graphql::Error::new("child uuid parse failed"))?;
+        let child_id = doc
+            .arena
+            .id_by_uuid(&child_uuid)
+            .ok_or_else(|| async_graphql::Error::new("child not found after ungroup"))?;
+        let child_node = doc
+            .arena
+            .get(child_id)
+            .map_err(|_| async_graphql::Error::new("child lookup failed"))?;
+
+        let (parent_uuid_str, position) = match child_node.parent {
+            Some(pid) => {
+                let pu = doc
+                    .arena
+                    .uuid_of(pid)
+                    .map_err(|_| async_graphql::Error::new("parent uuid lookup failed"))?;
+                let parent_node = doc
+                    .arena
+                    .get(pid)
+                    .map_err(|_| async_graphql::Error::new("parent lookup failed"))?;
+                let pos = parent_node
+                    .children
+                    .iter()
+                    .position(|&c| c == child_id)
+                    .unwrap_or(0);
+                (pu.to_string(), pos)
+            }
+            None => (String::new(), 0),
+        };
+
+        ops.push(OperationPayload {
+            id: uuid::Uuid::new_v4().to_string(),
+            node_uuid: child_uuid_str.clone(),
+            op_type: "reparent".to_string(),
+            path: String::new(),
+            value: Some(serde_json::json!({
+                "parentUuid": parent_uuid_str,
+                "position": position,
+            })),
+        });
+    }
+    Ok(ops)
+}
+
 /// Acquires the document lock, recovering from mutex poisoning.
 fn acquire_document_lock(
     state: &ServerState,
@@ -160,12 +216,10 @@ impl MutationRoot {
 
             let gql = node_to_gql(&doc_guard, node_id, node_uuid)?;
 
-            // Serialize node for broadcast while still holding the lock
-            let node = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
-            let json = serde_json::to_value(node)
+            // RF-004: Serialize the GraphQL representation (which uses UUIDs)
+            // instead of the raw arena Node (which contains arena-local NodeId
+            // structs that are meaningless outside a running session).
+            let json = serde_json::to_value(&gql)
                 .map_err(|e| async_graphql::Error::new(format!("serialization failed: {e}")))?;
             (gql, json)
         };
@@ -1227,21 +1281,24 @@ impl MutationRoot {
             nodes
         };
 
-        // Build per-node operation payloads for the batch broadcast
+        // RF-005: Build per-node operation payloads, propagating serialization
+        // errors instead of silently replacing with null.
         let operations: Vec<OperationPayload> = parsed_entries
             .iter()
             .map(|(node_uuid, transform)| {
-                let transform_json =
-                    serde_json::to_value(transform).unwrap_or(serde_json::Value::Null);
-                OperationPayload {
+                let transform_json = serde_json::to_value(transform).map_err(|e| {
+                    tracing::warn!("batch transform serialization failed: {e}");
+                    async_graphql::Error::new("serialization failed")
+                })?;
+                Ok(OperationPayload {
                     id: uuid::Uuid::new_v4().to_string(),
                     node_uuid: node_uuid.to_string(),
                     op_type: "set_field".to_string(),
                     path: "transform".to_string(),
                     value: Some(transform_json),
-                }
+                })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         state.app.signal_dirty();
         state.app.publish_transaction(
@@ -1346,7 +1403,10 @@ impl MutationRoot {
             parsed_uuids.push(parsed);
         }
 
-        let child_uuids: Vec<String> = {
+        // RF-003: capture child UUIDs and their new parent/position inside the
+        // lock scope so the reparent broadcast payload matches applyReparent's
+        // expected format: { "parentUuid": "...", "position": N }
+        let (child_uuids, operations): (Vec<String>, Vec<OperationPayload>) = {
             let mut doc_guard = acquire_document_lock(state);
 
             let group_ids: Vec<NodeId> = parsed_uuids
@@ -1387,29 +1447,22 @@ impl MutationRoot {
                 async_graphql::Error::new("ungroup nodes failed")
             })?;
 
-            all_child_uuids
-        };
+            // RF-003: After ungroup, read each child's new parent UUID and
+            // position so the broadcast payload carries the data that
+            // applyReparent expects.
+            let mut ops = build_ungroup_reparent_ops(&doc_guard, &all_child_uuids)?;
+            for group_uuid in &parsed_uuids {
+                ops.push(OperationPayload {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    node_uuid: group_uuid.to_string(),
+                    op_type: "delete_node".to_string(),
+                    path: String::new(),
+                    value: None,
+                });
+            }
 
-        // Build operations: reparent for each child + delete_node for each group
-        let mut operations = Vec::new();
-        for child_uuid_str in &child_uuids {
-            operations.push(OperationPayload {
-                id: uuid::Uuid::new_v4().to_string(),
-                node_uuid: child_uuid_str.clone(),
-                op_type: "reparent".to_string(),
-                path: String::new(),
-                value: Some(serde_json::json!({"operation": "ungroup"})),
-            });
-        }
-        for group_uuid in &parsed_uuids {
-            operations.push(OperationPayload {
-                id: uuid::Uuid::new_v4().to_string(),
-                node_uuid: group_uuid.to_string(),
-                op_type: "delete_node".to_string(),
-                path: String::new(),
-                value: None,
-            });
-        }
+            (all_child_uuids, ops)
+        };
 
         state.app.signal_dirty();
         state.app.publish_transaction(
@@ -1422,6 +1475,7 @@ impl MutationRoot {
     }
 
     /// Undo the last command.
+    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
     async fn undo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
         let state = ctx.data::<ServerState>()?;
 
@@ -1446,6 +1500,7 @@ impl MutationRoot {
     }
 
     /// Redo the last undone command.
+    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
     async fn redo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
         let state = ctx.data::<ServerState>()?;
 

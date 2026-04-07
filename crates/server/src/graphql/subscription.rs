@@ -10,6 +10,7 @@ pub struct SubscriptionRoot;
 #[Subscription]
 #[allow(clippy::unused_async)]
 impl SubscriptionRoot {
+    // TODO(Phase 15d): remove legacy document_changed subscription
     /// Stream of document change events (legacy).
     ///
     /// Yields a [`DocumentEvent`] every time a mutation modifies the document.
