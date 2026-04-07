@@ -53,6 +53,10 @@ When implementing optimistic updates (updating local state before the server res
 
 A mutation that applies optimistic state without a corresponding rollback on error is a bug. If rollback is genuinely impossible (e.g., the mutation is idempotent and the state is already correct), document why in a comment at the call site. Never silently suppress a mutation error.
 
+### History Bridge: Track-Only vs Apply-and-Track
+
+When using a history bridge that offers both `applyAndTrack` (applies to store + records in history) and a track-only API (records in history without applying), callers MUST choose the correct one based on whether the store has already been updated. If the store was populated by a fetch, subscription, or reconciliation before the history call, use the track-only API. Using `applyAndTrack` after the store is already populated double-writes the mutation — the second application may throw, silently overwrite, or produce duplicate entries depending on the store's merge semantics.
+
 ### urql Exchange Ordering
 
 urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST be placed BEFORE `fetchExchange` in the exchanges array. If `fetchExchange` comes first, it consumes subscription operations via HTTP instead of passing them to the WebSocket transport. When reviewing or writing urql client configuration, verify exchange ordering matches: `[cacheExchange, subscriptionExchange, fetchExchange]` (with any custom exchanges slotted appropriately).
@@ -75,6 +79,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - `createEffect` tracks only the signals read in its synchronous body during the current execution. Signals read inside a callback, setTimeout, or Promise `.then()` are not tracked. If the effect must re-run when a nested value changes, read the signal before the async boundary.
 - `window.devicePixelRatio` is NOT a Solid signal — changes to DPR (e.g., moving a window to a high-DPI monitor) will not trigger reactive updates. Listen for DPR changes via `matchMedia('(resolution: 1dppx)').addEventListener('change', ...)` and store the result in a signal.
 - Kobalte's `NumberField` fires `onRawValueChange` during mount with its initial value. If your effect or handler should only respond to user-initiated changes, gate it with a `mounted` flag set via `onMount` or `queueMicrotask`. Document the guard with a comment explaining the mount-time emission behavior.
+- Plain class instances are NOT reactive. `() => myManager.getValue()` will not re-run when the manager's internal state changes. Bridge external/imperative state into Solid by creating `createSignal` pairs and calling the setter after every mutation to the external object.
 
 ### Styling Conventions
 
