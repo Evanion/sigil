@@ -4,8 +4,6 @@ export const DOCUMENT_QUERY = `
       name
       pageCount
       nodeCount
-      canUndo
-      canRedo
     }
   }
 `;

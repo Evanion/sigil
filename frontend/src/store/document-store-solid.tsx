@@ -990,48 +990,171 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  // ── Undo/Redo (local-first via HistoryManager) ───────────────────────
+
+  /**
+   * Send a transaction's operations to the server using existing GraphQL mutations.
+   *
+   * During the 15c->15d transition, the server still expects individual mutations.
+   * This function maps each operation back to the appropriate mutation.
+   * In Phase 15d, this will be replaced with a single APPLY_OPERATIONS_MUTATION.
+   */
+  function sendTransactionToServer(tx: Transaction): void {
+    for (const op of tx.operations) {
+      sendOperationToServer(op);
+    }
+  }
+
+  function sendOperationToServer(op: Operation): void {
+    switch (op.type) {
+      case "set_field":
+        sendSetFieldToServer(op);
+        break;
+      case "create_node": {
+        const nodeData = op.value as Record<string, unknown>;
+        client
+          .mutation(gql(CREATE_NODE_MUTATION), {
+            kind: deepClone(nodeData["kind"]),
+            name: nodeData["name"],
+            pageId: state.pages[0]?.id ?? null,
+            transform: deepClone(nodeData["transform"]),
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer create_node error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer create_node:", err));
+        break;
+      }
+      case "delete_node":
+        client
+          .mutation(gql(DELETE_NODE_MUTATION), { uuid: op.nodeUuid, userId: clientSessionId })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer delete_node error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer delete_node:", err));
+        break;
+      case "reparent": {
+        const rv = op.value as ReparentValue;
+        client
+          .mutation(gql(REPARENT_NODE_MUTATION), {
+            uuid: op.nodeUuid,
+            newParentUuid: rv.parentUuid,
+            position: rv.position,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer reparent error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer reparent:", err));
+        break;
+      }
+      case "reorder": {
+        const reorder = op.value as ReorderValue;
+        client
+          .mutation(gql(REORDER_CHILDREN_MUTATION), {
+            uuid: op.nodeUuid,
+            newPosition: reorder.newPosition,
+            userId: clientSessionId,
+          })
+          .toPromise()
+          .then((r) => {
+            if (r.error) {
+              console.error("sendOperationToServer reorder error:", r.error.message);
+            }
+          })
+          .catch((err: unknown) => console.error("sendOperationToServer reorder:", err));
+        break;
+      }
+    }
+  }
+
+  function sendSetFieldToServer(op: Operation): void {
+    const { nodeUuid, path, value } = op;
+
+    switch (path) {
+      case "transform":
+        client.mutation(gql(SET_TRANSFORM_MUTATION), { uuid: nodeUuid, transform: deepClone(value), userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField transform error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField transform:", err));
+        break;
+      case "name":
+        client.mutation(gql(RENAME_NODE_MUTATION), { uuid: nodeUuid, newName: value as string, userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField name error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField name:", err));
+        break;
+      case "visible":
+        client.mutation(gql(SET_VISIBLE_MUTATION), { uuid: nodeUuid, visible: value as boolean, userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField visible error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField visible:", err));
+        break;
+      case "locked":
+        client.mutation(gql(SET_LOCKED_MUTATION), { uuid: nodeUuid, locked: value as boolean, userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField locked error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField locked:", err));
+        break;
+      case "style.opacity": {
+        const opVal = value as { type: string; value: number };
+        client.mutation(gql(SET_OPACITY_MUTATION), { uuid: nodeUuid, opacity: opVal.value, userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField opacity error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField opacity:", err));
+        break;
+      }
+      case "style.blend_mode":
+        client.mutation(gql(SET_BLEND_MODE_MUTATION), { uuid: nodeUuid, blendMode: value as string, userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField blend_mode error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField blend_mode:", err));
+        break;
+      case "style.fills":
+        client.mutation(gql(SET_FILLS_MUTATION), { uuid: nodeUuid, fills: deepClone(value), userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField fills error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField fills:", err));
+        break;
+      case "style.strokes":
+        client.mutation(gql(SET_STROKES_MUTATION), { uuid: nodeUuid, strokes: deepClone(value), userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField strokes error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField strokes:", err));
+        break;
+      case "style.effects":
+        client.mutation(gql(SET_EFFECTS_MUTATION), { uuid: nodeUuid, effects: deepClone(value), userId: clientSessionId }).toPromise()
+          .then((r) => { if (r.error) console.error("sendSetField effects error:", r.error.message); })
+          .catch((err: unknown) => console.error("sendSetField effects:", err));
+        break;
+      case "kind":
+        // For corner radii changes on rectangles
+        if (value && typeof value === "object" && "corner_radii" in (value as Record<string, unknown>)) {
+          const radii = (value as Record<string, unknown>)["corner_radii"] as [number, number, number, number];
+          client.mutation(gql(SET_CORNER_RADII_MUTATION), { uuid: nodeUuid, radii: [...radii], userId: clientSessionId }).toPromise()
+            .then((r) => { if (r.error) console.error("sendSetField kind error:", r.error.message); })
+            .catch((err: unknown) => console.error("sendSetField kind:", err));
+        }
+        break;
+    }
+  }
+
   function undo(): void {
-    client
-      .mutation(gql(UNDO_MUTATION), { userId: clientSessionId })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("undo error:", r.error.message);
-          return;
-        }
-        const data = r.data?.undo as { canUndo: boolean; canRedo: boolean } | undefined;
-        if (data) {
-          setState("info", "can_undo", data.canUndo);
-          setState("info", "can_redo", data.canRedo);
-        }
-        // RF-017: Use direct fetch, not debounced, for undo
-        void fetchPages();
-      })
-      .catch((err: unknown) => {
-        console.error("undo exception:", err);
-      });
+    const inverseTx = history.undo();
+    if (!inverseTx) return;
+
+    // Send inverse operations to server so other clients see the revert
+    sendTransactionToServer(inverseTx);
   }
 
   function redo(): void {
-    client
-      .mutation(gql(REDO_MUTATION), { userId: clientSessionId })
-      .toPromise()
-      .then((r) => {
-        if (r.error) {
-          console.error("redo error:", r.error.message);
-          return;
-        }
-        const data = r.data?.redo as { canUndo: boolean; canRedo: boolean } | undefined;
-        if (data) {
-          setState("info", "can_undo", data.canUndo);
-          setState("info", "can_redo", data.canRedo);
-        }
-        // RF-017: Use direct fetch, not debounced, for redo
-        void fetchPages();
-      })
-      .catch((err: unknown) => {
-        console.error("redo exception:", err);
-      });
+    const redoTx = history.redo();
+    if (!redoTx) return;
+
+    // Send redo operations to server so other clients see the re-application
+    sendTransactionToServer(redoTx);
   }
 
   // ── Drag coalescing ──────────────────────────────────────────────────
