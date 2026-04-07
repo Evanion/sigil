@@ -10,6 +10,8 @@ function makeEvent(overrides?: Partial<ToolEvent>): ToolEvent {
     screenY: 0,
     shiftKey: false,
     altKey: false,
+    metaKey: false,
+    ctrlKey: false,
     ...overrides,
   };
 }

@@ -6,13 +6,16 @@
  *
  * RF-002: Selection is identified by UUID (string), not NodeId.
  * RF-005: Accepts an optional preview transform to render drag feedback.
+ * RF-006: Accepts ReadonlySet<string> for selectedUuids (caller memoizes).
  */
 
 import type { DocumentNode, Transform } from "../types/document";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
+import type { MarqueeRect } from "../tools/select-tool";
 import type { Viewport } from "./viewport";
 import type { SnapGuide } from "./snap-engine";
+import { computeCompoundBounds } from "./multi-select";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -60,17 +63,14 @@ function resolveFillColor(node: DocumentNode): string {
 }
 
 /**
- * Get the effective transform for a node, taking into account any active
- * preview transform (e.g. during drag).
+ * RF-005: Get the effective transform for a node, using a Map for O(1) lookup
+ * instead of a linear scan over the previewTransforms array.
  */
 function getEffectiveTransform(
   node: DocumentNode,
-  previewTransform: PreviewTransform | null,
+  previewMap: ReadonlyMap<string, Transform>,
 ): Transform {
-  if (previewTransform !== null && previewTransform.uuid === node.uuid) {
-    return previewTransform.transform;
-  }
-  return node.transform;
+  return previewMap.get(node.uuid) ?? node.transform;
 }
 
 /**
@@ -216,6 +216,76 @@ function drawPreviewRect(ctx: CanvasRenderingContext2D, preview: PreviewRect, zo
   ctx.setLineDash([]);
 }
 
+/** Marquee rectangle stroke color. */
+const MARQUEE_COLOR = "#0d99ff";
+
+/** Marquee rectangle fill color (semi-transparent). */
+const MARQUEE_FILL = "rgba(13, 153, 255, 0.1)";
+
+/** Compound bounds outline color. */
+const COMPOUND_BOUNDS_COLOR = "#0d99ff";
+
+/**
+ * Draw a marquee selection rectangle on the canvas.
+ *
+ * Renders a dashed blue outline with a semi-transparent blue fill.
+ * All dimensions are in world coordinates; the viewport transform
+ * is already applied by the caller.
+ */
+function drawMarqueeRect(ctx: CanvasRenderingContext2D, rect: MarqueeRect, zoom: number): void {
+  const lineWidth = 1 / zoom;
+  const dashPattern = [6 / zoom, 4 / zoom];
+
+  ctx.strokeStyle = MARQUEE_COLOR;
+  ctx.lineWidth = lineWidth;
+  ctx.setLineDash(dashPattern);
+  ctx.fillStyle = MARQUEE_FILL;
+
+  // RF-016: Normalize negative dimensions before drawing. The marquee rect
+  // may have negative width/height when the user drags right-to-left or
+  // bottom-to-top. Canvas fillRect/strokeRect handle negatives inconsistently
+  // across browsers, so we normalize to always-positive dimensions.
+  const rx = rect.width >= 0 ? rect.x : rect.x + rect.width;
+  const ry = rect.height >= 0 ? rect.y : rect.y + rect.height;
+  const rw = Math.abs(rect.width);
+  const rh = Math.abs(rect.height);
+
+  ctx.fillRect(rx, ry, rw, rh);
+  ctx.strokeRect(rx, ry, rw, rh);
+  ctx.setLineDash([]);
+}
+
+/**
+ * Draw compound bounding box outline and 8 resize handles for multi-selection.
+ *
+ * Computes the union bounding box of all provided transforms and draws a
+ * dashed outline with resize handles at corners and edge midpoints.
+ *
+ * RF-010: This recomputes compound bounds separately from select-tool.ts.
+ * Known redundancy — the tool computes bounds for resize math, the renderer
+ * computes bounds for drawing. Merging would require plumbing compound bounds
+ * through the preview signal, deferred for simplicity.
+ */
+function drawCompoundBounds(
+  ctx: CanvasRenderingContext2D,
+  transforms: Transform[],
+  zoom: number,
+): void {
+  if (transforms.length < 2) return;
+
+  const bounds = computeCompoundBounds(transforms);
+  const lineWidth = SELECTION_LINE_WIDTH / zoom;
+
+  ctx.strokeStyle = COMPOUND_BOUNDS_COLOR;
+  ctx.lineWidth = lineWidth;
+  ctx.setLineDash([6 / zoom, 4 / zoom]);
+  ctx.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+  ctx.setLineDash([]);
+
+  // Draw 8 handles on the compound bounds
+  drawSelectionHandles(ctx, bounds, zoom);
+}
+
 /** Smart guide line color (pink/red). */
 const GUIDE_COLOR = "#ff3366";
 
@@ -271,20 +341,26 @@ function drawGuideLines(
  * Render the document onto the canvas.
  *
  * Clears the canvas, applies the viewport transform, and draws all visible
- * nodes. If a selectedUuid is provided, draws a selection highlight,
- * name label, and 8 resize handles on the matching node. If a previewRect
+ * nodes. For each UUID in selectedUuids, draws a selection highlight. If
+ * multiple nodes are selected, draws a compound bounding box with handles;
+ * if exactly one is selected, draws handles on that node. If a previewRect
  * is provided, draws a dashed outline for the shape tool drag preview.
- * If a previewTransform is provided, uses it for the dragged node's position.
+ * If previewTransforms are provided, uses them for the dragged nodes' positions.
+ * If a marqueeRect is provided, draws a dashed selection rectangle on top.
+ *
+ * RF-006: selectedUuids is now ReadonlySet<string> (memoized by caller).
+ * RF-005: previewTransforms are converted to a Map once before the render loop.
  */
 export function render(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
   nodes: readonly DocumentNode[],
-  selectedUuid: string | null,
+  selectedUuids: ReadonlySet<string>,
   dpr = 1,
   previewRect: PreviewRect | null = null,
-  previewTransform: PreviewTransform | null = null,
+  previewTransforms: readonly PreviewTransform[] = [],
   snapGuides: readonly SnapGuide[] = [],
+  marqueeRect: MarqueeRect | null = null,
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -301,28 +377,45 @@ export function render(
     viewport.y * dpr,
   );
 
+  // RF-005: Build Map<string, Transform> from previewTransforms once before
+  // the render loop, replacing the O(n*k) linear scan per node.
+  const previewMap = new Map<string, Transform>(
+    previewTransforms.map((pt) => [pt.uuid, pt.transform]),
+  );
+
   // Draw each visible node.
   for (const node of nodes) {
     if (!node.visible) {
       continue;
     }
-    const effectiveTransform = getEffectiveTransform(node, previewTransform);
+    const effectiveTransform = getEffectiveTransform(node, previewMap);
     drawNode(ctx, node, effectiveTransform);
   }
 
-  // Draw selection highlight on top of all nodes.
-  if (selectedUuid !== null) {
+  // RF-006: selectedUuids is already a Set — no per-frame allocation needed.
+
+  // Draw selection highlights on all selected nodes.
+  if (selectedUuids.size > 0) {
+    const selectedTransforms: Transform[] = [];
+
     for (const node of nodes) {
-      if (!node.visible) {
-        continue;
-      }
-      if (node.uuid === selectedUuid) {
-        const effectiveTransform = getEffectiveTransform(node, previewTransform);
-        drawSelectionHighlight(ctx, node, effectiveTransform, viewport.zoom);
+      if (!node.visible) continue;
+      if (!selectedUuids.has(node.uuid)) continue;
+
+      const effectiveTransform = getEffectiveTransform(node, previewMap);
+      drawSelectionHighlight(ctx, node, effectiveTransform, viewport.zoom);
+      selectedTransforms.push(effectiveTransform);
+
+      // Draw name label + individual handles only for single selection.
+      if (selectedUuids.size === 1) {
         drawNameLabel(ctx, node, effectiveTransform, viewport.zoom);
         drawSelectionHandles(ctx, effectiveTransform, viewport.zoom);
-        break;
       }
+    }
+
+    // For multi-selection: draw compound bounding box + handles.
+    if (selectedUuids.size >= 2 && selectedTransforms.length >= 2) {
+      drawCompoundBounds(ctx, selectedTransforms, viewport.zoom);
     }
   }
 
@@ -331,9 +424,14 @@ export function render(
     drawPreviewRect(ctx, previewRect, viewport.zoom);
   }
 
-  // Draw smart guide lines (after nodes and selection, before transform reset).
+  // Draw smart guide lines (after nodes and selection, before marquee).
   if (snapGuides.length > 0) {
     drawGuideLines(ctx, snapGuides, viewport, ctx.canvas.width / dpr, ctx.canvas.height / dpr);
+  }
+
+  // Draw marquee selection rectangle on top of everything.
+  if (marqueeRect !== null) {
+    drawMarqueeRect(ctx, marqueeRect, viewport.zoom);
   }
 
   // Reset transform to identity.

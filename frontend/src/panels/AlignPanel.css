@@ -1,0 +1,62 @@
+/* ── AlignPanel ────────────────────────────────────────────────────────── */
+
+.sigil-align-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.sigil-align-panel__section-title {
+  font-size: var(--font-size-00, 10px);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-1, 0.5px);
+  color: var(--text-2);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.sigil-align-panel__row {
+  display: flex;
+  flex-direction: row;
+  gap: 2px;
+}
+
+.sigil-align-panel__button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--button-radius);
+  background: var(--surface-3);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.sigil-align-panel__button:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sigil-align-panel__button:active {
+  background: var(--accent-active);
+  color: var(--text-1);
+}
+
+.sigil-align-panel__button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-align-panel__button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.sigil-align-panel__button:disabled:hover {
+  background: var(--surface-3);
+  color: var(--text-2);
+}

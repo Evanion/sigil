@@ -1,22 +1,24 @@
 /**
- * EffectsPanel.stories.tsx — Storybook stories for the EffectsPanel.
+ * AlignPanel.stories.tsx — Storybook stories for the AlignPanel.
  *
- * Each story wraps a mock DocumentProvider so the panel can read its
- * effects array without a live server.
+ * Stories cover the three meaningful selection states:
+ * - 2 nodes: align buttons enabled, distribute buttons disabled
+ * - 3+ nodes: align and distribute buttons both enabled
+ * - 1 node: panel not shown (nothing rendered)
  */
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
-import { EffectsPanel } from "./EffectsPanel";
+import { AlignPanel } from "./AlignPanel";
 import { DocumentProvider } from "../store/document-context";
 import type { DocumentStoreAPI, ToolType } from "../store/document-store-solid";
 
 // ── Mock store factory ─────────────────────────────────────────────────
 
 function createMockStore(
-  selectedUuid: string | null = null,
-  nodes: Record<string, unknown> = {},
+  selectedUuids: string[],
+  nodes: Record<string, unknown>,
 ): DocumentStoreAPI {
-  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(selectedUuid);
+  const [selectedNodeId, setSelectedNodeId] = createSignal<string | null>(selectedUuids[0] ?? null);
   const [activeTool, setActiveTool] = createSignal<ToolType>("select");
 
   return {
@@ -27,10 +29,7 @@ function createMockStore(
     },
     selectedNodeId,
     setSelectedNodeId,
-    selectedNodeIds: () => {
-      const id = selectedNodeId();
-      return id ? [id] : [];
-    },
+    selectedNodeIds: () => selectedUuids,
     setSelectedNodeIds: () => {},
     activeTool,
     setActiveTool,
@@ -63,25 +62,23 @@ function createMockStore(
   } as DocumentStoreAPI;
 }
 
-// ── Sample node factory ────────────────────────────────────────────────
+// ── Node factory ────────────────────────────────────────────────────────
 
-const UUID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
-
-function makeNode(effects: unknown[] = []) {
+function makeNode(uuid: string, x: number, y: number) {
   return {
     id: { index: 0, generation: 0 },
-    uuid: UUID,
+    uuid,
     kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
-    name: "Rectangle 1",
+    name: `Rectangle ${uuid}`,
     parent: null,
     children: [],
-    transform: { x: 0, y: 0, width: 200, height: 150, rotation: 0, scale_x: 1, scale_y: 1 },
+    transform: { x, y, width: 100, height: 80, rotation: 0, scale_x: 1, scale_y: 1 },
     style: {
       fills: [],
       strokes: [],
       opacity: { type: "literal", value: 1 },
       blend_mode: "normal",
-      effects,
+      effects: [],
     },
     constraints: { horizontal: "start", vertical: "start" },
     grid_placement: null,
@@ -92,15 +89,19 @@ function makeNode(effects: unknown[] = []) {
   };
 }
 
+const UUID_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+const UUID_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+const UUID_C = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+
 // ── Meta ───────────────────────────────────────────────────────────────
 
-const meta: Meta<typeof EffectsPanel> = {
-  title: "Panels/EffectsPanel",
-  component: EffectsPanel,
+const meta: Meta<typeof AlignPanel> = {
+  title: "Panels/AlignPanel",
+  component: AlignPanel,
   tags: ["autodocs"],
   decorators: [
     (Story) => (
-      <div style={{ width: "280px", background: "var(--surface-2)" }}>
+      <div style={{ width: "280px", background: "var(--surface-2)", padding: "8px" }}>
         <Story />
       </div>
     ),
@@ -108,29 +109,21 @@ const meta: Meta<typeof EffectsPanel> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof EffectsPanel>;
+type Story = StoryObj<typeof AlignPanel>;
 
 // ── Stories ────────────────────────────────────────────────────────────
 
 /**
- * Node with a single drop shadow effect.
+ * Two nodes selected: alignment buttons enabled, distribute buttons disabled.
  */
-export const WithDropShadow: Story = {
+export const TwoNodesSelected: Story = {
   decorators: [
     (Story) => {
-      const node = makeNode([
-        {
-          type: "drop_shadow",
-          color: {
-            type: "literal",
-            value: { space: "srgb", r: 0.0, g: 0.0, b: 0.0, a: 0.3 },
-          },
-          offset: { x: 0, y: 4 },
-          blur: { type: "literal", value: 8 },
-          spread: { type: "literal", value: 0 },
-        },
-      ]);
-      const store = createMockStore(UUID, { [UUID]: node });
+      const nodes = {
+        [UUID_A]: makeNode(UUID_A, 10, 10),
+        [UUID_B]: makeNode(UUID_B, 200, 50),
+      };
+      const store = createMockStore([UUID_A, UUID_B], nodes);
       return (
         <DocumentProvider store={store}>
           <Story />
@@ -141,28 +134,17 @@ export const WithDropShadow: Story = {
 };
 
 /**
- * Node with two effects — a drop shadow and a layer blur.
+ * Three nodes selected: alignment and distribute buttons both enabled.
  */
-export const WithMultipleEffects: Story = {
+export const ThreeNodesSelected: Story = {
   decorators: [
     (Story) => {
-      const node = makeNode([
-        {
-          type: "drop_shadow",
-          color: {
-            type: "literal",
-            value: { space: "srgb", r: 0.0, g: 0.0, b: 0.0, a: 0.4 },
-          },
-          offset: { x: 2, y: 6 },
-          blur: { type: "literal", value: 12 },
-          spread: { type: "literal", value: 0 },
-        },
-        {
-          type: "layer_blur",
-          radius: { type: "literal", value: 4 },
-        },
-      ]);
-      const store = createMockStore(UUID, { [UUID]: node });
+      const nodes = {
+        [UUID_A]: makeNode(UUID_A, 10, 10),
+        [UUID_B]: makeNode(UUID_B, 200, 50),
+        [UUID_C]: makeNode(UUID_C, 400, 100),
+      };
+      const store = createMockStore([UUID_A, UUID_B, UUID_C], nodes);
       return (
         <DocumentProvider store={store}>
           <Story />
@@ -173,29 +155,15 @@ export const WithMultipleEffects: Story = {
 };
 
 /**
- * Node with no effects — shows the empty state.
+ * One node selected: panel is not shown (nothing rendered).
  */
-export const Empty: Story = {
+export const OneNodeSelected: Story = {
   decorators: [
     (Story) => {
-      const node = makeNode([]);
-      const store = createMockStore(UUID, { [UUID]: node });
-      return (
-        <DocumentProvider store={store}>
-          <Story />
-        </DocumentProvider>
-      );
-    },
-  ],
-};
-
-/**
- * No node selected — add button is disabled.
- */
-export const NoSelection: Story = {
-  decorators: [
-    (Story) => {
-      const store = createMockStore(null, {});
+      const nodes = {
+        [UUID_A]: makeNode(UUID_A, 10, 10),
+      };
+      const store = createMockStore([UUID_A], nodes);
       return (
         <DocumentProvider store={store}>
           <Story />

@@ -14,7 +14,7 @@ import type { DocumentNode, Transform } from "../types/document";
  * For rotated nodes, this computes the AABB of the four rotated corners.
  * Returns [minX, minY, maxX, maxY].
  */
-function computeAABB(t: Transform): [number, number, number, number] {
+export function computeAABB(t: Transform): [number, number, number, number] {
   if (t.rotation === 0) {
     return [t.x, t.y, t.x + t.width, t.y + t.height];
   }
