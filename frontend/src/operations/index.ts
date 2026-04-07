@@ -40,3 +40,11 @@ export { PersistentHistoryManager } from "./persistent-history-manager";
 // Remote transaction application
 export { applyRemoteTransaction } from "./apply-remote";
 export type { RemoteTransactionPayload, RemoteOperationPayload } from "./apply-remote";
+
+// Store-level operation application
+export { applyOperationToStore } from "./apply-to-store";
+export type { StoreStateSetter, StoreStateReader } from "./apply-to-store";
+
+// Store + History bridge
+export { createStoreHistoryBridge } from "./store-history";
+export type { StoreHistoryBridge } from "./store-history";
