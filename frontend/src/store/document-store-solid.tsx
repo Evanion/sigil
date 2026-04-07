@@ -244,7 +244,61 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     getNode: (uuid: string) => state.nodes[uuid] as Record<string, unknown> | undefined,
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- DocumentState is structurally compatible with StoreStateSetter
-  const history = createStoreHistoryBridge(historyManager, setState as any, storeReader);
+  const rawBridge = createStoreHistoryBridge(historyManager, setState as any, storeReader);
+
+  // RF-012: Wrap bridge so every history-mutating method syncs the reactive signals.
+  // This avoids adding syncHistorySignals() to 30+ individual call sites.
+  const history: typeof rawBridge = {
+    applyAndTrack(op, description) {
+      rawBridge.applyAndTrack(op, description);
+      syncHistorySignals();
+    },
+    rollbackLast() {
+      rawBridge.rollbackLast();
+      syncHistorySignals();
+    },
+    beginTransaction(description) {
+      rawBridge.beginTransaction(description);
+    },
+    applyInTransaction(op) {
+      rawBridge.applyInTransaction(op);
+    },
+    commitTransaction() {
+      rawBridge.commitTransaction();
+      syncHistorySignals();
+    },
+    cancelTransaction() {
+      rawBridge.cancelTransaction();
+      syncHistorySignals();
+    },
+    beginDrag(nodeUuid, path) {
+      rawBridge.beginDrag(nodeUuid, path);
+    },
+    updateDrag(op) {
+      rawBridge.updateDrag(op);
+    },
+    commitDrag() {
+      const result = rawBridge.commitDrag();
+      syncHistorySignals();
+      return result;
+    },
+    cancelDrag() {
+      rawBridge.cancelDrag();
+      syncHistorySignals();
+    },
+    undo() {
+      const result = rawBridge.undo();
+      syncHistorySignals();
+      return result;
+    },
+    redo() {
+      const result = rawBridge.redo();
+      syncHistorySignals();
+      return result;
+    },
+    canUndo: rawBridge.canUndo,
+    canRedo: rawBridge.canRedo,
+  };
 
   // UI signals — multi-select with backwards-compatible single-select accessors
   const [selectedNodeIds, setSelectedNodeIds] = createSignal<string[]>([]);
@@ -263,9 +317,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   });
   const [connected, setConnected] = createSignal(false);
 
-  // Derived from HistoryManager, not server state
-  const canUndo = () => history.canUndo();
-  const canRedo = () => history.canRedo();
+  // RF-012: Reactive undo/redo availability signals.
+  // HistoryManager is a plain class — its canUndo()/canRedo() don't trigger Solid reactivity.
+  // We maintain signals that the bridge updates after every history-mutating operation.
+  const [canUndoSignal, setCanUndoSignal] = createSignal(false);
+  const [canRedoSignal, setCanRedoSignal] = createSignal(false);
+  /** Sync the reactive signals with the current HistoryManager state. */
+  function syncHistorySignals(): void {
+    setCanUndoSignal(historyManager.canUndo());
+    setCanRedoSignal(historyManager.canRedo());
+  }
+  const canUndo = canUndoSignal;
+  const canRedo = canRedoSignal;
 
   // ── WebSocket client with connection tracking (RF-025) ──────────────
 
@@ -967,11 +1030,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         if (groupUuid) {
           // After server response, refetch to get complete state, then track
           void fetchPages().then(() => {
-            // Track a create_node operation for the group so undo knows about it
+            // RF-011: Track in history only — fetchPages already populated the store.
+            // Using historyManager.apply() instead of history.applyAndTrack() to
+            // avoid double-writing the node to the store.
             const groupNode = state.nodes[groupUuid];
             if (groupNode) {
               const op = createCreateNodeOp(clientSessionId, deepClone(groupNode));
-              history.applyAndTrack(op, `Group ${name}`);
+              historyManager.apply(op, `Group ${name}`);
+              syncHistorySignals();
             }
           });
           setSelectedNodeIds([groupUuid]);
@@ -1014,11 +1080,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         }
         // After server response, refetch to get complete state, then track
         void fetchPages().then(() => {
-          // Track delete_node operations for the removed groups so undo knows
+          // RF-011: Track in history only — fetchPages already populated the store.
+          // Using historyManager.apply() avoids double-writing.
           for (const group of groupSnapshots) {
             const op = createDeleteNodeOp(clientSessionId, group.uuid, group.snapshot);
-            history.applyAndTrack(op, `Ungroup ${(group.snapshot["name"] as string) ?? "nodes"}`);
+            historyManager.apply(op, `Ungroup ${(group.snapshot["name"] as string) ?? "nodes"}`);
           }
+          syncHistorySignals();
         });
       })
       .catch((err: unknown) => {
