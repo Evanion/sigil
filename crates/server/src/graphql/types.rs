@@ -1,7 +1,7 @@
 use async_graphql::SimpleObject;
 
 use agent_designer_core::{Document, NodeId};
-use agent_designer_state::{MutationEvent, MutationEventKind};
+use agent_designer_state::{MutationEvent, MutationEventKind, TransactionPayload};
 
 /// Discriminator for document change events.
 ///
@@ -53,28 +53,129 @@ pub struct DocumentEvent {
     pub sender_id: Option<u64>,
 }
 
+/// Converts a [`MutationEventKind`] to a [`DocumentEventType`].
+///
+/// Shared between [`DocumentEvent`] and [`TransactionAppliedEvent`] conversion
+/// paths so the mapping is defined in one place.
+#[must_use]
+pub fn event_type_from_kind(kind: MutationEventKind) -> DocumentEventType {
+    match kind {
+        MutationEventKind::NodeCreated => DocumentEventType::NodeCreated,
+        MutationEventKind::NodeUpdated => DocumentEventType::NodeUpdated,
+        MutationEventKind::NodeDeleted => DocumentEventType::NodeDeleted,
+        MutationEventKind::UndoRedo => DocumentEventType::UndoRedo,
+        MutationEventKind::PageCreated => DocumentEventType::PageCreated,
+        MutationEventKind::PageUpdated => DocumentEventType::PageUpdated,
+        MutationEventKind::PageDeleted => DocumentEventType::PageDeleted,
+        MutationEventKind::TokenCreated => DocumentEventType::TokenCreated,
+        MutationEventKind::TokenUpdated => DocumentEventType::TokenUpdated,
+        MutationEventKind::TokenDeleted => DocumentEventType::TokenDeleted,
+    }
+}
+
 impl DocumentEvent {
     /// Converts a [`MutationEvent`] from the state crate into a GraphQL
     /// [`DocumentEvent`].
     #[must_use]
     pub fn from_mutation_event(event: MutationEvent) -> Self {
-        let event_type = match event.kind {
-            MutationEventKind::NodeCreated => DocumentEventType::NodeCreated,
-            MutationEventKind::NodeUpdated => DocumentEventType::NodeUpdated,
-            MutationEventKind::NodeDeleted => DocumentEventType::NodeDeleted,
-            MutationEventKind::UndoRedo => DocumentEventType::UndoRedo,
-            MutationEventKind::PageCreated => DocumentEventType::PageCreated,
-            MutationEventKind::PageUpdated => DocumentEventType::PageUpdated,
-            MutationEventKind::PageDeleted => DocumentEventType::PageDeleted,
-            MutationEventKind::TokenCreated => DocumentEventType::TokenCreated,
-            MutationEventKind::TokenUpdated => DocumentEventType::TokenUpdated,
-            MutationEventKind::TokenDeleted => DocumentEventType::TokenDeleted,
-        };
         Self {
-            event_type,
+            event_type: event_type_from_kind(event.kind),
             uuid: event.uuid,
             data: event.data.map(async_graphql::Json),
             sender_id: None,
+        }
+    }
+}
+
+/// GraphQL representation of a single operation in a broadcast transaction.
+#[derive(Clone, Debug, SimpleObject)]
+pub struct OperationPayloadGql {
+    /// Unique operation ID.
+    pub id: String,
+    /// Target node UUID.
+    pub node_uuid: String,
+    /// Operation type: `set_field`, `create_node`, `delete_node`, `reparent`, `reorder`.
+    #[graphql(name = "type")]
+    pub op_type: String,
+    /// Field path for `set_field` operations.
+    pub path: Option<String>,
+    /// New value as JSON.
+    pub value: Option<async_graphql::Json<serde_json::Value>>,
+}
+
+/// GraphQL representation of a transaction broadcast event.
+///
+/// Sent to subscription clients when any mutation modifies the document.
+/// Contains the full operation payload so clients can apply changes directly
+/// without refetching.
+#[derive(Clone, Debug, SimpleObject)]
+pub struct TransactionAppliedEvent {
+    /// Unique transaction ID.
+    pub transaction_id: String,
+    /// Session ID of the user who originated this transaction.
+    pub user_id: String,
+    /// Server-assigned sequence number (string because GraphQL Int is i32, seq is u64).
+    pub seq: String,
+    /// Ordered list of operations.
+    pub operations: Vec<OperationPayloadGql>,
+    /// Legacy event type for clients that haven't migrated yet.
+    pub event_type: DocumentEventType,
+    /// Legacy UUID field.
+    pub uuid: Option<String>,
+}
+
+impl TransactionAppliedEvent {
+    /// Converts a state-crate [`TransactionPayload`] into a GraphQL event.
+    #[must_use]
+    pub fn from_transaction(
+        tx: &TransactionPayload,
+        kind: DocumentEventType,
+        uuid: Option<String>,
+    ) -> Self {
+        Self {
+            transaction_id: tx.transaction_id.clone(),
+            user_id: tx.user_id.clone(),
+            seq: tx.seq.to_string(),
+            operations: tx
+                .operations
+                .iter()
+                .map(|op| OperationPayloadGql {
+                    id: op.id.clone(),
+                    node_uuid: op.node_uuid.clone(),
+                    op_type: op.op_type.clone(),
+                    path: if op.path.is_empty() {
+                        None
+                    } else {
+                        Some(op.path.clone())
+                    },
+                    value: op.value.clone().map(async_graphql::Json),
+                })
+                .collect(),
+            event_type: kind,
+            uuid,
+        }
+    }
+
+    /// Converts a [`MutationEvent`] into a [`TransactionAppliedEvent`].
+    ///
+    /// When the event carries a transaction payload, uses it directly.
+    /// When it doesn't (legacy path), synthesizes a minimal event with
+    /// empty operations and seq=0 so the client falls back to refetch.
+    #[must_use]
+    pub fn from_mutation_event(event: MutationEvent) -> Self {
+        let event_type = event_type_from_kind(event.kind);
+        if let Some(ref tx) = event.transaction {
+            Self::from_transaction(tx, event_type, event.uuid)
+        } else {
+            // Legacy fallback: no operation payload, client must refetch
+            Self {
+                transaction_id: String::new(),
+                user_id: String::new(),
+                seq: "0".to_string(),
+                operations: vec![],
+                event_type,
+                uuid: event.uuid,
+            }
         }
     }
 }
@@ -179,4 +280,176 @@ pub fn node_to_gql(
         visible: node.visible,
         locked: node.locked,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use agent_designer_state::OperationPayload;
+
+    #[test]
+    fn test_from_transaction_maps_all_fields() {
+        let tx = TransactionPayload {
+            transaction_id: "tx-abc".to_string(),
+            user_id: "user-1".to_string(),
+            seq: 42,
+            operations: vec![OperationPayload {
+                id: "op-1".to_string(),
+                node_uuid: "node-xyz".to_string(),
+                op_type: "set_field".to_string(),
+                path: "transform".to_string(),
+                value: Some(serde_json::json!({"x": 100})),
+            }],
+        };
+
+        let event = TransactionAppliedEvent::from_transaction(
+            &tx,
+            DocumentEventType::NodeUpdated,
+            Some("node-xyz".to_string()),
+        );
+
+        assert_eq!(event.transaction_id, "tx-abc");
+        assert_eq!(event.user_id, "user-1");
+        assert_eq!(event.seq, "42");
+        assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
+        assert_eq!(event.uuid.as_deref(), Some("node-xyz"));
+        assert_eq!(event.operations.len(), 1);
+
+        let op = &event.operations[0];
+        assert_eq!(op.id, "op-1");
+        assert_eq!(op.node_uuid, "node-xyz");
+        assert_eq!(op.op_type, "set_field");
+        assert_eq!(op.path.as_deref(), Some("transform"));
+        assert!(op.value.is_some());
+    }
+
+    #[test]
+    fn test_from_transaction_empty_path_becomes_none() {
+        let tx = TransactionPayload {
+            transaction_id: "tx-def".to_string(),
+            user_id: "user-2".to_string(),
+            seq: 1,
+            operations: vec![OperationPayload {
+                id: "op-2".to_string(),
+                node_uuid: "node-abc".to_string(),
+                op_type: "create_node".to_string(),
+                path: String::new(),
+                value: Some(serde_json::json!({"kind": "frame"})),
+            }],
+        };
+
+        let event = TransactionAppliedEvent::from_transaction(
+            &tx,
+            DocumentEventType::NodeCreated,
+            Some("node-abc".to_string()),
+        );
+
+        assert!(
+            event.operations[0].path.is_none(),
+            "empty path should map to None"
+        );
+    }
+
+    #[test]
+    fn test_from_mutation_event_with_transaction_uses_payload() {
+        let mutation = MutationEvent {
+            kind: MutationEventKind::NodeUpdated,
+            uuid: Some("node-123".to_string()),
+            data: None,
+            transaction: Some(TransactionPayload {
+                transaction_id: "tx-ghi".to_string(),
+                user_id: "user-3".to_string(),
+                seq: 7,
+                operations: vec![OperationPayload {
+                    id: "op-3".to_string(),
+                    node_uuid: "node-123".to_string(),
+                    op_type: "set_field".to_string(),
+                    path: "name".to_string(),
+                    value: Some(serde_json::json!("New Name")),
+                }],
+            }),
+        };
+
+        let event = TransactionAppliedEvent::from_mutation_event(mutation);
+
+        assert_eq!(event.transaction_id, "tx-ghi");
+        assert_eq!(event.seq, "7");
+        assert_eq!(event.operations.len(), 1);
+        assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
+    }
+
+    #[test]
+    fn test_from_mutation_event_without_transaction_falls_back() {
+        let mutation = MutationEvent {
+            kind: MutationEventKind::UndoRedo,
+            uuid: None,
+            data: Some(serde_json::json!({"can_undo": true})),
+            transaction: None,
+        };
+
+        let event = TransactionAppliedEvent::from_mutation_event(mutation);
+
+        assert!(
+            event.transaction_id.is_empty(),
+            "legacy fallback should have empty transaction_id"
+        );
+        assert_eq!(event.seq, "0", "legacy fallback should have seq 0");
+        assert!(
+            event.operations.is_empty(),
+            "legacy fallback should have no operations"
+        );
+        assert_eq!(event.event_type, DocumentEventType::UndoRedo);
+        assert!(event.uuid.is_none());
+    }
+
+    #[test]
+    fn test_event_type_from_kind_maps_all_variants() {
+        let cases = [
+            (
+                MutationEventKind::NodeCreated,
+                DocumentEventType::NodeCreated,
+            ),
+            (
+                MutationEventKind::NodeUpdated,
+                DocumentEventType::NodeUpdated,
+            ),
+            (
+                MutationEventKind::NodeDeleted,
+                DocumentEventType::NodeDeleted,
+            ),
+            (MutationEventKind::UndoRedo, DocumentEventType::UndoRedo),
+            (
+                MutationEventKind::PageCreated,
+                DocumentEventType::PageCreated,
+            ),
+            (
+                MutationEventKind::PageUpdated,
+                DocumentEventType::PageUpdated,
+            ),
+            (
+                MutationEventKind::PageDeleted,
+                DocumentEventType::PageDeleted,
+            ),
+            (
+                MutationEventKind::TokenCreated,
+                DocumentEventType::TokenCreated,
+            ),
+            (
+                MutationEventKind::TokenUpdated,
+                DocumentEventType::TokenUpdated,
+            ),
+            (
+                MutationEventKind::TokenDeleted,
+                DocumentEventType::TokenDeleted,
+            ),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(
+                event_type_from_kind(kind),
+                expected,
+                "mismatch for {kind:?}"
+            );
+        }
+    }
 }
