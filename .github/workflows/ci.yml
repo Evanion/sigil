@@ -150,21 +150,51 @@ jobs:
       - name: Build
         run: cd frontend && pnpm build
 
+  # Lint infrastructure files for floating version references
+  pin-check:
+    name: Version Pin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Check for floating version references
+        run: |
+          ERRORS=0
+          # Check .node-version for floating refs
+          if grep -qE '(lts/\*|latest|current)' .node-version 2>/dev/null; then
+            echo "::error file=.node-version::.node-version contains floating reference (must be exact version)"
+            ERRORS=$((ERRORS + 1))
+          fi
+          # Check Dockerfiles for @latest
+          for f in Dockerfile .devcontainer/Dockerfile; do
+            if [ -f "$f" ] && grep -qE '@latest' "$f"; then
+              echo "::error file=$f::$f contains @latest reference (must pin exact version)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "Found $ERRORS floating version reference(s). Pin to exact versions."
+            exit 1
+          fi
+          echo "All version references are pinned."
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust, frontend]
+    needs: [rust, frontend, pin-check]
     steps:
       - name: Check results
         env:
           RUST_RESULT: ${{ needs.rust.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          PIN_CHECK_RESULT: ${{ needs.pin-check.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" ]]; then
+          echo "Pin Check: $PIN_CHECK_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

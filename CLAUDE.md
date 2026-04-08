@@ -327,7 +327,7 @@ When an item is removed from a collection (popped from a stack, removed from a v
 
 ### Multi-Item Mutations Must Roll Back on Partial Failure
 
-When a single command's `apply` or `undo` method loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This is distinct from `CompoundCommand` rollback, which handles inter-command failures — this rule applies to loops WITHIN a single command. A loop that modifies 5 of 10 items and then returns an error has corrupted the document, because the history stack will not undo the partial modifications.
+When a mutation function loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This applies to loops within any single mutation function — whether a `FieldOperation`'s `apply()`, a GraphQL resolver, or an MCP tool handler. A loop that modifies 5 of 10 items and then returns an error has corrupted the document.
 
 ### No Silent Error Suppression in Rollback Paths
 
@@ -465,6 +465,14 @@ When an operation fails and the error handler reverts local state, the revert me
 ### History Commits Must Contain At Least One Operation
 
 Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+
+### Behavioral Inventory Before Deleting Implementation Code
+
+When deleting a module, trait, struct, or function that carries non-trivial logic (computation, validation, state transitions, coordinate transforms, invariant maintenance), the PR MUST include a behavioral inventory before deletion. Enumerate: (1) every side effect and computation the deleted code performs beyond simple CRUD, (2) for each item, whether it is preserved in the replacement code, moved to a different location, or intentionally removed with rationale. "The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. This rule exists because PR #39 deleted Command structs that contained bounding box computation, transform adjustment, and child ordering logic. The replacement FieldOperations omitted this behavior, causing four Critical regressions that were only caught during review.
+
+### Validation Must Be Symmetric Across All Transports
+
+When a validation check exists at one API boundary (GraphQL resolver, MCP tool handler, REST endpoint), the same check MUST exist at every other boundary that accepts the same input type. When adding or modifying a validation rule, search all transport layers for the same input type and update them in the same PR. Asymmetric validation means one transport silently accepts input that another rejects, which is a security inconsistency.
 
 ### Continuous-Value Controls Must Coalesce History Entries
 
