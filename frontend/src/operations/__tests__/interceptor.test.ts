@@ -4,20 +4,13 @@ import { createInterceptor, type Interceptor } from "../interceptor";
 import { HistoryManager } from "../history-manager";
 import type { Transaction } from "../types";
 
-// Mock rAF for deterministic testing
-let rafCallback: (() => void) | null = null;
-const mockRaf = vi.fn((cb: FrameRequestCallback) => {
-  rafCallback = cb as unknown as () => void;
-  return 1;
-});
-const mockCancelRaf = vi.fn();
-
+/**
+ * The interceptor uses setTimeout(fn, 100) for idle coalescing.
+ * We use Vitest fake timers to control when the timeout fires.
+ */
 function flushFrame(): void {
-  if (rafCallback) {
-    const cb = rafCallback;
-    rafCallback = null;
-    cb();
-  }
+  // Advance fake timers past the 100ms coalesce window
+  vi.advanceTimersByTime(150);
 }
 
 /**
@@ -39,11 +32,7 @@ describe("Interceptor", () => {
   let interceptor: Interceptor;
 
   beforeEach(() => {
-    vi.stubGlobal("requestAnimationFrame", mockRaf);
-    vi.stubGlobal("cancelAnimationFrame", mockCancelRaf);
-    mockRaf.mockClear();
-    mockCancelRaf.mockClear();
-    rafCallback = null;
+    vi.useFakeTimers();
 
     const [s, ss] = createStore({
       nodes: {} as Record<string, Record<string, unknown>>,
@@ -59,6 +48,7 @@ describe("Interceptor", () => {
 
   afterEach(() => {
     interceptor.destroy();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -196,13 +186,15 @@ describe("Interceptor", () => {
     expect(historyManager.canUndo()).toBe(true);
   });
 
-  it("should cancel rAF on destroy", () => {
+  it("should cancel timeout on destroy", () => {
     setState("nodes", "node-1", { name: "Before" });
     interceptor.set("node-1", "name", "After");
-    // rAF is scheduled but not fired
+    // timeout is scheduled but not fired
 
     interceptor.destroy();
-    expect(mockCancelRaf).toHaveBeenCalled();
+    // Advancing timers should NOT commit (timeout was cleared)
+    vi.advanceTimersByTime(200);
+    expect(historyManager.canUndo()).toBe(false);
   });
 
   it("should not commit empty buffer", () => {
@@ -210,17 +202,22 @@ describe("Interceptor", () => {
     expect(historyManager.canUndo()).toBe(false);
   });
 
-  it("should reschedule rAF when new writes arrive before previous fires", () => {
+  it("should reschedule timeout when new writes arrive before previous fires", () => {
     setState("nodes", "node-1", { name: "Original" });
 
     interceptor.set("node-1", "name", "A");
-    // First rAF scheduled
-    expect(mockRaf).toHaveBeenCalledTimes(1);
+    // Advance 50ms (within 100ms window) — not committed yet
+    vi.advanceTimersByTime(50);
+    expect(historyManager.canUndo()).toBe(false);
 
     interceptor.set("node-1", "name", "B");
-    // cancelAnimationFrame called, then new rAF scheduled
-    expect(mockCancelRaf).toHaveBeenCalledTimes(1);
-    expect(mockRaf).toHaveBeenCalledTimes(2);
+    // Advance another 50ms — still within new 100ms window (reset by second write)
+    vi.advanceTimersByTime(50);
+    expect(historyManager.canUndo()).toBe(false);
+
+    // Advance past the full window — NOW it commits
+    vi.advanceTimersByTime(60);
+    expect(historyManager.canUndo()).toBe(true);
   });
 
   it("should ignore trackStructural during undo", () => {
