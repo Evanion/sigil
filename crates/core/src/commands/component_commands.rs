@@ -1,10 +1,6 @@
 // crates/core/src/commands/component_commands.rs
-// The Command trait's description() returns &str (not &'static str) because
-// CompoundCommand borrows from its String field. Literal returns in other impls
-// trigger this lint unnecessarily.
-#![allow(clippy::unnecessary_literal_bound)]
 
-use crate::command::{Command, SideEffect};
+use crate::command::FieldOperation;
 use crate::component::{ComponentDef, OverrideKey, OverrideSource, OverrideValue};
 use crate::document::Document;
 use crate::error::CoreError;
@@ -17,21 +13,20 @@ pub struct AddComponent {
     pub component: ComponentDef,
 }
 
-impl Command for AddComponent {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for AddComponent {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if doc.components.contains_key(&self.component.id()) {
+            return Err(CoreError::ValidationError(format!(
+                "component with id {:?} already exists",
+                self.component.id()
+            )));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.add_component(self.component.clone())?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.components
-            .remove(&self.component.id())
-            .ok_or(CoreError::ComponentNotFound(self.component.id()))?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Add component"
+        Ok(())
     }
 }
 
@@ -40,25 +35,21 @@ impl Command for AddComponent {
 pub struct RemoveComponent {
     /// The ID of the component to remove.
     pub component_id: ComponentId,
-    /// Snapshot of the removed component for undo.
-    pub snapshot: ComponentDef,
 }
 
-impl Command for RemoveComponent {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for RemoveComponent {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if !doc.components.contains_key(&self.component_id) {
+            return Err(CoreError::ComponentNotFound(self.component_id));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.components
             .remove(&self.component_id)
             .ok_or(CoreError::ComponentNotFound(self.component_id))?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.restore_component(self.snapshot.clone())?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Remove component"
+        Ok(())
     }
 }
 
@@ -73,12 +64,20 @@ pub struct SetOverride {
     pub new_value: OverrideValue,
     /// The new override source.
     pub new_source: OverrideSource,
-    /// The old override value and source (None if this is a new override).
-    pub old_entry: Option<(OverrideValue, OverrideSource)>,
 }
 
-impl Command for SetOverride {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetOverride {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        let node = doc.arena.get(self.node_id)?;
+        if !matches!(node.kind, crate::node::NodeKind::ComponentInstance { .. }) {
+            return Err(CoreError::ValidationError(
+                "SetOverride: node is not a ComponentInstance".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
             crate::node::NodeKind::ComponentInstance { overrides, .. } => {
@@ -90,35 +89,7 @@ impl Command for SetOverride {
                 ));
             }
         }
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        let node = doc.arena.get_mut(self.node_id)?;
-        match &mut node.kind {
-            crate::node::NodeKind::ComponentInstance { overrides, .. } => match &self.old_entry {
-                Some((val, src)) => {
-                    overrides.set(self.key.clone(), val.clone(), *src)?;
-                }
-                None => {
-                    overrides.remove(&self.key).ok_or_else(|| {
-                        CoreError::ValidationError(
-                            "SetOverride undo: override not found for removal".to_string(),
-                        )
-                    })?;
-                }
-            },
-            _ => {
-                return Err(CoreError::ValidationError(
-                    "SetOverride undo: node is not a ComponentInstance".to_string(),
-                ));
-            }
-        }
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set override"
+        Ok(())
     }
 }
 
@@ -129,12 +100,30 @@ pub struct RemoveOverride {
     pub node_id: NodeId,
     /// The override key to remove.
     pub key: OverrideKey,
-    /// The old value and source for undo.
-    pub old_entry: (OverrideValue, OverrideSource),
 }
 
-impl Command for RemoveOverride {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for RemoveOverride {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        let node = doc.arena.get(self.node_id)?;
+        match &node.kind {
+            crate::node::NodeKind::ComponentInstance { overrides, .. } => {
+                if overrides.get(&self.key).is_none() {
+                    return Err(CoreError::ValidationError(format!(
+                        "override not found for key {:?}",
+                        self.key
+                    )));
+                }
+            }
+            _ => {
+                return Err(CoreError::ValidationError(
+                    "RemoveOverride: node is not a ComponentInstance".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
             crate::node::NodeKind::ComponentInstance { overrides, .. } => {
@@ -148,26 +137,7 @@ impl Command for RemoveOverride {
                 ));
             }
         }
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        let node = doc.arena.get_mut(self.node_id)?;
-        match &mut node.kind {
-            crate::node::NodeKind::ComponentInstance { overrides, .. } => {
-                overrides.set(self.key.clone(), self.old_entry.0.clone(), self.old_entry.1)?;
-            }
-            _ => {
-                return Err(CoreError::ValidationError(
-                    "RemoveOverride undo: node is not a ComponentInstance".to_string(),
-                ));
-            }
-        }
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Remove override"
+        Ok(())
     }
 }
 
@@ -205,7 +175,7 @@ mod tests {
     // ── AddComponent / RemoveComponent ──────────────────────────────
 
     #[test]
-    fn test_add_component_apply_and_undo() {
+    fn test_add_component_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let def = ComponentDef::new(
             ComponentId::new(make_uuid(50)),
@@ -216,21 +186,19 @@ mod tests {
         )
         .expect("valid");
 
-        let cmd = AddComponent {
+        let op = AddComponent {
             component: def.clone(),
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert!(
             doc.components
                 .contains_key(&ComponentId::new(make_uuid(50)))
         );
-
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.components.is_empty());
     }
 
     #[test]
-    fn test_remove_component_apply_and_undo() {
+    fn test_add_component_validate_rejects_duplicate() {
         let mut doc = Document::new("Test".to_string());
         let def = ComponentDef::new(
             ComponentId::new(make_uuid(50)),
@@ -242,50 +210,60 @@ mod tests {
         .expect("valid");
         doc.add_component(def.clone()).expect("add");
 
-        let cmd = RemoveComponent {
-            component_id: ComponentId::new(make_uuid(50)),
-            snapshot: def,
-        };
-        cmd.apply(&mut doc).expect("apply");
-        assert!(doc.components.is_empty());
+        let op = AddComponent { component: def };
+        assert!(op.validate(&doc).is_err());
+    }
 
-        cmd.undo(&mut doc).expect("undo");
-        assert!(
-            doc.components
-                .contains_key(&ComponentId::new(make_uuid(50)))
-        );
+    #[test]
+    fn test_remove_component_validate_and_apply() {
+        let mut doc = Document::new("Test".to_string());
+        let def = ComponentDef::new(
+            ComponentId::new(make_uuid(50)),
+            "Button".to_string(),
+            NodeId::new(0, 0),
+            vec![],
+            vec![],
+        )
+        .expect("valid");
+        doc.add_component(def).expect("add");
+
+        let op = RemoveComponent {
+            component_id: ComponentId::new(make_uuid(50)),
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+        assert!(doc.components.is_empty());
+    }
+
+    #[test]
+    fn test_remove_component_validate_rejects_missing() {
+        let doc = Document::new("Test".to_string());
+        let op = RemoveComponent {
+            component_id: ComponentId::new(make_uuid(99)),
+        };
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── SetOverride / RemoveOverride ────────────────────────────────
 
     #[test]
-    fn test_set_override_apply_and_undo() {
+    fn test_set_override_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_instance();
         let key = OverrideKey::new(make_uuid(10), PropertyPath::Visible);
 
-        let cmd = SetOverride {
+        let op = SetOverride {
             node_id,
             key: key.clone(),
             new_value: OverrideValue::Bool { value: false },
             new_source: OverrideSource::User,
-            old_entry: None,
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
 
-        // Verify override was set
         let node = doc.arena.get(node_id).expect("get");
         match &node.kind {
             NodeKind::ComponentInstance { overrides, .. } => {
                 assert!(overrides.get(&key).is_some());
-            }
-            _ => panic!("expected ComponentInstance"),
-        }
-
-        cmd.undo(&mut doc).expect("undo");
-        let node = doc.arena.get(node_id).expect("get");
-        match &node.kind {
-            NodeKind::ComponentInstance { overrides, .. } => {
-                assert!(overrides.get(&key).is_none());
             }
             _ => panic!("expected ComponentInstance"),
         }
@@ -297,81 +275,61 @@ mod tests {
         let key = OverrideKey::new(make_uuid(10), PropertyPath::Visible);
 
         // Set initial override
-        let cmd1 = SetOverride {
+        let op1 = SetOverride {
             node_id,
             key: key.clone(),
             new_value: OverrideValue::Bool { value: false },
             new_source: OverrideSource::User,
-            old_entry: None,
         };
-        cmd1.apply(&mut doc).expect("apply first");
+        op1.apply(&mut doc).expect("apply first");
 
         // Replace it
-        let cmd2 = SetOverride {
+        let op2 = SetOverride {
             node_id,
             key: key.clone(),
             new_value: OverrideValue::Bool { value: true },
             new_source: OverrideSource::Variant,
-            old_entry: Some((OverrideValue::Bool { value: false }, OverrideSource::User)),
         };
-        cmd2.apply(&mut doc).expect("apply second");
+        op2.apply(&mut doc).expect("apply second");
 
-        // Undo should restore the first value
-        cmd2.undo(&mut doc).expect("undo");
         let node = doc.arena.get(node_id).expect("get");
         match &node.kind {
             NodeKind::ComponentInstance { overrides, .. } => {
                 let (val, src) = overrides.get(&key).expect("get");
-                assert_eq!(*val, OverrideValue::Bool { value: false });
-                assert_eq!(*src, OverrideSource::User);
+                assert_eq!(*val, OverrideValue::Bool { value: true });
+                assert_eq!(*src, OverrideSource::Variant);
             }
             _ => panic!("expected ComponentInstance"),
         }
     }
 
     #[test]
-    fn test_remove_override_apply_and_undo() {
+    fn test_remove_override_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_instance();
         let key = OverrideKey::new(make_uuid(10), PropertyPath::Name);
 
         // Add an override first
-        let set_cmd = SetOverride {
+        let set_op = SetOverride {
             node_id,
             key: key.clone(),
             new_value: OverrideValue::String {
                 value: "Custom".to_string(),
             },
             new_source: OverrideSource::User,
-            old_entry: None,
         };
-        set_cmd.apply(&mut doc).expect("set");
+        set_op.apply(&mut doc).expect("set");
 
-        let cmd = RemoveOverride {
+        let remove_op = RemoveOverride {
             node_id,
             key: key.clone(),
-            old_entry: (
-                OverrideValue::String {
-                    value: "Custom".to_string(),
-                },
-                OverrideSource::User,
-            ),
         };
-        cmd.apply(&mut doc).expect("apply remove");
+        remove_op.validate(&doc).expect("validate");
+        remove_op.apply(&mut doc).expect("apply");
 
-        // Verify removed
         let node = doc.arena.get(node_id).expect("get");
         match &node.kind {
             NodeKind::ComponentInstance { overrides, .. } => {
                 assert!(overrides.get(&key).is_none());
-            }
-            _ => panic!("expected ComponentInstance"),
-        }
-
-        cmd.undo(&mut doc).expect("undo");
-        let node = doc.arena.get(node_id).expect("get");
-        match &node.kind {
-            NodeKind::ComponentInstance { overrides, .. } => {
-                assert!(overrides.get(&key).is_some());
             }
             _ => panic!("expected ComponentInstance"),
         }
@@ -389,46 +347,21 @@ mod tests {
         .expect("valid");
         let node_id = doc.arena.insert(node).expect("insert");
 
-        let cmd = SetOverride {
+        let op = SetOverride {
             node_id,
             key: OverrideKey::new(make_uuid(10), PropertyPath::Visible),
             new_value: OverrideValue::Bool { value: false },
             new_source: OverrideSource::User,
-            old_entry: None,
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
     }
 
-    // ── Integration: execute / undo / redo ────────────────────────────
-
     #[test]
-    fn test_add_component_execute_undo_redo_round_trip() {
-        let mut doc = Document::new("Test".to_string());
-        let def = ComponentDef::new(
-            ComponentId::new(make_uuid(50)),
-            "Button".to_string(),
-            NodeId::new(0, 0),
-            vec![],
-            vec![],
-        )
-        .expect("valid");
+    fn test_remove_override_validate_rejects_missing_key() {
+        let (doc, node_id) = setup_doc_with_instance();
+        let key = OverrideKey::new(make_uuid(99), PropertyPath::Visible);
 
-        let cmd = AddComponent {
-            component: def.clone(),
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert!(
-            doc.components
-                .contains_key(&ComponentId::new(make_uuid(50)))
-        );
-
-        doc.undo().expect("undo");
-        assert!(doc.components.is_empty());
-
-        doc.redo().expect("redo");
-        assert!(
-            doc.components
-                .contains_key(&ComponentId::new(make_uuid(50)))
-        );
+        let op = RemoveOverride { node_id, key };
+        assert!(op.validate(&doc).is_err());
     }
 }

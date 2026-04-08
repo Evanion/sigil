@@ -1,10 +1,6 @@
 // crates/core/src/commands/token_commands.rs
-// The Command trait's description() returns &str (not &'static str) because
-// CompoundCommand borrows from its String field. Literal returns in other impls
-// trigger this lint unnecessarily.
-#![allow(clippy::unnecessary_literal_bound)]
 
-use crate::command::{Command, SideEffect};
+use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::token::Token;
@@ -16,24 +12,20 @@ pub struct AddToken {
     pub token: Token,
 }
 
-impl Command for AddToken {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.token_context.insert(self.token.clone())?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.token_context.remove(self.token.name()).ok_or_else(|| {
-            CoreError::ValidationError(format!(
-                "cannot undo AddToken: token '{}' not found",
+impl FieldOperation for AddToken {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if doc.token_context.get(self.token.name()).is_some() {
+            return Err(CoreError::ValidationError(format!(
+                "token '{}' already exists",
                 self.token.name()
-            ))
-        })?;
-        Ok(vec![])
+            )));
+        }
+        Ok(())
     }
 
-    fn description(&self) -> &str {
-        "Add token"
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
+        doc.token_context.insert(self.token.clone())?;
+        Ok(())
     }
 }
 
@@ -42,62 +34,56 @@ impl Command for AddToken {
 pub struct RemoveToken {
     /// The name of the token to remove.
     pub token_name: String,
-    /// Snapshot of the removed token for undo.
-    pub snapshot: Token,
 }
 
-impl Command for RemoveToken {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for RemoveToken {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if doc.token_context.get(&self.token_name).is_none() {
+            return Err(CoreError::TokenNotFound(self.token_name.clone()));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.token_context
             .remove(&self.token_name)
             .ok_or_else(|| CoreError::TokenNotFound(self.token_name.clone()))?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.token_context.insert(self.snapshot.clone())?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Remove token"
+        Ok(())
     }
 }
 
 /// Replaces a token with a new version (same name, different value/type/description).
 #[derive(Debug)]
 pub struct UpdateToken {
-    /// The new token (must have the same name as the old one).
+    /// The new token (must have the same name as the existing one).
     pub new_token: Token,
-    /// The old token for undo.
-    pub old_token: Token,
+    /// The name of the existing token being updated.
+    pub token_name: String,
 }
 
-impl Command for UpdateToken {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        if self.new_token.name() != self.old_token.name() {
+impl FieldOperation for UpdateToken {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if self.new_token.name() != self.token_name {
             return Err(CoreError::ValidationError(format!(
-                "UpdateToken: name mismatch — new='{}', old='{}'",
+                "UpdateToken: name mismatch — new='{}', expected='{}'",
                 self.new_token.name(),
-                self.old_token.name()
+                self.token_name
             )));
         }
-        if doc.token_context.get(self.old_token.name()).is_none() {
-            return Err(CoreError::TokenNotFound(self.old_token.name().to_string()));
+        if doc.token_context.get(&self.token_name).is_none() {
+            return Err(CoreError::TokenNotFound(self.token_name.clone()));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
+        if doc.token_context.get(&self.token_name).is_none() {
+            return Err(CoreError::TokenNotFound(self.token_name.clone()));
         }
         // Token::new already validated the new token at construction time.
         // Re-insert replaces the existing entry.
         doc.token_context.insert(self.new_token.clone())?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.token_context.insert(self.old_token.clone())?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Update token"
+        Ok(())
     }
 }
 
@@ -127,50 +113,56 @@ mod tests {
     }
 
     #[test]
-    fn test_add_token_apply_and_undo() {
+    fn test_add_token_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
-        let cmd = AddToken {
+        let op = AddToken {
             token: make_color_token("color.primary"),
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert!(doc.token_context.get("color.primary").is_some());
-
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.token_context.get("color.primary").is_none());
     }
 
     #[test]
-    fn test_remove_token_apply_and_undo() {
+    fn test_add_token_validate_rejects_duplicate() {
         let mut doc = Document::new("Test".to_string());
         let token = make_color_token("color.primary");
-        doc.token_context.insert(token.clone()).expect("insert");
+        doc.token_context.insert(token).expect("insert");
 
-        let cmd = RemoveToken {
-            token_name: "color.primary".to_string(),
-            snapshot: token,
+        let op = AddToken {
+            token: make_color_token("color.primary"),
         };
-        cmd.apply(&mut doc).expect("apply");
-        assert!(doc.token_context.is_empty());
+        assert!(op.validate(&doc).is_err());
+    }
 
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.token_context.get("color.primary").is_some());
+    #[test]
+    fn test_remove_token_validate_and_apply() {
+        let mut doc = Document::new("Test".to_string());
+        let token = make_color_token("color.primary");
+        doc.token_context.insert(token).expect("insert");
+
+        let op = RemoveToken {
+            token_name: "color.primary".to_string(),
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+        assert!(doc.token_context.is_empty());
     }
 
     #[test]
     fn test_remove_nonexistent_token() {
-        let mut doc = Document::new("Test".to_string());
-        let cmd = RemoveToken {
+        let doc = Document::new("Test".to_string());
+        let op = RemoveToken {
             token_name: "nonexistent".to_string(),
-            snapshot: make_color_token("nonexistent"),
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
     }
 
     #[test]
-    fn test_update_token_apply_and_undo() {
+    fn test_update_token_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let old = make_color_token("color.primary");
-        doc.token_context.insert(old.clone()).expect("insert");
+        doc.token_context.insert(old).expect("insert");
 
         let new = Token::new(
             TokenId::new(make_uuid(1)),
@@ -181,23 +173,19 @@ mod tests {
         )
         .expect("valid");
 
-        let cmd = UpdateToken {
+        let op = UpdateToken {
             new_token: new,
-            old_token: old,
+            token_name: "color.primary".to_string(),
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         let resolved = doc.token_context.get("color.primary").expect("get");
         assert!(matches!(resolved.value(), TokenValue::Number { .. }));
-
-        cmd.undo(&mut doc).expect("undo");
-        let resolved = doc.token_context.get("color.primary").expect("get");
-        assert!(matches!(resolved.value(), TokenValue::Color { .. }));
     }
 
     #[test]
     fn test_update_token_nonexistent_returns_token_not_found() {
-        let mut doc = Document::new("Test".to_string());
-        let old = make_color_token("color.primary");
+        let doc = Document::new("Test".to_string());
         let new = Token::new(
             TokenId::new(make_uuid(1)),
             "color.primary".to_string(),
@@ -207,11 +195,11 @@ mod tests {
         )
         .expect("valid");
 
-        let cmd = UpdateToken {
+        let op = UpdateToken {
             new_token: new,
-            old_token: old,
+            token_name: "color.primary".to_string(),
         };
-        let result = cmd.apply(&mut doc);
+        let result = op.validate(&doc);
         assert!(matches!(result, Err(CoreError::TokenNotFound(_))));
     }
 
@@ -219,31 +207,13 @@ mod tests {
     fn test_update_token_name_mismatch() {
         let mut doc = Document::new("Test".to_string());
         let old = make_color_token("color.primary");
-        doc.token_context.insert(old.clone()).expect("insert");
+        doc.token_context.insert(old).expect("insert");
 
         let new = make_color_token("color.secondary");
-        let cmd = UpdateToken {
+        let op = UpdateToken {
             new_token: new,
-            old_token: old,
+            token_name: "color.primary".to_string(),
         };
-        assert!(cmd.apply(&mut doc).is_err());
-    }
-
-    // ── Integration: execute / undo / redo ────────────────────────────
-
-    #[test]
-    fn test_add_token_execute_undo_redo_round_trip() {
-        let mut doc = Document::new("Test".to_string());
-        let cmd = AddToken {
-            token: make_color_token("color.primary"),
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert!(doc.token_context.get("color.primary").is_some());
-
-        doc.undo().expect("undo");
-        assert!(doc.token_context.get("color.primary").is_none());
-
-        doc.redo().expect("redo");
-        assert!(doc.token_context.get("color.primary").is_some());
+        assert!(op.validate(&doc).is_err());
     }
 }

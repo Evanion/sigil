@@ -1,12 +1,8 @@
 // crates/core/src/commands/transition_commands.rs
-// The Command trait's description() returns &str (not &'static str) because
-// CompoundCommand borrows from its String field. Literal returns in other impls
-// trigger this lint unnecessarily.
-#![allow(clippy::unnecessary_literal_bound)]
 
 use uuid::Uuid;
 
-use crate::command::{Command, SideEffect};
+use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::prototype::Transition;
@@ -18,20 +14,15 @@ pub struct AddTransition {
     pub transition: Transition,
 }
 
-impl Command for AddTransition {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for AddTransition {
+    fn validate(&self, _doc: &Document) -> Result<(), CoreError> {
+        crate::prototype::validate_transition(&self.transition)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.add_transition(self.transition.clone())?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.remove_transition(self.transition.id)
-            .ok_or(CoreError::TransitionNotFound(self.transition.id))?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Add transition"
+        Ok(())
     }
 }
 
@@ -40,24 +31,20 @@ impl Command for AddTransition {
 pub struct RemoveTransition {
     /// The ID of the transition to remove.
     pub transition_id: Uuid,
-    /// Snapshot of the removed transition for undo.
-    pub snapshot: Transition,
 }
 
-impl Command for RemoveTransition {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for RemoveTransition {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if !doc.transitions.iter().any(|t| t.id == self.transition_id) {
+            return Err(CoreError::TransitionNotFound(self.transition_id));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.remove_transition(self.transition_id)
             .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.restore_transition(self.snapshot.clone())?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Remove transition"
+        Ok(())
     }
 }
 
@@ -68,49 +55,30 @@ pub struct UpdateTransition {
     pub transition_id: Uuid,
     /// The new transition state.
     pub new_transition: Transition,
-    /// The old transition state for undo.
-    pub old_transition: Transition,
 }
 
-impl Command for UpdateTransition {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        if self.new_transition.id != self.transition_id
-            || self.old_transition.id != self.transition_id
-        {
+impl FieldOperation for UpdateTransition {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        if self.new_transition.id != self.transition_id {
             return Err(CoreError::ValidationError(
-                "UpdateTransition: transition_id must match new and old transition IDs".to_string(),
+                "UpdateTransition: transition_id must match new transition ID".to_string(),
             ));
         }
         crate::prototype::validate_transition(&self.new_transition)?;
+        if !doc.transitions.iter().any(|t| t.id == self.transition_id) {
+            return Err(CoreError::TransitionNotFound(self.transition_id));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let pos = doc
             .transitions
             .iter()
             .position(|t| t.id == self.transition_id)
             .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
         doc.transitions[pos] = self.new_transition.clone();
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        if self.new_transition.id != self.transition_id
-            || self.old_transition.id != self.transition_id
-        {
-            return Err(CoreError::ValidationError(
-                "UpdateTransition: transition_id must match new and old transition IDs".to_string(),
-            ));
-        }
-        crate::prototype::validate_transition(&self.old_transition)?;
-        let pos = doc
-            .transitions
-            .iter()
-            .position(|t| t.id == self.transition_id)
-            .ok_or(CoreError::TransitionNotFound(self.transition_id))?;
-        doc.transitions[pos] = self.old_transition.clone();
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Update transition"
+        Ok(())
     }
 }
 
@@ -136,122 +104,83 @@ mod tests {
     }
 
     #[test]
-    fn test_add_transition_apply_and_undo() {
+    fn test_add_transition_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
-        let cmd = AddTransition {
+        let op = AddTransition {
             transition: make_transition(1),
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.transitions.len(), 1);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.transitions.is_empty());
     }
 
     #[test]
-    fn test_remove_transition_apply_and_undo() {
+    fn test_remove_transition_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let t = make_transition(1);
-        doc.add_transition(t.clone()).expect("add");
+        doc.add_transition(t).expect("add");
 
-        let cmd = RemoveTransition {
+        let op = RemoveTransition {
             transition_id: make_uuid(1),
-            snapshot: t,
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert!(doc.transitions.is_empty());
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(doc.transitions.len(), 1);
     }
 
     #[test]
-    fn test_update_transition_apply_and_undo() {
+    fn test_update_transition_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let old = make_transition(1);
-        doc.add_transition(old.clone()).expect("add");
+        doc.add_transition(old).expect("add");
 
-        let mut new = old.clone();
+        let mut new = make_transition(1);
         new.trigger = TransitionTrigger::OnHover;
         new.animation = TransitionAnimation::Dissolve { duration: 0.3 };
 
-        let cmd = UpdateTransition {
+        let op = UpdateTransition {
             transition_id: make_uuid(1),
             new_transition: new,
-            old_transition: old,
         };
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.transitions[0].trigger, TransitionTrigger::OnHover);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(doc.transitions[0].trigger, TransitionTrigger::OnClick);
     }
 
     #[test]
     fn test_add_transition_validates_duration() {
-        let mut doc = Document::new("Test".to_string());
+        let doc = Document::new("Test".to_string());
         let mut t = make_transition(1);
         t.trigger = TransitionTrigger::AfterDelay { seconds: -1.0 };
-        let cmd = AddTransition { transition: t };
-        assert!(cmd.apply(&mut doc).is_err());
+        let op = AddTransition { transition: t };
+        assert!(op.validate(&doc).is_err());
     }
 
     #[test]
     fn test_update_transition_id_mismatch_rejected() {
         let mut doc = Document::new("Test".to_string());
         let old = make_transition(1);
-        doc.add_transition(old.clone()).expect("add");
+        doc.add_transition(old).expect("add");
 
-        let mut new = old.clone();
+        let mut new = make_transition(1);
         new.id = make_uuid(2); // ID mismatch
 
-        let cmd = UpdateTransition {
+        let op = UpdateTransition {
             transition_id: make_uuid(1),
             new_transition: new,
-            old_transition: old,
         };
-        let result = cmd.apply(&mut doc);
-        assert!(matches!(result, Err(CoreError::ValidationError(_))));
+        assert!(op.validate(&doc).is_err());
     }
 
     #[test]
     fn test_remove_nonexistent_transition_returns_transition_not_found() {
-        let mut doc = Document::new("Test".to_string());
-        let cmd = RemoveTransition {
+        let doc = Document::new("Test".to_string());
+        let op = RemoveTransition {
             transition_id: make_uuid(99),
-            snapshot: make_transition(99),
         };
         assert!(matches!(
-            cmd.apply(&mut doc),
+            op.validate(&doc),
             Err(CoreError::TransitionNotFound(_))
         ));
-    }
-
-    #[test]
-    fn test_remove_nonexistent_transition() {
-        let mut doc = Document::new("Test".to_string());
-        let cmd = RemoveTransition {
-            transition_id: make_uuid(99),
-            snapshot: make_transition(99),
-        };
-        assert!(cmd.apply(&mut doc).is_err());
-    }
-
-    // ── Integration: execute / undo / redo ────────────────────────────
-
-    #[test]
-    fn test_add_transition_execute_undo_redo_round_trip() {
-        let mut doc = Document::new("Test".to_string());
-        let cmd = AddTransition {
-            transition: make_transition(1),
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert_eq!(doc.transitions.len(), 1);
-
-        doc.undo().expect("undo");
-        assert!(doc.transitions.is_empty());
-
-        doc.redo().expect("redo");
-        assert_eq!(doc.transitions.len(), 1);
     }
 }

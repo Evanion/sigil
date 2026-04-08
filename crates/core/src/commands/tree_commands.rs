@@ -1,17 +1,12 @@
 // crates/core/src/commands/tree_commands.rs
-// The Command trait's description() returns &str (not &'static str) because
-// CompoundCommand borrows from its String field. Literal returns in other impls
-// trigger this lint unnecessarily.
-#![allow(clippy::unnecessary_literal_bound)]
 
-use crate::command::{Command, SideEffect};
+use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::tree;
 
 /// Moves a node to a new parent at a specific position.
-/// Captures the old parent and position for undo.
 #[derive(Debug)]
 pub struct ReparentNode {
     /// The node to reparent.
@@ -20,42 +15,23 @@ pub struct ReparentNode {
     pub new_parent_id: NodeId,
     /// The index within the new parent's children list.
     pub new_position: usize,
-    /// The previous parent (if any), captured before apply for undo.
-    pub old_parent_id: Option<NodeId>,
-    /// The previous position within the old parent, captured before apply for undo.
-    pub old_position: Option<usize>,
 }
 
-impl Command for ReparentNode {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for ReparentNode {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        doc.arena.get(self.node_id)?;
+        doc.arena.get(self.new_parent_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         tree::rearrange(
             &mut doc.arena,
             self.node_id,
             self.new_parent_id,
             self.new_position,
         )?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        match self.old_parent_id {
-            Some(old_parent) => {
-                let pos = self.old_position.ok_or(CoreError::ValidationError(
-                    "ReparentNode undo: old_position is required when old_parent_id is set"
-                        .to_string(),
-                ))?;
-                tree::rearrange(&mut doc.arena, self.node_id, old_parent, pos)?;
-            }
-            None => {
-                // Was a root node — detach from current parent
-                tree::remove_child(&mut doc.arena, self.node_id)?;
-            }
-        }
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Reparent node"
+        Ok(())
     }
 }
 
@@ -67,12 +43,20 @@ pub struct ReorderChildren {
     pub node_id: NodeId,
     /// The target position within the parent's children list.
     pub new_position: usize,
-    /// The original position, captured before apply for undo.
-    pub old_position: usize,
 }
 
-impl Command for ReorderChildren {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for ReorderChildren {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        let node = doc.arena.get(self.node_id)?;
+        if node.parent.is_none() {
+            return Err(CoreError::ValidationError(
+                "ReorderChildren: node has no parent".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let parent_id = doc
             .arena
             .get(self.node_id)?
@@ -81,23 +65,7 @@ impl Command for ReorderChildren {
                 "ReorderChildren: node has no parent".to_string(),
             ))?;
         tree::rearrange(&mut doc.arena, self.node_id, parent_id, self.new_position)?;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        let parent_id = doc
-            .arena
-            .get(self.node_id)?
-            .parent
-            .ok_or(CoreError::ValidationError(
-                "ReorderChildren undo: node has no parent".to_string(),
-            ))?;
-        tree::rearrange(&mut doc.arena, self.node_id, parent_id, self.old_position)?;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Reorder children"
+        Ok(())
     }
 }
 
@@ -127,31 +95,25 @@ mod tests {
     // ── ReparentNode ────────────────────────────────────────────────
 
     #[test]
-    fn test_reparent_node_apply_and_undo() {
+    fn test_reparent_node_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let parent_a = insert_frame(&mut doc, 1, "Parent A");
         let parent_b = insert_frame(&mut doc, 2, "Parent B");
         let child = insert_frame(&mut doc, 3, "Child");
 
-        // Add child to parent_a first
         tree::add_child(&mut doc.arena, parent_a, child).expect("add child");
         assert_eq!(doc.arena.get(parent_a).unwrap().children, vec![child]);
 
-        let cmd = ReparentNode {
+        let op = ReparentNode {
             node_id: child,
             new_parent_id: parent_b,
             new_position: 0,
-            old_parent_id: Some(parent_a),
-            old_position: Some(0),
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert!(doc.arena.get(parent_a).unwrap().children.is_empty());
         assert_eq!(doc.arena.get(parent_b).unwrap().children, vec![child]);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(doc.arena.get(parent_a).unwrap().children, vec![child]);
-        assert!(doc.arena.get(parent_b).unwrap().children.is_empty());
     }
 
     #[test]
@@ -162,21 +124,31 @@ mod tests {
 
         tree::add_child(&mut doc.arena, parent, child).expect("add child");
 
-        let cmd = ReparentNode {
+        let op = ReparentNode {
             node_id: parent,
             new_parent_id: child,
             new_position: 0,
-            old_parent_id: None,
-            old_position: None,
         };
 
-        assert!(cmd.apply(&mut doc).is_err());
+        // validate passes (both nodes exist), but apply detects cycle
+        assert!(op.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_reparent_node_validate_rejects_missing_node() {
+        let doc = Document::new("Test".to_string());
+        let op = ReparentNode {
+            node_id: NodeId::new(99, 0),
+            new_parent_id: NodeId::new(98, 0),
+            new_position: 0,
+        };
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── ReorderChildren ─────────────────────────────────────────────
 
     #[test]
-    fn test_reorder_children_apply_and_undo() {
+    fn test_reorder_children_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let parent = insert_frame(&mut doc, 1, "Parent");
         let child_a = insert_frame(&mut doc, 2, "A");
@@ -188,19 +160,15 @@ mod tests {
         tree::add_child(&mut doc.arena, parent, child_c).expect("add c");
 
         // Move A from position 0 to position 2
-        let cmd = ReorderChildren {
+        let op = ReorderChildren {
             node_id: child_a,
             new_position: 2,
-            old_position: 0,
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         let children = &doc.arena.get(parent).unwrap().children;
         assert_eq!(children, &[child_b, child_c, child_a]);
-
-        cmd.undo(&mut doc).expect("undo");
-        let children = &doc.arena.get(parent).unwrap().children;
-        assert_eq!(children, &[child_a, child_b, child_c]);
     }
 
     #[test]
@@ -208,89 +176,11 @@ mod tests {
         let mut doc = Document::new("Test".to_string());
         let orphan = insert_frame(&mut doc, 1, "Orphan");
 
-        let cmd = ReorderChildren {
+        let op = ReorderChildren {
             node_id: orphan,
             new_position: 0,
-            old_position: 0,
         };
 
-        assert!(cmd.apply(&mut doc).is_err());
-    }
-
-    // ── Integration: execute / undo / redo ────────────────────────────
-
-    #[test]
-    fn test_reparent_node_execute_undo_redo_round_trip() {
-        let mut doc = Document::new("Test".to_string());
-        let parent_a = insert_frame(&mut doc, 1, "Parent A");
-        let parent_b = insert_frame(&mut doc, 2, "Parent B");
-        let child = insert_frame(&mut doc, 3, "Child");
-
-        crate::tree::add_child(&mut doc.arena, parent_a, child).expect("add child");
-
-        let cmd = ReparentNode {
-            node_id: child,
-            new_parent_id: parent_b,
-            new_position: 0,
-            old_parent_id: Some(parent_a),
-            old_position: Some(0),
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert_eq!(doc.arena.get(parent_b).expect("get").children, vec![child]);
-        assert!(doc.arena.get(parent_a).expect("get").children.is_empty());
-
-        doc.undo().expect("undo");
-        assert_eq!(doc.arena.get(parent_a).expect("get").children, vec![child]);
-        assert!(doc.arena.get(parent_b).expect("get").children.is_empty());
-
-        doc.redo().expect("redo");
-        assert_eq!(doc.arena.get(parent_b).expect("get").children, vec![child]);
-        assert!(doc.arena.get(parent_a).expect("get").children.is_empty());
-    }
-
-    #[test]
-    fn test_reorder_children_execute_undo_redo_cycle() {
-        let mut doc = Document::new("Test".to_string());
-        let parent = insert_frame(&mut doc, 1, "Parent");
-        let child_a = insert_frame(&mut doc, 2, "A");
-        let child_b = insert_frame(&mut doc, 3, "B");
-        let child_c = insert_frame(&mut doc, 4, "C");
-
-        crate::tree::add_child(&mut doc.arena, parent, child_a).expect("add a");
-        crate::tree::add_child(&mut doc.arena, parent, child_b).expect("add b");
-        crate::tree::add_child(&mut doc.arena, parent, child_c).expect("add c");
-
-        let original_order = vec![child_a, child_b, child_c];
-        assert_eq!(doc.arena.get(parent).expect("get").children, original_order);
-
-        // Execute: move A (position 0) to position 2 → [B, C, A]
-        let cmd = ReorderChildren {
-            node_id: child_a,
-            new_position: 2,
-            old_position: 0,
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        let expected_after = vec![child_b, child_c, child_a];
-        assert_eq!(
-            doc.arena.get(parent).expect("get").children,
-            expected_after,
-            "state after execute"
-        );
-
-        // Undo → [A, B, C]
-        doc.undo().expect("undo");
-        assert_eq!(
-            doc.arena.get(parent).expect("get").children,
-            original_order,
-            "state after undo matches original"
-        );
-
-        // Redo → [B, C, A]
-        doc.redo().expect("redo");
-        assert_eq!(
-            doc.arena.get(parent).expect("get").children,
-            expected_after,
-            "state after redo matches post-execute"
-        );
+        assert!(op.validate(&doc).is_err());
     }
 }
