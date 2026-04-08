@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../history-manager";
 import { createSetFieldOp, createCreateNodeOp } from "../operation-helpers";
-import { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "../types";
+import { MAX_HISTORY_SIZE } from "../types";
 import type { Transaction } from "../types";
 
 const USER_ID = "test-user";
@@ -46,6 +46,90 @@ describe("HistoryManager", () => {
       const op2 = createSetFieldOp(USER_ID, "node-1", "name", "C", "A");
       hm.apply(op2, "Step 2");
       expect(hm.canRedo()).toBe(false);
+    });
+  });
+
+  // ── pushTransaction ─────────────────────────────────────────────
+
+  describe("pushTransaction", () => {
+    it("should push a pre-built transaction onto the undo stack", () => {
+      const tx: Transaction = {
+        id: "tx-1",
+        userId: USER_ID,
+        operations: [createSetFieldOp(USER_ID, "node-1", "name", "B", "A")],
+        description: "Rename node",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      expect(hm.canUndo()).toBe(true);
+    });
+
+    it("should clear the redo stack when a transaction is pushed", () => {
+      hm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Step 1");
+      hm.undo();
+      expect(hm.canRedo()).toBe(true);
+
+      const tx: Transaction = {
+        id: "tx-2",
+        userId: USER_ID,
+        operations: [createSetFieldOp(USER_ID, "node-2", "name", "D", "C")],
+        description: "New work",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      expect(hm.canRedo()).toBe(false);
+    });
+
+    it("should be undoable after push", () => {
+      const tx: Transaction = {
+        id: "tx-3",
+        userId: USER_ID,
+        operations: [createSetFieldOp(USER_ID, "node-1", "name", "B", "A")],
+        description: "Test",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      const inv = assertNonNull(hm.undo());
+      expect(inv.operations).toHaveLength(1);
+      expect(inv.operations[0].value).toBe("A"); // inverse swaps value/previousValue
+    });
+  });
+
+  // ── peekRedo ────────────────────────────────────────────────────
+
+  describe("peekRedo", () => {
+    it("should return null when redo stack is empty", () => {
+      expect(hm.peekRedo()).toBeNull();
+    });
+
+    it("should return the top of the redo stack without popping", () => {
+      hm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Step 1");
+      hm.undo();
+
+      const peeked = hm.peekRedo();
+      expect(peeked).not.toBeNull();
+      // Peek should not remove it
+      expect(hm.canRedo()).toBe(true);
+      // Peek again should return the same transaction
+      const peeked2 = hm.peekRedo();
+      expect(peeked2).not.toBeNull();
+      if (peeked && peeked2) {
+        expect(peeked.id).toBe(peeked2.id);
+      }
+    });
+
+    it("should return the original forward transaction after undo", () => {
+      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
+      hm.apply(op, "Rename");
+      hm.undo();
+
+      const peeked = assertNonNull(hm.peekRedo());
+      // The original transaction had value=B, previousValue=A
+      expect(peeked.operations[0].value).toBe("B");
+      expect(peeked.operations[0].previousValue).toBe("A");
     });
   });
 
@@ -173,174 +257,6 @@ describe("HistoryManager", () => {
     });
   });
 
-  // ── Explicit transactions ────────────────────────────────────────
-
-  describe("explicit transactions", () => {
-    it("should group multiple operations into a single undo step", () => {
-      hm.beginTransaction("Align 3 nodes");
-      hm.addOperation(createSetFieldOp(USER_ID, "n1", "transform", { x: 10 }, { x: 0 }));
-      hm.addOperation(createSetFieldOp(USER_ID, "n2", "transform", { x: 10 }, { x: 5 }));
-      hm.addOperation(createSetFieldOp(USER_ID, "n3", "transform", { x: 10 }, { x: 3 }));
-      hm.commitTransaction();
-
-      expect(hm.canUndo()).toBe(true);
-
-      const inv = assertNonNull(hm.undo());
-      // All three operations reversed in one step
-      expect(inv.operations).toHaveLength(3);
-      // Reversed order
-      expect(inv.operations[0].nodeUuid).toBe("n3");
-      expect(inv.operations[1].nodeUuid).toBe("n2");
-      expect(inv.operations[2].nodeUuid).toBe("n1");
-
-      expect(hm.canUndo()).toBe(false);
-    });
-
-    it("should discard pending operations when cancelTransaction is called", () => {
-      hm.beginTransaction("Will cancel");
-      hm.addOperation(createSetFieldOp(USER_ID, "n1", "name", "B", "A"));
-      hm.cancelTransaction();
-
-      expect(hm.canUndo()).toBe(false);
-    });
-
-    it("should clear redo stack on commit", () => {
-      hm.apply(createSetFieldOp(USER_ID, "n1", "name", "B", "A"), "Step 1");
-      hm.undo();
-      expect(hm.canRedo()).toBe(true);
-
-      hm.beginTransaction("New work");
-      hm.addOperation(createSetFieldOp(USER_ID, "n2", "name", "D", "C"));
-      hm.commitTransaction();
-      expect(hm.canRedo()).toBe(false);
-    });
-
-    // RF-004: Empty transaction commit still clears redo
-    it("should clear redo stack even when committing an empty transaction", () => {
-      hm.apply(createSetFieldOp(USER_ID, "n1", "name", "B", "A"), "Step 1");
-      hm.undo();
-      expect(hm.canRedo()).toBe(true);
-
-      hm.beginTransaction("Empty");
-      hm.commitTransaction();
-      expect(hm.canRedo()).toBe(false);
-    });
-
-    it("should throw when calling addOperation without beginTransaction", () => {
-      const op = createSetFieldOp(USER_ID, "n1", "name", "B", "A");
-      expect(() => hm.addOperation(op)).toThrow();
-    });
-
-    it("should throw when calling commitTransaction without beginTransaction", () => {
-      expect(() => hm.commitTransaction()).toThrow();
-    });
-
-    it("should throw when calling beginTransaction while one is active", () => {
-      hm.beginTransaction("First");
-      expect(() => hm.beginTransaction("Second")).toThrow();
-    });
-
-    // RF-006: MAX_OPERATIONS_PER_TRANSACTION enforcement
-    it("test_max_operations_per_transaction_enforced", () => {
-      hm.beginTransaction("Big transaction");
-      for (let i = 0; i < MAX_OPERATIONS_PER_TRANSACTION; i++) {
-        hm.addOperation(createSetFieldOp(USER_ID, `node-${i}`, "name", `v${i + 1}`, `v${i}`));
-      }
-      // The next one should throw
-      expect(() =>
-        hm.addOperation(createSetFieldOp(USER_ID, "node-overflow", "name", "x", "y")),
-      ).toThrow("MAX_OPERATIONS_PER_TRANSACTION");
-    });
-  });
-
-  // ── cancelTransaction guard ─────────────────────────────────────
-
-  describe("cancelTransaction guard", () => {
-    // RF-012: cancelTransaction throws when no active transaction
-    it("should throw when calling cancelTransaction without beginTransaction", () => {
-      expect(() => hm.cancelTransaction()).toThrow("no active transaction");
-    });
-  });
-
-  // ── Drag coalescing ──────────────────────────────────────────────
-
-  describe("drag coalescing", () => {
-    it("should merge updates on the same node+path into a single transaction", () => {
-      hm.beginDrag("node-1", "transform");
-
-      // Simulate 3 pointermove events
-      hm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform", { x: 1 }, { x: 0 }));
-      hm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform", { x: 5 }, { x: 1 }));
-      hm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform", { x: 10 }, { x: 5 }));
-
-      hm.commitDrag();
-
-      expect(hm.canUndo()).toBe(true);
-      const inv = assertNonNull(hm.undo());
-      // Should be ONE operation: previousValue from first, value from last
-      expect(inv.operations).toHaveLength(1);
-      // Inverse: value = original previousValue (x:0), previousValue = final value (x:10)
-      expect(inv.operations[0].value).toEqual({ x: 0 });
-      expect(inv.operations[0].previousValue).toEqual({ x: 10 });
-    });
-
-    it("should discard all drag operations when cancelDrag is called", () => {
-      hm.beginDrag("node-1", "transform");
-      hm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform", { x: 5 }, { x: 0 }));
-      hm.cancelDrag();
-
-      expect(hm.canUndo()).toBe(false);
-    });
-
-    it("should throw when calling updateDrag without beginDrag", () => {
-      const op = createSetFieldOp(USER_ID, "node-1", "transform", { x: 5 }, { x: 0 });
-      expect(() => hm.updateDrag(op)).toThrow();
-    });
-
-    it("should throw when calling commitDrag without beginDrag", () => {
-      expect(() => hm.commitDrag()).toThrow();
-    });
-
-    it("should throw when calling beginDrag while a drag is active", () => {
-      hm.beginDrag("node-1", "transform");
-      expect(() => hm.beginDrag("node-2", "name")).toThrow();
-    });
-
-    it("should throw when calling beginDrag while a transaction is active", () => {
-      hm.beginTransaction("Work");
-      expect(() => hm.beginDrag("node-1", "transform")).toThrow();
-    });
-
-    it("should throw when calling beginTransaction while a drag is active", () => {
-      hm.beginDrag("node-1", "transform");
-      expect(() => hm.beginTransaction("Work")).toThrow();
-    });
-
-    it("should not push anything if commitDrag is called with zero updates", () => {
-      hm.beginDrag("node-1", "transform");
-      hm.commitDrag();
-      expect(hm.canUndo()).toBe(false);
-    });
-
-    // RF-012: cancelDrag guard
-    it("should throw when calling cancelDrag without beginDrag", () => {
-      expect(() => hm.cancelDrag()).toThrow("no active drag");
-    });
-
-    // updateDrag node/path mismatch guard
-    it("should throw when updateDrag operation has mismatched node/path", () => {
-      hm.beginDrag("node-1", "transform");
-      const op = createSetFieldOp(USER_ID, "node-2", "transform", { x: 5 }, { x: 0 });
-      expect(() => hm.updateDrag(op)).toThrow("does not match drag");
-    });
-
-    it("should throw when updateDrag operation has mismatched path", () => {
-      hm.beginDrag("node-1", "transform");
-      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
-      expect(() => hm.updateDrag(op)).toThrow("does not match drag");
-    });
-  });
-
   // ── clear ────────────────────────────────────────────────────────
 
   describe("clear", () => {
@@ -413,49 +329,6 @@ describe("HistoryManager", () => {
       const redo = assertNonNull(hm.redo());
       expect(redo.operations[0].type).toBe("create_node");
       expect(redo.operations[0].value).toEqual(nodeData);
-    });
-  });
-
-  // ── popLastUndo (RF-001) ─────────────────────────────────────────
-
-  describe("popLastUndo", () => {
-    it("should return null when undo stack is empty", () => {
-      expect(hm.popLastUndo()).toBeNull();
-    });
-
-    it("should pop the last transaction from undo stack", () => {
-      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
-      hm.apply(op, "Rename");
-      expect(hm.canUndo()).toBe(true);
-
-      const popped = hm.popLastUndo();
-      expect(popped).not.toBeNull();
-      expect(popped?.operations[0].value).toBe("B");
-      expect(hm.canUndo()).toBe(false);
-    });
-
-    it("should NOT push to redo stack (unlike undo)", () => {
-      const op = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
-      hm.apply(op, "Rename");
-
-      hm.popLastUndo();
-
-      // The critical difference from undo(): redo stack stays empty
-      expect(hm.canRedo()).toBe(false);
-    });
-
-    it("should not affect existing redo stack entries", () => {
-      const op1 = createSetFieldOp(USER_ID, "node-1", "name", "B", "A");
-      hm.apply(op1, "Step 1");
-      hm.undo(); // Pushes to redo
-      expect(hm.canRedo()).toBe(true);
-
-      const op2 = createSetFieldOp(USER_ID, "node-1", "name", "C", "A");
-      hm.apply(op2, "Step 2"); // Clears redo
-
-      // Now popLastUndo should not affect redo
-      hm.popLastUndo();
-      expect(hm.canRedo()).toBe(false);
     });
   });
 });

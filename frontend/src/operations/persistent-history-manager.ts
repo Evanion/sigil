@@ -5,7 +5,7 @@
  * After each state-changing operation, persistAsync() can be called
  * to fire-and-forget save to IndexedDB.
  *
- * See: Spec 15, sections 4.1 and 4.2.
+ * See: Spec 15e.
  */
 
 import type { Operation, Transaction } from "./types";
@@ -47,36 +47,8 @@ export class PersistentHistoryManager {
     this.manager.apply(op, description);
   }
 
-  beginTransaction(description: string): void {
-    this.manager.beginTransaction(description);
-  }
-
-  addOperation(op: Operation): void {
-    this.manager.addOperation(op);
-  }
-
-  commitTransaction(): void {
-    this.manager.commitTransaction();
-  }
-
-  cancelTransaction(): void {
-    this.manager.cancelTransaction();
-  }
-
-  beginDrag(nodeUuid: string, path: string): void {
-    this.manager.beginDrag(nodeUuid, path);
-  }
-
-  updateDrag(op: Operation): void {
-    this.manager.updateDrag(op);
-  }
-
-  commitDrag(): void {
-    this.manager.commitDrag();
-  }
-
-  cancelDrag(): void {
-    this.manager.cancelDrag();
+  pushTransaction(tx: Transaction): void {
+    this.manager.pushTransaction(tx);
   }
 
   undo(): Transaction | null {
@@ -93,6 +65,10 @@ export class PersistentHistoryManager {
 
   canRedo(): boolean {
     return this.manager.canRedo();
+  }
+
+  peekRedo(): Transaction | null {
+    return this.manager.peekRedo();
   }
 
   clear(): void {
