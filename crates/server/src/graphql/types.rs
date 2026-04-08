@@ -288,13 +288,6 @@ pub struct PageGql {
     pub nodes: Vec<NodeGql>,
 }
 
-/// Result of node creation.
-#[derive(SimpleObject)]
-pub struct CreateNodeResult {
-    pub uuid: String,
-    pub node: NodeGql,
-}
-
 /// Reads a node from the arena and converts it to a [`NodeGql`] representation.
 ///
 /// Requires that the node has already been verified to exist. Returns a
