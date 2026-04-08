@@ -25,10 +25,6 @@ pub struct DocumentInfo {
     pub page_count: usize,
     /// Total number of nodes across all pages.
     pub node_count: usize,
-    /// Whether undo is available.
-    pub can_undo: bool,
-    /// Whether redo is available.
-    pub can_redo: bool,
 }
 
 /// A node in the document tree, serialized for MCP output.
@@ -415,15 +411,6 @@ pub struct CreateNodeResult {
     pub node: NodeInfo,
 }
 
-/// Result of undo/redo.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct UndoRedoResult {
-    /// Whether undo is still available after the operation.
-    pub can_undo: bool,
-    /// Whether redo is still available after the operation.
-    pub can_redo: bool,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,13 +436,11 @@ mod tests {
             name: "My Doc".to_string(),
             page_count: 3,
             node_count: 42,
-            can_undo: true,
-            can_redo: false,
         };
         let json = serde_json::to_string(&info).expect("serializable");
         assert!(json.contains("\"name\":\"My Doc\""));
         assert!(json.contains("\"page_count\":3"));
-        assert!(json.contains("\"can_undo\":true"));
+        assert!(json.contains("\"node_count\":42"));
     }
 
     #[test]

@@ -87,8 +87,6 @@ pub enum MutationEventKind {
     NodeUpdated,
     /// A node was removed from the document.
     NodeDeleted,
-    /// An undo or redo operation was performed.
-    UndoRedo,
     /// A new page was created.
     PageCreated,
     /// A page's properties were updated.
@@ -106,15 +104,14 @@ pub enum MutationEventKind {
 /// Newtype wrapper around `Document` that allows us to assert `Send` and `Sync`
 /// without placing blanket unsafe impls on the entire `AppState`.
 ///
-/// `Document` contains `Box<dyn Command>` which lacks `Send` bounds for WASM
-/// compatibility. However, all concrete `Command` implementations in the core
-/// crate are plain data structs (no `Rc`, `RefCell`, or other non-Send types).
+/// The core crate avoids `Send`/`Sync` bounds for WASM compatibility. However,
+/// `Document` is a plain data struct (no `Rc`, `RefCell`, or other non-Send types),
+/// so it is safe to use across threads when synchronized by a `Mutex`.
 pub struct SendDocument(pub Document);
 
-// SAFETY: All concrete `Command` implementations stored inside the `Document`
-// history are plain data structs without `Rc`, `RefCell`, or other non-Send types.
-// The `Box<dyn Command>` trait object only lacks `Send` bounds to keep the core
-// crate WASM-compatible. The server is the only consumer that needs thread-safety.
+// SAFETY: `Document` is a plain data struct without `Rc`, `RefCell`, or other
+// non-Send types. The core crate omits `Send` bounds solely for WASM compat.
+// The server is the only consumer that needs thread-safety.
 unsafe impl Send for SendDocument {}
 
 // SAFETY: Access to the inner `Document` is always synchronized via `Mutex`.
@@ -503,14 +500,14 @@ mod tests {
 
         // Legacy publish_event without transaction
         state.publish_event(MutationEvent {
-            kind: MutationEventKind::UndoRedo,
+            kind: MutationEventKind::NodeUpdated,
             uuid: None,
-            data: Some(serde_json::json!({"action": "undo"})),
+            data: Some(serde_json::json!({"action": "update"})),
             transaction: None,
         });
 
         let received = rx.try_recv().expect("should receive event");
-        assert_eq!(received.kind, MutationEventKind::UndoRedo);
+        assert_eq!(received.kind, MutationEventKind::NodeUpdated);
         assert!(
             received.transaction.is_none(),
             "transaction should be None for legacy events"

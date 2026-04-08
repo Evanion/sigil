@@ -173,7 +173,7 @@ mod tests {
             MutationEventKind::NodeCreated,
             MutationEventKind::NodeUpdated,
             MutationEventKind::NodeDeleted,
-            MutationEventKind::UndoRedo,
+            MutationEventKind::NodeDeleted,
             MutationEventKind::NodeCreated,
         ];
 
@@ -181,7 +181,7 @@ mod tests {
             DocumentEventType::NodeCreated,
             DocumentEventType::NodeUpdated,
             DocumentEventType::NodeDeleted,
-            DocumentEventType::UndoRedo,
+            DocumentEventType::NodeDeleted,
             DocumentEventType::NodeCreated,
         ];
 
@@ -204,16 +204,14 @@ mod tests {
     #[tokio::test]
     async fn test_document_event_clone_preserves_fields() {
         let event = DocumentEvent {
-            event_type: DocumentEventType::UndoRedo,
+            event_type: DocumentEventType::NodeDeleted,
             uuid: None,
-            data: Some(async_graphql::Json(
-                serde_json::json!({"can_undo": true, "can_redo": false}),
-            )),
+            data: Some(async_graphql::Json(serde_json::json!({"field": "test"}))),
             sender_id: None,
         };
 
         let cloned = event.clone();
-        assert_eq!(cloned.event_type, DocumentEventType::UndoRedo);
+        assert_eq!(cloned.event_type, DocumentEventType::NodeDeleted);
         assert!(cloned.uuid.is_none());
         assert!(cloned.data.is_some());
         assert!(cloned.sender_id.is_none());
@@ -236,7 +234,6 @@ mod tests {
                 MutationEventKind::NodeDeleted,
                 DocumentEventType::NodeDeleted,
             ),
-            (MutationEventKind::UndoRedo, DocumentEventType::UndoRedo),
             (
                 MutationEventKind::PageCreated,
                 DocumentEventType::PageCreated,
@@ -324,9 +321,9 @@ mod tests {
 
         // Publish a legacy event without a transaction payload
         state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::UndoRedo,
+            kind: MutationEventKind::NodeDeleted,
             uuid: None,
-            data: Some(serde_json::json!({"can_undo": true})),
+            data: Some(serde_json::json!({"field": "test"})),
             transaction: None,
         });
 
@@ -342,7 +339,7 @@ mod tests {
             event.operations.is_empty(),
             "legacy fallback should have no operations"
         );
-        assert_eq!(event.event_type, DocumentEventType::UndoRedo);
+        assert_eq!(event.event_type, DocumentEventType::NodeDeleted);
     }
 
     #[tokio::test]

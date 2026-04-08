@@ -15,8 +15,6 @@ pub enum DocumentEventType {
     NodeUpdated,
     /// A node was removed from the document.
     NodeDeleted,
-    /// An undo or redo operation was performed.
-    UndoRedo,
     /// A new page was created.
     PageCreated,
     /// A page's properties were updated.
@@ -63,7 +61,6 @@ pub fn event_type_from_kind(kind: MutationEventKind) -> DocumentEventType {
         MutationEventKind::NodeCreated => DocumentEventType::NodeCreated,
         MutationEventKind::NodeUpdated => DocumentEventType::NodeUpdated,
         MutationEventKind::NodeDeleted => DocumentEventType::NodeDeleted,
-        MutationEventKind::UndoRedo => DocumentEventType::UndoRedo,
         MutationEventKind::PageCreated => DocumentEventType::PageCreated,
         MutationEventKind::PageUpdated => DocumentEventType::PageUpdated,
         MutationEventKind::PageDeleted => DocumentEventType::PageDeleted,
@@ -186,8 +183,6 @@ pub struct DocumentInfoGql {
     pub name: String,
     pub page_count: usize,
     pub node_count: usize,
-    pub can_undo: bool,
-    pub can_redo: bool,
 }
 
 /// GraphQL representation of a serialized node.
@@ -210,13 +205,6 @@ pub struct PageGql {
     pub id: String,
     pub name: String,
     pub nodes: Vec<NodeGql>,
-}
-
-/// Result of an undo/redo operation.
-#[derive(SimpleObject)]
-pub struct UndoRedoResult {
-    pub can_undo: bool,
-    pub can_redo: bool,
 }
 
 /// Result of node creation.
@@ -381,9 +369,9 @@ mod tests {
     #[test]
     fn test_from_mutation_event_without_transaction_falls_back() {
         let mutation = MutationEvent {
-            kind: MutationEventKind::UndoRedo,
+            kind: MutationEventKind::NodeUpdated,
             uuid: None,
-            data: Some(serde_json::json!({"can_undo": true})),
+            data: Some(serde_json::json!({"field": "transform"})),
             transaction: None,
         };
 
@@ -398,7 +386,7 @@ mod tests {
             event.operations.is_empty(),
             "legacy fallback should have no operations"
         );
-        assert_eq!(event.event_type, DocumentEventType::UndoRedo);
+        assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
         assert!(event.uuid.is_none());
     }
 
@@ -417,7 +405,6 @@ mod tests {
                 MutationEventKind::NodeDeleted,
                 DocumentEventType::NodeDeleted,
             ),
-            (MutationEventKind::UndoRedo, DocumentEventType::UndoRedo),
             (
                 MutationEventKind::PageCreated,
                 DocumentEventType::PageCreated,

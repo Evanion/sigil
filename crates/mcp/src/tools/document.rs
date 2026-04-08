@@ -29,8 +29,6 @@ pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {
         name: doc.metadata.name.clone(),
         page_count: doc.pages.len(),
         node_count: doc.arena.len(),
-        can_undo: doc.can_undo(),
-        can_redo: doc.can_redo(),
     }
 }
 
@@ -164,8 +162,6 @@ mod tests {
         assert_eq!(info.name, "Untitled");
         assert_eq!(info.page_count, 1);
         assert_eq!(info.node_count, 0);
-        assert!(!info.can_undo);
-        assert!(!info.can_redo);
     }
 
     #[test]

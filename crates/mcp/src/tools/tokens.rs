@@ -1,15 +1,15 @@
 //! Token operation tools — list, create, update, delete.
 //!
 //! All mutations follow the pattern:
-//!   lock → look up existing state → construct command →
-//!   `doc.execute(Box::new(cmd))` → build response → drop lock → `signal_dirty`
+//!   lock → construct operation →
+//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
 //!
 //! The `TokenValue` for create/update is passed in as a raw `serde_json::Value`
 //! and deserialized into `TokenValue` inside the tool. Validation is performed
 //! by `Token::new` (which calls `validate_token_name` and `validate_token_value`).
 
 use agent_designer_core::{
-    Token, TokenId, TokenType, TokenValue,
+    FieldOperation, Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, UpdateToken},
 };
 use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
@@ -128,7 +128,9 @@ pub fn create_token_impl(
 
     {
         let mut doc = acquire_document_lock(state);
-        doc.execute(Box::new(AddToken { token }))?;
+        let cmd = AddToken { token };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -159,19 +161,18 @@ pub fn update_token_impl(
     let token_type = parse_token_type(&input.token_type)?;
     let token_value: TokenValue = serde_json::from_value(input.value.clone())?;
 
-    // RF-004: Single lock scope — snapshot, construct, and execute atomically
+    // RF-004: Single lock scope — construct and execute atomically
     // to prevent TOCTOU races where the token could be modified or deleted
-    // between the snapshot read and the execute call.
+    // between the read and the execute call.
     let info = {
         let mut doc = acquire_document_lock(state);
-        let old_token = doc
+        let existing = doc
             .token_context
             .get(&input.name)
-            .ok_or_else(|| McpToolError::TokenNotFound(input.name.clone()))?
-            .clone();
+            .ok_or_else(|| McpToolError::TokenNotFound(input.name.clone()))?;
 
         let new_token = Token::new(
-            old_token.id(),
+            existing.id(),
             input.name.clone(),
             token_value,
             token_type,
@@ -180,10 +181,12 @@ pub fn update_token_impl(
 
         let info = token_to_info(&new_token)?;
 
-        doc.execute(Box::new(UpdateToken {
+        let cmd = UpdateToken {
             new_token,
-            old_token,
-        }))?;
+            token_name: input.name.clone(),
+        };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         info
     };
@@ -210,21 +213,13 @@ pub fn delete_token_impl(
     state: &AppState,
     token_name: &str,
 ) -> Result<MutationResult, McpToolError> {
-    // RF-004: Single lock scope — snapshot and execute atomically to prevent
-    // TOCTOU races where the token could be modified or deleted between the
-    // snapshot read and the execute call.
     {
         let mut doc = acquire_document_lock(state);
-        let snapshot = doc
-            .token_context
-            .get(token_name)
-            .ok_or_else(|| McpToolError::TokenNotFound(token_name.to_string()))?
-            .clone();
-
-        doc.execute(Box::new(RemoveToken {
+        let cmd = RemoveToken {
             token_name: token_name.to_string(),
-            snapshot,
-        }))?;
+        };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -315,9 +310,14 @@ mod tests {
         let state = AppState::new();
         let result = delete_token_impl(&state, "does.not.exist");
         assert!(result.is_err());
+        // Token not found error comes from core's validate() via From<CoreError>
+        let err = result.unwrap_err();
         assert!(
-            matches!(result.unwrap_err(), McpToolError::TokenNotFound(_)),
-            "expected TokenNotFound"
+            matches!(
+                err,
+                McpToolError::CoreError(agent_designer_core::CoreError::TokenNotFound(_))
+            ),
+            "expected CoreError(TokenNotFound), got: {err}"
         );
     }
 

@@ -73,11 +73,10 @@ pub fn acquire_document_lock(state: &AppState) -> MutexGuard<'_, SendDocument> {
 
 #[tool_router]
 impl SigilMcpServer {
-    /// Returns a compact summary of the document: name, page count, node count,
-    /// and undo/redo availability.
+    /// Returns a compact summary of the document: name, page count, node count.
     #[tool(
         name = "get_document_info",
-        description = "Get document summary: name, page count, node count, undo/redo availability"
+        description = "Get document summary: name, page count, node count"
     )]
     fn get_document_info(&self) -> Json<crate::types::DocumentInfo> {
         Json(crate::tools::document::get_document_info_impl(&self.state))
@@ -406,28 +405,6 @@ impl SigilMcpServer {
             components: crate::tools::components::list_components_impl(&self.state),
         })
     }
-
-    /// Undoes the most recent document command.
-    #[tool(
-        name = "undo",
-        description = "Undo the most recent document mutation. Returns updated undo/redo availability."
-    )]
-    fn undo(&self) -> Result<Json<crate::types::UndoRedoResult>, rmcp::ErrorData> {
-        crate::tools::history::undo_impl(&self.state)
-            .map(Json)
-            .map_err(|e| e.to_mcp_error())
-    }
-
-    /// Redoes the most recently undone document command.
-    #[tool(
-        name = "redo",
-        description = "Redo the most recently undone document mutation. Returns updated undo/redo availability."
-    )]
-    fn redo(&self) -> Result<Json<crate::types::UndoRedoResult>, rmcp::ErrorData> {
-        crate::tools::history::redo_impl(&self.state)
-            .map(Json)
-            .map_err(|e| e.to_mcp_error())
-    }
 }
 
 /// Spawns the MCP server on stdio in a background task.
@@ -467,7 +444,7 @@ impl ServerHandler for SigilMcpServer {
         .with_instructions(
             "Sigil is an AI-native design tool. \
              Use the available tools to read and modify design documents, \
-             manage pages and nodes, define design tokens, and undo/redo changes.",
+             manage pages and nodes, and define design tokens.",
         )
     }
 

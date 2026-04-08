@@ -1,12 +1,12 @@
 //! Node operation tools — create, delete, rename, `set_transform`, `set_visible`, `set_locked`.
 //!
 //! All mutations follow the pattern:
-//!   lock → resolve UUID → capture old state → construct command →
-//!   `doc.execute(Box::new(cmd))` → build response → drop lock → `signal_dirty`
+//!   lock → resolve UUID → construct operation →
+//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
 
 use agent_designer_core::{
-    BlendMode, Effect, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE,
-    NodeId, NodeKind, Stroke, StyleValue, Transform,
+    BlendMode, Effect, FieldOperation, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
+    MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
     commands::style_commands::{
         SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
@@ -210,7 +210,8 @@ pub fn create_node_impl(
             page_id,
             initial_transform,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         // Resolve the actual NodeId from the UUID.
         let actual_id = doc
@@ -219,34 +220,35 @@ pub fn create_node_impl(
             .ok_or_else(|| McpToolError::NodeNotFound(node_uuid.to_string()))?;
 
         // If a parent was requested, reparent the node.
-        // RF-007/RF-008: If reparent fails, undo the CreateNode to maintain
-        // atomicity. Without CompoundCommand support, create+reparent is two
-        // separate commands; undo requires two steps when a parent is specified.
+        // RF-007/RF-008: If reparent fails, delete the created node to maintain
+        // atomicity. Without undo, we must manually clean up.
         if let Some(parent_id) = parent_node_id {
             let new_position = doc.arena.get(parent_id)?.children.len();
-            let old_parent_id = doc.arena.get(actual_id)?.parent;
-            let old_position = old_parent_id.and_then(|pid| {
-                doc.arena
-                    .get(pid)
-                    .ok()
-                    .and_then(|p| p.children.iter().position(|&c| c == actual_id))
-            });
 
             let reparent_cmd = ReparentNode {
                 node_id: actual_id,
                 new_parent_id: parent_id,
                 new_position,
-                old_parent_id,
-                old_position,
             };
-            if let Err(reparent_err) = doc.execute(Box::new(reparent_cmd)) {
+            if let Err(reparent_err) = reparent_cmd
+                .validate(&doc)
+                .and_then(|()| reparent_cmd.apply(&mut doc))
+            {
                 // Restore state before propagating error (CLAUDE.md section 11).
-                // Undo the CreateNode that was already committed.
-                if let Err(undo_err) = doc.undo() {
-                    tracing::error!("failed to undo CreateNode after reparent failure: {undo_err}");
-                    // Return a compound-style error that surfaces both failures.
+                // Delete the node we just created to roll back.
+                let rollback = DeleteNode {
+                    node_id: actual_id,
+                    page_id,
+                };
+                if let Err(rollback_err) = rollback
+                    .validate(&doc)
+                    .and_then(|()| rollback.apply(&mut doc))
+                {
+                    tracing::error!(
+                        "failed to delete CreateNode after reparent failure: {rollback_err}"
+                    );
                     return Err(McpToolError::InvalidInput(format!(
-                        "reparent failed ({reparent_err}) and rollback also failed ({undo_err})"
+                        "reparent failed ({reparent_err}) and rollback also failed ({rollback_err})"
                     )));
                 }
                 return Err(McpToolError::CoreError(reparent_err));
@@ -294,42 +296,18 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        // Capture snapshot for undo.
-        let snapshot = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .clone();
-
-        let parent_id = snapshot.parent;
-        let parent_child_index = parent_id.and_then(|pid| {
-            doc.arena
-                .get(pid)
-                .ok()
-                .and_then(|p| p.children.iter().position(|&c| c == node_id))
+        // Find if this node is a page root.
+        let page_id = doc.pages.iter().find_map(|page| {
+            if page.root_nodes.contains(&node_id) {
+                Some(page.id)
+            } else {
+                None
+            }
         });
 
-        // Find if this node is a page root and where.
-        let (page_id, page_root_index) = doc
-            .pages
-            .iter()
-            .find_map(|page| {
-                page.root_nodes
-                    .iter()
-                    .position(|&n| n == node_id)
-                    .map(|idx| (Some(page.id), Some(idx)))
-            })
-            .unwrap_or((None, None));
-
-        let cmd = DeleteNode {
-            node_id,
-            snapshot: Some(snapshot),
-            page_id,
-            page_root_index,
-            parent_id,
-            parent_child_index,
-        };
-        doc.execute(Box::new(cmd))?;
+        let cmd = DeleteNode { node_id, page_id };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -370,19 +348,12 @@ pub fn rename_node_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_name = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .name
-            .clone();
-
         let cmd = RenameNode {
             node_id,
             new_name: new_name.to_string(),
-            old_name,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -429,18 +400,12 @@ pub fn set_transform_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_transform = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .transform;
-
         let cmd = SetTransform {
             node_id,
             new_transform,
-            old_transform,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -479,18 +444,12 @@ pub fn set_visible_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_visible = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .visible;
-
         let cmd = SetVisible {
             node_id,
             new_visible: visible,
-            old_visible,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -529,18 +488,12 @@ pub fn set_locked_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_locked = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .locked;
-
         let cmd = SetLocked {
             node_id,
             new_locked: locked,
-            old_locked,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -587,31 +540,14 @@ pub fn reparent_node_impl(
             .id_by_uuid(&parent_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(new_parent_uuid_str.to_string()))?;
 
-        let old_parent_id = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .parent;
-        let old_position = match old_parent_id {
-            Some(pid) => {
-                let parent_node = doc
-                    .arena
-                    .get(pid)
-                    .map_err(|_| McpToolError::NodeNotFound(format!("old parent {pid:?}")))?;
-                parent_node.children.iter().position(|&c| c == node_id)
-            }
-            None => None,
-        };
-
         // Positions beyond children count are clamped by the core engine (append semantics).
         let cmd = ReparentNode {
             node_id,
             new_parent_id: parent_id,
             new_position: position as usize,
-            old_parent_id,
-            old_position,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -650,33 +586,13 @@ pub fn reorder_children_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let parent_id = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .parent
-            .ok_or_else(|| {
-                McpToolError::InvalidInput("node has no parent — cannot reorder".to_string())
-            })?;
-
-        let old_position = doc
-            .arena
-            .get(parent_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .children
-            .iter()
-            .position(|&c| c == node_id)
-            .ok_or_else(|| {
-                McpToolError::InvalidInput("node not found in parent's children list".to_string())
-            })?;
-
         // Positions beyond children count are clamped by the core engine.
         let cmd = ReorderChildren {
             node_id,
             new_position: new_position as usize,
-            old_position,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         build_node_info(&doc, node_id, node_uuid)?
     };
@@ -729,20 +645,12 @@ pub fn set_opacity_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_opacity = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .style
-            .opacity
-            .clone();
-
         let cmd = SetOpacity {
             node_id,
             new_opacity: StyleValue::Literal { value: opacity },
-            old_opacity,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -797,19 +705,12 @@ pub fn set_blend_mode_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_blend_mode = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .style
-            .blend_mode;
-
         let cmd = SetBlendMode {
             node_id,
             new_blend_mode,
-            old_blend_mode,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -869,20 +770,9 @@ pub fn set_fills_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_fills = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .style
-            .fills
-            .clone();
-
-        let cmd = SetFills {
-            node_id,
-            new_fills,
-            old_fills,
-        };
-        doc.execute(Box::new(cmd))?;
+        let cmd = SetFills { node_id, new_fills };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -942,20 +832,12 @@ pub fn set_strokes_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_strokes = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .style
-            .strokes
-            .clone();
-
         let cmd = SetStrokes {
             node_id,
             new_strokes,
-            old_strokes,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -1015,20 +897,12 @@ pub fn set_effects_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let old_effects = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?
-            .style
-            .effects
-            .clone();
-
         let cmd = SetEffects {
             node_id,
             new_effects,
-            old_effects,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -1092,26 +966,9 @@ pub fn set_corner_radii_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node = doc
-            .arena
-            .get(node_id)
-            .map_err(|_| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let old_radii = match &node.kind {
-            NodeKind::Rectangle { corner_radii } => *corner_radii,
-            _ => {
-                return Err(McpToolError::InvalidInput(
-                    "SetCornerRadii requires a rectangle node".to_string(),
-                ));
-            }
-        };
-
-        let cmd = SetCornerRadii {
-            node_id,
-            new_radii,
-            old_radii,
-        };
-        doc.execute(Box::new(cmd))?;
+        let cmd = SetCornerRadii { node_id, new_radii };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -1600,9 +1457,15 @@ mod tests {
 
         let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0, 4.0, 4.0]);
         assert!(result.is_err());
+        // Rectangle check now comes from core's validate() via From<CoreError>
+        let err = result.unwrap_err();
         assert!(
-            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("rectangle")),
-            "error should mention rectangle requirement"
+            matches!(
+                &err,
+                McpToolError::CoreError(agent_designer_core::CoreError::ValidationError(msg))
+                    if msg.contains("Rectangle") || msg.contains("rectangle")
+            ),
+            "error should mention rectangle requirement, got: {err}"
         );
     }
 

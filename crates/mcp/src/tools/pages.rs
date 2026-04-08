@@ -1,9 +1,10 @@
 //! Page operation tools — list, create, rename, delete.
 //!
 //! All mutations follow the pattern:
-//!   lock -> capture old state -> construct command ->
-//!   `doc.execute(Box::new(cmd))` -> build response -> drop lock -> `signal_dirty`
+//!   lock → construct operation →
+//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
 
+use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
 use agent_designer_core::commands::page_commands::{CreatePage, DeletePage, RenamePage};
 use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
@@ -37,9 +38,6 @@ pub fn list_pages_impl(state: &AppState) -> Vec<PageInfo> {
 
 /// Creates a new page with the given name and adds it to the document.
 ///
-/// Routes through `Document::execute` so the operation participates in
-/// undo/redo history.
-///
 /// # Errors
 ///
 /// Returns `McpToolError::CoreError` if validation fails or the document
@@ -54,7 +52,8 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
             page_id,
             name: name.to_string(),
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -74,9 +73,6 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
 
 /// Deletes a page by UUID.
 ///
-/// Captures the page snapshot before deletion so undo can restore it at
-/// the correct position.
-///
 /// # Errors
 ///
 /// - `McpToolError::InvalidUuid` if `page_uuid_str` is not a valid UUID.
@@ -93,20 +89,15 @@ pub fn delete_page_impl(
     {
         let mut doc = acquire_document_lock(state);
 
-        // Capture snapshot and position before deletion for undo support.
-        let pos = doc
-            .pages
+        // Verify page exists before deleting.
+        doc.pages
             .iter()
-            .position(|p| p.id == page_id)
+            .find(|p| p.id == page_id)
             .ok_or_else(|| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-        let snapshot = doc.pages[pos].clone();
 
-        let cmd = DeletePage {
-            page_id,
-            snapshot: Some(snapshot),
-            page_index: Some(pos),
-        };
-        doc.execute(Box::new(cmd))?;
+        let cmd = DeletePage { page_id };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
     }
 
     state.signal_dirty();
@@ -124,8 +115,6 @@ pub fn delete_page_impl(
 }
 
 /// Renames a page identified by UUID.
-///
-/// Captures the old name before rename so undo can restore it.
 ///
 /// # Errors
 ///
@@ -145,19 +134,17 @@ pub fn rename_page_impl(
     let root_uuids = {
         let mut doc = acquire_document_lock(state);
 
-        // Capture old name for undo.
         let page = doc
             .page(page_id)
             .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-        let old_name = page.name.clone();
         let root_node_ids: Vec<agent_designer_core::NodeId> = page.root_nodes.clone();
 
         let cmd = RenamePage {
             page_id,
             new_name: new_name.to_string(),
-            old_name,
         };
-        doc.execute(Box::new(cmd))?;
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
 
         // Resolve NodeIds to UUIDs.
         root_node_ids
@@ -205,16 +192,6 @@ mod tests {
     }
 
     #[test]
-    fn test_create_page_participates_in_undo() {
-        let state = AppState::new();
-        create_page_impl(&state, "Home").expect("create");
-        {
-            let doc = acquire_document_lock(&state);
-            assert!(doc.can_undo());
-        }
-    }
-
-    #[test]
     fn test_create_page_rejects_empty_name() {
         let state = AppState::new();
         let result = create_page_impl(&state, "");
@@ -229,17 +206,6 @@ mod tests {
         let result = delete_page_impl(&state, &page.id);
         assert!(result.is_ok());
         assert!(list_pages_impl(&state).is_empty());
-    }
-
-    #[test]
-    fn test_delete_page_participates_in_undo() {
-        let state = AppState::new();
-        let page = create_page_impl(&state, "Temp").unwrap();
-        delete_page_impl(&state, &page.id).expect("delete");
-        {
-            let doc = acquire_document_lock(&state);
-            assert!(doc.can_undo());
-        }
     }
 
     #[test]
@@ -260,17 +226,6 @@ mod tests {
         // Verify the document state was actually updated.
         let pages = list_pages_impl(&state);
         assert_eq!(pages[0].name, "New Name");
-    }
-
-    #[test]
-    fn test_rename_page_participates_in_undo() {
-        let state = AppState::new();
-        let page = create_page_impl(&state, "Home").unwrap();
-        rename_page_impl(&state, &page.id, "New Name").expect("rename");
-        {
-            let doc = acquire_document_lock(&state);
-            assert!(doc.can_undo());
-        }
     }
 
     #[test]

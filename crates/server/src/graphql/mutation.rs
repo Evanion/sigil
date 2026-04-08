@@ -7,18 +7,16 @@
 //! 2. Acquire document lock (`std::sync::Mutex` -- never hold across await)
 //! 3. Parse UUID string to `uuid::Uuid`
 //! 4. Resolve UUID to `NodeId` via `arena.id_by_uuid()`
-//! 5. Read old state for undo
-//! 6. Construct the appropriate `Command` struct from core
-//! 7. Call `doc_guard.execute(Box::new(cmd))`
-//! 8. Build the GraphQL response INSIDE the lock scope (RF-005)
-//! 9. Drop the lock
-//! 10. Signal dirty for persistence
-//! 11. Publish event and return result
+//! 5. Construct the appropriate `FieldOperation` struct from core
+//! 6. Call `op.validate(&doc)?; op.apply(&mut doc)?;`
+//! 7. Build the GraphQL response INSIDE the lock scope (RF-005)
+//! 8. Drop the lock
+//! 9. Signal dirty for persistence
+//! 10. Publish event and return result
 
 use async_graphql::{Context, Json, Object, Result};
 
-use agent_designer_core::commands::batch_commands::BatchSetTransform;
-use agent_designer_core::commands::group_commands::{GroupNodes, UngroupNodes};
+use agent_designer_core::FieldOperation;
 use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
 };
@@ -30,13 +28,11 @@ use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode
 use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
 use agent_designer_core::validate::MAX_BATCH_SIZE;
 use agent_designer_core::{NodeId, PageId};
-use agent_designer_state::{
-    MutationEvent, MutationEventKind, OperationPayload, TransactionPayload,
-};
+use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPayload};
 
 use crate::state::ServerState;
 
-use super::types::{CreateNodeResult, NodeGql, UndoRedoResult, node_to_gql};
+use super::types::{CreateNodeResult, NodeGql, node_to_gql};
 
 pub struct MutationRoot;
 
@@ -204,7 +200,11 @@ impl MutationRoot {
         // RF-005: build the response inside the lock scope to avoid TOCTOU
         let (node_gql, node_json) = {
             let mut doc_guard = acquire_document_lock(state);
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("createNode validation failed: {e}");
+                async_graphql::Error::new("node creation failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("createNode failed: {e}");
                 async_graphql::Error::new("node creation failed")
             })?;
@@ -266,44 +266,25 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            // Capture snapshot for undo
-            let node = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
-            let snapshot = node.clone();
-            let parent_id = node.parent;
-
-            // Find parent_child_index
-            let parent_child_index = parent_id.and_then(|pid| {
-                doc_guard
-                    .arena
-                    .get(pid)
-                    .ok()
-                    .and_then(|parent| parent.children.iter().position(|&id| id == node_id))
-            });
-
-            // Find page and root index
-            let mut found_page_id: Option<PageId> = None;
-            let mut found_page_root_index: Option<usize> = None;
-            for page in &doc_guard.pages {
-                if let Some(idx) = page.root_nodes.iter().position(|&nid| nid == node_id) {
-                    found_page_id = Some(page.id);
-                    found_page_root_index = Some(idx);
-                    break;
+            // Find page ID for the node (needed by DeleteNode)
+            let found_page_id: Option<PageId> = doc_guard.pages.iter().find_map(|page| {
+                if page.root_nodes.contains(&node_id) {
+                    Some(page.id)
+                } else {
+                    None
                 }
-            }
+            });
 
             let cmd = DeleteNode {
                 node_id,
-                snapshot: Some(snapshot),
                 page_id: found_page_id,
-                page_root_index: found_page_root_index,
-                parent_id,
-                parent_child_index,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("deleteNode validation failed: {e}");
+                async_graphql::Error::new("node deletion failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("deleteNode failed: {e}");
                 async_graphql::Error::new("node deletion failed")
             })?;
@@ -352,20 +333,13 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_name = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .name
-                .clone();
+            let cmd = RenameNode { node_id, new_name };
 
-            let cmd = RenameNode {
-                node_id,
-                new_name,
-                old_name,
-            };
-
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("renameNode validation failed: {e}");
+                async_graphql::Error::new("rename failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("renameNode failed: {e}");
                 async_graphql::Error::new("rename failed")
             })?;
@@ -418,19 +392,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_transform = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .transform;
-
             let cmd = SetTransform {
                 node_id,
                 new_transform,
-                old_transform,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setTransform validation failed: {e}");
+                async_graphql::Error::new("set transform failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setTransform failed: {e}");
                 async_graphql::Error::new("set transform failed")
             })?;
@@ -474,19 +445,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_visible = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .visible;
-
             let cmd = SetVisible {
                 node_id,
                 new_visible: visible,
-                old_visible,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setVisible validation failed: {e}");
+                async_graphql::Error::new("set visible failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setVisible failed: {e}");
                 async_graphql::Error::new("set visible failed")
             })?;
@@ -530,19 +498,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_locked = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .locked;
-
             let cmd = SetLocked {
                 node_id,
                 new_locked: locked,
-                old_locked,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setLocked validation failed: {e}");
+                async_graphql::Error::new("set locked failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setLocked failed: {e}");
                 async_graphql::Error::new("set locked failed")
             })?;
@@ -606,33 +571,18 @@ impl MutationRoot {
                 .id_by_uuid(&parent_uuid)
                 .ok_or_else(|| async_graphql::Error::new("parent not found"))?;
 
-            let old_parent_id = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .parent;
-            // RF-019: propagate error instead of silently suppressing with .ok()
-            let old_position = match old_parent_id {
-                Some(pid) => {
-                    let parent_node = doc_guard
-                        .arena
-                        .get(pid)
-                        .map_err(|_| async_graphql::Error::new("old parent node not found"))?;
-                    parent_node.children.iter().position(|&c| c == node_id)
-                }
-                None => None,
-            };
-
             // RF-014: positions beyond children count are clamped by the core engine.
             let cmd = ReparentNode {
                 node_id,
                 new_parent_id: parent_id,
                 new_position: position_usize,
-                old_parent_id,
-                old_position,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("reparentNode validation failed: {e}");
+                async_graphql::Error::new("reparent failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("reparentNode failed: {e}");
                 async_graphql::Error::new("reparent failed")
             })?;
@@ -695,31 +645,17 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            // Find the node's current parent and position within it
-            let parent_id = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .parent
-                .ok_or_else(|| async_graphql::Error::new("node has no parent"))?;
-
-            let old_position = doc_guard
-                .arena
-                .get(parent_id)
-                .map_err(|_| async_graphql::Error::new("parent lookup failed"))?
-                .children
-                .iter()
-                .position(|&c| c == node_id)
-                .ok_or_else(|| async_graphql::Error::new("node not found in parent's children"))?;
-
             // RF-014: positions beyond children count are clamped by the core engine.
             let cmd = ReorderChildren {
                 node_id,
                 new_position: new_position_usize,
-                old_position,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("reorderChildren validation failed: {e}");
+                async_graphql::Error::new("reorder failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("reorderChildren failed: {e}");
                 async_graphql::Error::new("reorder failed")
             })?;
@@ -782,21 +718,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_opacity = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .style
-                .opacity
-                .clone();
-
             let cmd = SetOpacity {
                 node_id,
                 new_opacity: StyleValue::Literal { value: opacity },
-                old_opacity,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setOpacity validation failed: {e}");
+                async_graphql::Error::new("set opacity failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setOpacity failed: {e}");
                 async_graphql::Error::new("set opacity failed")
             })?;
@@ -853,20 +784,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_blend_mode = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .style
-                .blend_mode;
-
             let cmd = SetBlendMode {
                 node_id,
                 new_blend_mode,
-                old_blend_mode,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setBlendMode validation failed: {e}");
+                async_graphql::Error::new("set blend mode failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setBlendMode failed: {e}");
                 async_graphql::Error::new("set blend mode failed")
             })?;
@@ -922,21 +849,13 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_fills = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .style
-                .fills
-                .clone();
+            let cmd = SetFills { node_id, new_fills };
 
-            let cmd = SetFills {
-                node_id,
-                new_fills,
-                old_fills,
-            };
-
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setFills validation failed: {e}");
+                async_graphql::Error::new("set fills failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setFills failed: {e}");
                 async_graphql::Error::new("set fills failed")
             })?;
@@ -987,21 +906,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_strokes = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .style
-                .strokes
-                .clone();
-
             let cmd = SetStrokes {
                 node_id,
                 new_strokes,
-                old_strokes,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setStrokes validation failed: {e}");
+                async_graphql::Error::new("set strokes failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setStrokes failed: {e}");
                 async_graphql::Error::new("set strokes failed")
             })?;
@@ -1057,21 +971,16 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let old_effects = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                .style
-                .effects
-                .clone();
-
             let cmd = SetEffects {
                 node_id,
                 new_effects,
-                old_effects,
             };
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setEffects validation failed: {e}");
+                async_graphql::Error::new("set effects failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setEffects failed: {e}");
                 async_graphql::Error::new("set effects failed")
             })?;
@@ -1139,27 +1048,13 @@ impl MutationRoot {
                 .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
-            let node = doc_guard
-                .arena
-                .get(node_id)
-                .map_err(|_| async_graphql::Error::new("node lookup failed"))?;
+            let cmd = SetCornerRadii { node_id, new_radii };
 
-            let old_radii = match &node.kind {
-                NodeKind::Rectangle { corner_radii } => *corner_radii,
-                _ => {
-                    return Err(async_graphql::Error::new(
-                        "setCornerRadii requires a Rectangle node",
-                    ));
-                }
-            };
-
-            let cmd = SetCornerRadii {
-                node_id,
-                new_radii,
-                old_radii,
-            };
-
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
+            cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("setCornerRadii validation failed: {e}");
+                async_graphql::Error::new("set corner radii failed")
+            })?;
+            cmd.apply(&mut doc_guard).map_err(|e| {
                 tracing::warn!("setCornerRadii failed: {e}");
                 async_graphql::Error::new("set corner radii failed")
             })?;
@@ -1241,34 +1136,35 @@ impl MutationRoot {
         let result_nodes = {
             let mut doc_guard = acquire_document_lock(state);
 
-            // Resolve UUIDs to NodeIds and capture old transforms
-            let mut cmd_entries = Vec::with_capacity(parsed_entries.len());
-            let mut old_transforms = Vec::with_capacity(parsed_entries.len());
-
+            // Validate all transforms before applying any (all-or-nothing semantics)
+            let mut resolved: Vec<(NodeId, Transform)> = Vec::with_capacity(parsed_entries.len());
             for (uuid, new_transform) in &parsed_entries {
                 let node_id = doc_guard
                     .arena
                     .id_by_uuid(uuid)
                     .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))?;
-                let old_transform = doc_guard
-                    .arena
-                    .get(node_id)
-                    .map_err(|_| async_graphql::Error::new("node lookup failed"))?
-                    .transform;
-                cmd_entries.push((node_id, *new_transform));
-                old_transforms.push((node_id, old_transform));
+                let cmd = SetTransform {
+                    node_id,
+                    new_transform: *new_transform,
+                };
+                cmd.validate(&doc_guard).map_err(|e| {
+                    tracing::warn!("batchSetTransform validation failed for {uuid}: {e}");
+                    async_graphql::Error::new("batch set transform validation failed")
+                })?;
+                resolved.push((node_id, *new_transform));
             }
 
-            // RF-006: Use validating constructor
-            let cmd = BatchSetTransform::new(cmd_entries, old_transforms).map_err(|e| {
-                tracing::warn!("batchSetTransform validation failed: {e}");
-                async_graphql::Error::new("batch set transform validation failed")
-            })?;
-
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
-                tracing::warn!("batchSetTransform failed: {e}");
-                async_graphql::Error::new("batch set transform failed")
-            })?;
+            // Apply all transforms
+            for (node_id, new_transform) in &resolved {
+                let cmd = SetTransform {
+                    node_id: *node_id,
+                    new_transform: *new_transform,
+                };
+                cmd.apply(&mut doc_guard).map_err(|e| {
+                    tracing::warn!("batchSetTransform apply failed: {e}");
+                    async_graphql::Error::new("batch set transform failed")
+                })?;
+            }
 
             // Build response inside lock scope (RF-005)
             let mut nodes = Vec::with_capacity(parsed_entries.len());
@@ -1313,6 +1209,7 @@ impl MutationRoot {
     /// Group multiple nodes under a new Group node.
     ///
     /// Returns the UUID of the created group node.
+    #[allow(clippy::too_many_lines)]
     async fn group_nodes(
         &self,
         ctx: &Context<'_>,
@@ -1335,6 +1232,7 @@ impl MutationRoot {
         {
             let mut doc_guard = acquire_document_lock(state);
 
+            // Resolve all child UUIDs to NodeIds
             let node_ids: Vec<NodeId> = parsed_uuids
                 .iter()
                 .map(|uuid| {
@@ -1345,15 +1243,77 @@ impl MutationRoot {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            let cmd = GroupNodes::new(node_ids, name, group_uuid).map_err(|e| {
-                tracing::warn!("groupNodes validation failed: {e}");
+            // Determine page and parent from the first child node
+            let first_node_parent = doc_guard
+                .arena
+                .get(node_ids[0])
+                .map_err(|_| async_graphql::Error::new("child lookup failed"))?
+                .parent;
+            let page_id = doc_guard.pages.iter().find_map(|page| {
+                if page.root_nodes.contains(&node_ids[0]) {
+                    Some(page.id)
+                } else {
+                    None
+                }
+            });
+
+            // Create the group node
+            let create_cmd = CreateNode {
+                node_id: NodeId::new(0, 0),
+                uuid: group_uuid,
+                kind: NodeKind::Group,
+                name,
+                page_id,
+                initial_transform: None,
+            };
+            create_cmd.validate(&doc_guard).map_err(|e| {
+                tracing::warn!("groupNodes create validation failed: {e}");
+                async_graphql::Error::new("group nodes failed")
+            })?;
+            create_cmd.apply(&mut doc_guard).map_err(|e| {
+                tracing::warn!("groupNodes create failed: {e}");
                 async_graphql::Error::new("group nodes failed")
             })?;
 
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
-                tracing::warn!("groupNodes failed: {e}");
-                async_graphql::Error::new("group nodes failed")
-            })?;
+            // Resolve the group's actual NodeId
+            let group_node_id = doc_guard
+                .arena
+                .id_by_uuid(&group_uuid)
+                .ok_or_else(|| async_graphql::Error::new("group node not found after creation"))?;
+
+            // If the first child had a parent, reparent the group under that parent
+            if let Some(parent_id) = first_node_parent {
+                let reparent_group = ReparentNode {
+                    node_id: group_node_id,
+                    new_parent_id: parent_id,
+                    new_position: 0,
+                };
+                reparent_group.validate(&doc_guard).map_err(|e| {
+                    tracing::warn!("groupNodes reparent group failed: {e}");
+                    async_graphql::Error::new("group nodes failed")
+                })?;
+                reparent_group.apply(&mut doc_guard).map_err(|e| {
+                    tracing::warn!("groupNodes reparent group failed: {e}");
+                    async_graphql::Error::new("group nodes failed")
+                })?;
+            }
+
+            // Reparent each child under the group
+            for (i, &child_id) in node_ids.iter().enumerate() {
+                let reparent_cmd = ReparentNode {
+                    node_id: child_id,
+                    new_parent_id: group_node_id,
+                    new_position: i,
+                };
+                reparent_cmd.validate(&doc_guard).map_err(|e| {
+                    tracing::warn!("groupNodes reparent child failed: {e}");
+                    async_graphql::Error::new("group nodes failed")
+                })?;
+                reparent_cmd.apply(&mut doc_guard).map_err(|e| {
+                    tracing::warn!("groupNodes reparent child failed: {e}");
+                    async_graphql::Error::new("group nodes failed")
+                })?;
+            }
         }
 
         // Build operations: create_node for the group + reparent for each child
@@ -1419,37 +1379,69 @@ impl MutationRoot {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // Collect child UUIDs before ungroup (for response)
+            // For each group: reparent children to the group's parent, then delete the group
             let mut all_child_uuids = Vec::new();
             for &gid in &group_ids {
                 let group = doc_guard
                     .arena
                     .get(gid)
                     .map_err(|_| async_graphql::Error::new("group lookup failed"))?;
-                for &cid in &group.children {
+                let group_parent = group.parent;
+                let children: Vec<NodeId> = group.children.clone();
+
+                // Collect child UUIDs for response
+                for &cid in &children {
                     let child_uuid = doc_guard
                         .arena
                         .uuid_of(cid)
                         .map_err(|_| async_graphql::Error::new("child uuid lookup failed"))?;
                     all_child_uuids.push(child_uuid.to_string());
                 }
+
+                // Reparent each child to the group's parent (or make it a root)
+                if let Some(parent_id) = group_parent {
+                    for (i, &cid) in children.iter().enumerate() {
+                        let reparent_cmd = ReparentNode {
+                            node_id: cid,
+                            new_parent_id: parent_id,
+                            new_position: i,
+                        };
+                        reparent_cmd.validate(&doc_guard).map_err(|e| {
+                            tracing::warn!("ungroupNodes reparent failed: {e}");
+                            async_graphql::Error::new("ungroup nodes failed")
+                        })?;
+                        reparent_cmd.apply(&mut doc_guard).map_err(|e| {
+                            tracing::warn!("ungroupNodes reparent failed: {e}");
+                            async_graphql::Error::new("ungroup nodes failed")
+                        })?;
+                    }
+                }
+
+                // Find which page the group is on (for DeleteNode)
+                let page_id = doc_guard.pages.iter().find_map(|page| {
+                    if page.root_nodes.contains(&gid) {
+                        Some(page.id)
+                    } else {
+                        None
+                    }
+                });
+
+                // Delete the group node
+                let delete_cmd = DeleteNode {
+                    node_id: gid,
+                    page_id,
+                };
+                delete_cmd.validate(&doc_guard).map_err(|e| {
+                    tracing::warn!("ungroupNodes delete failed: {e}");
+                    async_graphql::Error::new("ungroup nodes failed")
+                })?;
+                delete_cmd.apply(&mut doc_guard).map_err(|e| {
+                    tracing::warn!("ungroupNodes delete failed: {e}");
+                    async_graphql::Error::new("ungroup nodes failed")
+                })?;
             }
 
-            // RF-003/RF-006: Use validating constructor. Snapshots are now
-            // captured automatically inside apply() via interior mutability.
-            let cmd = UngroupNodes::new(group_ids, parsed_uuids.clone()).map_err(|e| {
-                tracing::warn!("ungroupNodes validation failed: {e}");
-                async_graphql::Error::new("ungroup nodes validation failed")
-            })?;
-
-            doc_guard.execute(Box::new(cmd)).map_err(|e| {
-                tracing::warn!("ungroupNodes failed: {e}");
-                async_graphql::Error::new("ungroup nodes failed")
-            })?;
-
-            // RF-003: After ungroup, read each child's new parent UUID and
-            // position so the broadcast payload carries the data that
-            // applyReparent expects.
+            // Build reparent operation payloads for broadcast
             let mut ops = build_ungroup_reparent_ops(&doc_guard, &all_child_uuids)?;
             for group_uuid in &parsed_uuids {
                 ops.push(OperationPayload {
@@ -1472,56 +1464,6 @@ impl MutationRoot {
         );
 
         Ok(child_uuids)
-    }
-
-    /// Undo the last command.
-    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
-    async fn undo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
-        let state = ctx.data::<ServerState>()?;
-
-        let (can_undo, can_redo) = {
-            let mut doc_guard = acquire_document_lock(state);
-            doc_guard.undo().map_err(|e| {
-                tracing::warn!("undo failed: {e}");
-                async_graphql::Error::new("undo failed")
-            })?;
-            (doc_guard.can_undo(), doc_guard.can_redo())
-        };
-
-        state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::UndoRedo,
-            uuid: None,
-            data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
-            transaction: None,
-        });
-
-        Ok(UndoRedoResult { can_undo, can_redo })
-    }
-
-    /// Redo the last undone command.
-    // TODO(Phase 15d): undo/redo handlers must emit TransactionPayload once server-side undo is removed
-    async fn redo(&self, ctx: &Context<'_>) -> Result<UndoRedoResult> {
-        let state = ctx.data::<ServerState>()?;
-
-        let (can_undo, can_redo) = {
-            let mut doc_guard = acquire_document_lock(state);
-            doc_guard.redo().map_err(|e| {
-                tracing::warn!("redo failed: {e}");
-                async_graphql::Error::new("redo failed")
-            })?;
-            (doc_guard.can_undo(), doc_guard.can_redo())
-        };
-
-        state.app.signal_dirty();
-        state.app.publish_event(MutationEvent {
-            kind: MutationEventKind::UndoRedo,
-            uuid: None,
-            data: Some(serde_json::json!({"can_undo": can_undo, "can_redo": can_redo})),
-            transaction: None,
-        });
-
-        Ok(UndoRedoResult { can_undo, can_redo })
     }
 }
 
@@ -1756,74 +1698,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_undo_redo_mutations_round_trip() {
-        let state = ServerState::new();
-        let schema = test_schema(state);
-
-        // Create a node (pushes to undo stack)
-        let create_res = schema
-            .execute(
-                r#"mutation { createNode(kind: { type: "group" }, name: "Undo Me") { uuid } }"#,
-            )
-            .await;
-        assert!(create_res.errors.is_empty());
-
-        let uuid_str = create_res.data.into_json().unwrap()["createNode"]["uuid"]
-            .as_str()
-            .unwrap()
-            .to_string();
-
-        // Undo
-        let undo_res = schema
-            .execute(r#"mutation { undo { canUndo canRedo } }"#)
-            .await;
-        assert!(undo_res.errors.is_empty(), "errors: {:?}", undo_res.errors);
-
-        let undo_data = undo_res.data.into_json().unwrap();
-        assert!(undo_data["undo"]["canRedo"].as_bool().unwrap());
-
-        // Verify node is gone after undo
-        let node_query = format!(r#"{{ node(uuid: "{uuid_str}") {{ name }} }}"#);
-        let node_res = schema.execute(&*node_query).await;
-        assert!(node_res.errors.is_empty());
-        assert!(node_res.data.into_json().unwrap()["node"].is_null());
-
-        // Redo
-        let redo_res = schema
-            .execute(r#"mutation { redo { canUndo canRedo } }"#)
-            .await;
-        assert!(redo_res.errors.is_empty(), "errors: {:?}", redo_res.errors);
-
-        let redo_data = redo_res.data.into_json().unwrap();
-        assert!(redo_data["redo"]["canUndo"].as_bool().unwrap());
-
-        // Verify node is back after redo
-        let node_res2 = schema.execute(&*node_query).await;
-        assert!(node_res2.errors.is_empty());
-        assert_eq!(
-            node_res2.data.into_json().unwrap()["node"]["name"],
-            "Undo Me"
-        );
-    }
-
-    #[tokio::test]
     async fn test_delete_node_with_invalid_uuid_returns_error() {
         let state = ServerState::new();
         let schema = test_schema(state);
 
         let res = schema
             .execute(r#"mutation { deleteNode(uuid: "not-a-uuid") }"#)
-            .await;
-        assert!(!res.errors.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_undo_on_empty_history_returns_error() {
-        let state = ServerState::new();
-        let schema = test_schema(state);
-
-        let res = schema
-            .execute(r#"mutation { undo { canUndo canRedo } }"#)
             .await;
         assert!(!res.errors.is_empty());
     }
