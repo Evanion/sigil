@@ -17,7 +17,6 @@ pub mod serialize;
 pub mod token;
 pub mod tree;
 pub mod validate;
-pub mod wire;
 
 // ── Re-exports: Error ──────────────────────────────────────────────────
 pub use error::CoreError;

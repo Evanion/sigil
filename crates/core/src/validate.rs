@@ -61,9 +61,6 @@ pub const MAX_PAGE_NAME_LEN: usize = 256;
 /// Maximum pages per document.
 pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 
-/// Default maximum history size (undo/redo).
-pub const DEFAULT_MAX_HISTORY: usize = 500;
-
 /// Maximum number of tokens per document.
 pub const MAX_TOKENS_PER_CONTEXT: usize = 50_000;
 

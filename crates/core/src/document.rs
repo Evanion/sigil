@@ -71,6 +71,7 @@ pub struct Document {
     pub transitions: Vec<Transition>,
     pub token_context: TokenContext,
     pub layout_engine: LayoutEngine,
+    seq: u64,
 }
 
 impl Document {
@@ -85,6 +86,7 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
+            seq: 0,
         }
     }
 
@@ -99,7 +101,21 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
+            seq: 0,
         }
+    }
+
+    /// Returns the current sequence number.
+    #[must_use]
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Increments and returns the next sequence number.
+    /// Called by the server after committing a transaction.
+    pub fn next_seq(&mut self) -> u64 {
+        self.seq += 1;
+        self.seq
     }
 
     /// Adds a page to the document.
@@ -628,5 +644,21 @@ mod tests {
         )
         .expect("valid");
         assert!(doc.add_component(overflow).is_err());
+    }
+
+    // ── Sequence counter ─────────────────────────────────────────────
+
+    #[test]
+    fn test_document_seq_starts_at_zero() {
+        let doc = Document::new("Test".to_string());
+        assert_eq!(doc.seq(), 0);
+    }
+
+    #[test]
+    fn test_document_next_seq_increments() {
+        let mut doc = Document::new("Test".to_string());
+        assert_eq!(doc.next_seq(), 1);
+        assert_eq!(doc.next_seq(), 2);
+        assert_eq!(doc.seq(), 2);
     }
 }
