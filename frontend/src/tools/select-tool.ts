@@ -216,7 +216,6 @@ export function createSelectTool(store: ToolStore): Tool & {
             previewTransforms = [];
             snapGuides = [];
             prepareSnap(new Set(selectedUuids));
-            store.beginDrag(selectedUuids[0], "transform");
             return;
           }
         }
@@ -241,7 +240,6 @@ export function createSelectTool(store: ToolStore): Tool & {
             previewTransforms = [];
             snapGuides = [];
             prepareSnap(new Set([selectedId]));
-            store.beginDrag(selectedId, "transform");
             return;
           }
         }
@@ -294,7 +292,6 @@ export function createSelectTool(store: ToolStore): Tool & {
             previewTransforms = [];
             snapGuides = [];
             prepareSnap(new Set(movingUuids));
-            store.beginDrag(movingUuids[0], "transform");
           } else {
             // RF-014: Use only setSelectedNodeIds — the derived selectedNodeId signal
             // provides backward compatibility automatically.
@@ -311,7 +308,6 @@ export function createSelectTool(store: ToolStore): Tool & {
             previewTransforms = [];
             snapGuides = [];
             prepareSnap(new Set([hit.uuid]));
-            store.beginDrag(hit.uuid, "transform");
           }
         }
       } else {
@@ -507,7 +503,6 @@ export function createSelectTool(store: ToolStore): Tool & {
       }
 
       if (state.kind === "moving" || state.kind === "resizing") {
-        store.commitDrag();
         if (previewTransforms.length > 0) {
           if (previewTransforms.length === 1) {
             // Single node: use setTransform for backward compatibility
@@ -533,10 +528,6 @@ export function createSelectTool(store: ToolStore): Tool & {
       // TODO(a11y): Add Alt+Arrow resize nudge for keyboard accessibility
       // TODO(a11y): Add Arrow key nudge for multi-select move
       if (key === "Escape" && state.kind !== "idle") {
-        // Cancel active drag before resetting to idle
-        if (state.kind === "moving" || state.kind === "resizing") {
-          store.cancelDrag();
-        }
         resetToIdle();
       }
     },

@@ -31,11 +31,4 @@ export interface ToolStore {
   setSelectedNodeIds(ids: string[]): void;
   /** Multi-select: commits transforms for multiple nodes in a single batch operation. */
   batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
-
-  /** Begin a drag operation for coalescing multiple updates into a single undo step. */
-  beginDrag(nodeUuid: string, path: string): void;
-  /** Commit the current drag as a single coalesced undo step. */
-  commitDrag(): void;
-  /** Cancel the current drag without creating an undo step. */
-  cancelDrag(): void;
 }

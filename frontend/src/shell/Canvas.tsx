@@ -77,15 +77,6 @@ function createStoreAdapter(
     batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
       store.batchSetTransform(entries);
     },
-    beginDrag(nodeUuid: string, path: string): void {
-      store.beginDrag(nodeUuid, path);
-    },
-    commitDrag(): void {
-      store.commitDrag();
-    },
-    cancelDrag(): void {
-      store.cancelDrag();
-    },
   };
 }
 

@@ -50,9 +50,6 @@ function createMockStore(
     ungroupNodes: vi.fn(),
     undo: vi.fn(),
     redo: vi.fn(),
-    beginDrag: vi.fn(),
-    commitDrag: vi.fn(),
-    cancelDrag: vi.fn(),
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }
