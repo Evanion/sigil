@@ -1,7 +1,88 @@
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, OneofObject, SimpleObject};
 
 use agent_designer_core::{Document, NodeId};
 use agent_designer_state::{MutationEvent, MutationEventKind, TransactionPayload};
+
+// ── OneofObject input types for applyOperations ──────────────────────
+
+/// Type-safe discriminated union for operation inputs.
+///
+/// Uses `@oneOf` — exactly one variant must be provided per input.
+/// This replaces 16+ individual GraphQL mutations with a single endpoint.
+#[derive(OneofObject)]
+pub enum OperationInput {
+    /// Set a field on an existing node (transform, name, style properties, etc.).
+    SetField(SetFieldInput),
+    /// Create a new node in the document.
+    CreateNode(CreateNodeInput),
+    /// Delete a node from the document.
+    DeleteNode(DeleteNodeInput),
+    /// Reparent a node under a new parent.
+    Reparent(ReparentInput),
+    /// Reorder a node within its parent's children list.
+    Reorder(ReorderInput),
+}
+
+/// Input for setting a field on an existing node.
+#[derive(InputObject)]
+pub struct SetFieldInput {
+    /// UUID of the target node.
+    pub node_uuid: String,
+    /// Field path: "transform", "name", "visible", "locked", "style.fills",
+    /// `"style.strokes"`, `"style.effects"`, `"style.opacity"`, `"style.blend_mode"`, `"kind"`
+    pub path: String,
+    /// New value as JSON (shape depends on the field path).
+    pub value: String,
+}
+
+/// Input for creating a new node.
+#[derive(InputObject)]
+pub struct CreateNodeInput {
+    /// Pre-generated UUID for the new node.
+    pub node_uuid: String,
+    /// Node kind as JSON (e.g., `{"type": "rectangle", "corner_radii": [0,0,0,0]}`).
+    pub kind: String,
+    /// Display name for the new node.
+    pub name: String,
+    /// Optional initial transform as JSON.
+    pub transform: Option<String>,
+    /// Optional page UUID to add the node to.
+    pub page_id: Option<String>,
+}
+
+/// Input for deleting a node.
+#[derive(InputObject)]
+pub struct DeleteNodeInput {
+    /// UUID of the node to delete.
+    pub node_uuid: String,
+}
+
+/// Input for reparenting a node.
+#[derive(InputObject)]
+pub struct ReparentInput {
+    /// UUID of the node to reparent.
+    pub node_uuid: String,
+    /// UUID of the new parent node.
+    pub new_parent_uuid: String,
+    /// Position within the new parent's children list.
+    pub position: i32,
+}
+
+/// Input for reordering a node within its parent.
+#[derive(InputObject)]
+pub struct ReorderInput {
+    /// UUID of the node to reorder.
+    pub node_uuid: String,
+    /// Target position within the parent's children list.
+    pub new_position: i32,
+}
+
+/// Result returned by `applyOperations`.
+#[derive(SimpleObject)]
+pub struct ApplyOperationsResult {
+    /// Server-assigned sequence number (string because GraphQL Int is i32, seq is u64).
+    pub seq: String,
+}
 
 /// Discriminator for document change events.
 ///
