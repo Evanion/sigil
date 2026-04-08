@@ -540,15 +540,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Structural ops send immediately — they MUST reach the server before any
     // undo attempt. Field changes (coalesced via pendingServerOps) can be deferred,
     // but create/delete cannot.
-    sendOps([{
-      createNode: {
-        nodeUuid: optimisticUuid,
-        kind: JSON.stringify(kind),
-        name,
-        transform: JSON.stringify(transform),
-        pageId,
+    sendOps([
+      {
+        createNode: {
+          nodeUuid: optimisticUuid,
+          kind: JSON.stringify(kind),
+          name,
+          transform: JSON.stringify(transform),
+          pageId,
+        },
       },
-    }]);
+    ]);
 
     return optimisticUuid;
   }
