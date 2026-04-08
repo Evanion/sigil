@@ -56,9 +56,6 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     undo: () => {},
     redo: () => {},
     destroy: () => {},
-    beginDrag: () => {},
-    commitDrag: () => {},
-    cancelDrag: () => {},
     ...overrides,
   } as DocumentStoreAPI;
 }

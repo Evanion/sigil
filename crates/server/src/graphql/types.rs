@@ -1,7 +1,88 @@
-use async_graphql::SimpleObject;
+use async_graphql::{InputObject, OneofObject, SimpleObject};
 
 use agent_designer_core::{Document, NodeId};
 use agent_designer_state::{MutationEvent, MutationEventKind, TransactionPayload};
+
+// ── OneofObject input types for applyOperations ──────────────────────
+
+/// Type-safe discriminated union for operation inputs.
+///
+/// Uses `@oneOf` — exactly one variant must be provided per input.
+/// This replaces 16+ individual GraphQL mutations with a single endpoint.
+#[derive(OneofObject)]
+pub enum OperationInput {
+    /// Set a field on an existing node (transform, name, style properties, etc.).
+    SetField(SetFieldInput),
+    /// Create a new node in the document.
+    CreateNode(CreateNodeInput),
+    /// Delete a node from the document.
+    DeleteNode(DeleteNodeInput),
+    /// Reparent a node under a new parent.
+    Reparent(ReparentInput),
+    /// Reorder a node within its parent's children list.
+    Reorder(ReorderInput),
+}
+
+/// Input for setting a field on an existing node.
+#[derive(InputObject)]
+pub struct SetFieldInput {
+    /// UUID of the target node.
+    pub node_uuid: String,
+    /// Field path: "transform", "name", "visible", "locked", "style.fills",
+    /// `"style.strokes"`, `"style.effects"`, `"style.opacity"`, `"style.blend_mode"`, `"kind"`
+    pub path: String,
+    /// New value as JSON (shape depends on the field path).
+    pub value: String,
+}
+
+/// Input for creating a new node.
+#[derive(InputObject)]
+pub struct CreateNodeInput {
+    /// Pre-generated UUID for the new node.
+    pub node_uuid: String,
+    /// Node kind as JSON (e.g., `{"type": "rectangle", "corner_radii": [0,0,0,0]}`).
+    pub kind: String,
+    /// Display name for the new node.
+    pub name: String,
+    /// Optional initial transform as JSON.
+    pub transform: Option<String>,
+    /// Optional page UUID to add the node to.
+    pub page_id: Option<String>,
+}
+
+/// Input for deleting a node.
+#[derive(InputObject)]
+pub struct DeleteNodeInput {
+    /// UUID of the node to delete.
+    pub node_uuid: String,
+}
+
+/// Input for reparenting a node.
+#[derive(InputObject)]
+pub struct ReparentInput {
+    /// UUID of the node to reparent.
+    pub node_uuid: String,
+    /// UUID of the new parent node.
+    pub new_parent_uuid: String,
+    /// Position within the new parent's children list.
+    pub position: i32,
+}
+
+/// Input for reordering a node within its parent.
+#[derive(InputObject)]
+pub struct ReorderInput {
+    /// UUID of the node to reorder.
+    pub node_uuid: String,
+    /// Target position within the parent's children list.
+    pub new_position: i32,
+}
+
+/// Result returned by `applyOperations`.
+#[derive(SimpleObject)]
+pub struct ApplyOperationsResult {
+    /// Server-assigned sequence number (string because GraphQL Int is i32, seq is u64).
+    pub seq: String,
+}
 
 /// Discriminator for document change events.
 ///
@@ -15,8 +96,6 @@ pub enum DocumentEventType {
     NodeUpdated,
     /// A node was removed from the document.
     NodeDeleted,
-    /// An undo or redo operation was performed.
-    UndoRedo,
     /// A new page was created.
     PageCreated,
     /// A page's properties were updated.
@@ -63,7 +142,6 @@ pub fn event_type_from_kind(kind: MutationEventKind) -> DocumentEventType {
         MutationEventKind::NodeCreated => DocumentEventType::NodeCreated,
         MutationEventKind::NodeUpdated => DocumentEventType::NodeUpdated,
         MutationEventKind::NodeDeleted => DocumentEventType::NodeDeleted,
-        MutationEventKind::UndoRedo => DocumentEventType::UndoRedo,
         MutationEventKind::PageCreated => DocumentEventType::PageCreated,
         MutationEventKind::PageUpdated => DocumentEventType::PageUpdated,
         MutationEventKind::PageDeleted => DocumentEventType::PageDeleted,
@@ -186,8 +264,6 @@ pub struct DocumentInfoGql {
     pub name: String,
     pub page_count: usize,
     pub node_count: usize,
-    pub can_undo: bool,
-    pub can_redo: bool,
 }
 
 /// GraphQL representation of a serialized node.
@@ -210,20 +286,6 @@ pub struct PageGql {
     pub id: String,
     pub name: String,
     pub nodes: Vec<NodeGql>,
-}
-
-/// Result of an undo/redo operation.
-#[derive(SimpleObject)]
-pub struct UndoRedoResult {
-    pub can_undo: bool,
-    pub can_redo: bool,
-}
-
-/// Result of node creation.
-#[derive(SimpleObject)]
-pub struct CreateNodeResult {
-    pub uuid: String,
-    pub node: NodeGql,
 }
 
 /// Reads a node from the arena and converts it to a [`NodeGql`] representation.
@@ -381,9 +443,9 @@ mod tests {
     #[test]
     fn test_from_mutation_event_without_transaction_falls_back() {
         let mutation = MutationEvent {
-            kind: MutationEventKind::UndoRedo,
+            kind: MutationEventKind::NodeUpdated,
             uuid: None,
-            data: Some(serde_json::json!({"can_undo": true})),
+            data: Some(serde_json::json!({"field": "transform"})),
             transaction: None,
         };
 
@@ -398,7 +460,7 @@ mod tests {
             event.operations.is_empty(),
             "legacy fallback should have no operations"
         );
-        assert_eq!(event.event_type, DocumentEventType::UndoRedo);
+        assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
         assert!(event.uuid.is_none());
     }
 
@@ -417,7 +479,6 @@ mod tests {
                 MutationEventKind::NodeDeleted,
                 DocumentEventType::NodeDeleted,
             ),
-            (MutationEventKind::UndoRedo, DocumentEventType::UndoRedo),
             (
                 MutationEventKind::PageCreated,
                 DocumentEventType::PageCreated,

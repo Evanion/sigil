@@ -40,6 +40,13 @@ export interface Operation {
   seq: number;
 }
 
+/** Side-effect context snapshot (restored on undo/redo). */
+export interface SideEffectContext {
+  readonly selectedNodeIds: string[];
+  readonly activeTool: string;
+  readonly viewport: { readonly x: number; readonly y: number; readonly zoom: number };
+}
+
 /**
  * A group of operations that form a single undo step.
  *
@@ -58,6 +65,8 @@ export interface Transaction {
   readonly timestamp: number;
   // INTENTIONAL: mutable — server assigns seq after creation
   seq: number;
+  /** RF-019: Type-safe side-effect context for undo/redo restoration. */
+  sideEffectContext?: SideEffectContext;
 }
 
 /**

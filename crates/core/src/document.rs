@@ -1,10 +1,9 @@
 // crates/core/src/document.rs
 
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use crate::arena::Arena;
-use crate::command::{Command, SideEffect};
 use crate::error::CoreError;
 use crate::id::{ComponentId, NodeId, PageId};
 pub use crate::prototype::Transition;
@@ -55,52 +54,6 @@ impl Page {
 pub use crate::component::ComponentDef;
 pub use crate::token::TokenContext;
 
-/// Undo/redo history for the document.
-///
-/// Commands are pushed to the undo stack on execute. Undo pops from
-/// undo and pushes to redo. Redo pops from redo and pushes to undo.
-/// Executing a new command clears the redo stack.
-/// FIFO eviction when undo stack exceeds `max_history`.
-#[derive(Debug)]
-#[allow(clippy::struct_field_names)]
-pub struct History {
-    undo_stack: VecDeque<Box<dyn Command>>,
-    redo_stack: VecDeque<Box<dyn Command>>,
-    max_history: usize,
-}
-
-impl History {
-    #[must_use]
-    pub fn new(max_history: usize) -> Self {
-        Self {
-            undo_stack: VecDeque::new(),
-            redo_stack: VecDeque::new(),
-            max_history: max_history.max(1),
-        }
-    }
-
-    #[must_use]
-    pub fn max_history(&self) -> usize {
-        self.max_history
-    }
-
-    #[must_use]
-    pub fn can_undo(&self) -> bool {
-        !self.undo_stack.is_empty()
-    }
-
-    #[must_use]
-    pub fn can_redo(&self) -> bool {
-        !self.redo_stack.is_empty()
-    }
-}
-
-impl Default for History {
-    fn default() -> Self {
-        Self::new(crate::validate::DEFAULT_MAX_HISTORY)
-    }
-}
-
 /// Stub for layout engine — Plan 01b will fill this in.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutEngine;
@@ -109,7 +62,7 @@ pub struct LayoutEngine;
 ///
 /// All mutations go through commands executed on the document (Plan 01b).
 /// For Plan 01a, the document provides direct access to the arena and pages.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Document {
     pub metadata: DocumentMetadata,
     pub arena: Arena,
@@ -117,7 +70,6 @@ pub struct Document {
     pub components: HashMap<ComponentId, ComponentDef>,
     pub transitions: Vec<Transition>,
     pub token_context: TokenContext,
-    pub history: History,
     pub layout_engine: LayoutEngine,
 }
 
@@ -132,7 +84,6 @@ impl Document {
             components: HashMap::new(),
             transitions: Vec::new(),
             token_context: TokenContext::default(),
-            history: History::default(),
             layout_engine: LayoutEngine,
         }
     }
@@ -147,7 +98,6 @@ impl Document {
             components: HashMap::new(),
             transitions: Vec::new(),
             token_context: TokenContext::default(),
-            history: History::default(),
             layout_engine: LayoutEngine,
         }
     }
@@ -191,27 +141,6 @@ impl Document {
         Ok(())
     }
 
-    /// Restores a component definition (for undo paths).
-    ///
-    /// Skips the duplicate ID check but keeps the capacity check.
-    ///
-    /// # Errors
-    /// Returns `CoreError::ValidationError` if the document already has the maximum
-    /// number of components.
-    pub fn restore_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
-        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT
-            && !self.components.contains_key(&def.id())
-        {
-            return Err(CoreError::ValidationError(format!(
-                "document already has {} components (maximum {})",
-                self.components.len(),
-                crate::validate::MAX_COMPONENTS_PER_DOCUMENT
-            )));
-        }
-        self.components.insert(def.id(), def);
-        Ok(())
-    }
-
     /// Adds a transition to the document.
     ///
     /// # Errors
@@ -229,31 +158,6 @@ impl Document {
             )));
         }
         if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT {
-            return Err(CoreError::ValidationError(format!(
-                "document already has {} transitions (maximum {})",
-                self.transitions.len(),
-                crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
-            )));
-        }
-        self.transitions.push(transition);
-        Ok(())
-    }
-
-    /// Restores a transition (for undo paths).
-    ///
-    /// Validates the transition and checks capacity, but skips the duplicate ID check.
-    ///
-    /// # Errors
-    /// Returns `CoreError::ValidationError` if the transition is invalid or the document
-    /// is at capacity.
-    pub fn restore_transition(
-        &mut self,
-        transition: crate::prototype::Transition,
-    ) -> Result<(), CoreError> {
-        crate::prototype::validate_transition(&transition)?;
-        if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
-            && !self.transitions.iter().any(|t| t.id == transition.id)
-        {
             return Err(CoreError::ValidationError(format!(
                 "document already has {} transitions (maximum {})",
                 self.transitions.len(),
@@ -320,80 +224,6 @@ impl Document {
             page.root_nodes.push(node_id);
         }
         Ok(())
-    }
-
-    /// Executes a command, pushing it to the undo stack.
-    /// Clears the redo stack. Evicts oldest command if stack exceeds `max_history`.
-    ///
-    /// # Errors
-    /// Returns `CoreError` if the command's `apply` fails.
-    pub fn execute(&mut self, cmd: Box<dyn Command>) -> Result<Vec<SideEffect>, CoreError> {
-        let effects = cmd.apply(self)?;
-        for effect in &effects {
-            effect.validate()?;
-        }
-        self.history.redo_stack.clear();
-        self.history.undo_stack.push_back(cmd);
-        if self.history.undo_stack.len() > self.history.max_history {
-            self.history.undo_stack.pop_front();
-        }
-        Ok(effects)
-    }
-
-    /// Undoes the most recent command.
-    ///
-    /// # Errors
-    /// Returns `CoreError::NothingToUndo` if the undo stack is empty.
-    pub fn undo(&mut self) -> Result<Vec<SideEffect>, CoreError> {
-        let cmd = self
-            .history
-            .undo_stack
-            .pop_back()
-            .ok_or(CoreError::NothingToUndo)?;
-        match cmd.undo(self) {
-            Ok(effects) => {
-                self.history.redo_stack.push_back(cmd);
-                Ok(effects)
-            }
-            Err(e) => {
-                self.history.undo_stack.push_back(cmd);
-                Err(e)
-            }
-        }
-    }
-
-    /// Redoes the most recently undone command.
-    ///
-    /// # Errors
-    /// Returns `CoreError::NothingToRedo` if the redo stack is empty.
-    pub fn redo(&mut self) -> Result<Vec<SideEffect>, CoreError> {
-        let cmd = self
-            .history
-            .redo_stack
-            .pop_back()
-            .ok_or(CoreError::NothingToRedo)?;
-        match cmd.apply(self) {
-            Ok(effects) => {
-                self.history.undo_stack.push_back(cmd);
-                Ok(effects)
-            }
-            Err(e) => {
-                self.history.redo_stack.push_back(cmd);
-                Err(e)
-            }
-        }
-    }
-
-    /// Returns true if there are commands that can be undone.
-    #[must_use]
-    pub fn can_undo(&self) -> bool {
-        self.history.can_undo()
-    }
-
-    /// Returns true if there are commands that can be redone.
-    #[must_use]
-    pub fn can_redo(&self) -> bool {
-        self.history.can_redo()
     }
 }
 
@@ -552,18 +382,6 @@ mod tests {
     }
 
     #[test]
-    fn test_history_default() {
-        let h = History::default();
-        assert_eq!(h.max_history(), crate::validate::DEFAULT_MAX_HISTORY);
-    }
-
-    #[test]
-    fn test_history_custom() {
-        let h = History::new(100);
-        assert_eq!(h.max_history(), 100);
-    }
-
-    #[test]
     fn test_page_serde_round_trip() {
         let page = Page::new(PageId::new(make_uuid(1)), "Home".to_string()).expect("create page");
         let json = serde_json::to_string(&page).expect("serialize");
@@ -577,275 +395,6 @@ mod tests {
         let json = serde_json::to_string(&meta).expect("serialize");
         let deserialized: DocumentMetadata = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(meta, deserialized);
-    }
-
-    #[test]
-    fn test_undo_empty_returns_error() {
-        let mut doc = Document::new("Test".to_string());
-        let result = doc.undo();
-        assert!(matches!(result, Err(CoreError::NothingToUndo)));
-    }
-
-    #[test]
-    fn test_redo_empty_returns_error() {
-        let mut doc = Document::new("Test".to_string());
-        let result = doc.redo();
-        assert!(matches!(result, Err(CoreError::NothingToRedo)));
-    }
-
-    #[test]
-    fn test_execute_pushes_to_undo_stack() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        // We'll use a simple test command — SetVisible
-        let cmd = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert!(!doc.arena.get(node_id).expect("get node").visible);
-        assert!(doc.can_undo());
-        assert!(!doc.can_redo());
-    }
-
-    #[test]
-    fn test_undo_reverses_command() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        let cmd = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert!(!doc.arena.get(node_id).expect("get node").visible);
-
-        doc.undo().expect("undo");
-        assert!(doc.arena.get(node_id).expect("get node").visible);
-        assert!(!doc.can_undo());
-        assert!(doc.can_redo());
-    }
-
-    #[test]
-    fn test_redo_reapplies_command() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        let cmd = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-
-        doc.execute(Box::new(cmd)).expect("execute");
-        doc.undo().expect("undo");
-        doc.redo().expect("redo");
-        assert!(!doc.arena.get(node_id).expect("get node").visible);
-        assert!(doc.can_undo());
-        assert!(!doc.can_redo());
-    }
-
-    #[test]
-    fn test_execute_clears_redo_stack() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        let cmd1 = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-        let cmd2 = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: true,
-            old_visible: false,
-        };
-
-        doc.execute(Box::new(cmd1)).expect("execute cmd1");
-        doc.undo().expect("undo cmd1");
-        assert!(doc.can_redo());
-
-        doc.execute(Box::new(cmd2)).expect("execute cmd2");
-        assert!(!doc.can_redo()); // redo stack cleared
-    }
-
-    #[test]
-    fn test_history_eviction_fifo() {
-        let mut doc = Document::new("Test".to_string());
-        doc.history = History::new(2); // max 2 undo entries
-
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        // Execute 3 commands with max_history=2
-        for i in 0..3u8 {
-            let cmd = crate::commands::node_commands::RenameNode {
-                node_id,
-                new_name: format!("Name {i}"),
-                old_name: if i == 0 {
-                    "Frame".to_string()
-                } else {
-                    format!("Name {}", i - 1)
-                },
-            };
-            doc.execute(Box::new(cmd)).expect("execute");
-        }
-
-        // Only 2 undos should be possible (oldest evicted)
-        assert!(doc.undo().is_ok()); // undo "Name 2" -> "Name 1"
-        assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
-        assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
-    }
-
-    #[test]
-    fn test_failed_undo_preserves_command() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        // Execute a SetVisible command so it lands on the undo stack
-        let cmd = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert!(doc.can_undo());
-
-        // Remove the node from the arena so that undo will fail
-        // (the command tries to get_mut on a node that no longer exists)
-        doc.arena.remove(node_id).expect("remove node");
-
-        // Undo should fail because the node is gone
-        let result = doc.undo();
-        assert!(result.is_err());
-
-        // The command must still be on the undo stack — not lost
-        assert!(doc.can_undo());
-    }
-
-    #[test]
-    fn test_failed_redo_preserves_command() {
-        let mut doc = Document::new("Test".to_string());
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        // Execute then undo so the command lands on the redo stack
-        let cmd = crate::commands::node_commands::SetVisible {
-            node_id,
-            new_visible: false,
-            old_visible: true,
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        doc.undo().expect("undo");
-        assert!(doc.can_redo());
-
-        // Remove the node from the arena so that redo (apply) will fail
-        doc.arena.remove(node_id).expect("remove node");
-
-        // Redo should fail because the node is gone
-        let result = doc.redo();
-        assert!(result.is_err());
-
-        // The command must still be on the redo stack — not lost
-        assert!(doc.can_redo());
-    }
-
-    #[test]
-    fn test_history_eviction_at_min_capacity_1() {
-        let mut doc = Document::new("Test".to_string());
-        doc.history = History::new(1);
-
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame { layout: None },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-
-        // Execute 2 commands with max_history=1
-        let cmd1 = crate::commands::node_commands::RenameNode {
-            node_id,
-            new_name: "Name 0".to_string(),
-            old_name: "Frame".to_string(),
-        };
-        doc.execute(Box::new(cmd1)).expect("execute cmd1");
-
-        let cmd2 = crate::commands::node_commands::RenameNode {
-            node_id,
-            new_name: "Name 1".to_string(),
-            old_name: "Name 0".to_string(),
-        };
-        doc.execute(Box::new(cmd2)).expect("execute cmd2");
-
-        // Only 1 undo should be possible (the oldest was evicted)
-        assert!(doc.undo().is_ok()); // undo "Name 1" -> "Name 0"
-        assert!(doc.undo().is_err()); // nothing left — "Name 0" -> "Frame" was evicted
-    }
-
-    #[test]
-    fn test_history_min_capacity_enforced() {
-        let h = History::new(0);
-        assert_eq!(h.max_history(), 1, "max_history must be at least 1");
-
-        let h2 = History::new(1);
-        assert_eq!(h2.max_history(), 1);
-
-        let h3 = History::new(100);
-        assert_eq!(h3.max_history(), 100);
     }
 
     // ── Transition mutation API ────────────────────────────────────────

@@ -20,7 +20,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       frontend: ${{ steps.filter.outputs.frontend }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
         id: filter
@@ -36,6 +36,7 @@ jobs:
               - '.github/workflows/ci.yml'
             frontend:
               - 'frontend/**'
+              - '.node-version'
               - '.github/workflows/ci.yml'
 
   rust:
@@ -47,24 +48,24 @@ jobs:
       contents: read
       checks: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: "1.94.1"
           components: clippy, rustfmt
 
       - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           cache-on-failure: true
 
       - name: Install nextest
-        uses: taiki-e/install-action@nextest
+        uses: taiki-e/install-action@2b15ad09ca0f06a76791407e35ab20f0b712d615 # nextest
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@e3f5de9dc07635c0989e7620a8768b93e675db16 # cargo-llvm-cov
 
       - name: Check
         run: cargo check --workspace
@@ -79,7 +80,7 @@ jobs:
         run: cargo llvm-cov nextest --workspace --profile ci --lcov --output-path lcov-rust.info
 
       - name: Report test results
-        uses: dorny/test-reporter@v3
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3
         if: always() && hashFiles('target/nextest/ci/junit.xml') != ''
         with:
           name: Rust Tests
@@ -87,7 +88,7 @@ jobs:
           reporter: java-junit
 
       - name: Upload Rust coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov-rust.info
@@ -103,15 +104,16 @@ jobs:
       contents: read
       checks: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
-          version: 10
+          version: "10.0.0"
+          package_json_file: frontend/package.json
 
       - name: Install Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version-file: '.node-version'
           cache: pnpm
@@ -131,7 +133,7 @@ jobs:
         continue-on-error: false
 
       - name: Report test results
-        uses: dorny/test-reporter@v3
+        uses: dorny/test-reporter@a43b3a5f7366b97d083190328d2c652e1a8b6aa2 # v3
         if: always() && hashFiles('frontend/test-results/junit.xml') != ''
         with:
           name: Frontend Tests
@@ -139,7 +141,7 @@ jobs:
           reporter: java-junit
 
       - name: Upload Frontend coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@75cd11691c0faa626561e295848008c8a7dddffe # v5
         if: hashFiles('frontend/coverage/lcov.info') != ''
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -150,21 +152,61 @@ jobs:
       - name: Build
         run: cd frontend && pnpm build
 
+  # Lint infrastructure files for floating version references
+  pin-check:
+    name: Version Pin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check for floating version references
+        run: |
+          ERRORS=0
+          # Check .node-version for floating refs
+          if grep -qE '(lts/\*|latest|current)' .node-version 2>/dev/null; then
+            echo "::error file=.node-version::.node-version contains floating reference (must be exact version)"
+            ERRORS=$((ERRORS + 1))
+          fi
+          # Check Dockerfiles for @latest
+          for f in Dockerfile .devcontainer/Dockerfile; do
+            if [ -f "$f" ] && grep -qE '@latest' "$f"; then
+              echo "::error file=$f::$f contains @latest reference (must pin exact version)"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done
+          # Check GitHub Actions for uses: lines without SHA pins (40-char hex).
+          # Only match YAML key lines (indented "- uses:" or "uses:"), not strings
+          # inside run: blocks that happen to contain "uses:".
+          while IFS= read -r ref; do
+            if [ -z "$ref" ]; then continue; fi
+            if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
+              echo "::error file=.github/workflows/ci.yml::Action not pinned to SHA: $ref"
+              ERRORS=$((ERRORS + 1))
+            fi
+          done < <(grep -E '^\s+uses:\s' .github/workflows/ci.yml | sed 's/.*uses:\s*//' | sed 's/\s*#.*//')
+          if [ "$ERRORS" -gt 0 ]; then
+            echo "Found $ERRORS floating version reference(s). Pin to exact versions."
+            exit 1
+          fi
+          echo "All version references are pinned."
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust, frontend]
+    needs: [rust, frontend, pin-check]
     steps:
       - name: Check results
         env:
           RUST_RESULT: ${{ needs.rust.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
+          PIN_CHECK_RESULT: ${{ needs.pin-check.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" ]]; then
+          echo "Pin Check: $PIN_CHECK_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

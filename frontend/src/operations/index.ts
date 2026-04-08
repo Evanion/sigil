@@ -45,6 +45,6 @@ export type { RemoteTransactionPayload, RemoteOperationPayload } from "./apply-r
 export { applyOperationToStore } from "./apply-to-store";
 export type { StoreStateSetter, StoreStateReader } from "./apply-to-store";
 
-// Store + History bridge
-export { createStoreHistoryBridge } from "./store-history";
-export type { StoreHistoryBridge } from "./store-history";
+// Interceptor (transparent undo tracking)
+export { createInterceptor } from "./interceptor";
+export type { Interceptor, SideEffectReaders } from "./interceptor";

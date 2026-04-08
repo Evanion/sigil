@@ -1,10 +1,6 @@
 // crates/core/src/commands/style_commands.rs
-// The Command trait's description() returns &str (not &'static str) because
-// CompoundCommand borrows from its String field. Literal returns in other impls
-// trigger this lint unnecessarily.
-#![allow(clippy::unnecessary_literal_bound)]
 
-use crate::command::{Command, SideEffect};
+use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
@@ -44,25 +40,18 @@ pub struct SetTransform {
     pub node_id: NodeId,
     /// The new transform to apply.
     pub new_transform: Transform,
-    /// The previous transform (for undo).
-    pub old_transform: Transform,
 }
 
-impl Command for SetTransform {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetTransform {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         validate_transform(&self.new_transform)?;
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena.get_mut(self.node_id)?.transform = self.new_transform;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        validate_transform(&self.old_transform)?;
-        doc.arena.get_mut(self.node_id)?.transform = self.old_transform;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set transform"
+        Ok(())
     }
 }
 
@@ -73,37 +62,27 @@ pub struct SetFills {
     pub node_id: NodeId,
     /// The new fills to apply.
     pub new_fills: Vec<Fill>,
-    /// The previous fills (for undo).
-    pub old_fills: Vec<Fill>,
 }
 
-impl Command for SetFills {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetFills {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         if self.new_fills.len() > MAX_FILLS_PER_STYLE {
             return Err(CoreError::ValidationError(format!(
                 "too many fills: {} (max {MAX_FILLS_PER_STYLE})",
                 self.new_fills.len()
             )));
         }
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena
             .get_mut(self.node_id)?
             .style
             .fills
             .clone_from(&self.new_fills);
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena
-            .get_mut(self.node_id)?
-            .style
-            .fills
-            .clone_from(&self.old_fills);
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set fills"
+        Ok(())
     }
 }
 
@@ -114,37 +93,27 @@ pub struct SetStrokes {
     pub node_id: NodeId,
     /// The new strokes to apply.
     pub new_strokes: Vec<Stroke>,
-    /// The previous strokes (for undo).
-    pub old_strokes: Vec<Stroke>,
 }
 
-impl Command for SetStrokes {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetStrokes {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         if self.new_strokes.len() > MAX_STROKES_PER_STYLE {
             return Err(CoreError::ValidationError(format!(
                 "too many strokes: {} (max {MAX_STROKES_PER_STYLE})",
                 self.new_strokes.len()
             )));
         }
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena
             .get_mut(self.node_id)?
             .style
             .strokes
             .clone_from(&self.new_strokes);
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena
-            .get_mut(self.node_id)?
-            .style
-            .strokes
-            .clone_from(&self.old_strokes);
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set strokes"
+        Ok(())
     }
 }
 
@@ -155,12 +124,10 @@ pub struct SetOpacity {
     pub node_id: NodeId,
     /// The new opacity value.
     pub new_opacity: StyleValue<f64>,
-    /// The previous opacity value (for undo).
-    pub old_opacity: StyleValue<f64>,
 }
 
-impl Command for SetOpacity {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetOpacity {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         if let StyleValue::Literal { value } = &self.new_opacity
             && (!value.is_finite() || *value < 0.0 || *value > 1.0)
         {
@@ -168,24 +135,13 @@ impl Command for SetOpacity {
                 "opacity must be in [0.0, 1.0], got {value}"
             )));
         }
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena.get_mut(self.node_id)?.style.opacity = self.new_opacity.clone();
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        if let StyleValue::Literal { value } = &self.old_opacity
-            && (!value.is_finite() || *value < 0.0 || *value > 1.0)
-        {
-            return Err(CoreError::ValidationError(format!(
-                "opacity must be in [0.0, 1.0], got {value}"
-            )));
-        }
-        doc.arena.get_mut(self.node_id)?.style.opacity = self.old_opacity.clone();
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set opacity"
+        Ok(())
     }
 }
 
@@ -196,23 +152,17 @@ pub struct SetBlendMode {
     pub node_id: NodeId,
     /// The new blend mode.
     pub new_blend_mode: BlendMode,
-    /// The previous blend mode (for undo).
-    pub old_blend_mode: BlendMode,
 }
 
-impl Command for SetBlendMode {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetBlendMode {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena.get_mut(self.node_id)?.style.blend_mode = self.new_blend_mode;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena.get_mut(self.node_id)?.style.blend_mode = self.old_blend_mode;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set blend mode"
+        Ok(())
     }
 }
 
@@ -223,37 +173,27 @@ pub struct SetEffects {
     pub node_id: NodeId,
     /// The new effects to apply.
     pub new_effects: Vec<Effect>,
-    /// The previous effects (for undo).
-    pub old_effects: Vec<Effect>,
 }
 
-impl Command for SetEffects {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetEffects {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         if self.new_effects.len() > MAX_EFFECTS_PER_STYLE {
             return Err(CoreError::ValidationError(format!(
                 "too many effects: {} (max {MAX_EFFECTS_PER_STYLE})",
                 self.new_effects.len()
             )));
         }
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena
             .get_mut(self.node_id)?
             .style
             .effects
             .clone_from(&self.new_effects);
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena
-            .get_mut(self.node_id)?
-            .style
-            .effects
-            .clone_from(&self.old_effects);
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set effects"
+        Ok(())
     }
 }
 
@@ -287,43 +227,33 @@ pub struct SetCornerRadii {
     pub node_id: NodeId,
     /// The new corner radii to apply (top-left, top-right, bottom-right, bottom-left).
     pub new_radii: [f64; 4],
-    /// The previous corner radii (for undo).
-    pub old_radii: [f64; 4],
 }
 
-impl Command for SetCornerRadii {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetCornerRadii {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         validate_corner_radii(&self.new_radii)?;
+        let node = doc.arena.get(self.node_id)?;
+        if !matches!(node.kind, NodeKind::Rectangle { .. }) {
+            return Err(CoreError::ValidationError(format!(
+                "SetCornerRadii requires a Rectangle node, got a different kind (node {:?})",
+                self.node_id
+            )));
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
             NodeKind::Rectangle { corner_radii } => {
                 *corner_radii = self.new_radii;
-                Ok(vec![])
+                Ok(())
             }
             _ => Err(CoreError::ValidationError(format!(
                 "SetCornerRadii requires a Rectangle node, got a different kind (node {:?})",
                 self.node_id
             ))),
         }
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        validate_corner_radii(&self.old_radii)?;
-        let node = doc.arena.get_mut(self.node_id)?;
-        match &mut node.kind {
-            NodeKind::Rectangle { corner_radii } => {
-                *corner_radii = self.old_radii;
-                Ok(vec![])
-            }
-            _ => Err(CoreError::ValidationError(format!(
-                "SetCornerRadii undo requires a Rectangle node, got a different kind (node {:?})",
-                self.node_id
-            ))),
-        }
-    }
-
-    fn description(&self) -> &str {
-        "Set corner radii"
     }
 }
 
@@ -334,23 +264,17 @@ pub struct SetConstraints {
     pub node_id: NodeId,
     /// The new constraints.
     pub new_constraints: Constraints,
-    /// The previous constraints (for undo).
-    pub old_constraints: Constraints,
 }
 
-impl Command for SetConstraints {
-    fn apply(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
+impl FieldOperation for SetConstraints {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        doc.arena.get(self.node_id)?;
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         doc.arena.get_mut(self.node_id)?.constraints = self.new_constraints;
-        Ok(vec![])
-    }
-
-    fn undo(&self, doc: &mut Document) -> Result<Vec<SideEffect>, CoreError> {
-        doc.arena.get_mut(self.node_id)?.constraints = self.old_constraints;
-        Ok(vec![])
-    }
-
-    fn description(&self) -> &str {
-        "Set constraints"
+        Ok(())
     }
 }
 
@@ -397,9 +321,8 @@ mod tests {
     // ── SetTransform ────────────────────────────────────────────────
 
     #[test]
-    fn test_set_transform_apply_and_undo() {
+    fn test_set_transform_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
-        let old = doc.arena.get(node_id).unwrap().transform;
         let new = Transform {
             x: 50.0,
             y: 100.0,
@@ -410,26 +333,32 @@ mod tests {
             scale_y: 2.0,
         };
 
-        let cmd = SetTransform {
+        let op = SetTransform {
             node_id,
             new_transform: new,
-            old_transform: old,
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.arena.get(node_id).unwrap().transform.x, 50.0);
         assert_eq!(doc.arena.get(node_id).unwrap().transform.rotation, 45.0);
+    }
 
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(doc.arena.get(node_id).unwrap().transform.x, old.x);
+    #[test]
+    fn test_set_transform_validate_rejects_missing_node() {
+        let doc = Document::new("Test".to_string());
+        let op = SetTransform {
+            node_id: NodeId::new(99, 0),
+            new_transform: Transform::default(),
+        };
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── SetFills ────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_fills_apply_and_undo() {
+    fn test_set_fills_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
-        let old_fills = doc.arena.get(node_id).unwrap().style.fills.clone();
         let new_fills = vec![Fill::Solid {
             color: StyleValue::Literal {
                 value: Color::Srgb {
@@ -441,22 +370,19 @@ mod tests {
             },
         }];
 
-        let cmd = SetFills {
+        let op = SetFills {
             node_id,
             new_fills: new_fills.clone(),
-            old_fills: old_fills.clone(),
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.arena.get(node_id).unwrap().style.fills.len(), 1);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(doc.arena.get(node_id).unwrap().style.fills, old_fills);
     }
 
     #[test]
     fn test_set_fills_validates_max() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
         let too_many: Vec<Fill> = (0..MAX_FILLS_PER_STYLE + 1)
             .map(|_| Fill::Solid {
                 color: StyleValue::Literal {
@@ -465,152 +391,125 @@ mod tests {
             })
             .collect();
 
-        let cmd = SetFills {
+        let op = SetFills {
             node_id,
             new_fills: too_many,
-            old_fills: vec![],
         };
 
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── SetStrokes ──────────────────────────────────────────────────
 
     #[test]
-    fn test_set_strokes_apply_and_undo() {
+    fn test_set_strokes_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
         let new_strokes = vec![Stroke::default()];
 
-        let cmd = SetStrokes {
+        let op = SetStrokes {
             node_id,
             new_strokes: new_strokes.clone(),
-            old_strokes: vec![],
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.arena.get(node_id).unwrap().style.strokes.len(), 1);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.arena.get(node_id).unwrap().style.strokes.is_empty());
     }
 
     // ── SetOpacity ──────────────────────────────────────────────────
 
     #[test]
-    fn test_set_opacity_apply_and_undo() {
+    fn test_set_opacity_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
 
-        let cmd = SetOpacity {
+        let op = SetOpacity {
             node_id,
             new_opacity: StyleValue::Literal { value: 0.5 },
-            old_opacity: StyleValue::Literal { value: 1.0 },
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(
             doc.arena.get(node_id).unwrap().style.opacity,
             StyleValue::Literal { value: 0.5 }
-        );
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(
-            doc.arena.get(node_id).unwrap().style.opacity,
-            StyleValue::Literal { value: 1.0 }
         );
     }
 
     // ── SetBlendMode ────────────────────────────────────────────────
 
     #[test]
-    fn test_set_blend_mode_apply_and_undo() {
+    fn test_set_blend_mode_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
 
-        let cmd = SetBlendMode {
+        let op = SetBlendMode {
             node_id,
             new_blend_mode: BlendMode::Multiply,
-            old_blend_mode: BlendMode::Normal,
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(
             doc.arena.get(node_id).unwrap().style.blend_mode,
             BlendMode::Multiply
-        );
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(
-            doc.arena.get(node_id).unwrap().style.blend_mode,
-            BlendMode::Normal
         );
     }
 
     // ── SetEffects ──────────────────────────────────────────────────
 
     #[test]
-    fn test_set_effects_apply_and_undo() {
+    fn test_set_effects_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
         let new_effects = vec![Effect::LayerBlur {
             radius: StyleValue::Literal { value: 10.0 },
         }];
 
-        let cmd = SetEffects {
+        let op = SetEffects {
             node_id,
             new_effects: new_effects.clone(),
-            old_effects: vec![],
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(doc.arena.get(node_id).unwrap().style.effects.len(), 1);
-
-        cmd.undo(&mut doc).expect("undo");
-        assert!(doc.arena.get(node_id).unwrap().style.effects.is_empty());
     }
 
     #[test]
     fn test_set_effects_validates_max() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
         let too_many: Vec<Effect> = (0..MAX_EFFECTS_PER_STYLE + 1)
             .map(|_| Effect::LayerBlur {
                 radius: StyleValue::Literal { value: 1.0 },
             })
             .collect();
 
-        let cmd = SetEffects {
+        let op = SetEffects {
             node_id,
             new_effects: too_many,
-            old_effects: vec![],
         };
 
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── SetConstraints ──────────────────────────────────────────────
 
     #[test]
-    fn test_set_constraints_apply_and_undo() {
+    fn test_set_constraints_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
-        let old = doc.arena.get(node_id).unwrap().constraints;
         let new = Constraints {
             horizontal: PinConstraint::Center,
             vertical: PinConstraint::Scale,
         };
 
-        let cmd = SetConstraints {
+        let op = SetConstraints {
             node_id,
             new_constraints: new,
-            old_constraints: old,
         };
 
-        cmd.apply(&mut doc).expect("apply");
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
         assert_eq!(
             doc.arena.get(node_id).unwrap().constraints.horizontal,
             PinConstraint::Center
-        );
-
-        cmd.undo(&mut doc).expect("undo");
-        assert_eq!(
-            doc.arena.get(node_id).unwrap().constraints.horizontal,
-            PinConstraint::Start
         );
     }
 
@@ -618,201 +517,129 @@ mod tests {
 
     #[test]
     fn test_set_opacity_validates_range() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
 
-        let cmd = SetOpacity {
+        let op = SetOpacity {
             node_id,
             new_opacity: StyleValue::Literal { value: 1.5 },
-            old_opacity: StyleValue::Literal { value: 1.0 },
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
 
-        let cmd_neg = SetOpacity {
+        let op_neg = SetOpacity {
             node_id,
             new_opacity: StyleValue::Literal { value: -0.1 },
-            old_opacity: StyleValue::Literal { value: 1.0 },
         };
-        assert!(cmd_neg.apply(&mut doc).is_err());
+        assert!(op_neg.validate(&doc).is_err());
     }
 
     #[test]
     fn test_set_opacity_rejects_nan() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
 
-        let cmd = SetOpacity {
+        let op = SetOpacity {
             node_id,
             new_opacity: StyleValue::Literal { value: f64::NAN },
-            old_opacity: StyleValue::Literal { value: 1.0 },
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
     }
 
     // ── SetTransform validation ────────────────────────────────────
 
     #[test]
     fn test_set_transform_rejects_nan() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
         let old = doc.arena.get(node_id).unwrap().transform;
 
         let mut bad = old;
         bad.x = f64::NAN;
-        let cmd = SetTransform {
+        let op = SetTransform {
             node_id,
             new_transform: bad,
-            old_transform: old,
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
 
         let mut bad_inf = old;
         bad_inf.y = f64::INFINITY;
-        let cmd_inf = SetTransform {
+        let op_inf = SetTransform {
             node_id,
             new_transform: bad_inf,
-            old_transform: old,
         };
-        assert!(cmd_inf.apply(&mut doc).is_err());
+        assert!(op_inf.validate(&doc).is_err());
     }
 
     #[test]
     fn test_set_transform_rejects_negative_dimensions() {
-        let (mut doc, node_id) = setup_doc_with_rect();
+        let (doc, node_id) = setup_doc_with_rect();
         let old = doc.arena.get(node_id).unwrap().transform;
 
         let mut bad = old;
         bad.width = -10.0;
-        let cmd = SetTransform {
+        let op = SetTransform {
             node_id,
             new_transform: bad,
-            old_transform: old,
         };
-        assert!(cmd.apply(&mut doc).is_err());
+        assert!(op.validate(&doc).is_err());
 
         let mut bad_h = old;
         bad_h.height = -1.0;
-        let cmd_h = SetTransform {
+        let op_h = SetTransform {
             node_id,
             new_transform: bad_h,
-            old_transform: old,
         };
-        assert!(cmd_h.apply(&mut doc).is_err());
-    }
-
-    // ── Integration: execute / undo / redo ────────────────────────────
-
-    #[test]
-    fn test_set_opacity_execute_undo_redo_round_trip() {
-        let (mut doc, node_id) = setup_doc_with_rect();
-
-        let cmd = SetOpacity {
-            node_id,
-            new_opacity: StyleValue::Literal { value: 0.5 },
-            old_opacity: StyleValue::Literal { value: 1.0 },
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        assert_eq!(
-            doc.arena.get(node_id).expect("get").style.opacity,
-            StyleValue::Literal { value: 0.5 }
-        );
-
-        doc.undo().expect("undo");
-        assert_eq!(
-            doc.arena.get(node_id).expect("get").style.opacity,
-            StyleValue::Literal { value: 1.0 }
-        );
-
-        doc.redo().expect("redo");
-        assert_eq!(
-            doc.arena.get(node_id).expect("get").style.opacity,
-            StyleValue::Literal { value: 0.5 }
-        );
+        assert!(op_h.validate(&doc).is_err());
     }
 
     // ── SetCornerRadii ────────────────────────────────────────────────
 
     #[test]
-    fn test_set_corner_radii_execute_undo_redo_cycle() {
+    fn test_set_corner_radii_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
-        // Initial radii are all 0.0 from setup_doc_with_rect.
-        let old_radii = [0.0; 4];
         let new_radii = [4.0, 8.0, 4.0, 8.0];
 
-        let cmd = SetCornerRadii {
-            node_id,
-            new_radii,
-            old_radii,
-        };
-        doc.execute(Box::new(cmd)).expect("execute");
-        let after_execute = match &doc.arena.get(node_id).expect("get").kind {
-            NodeKind::Rectangle { corner_radii } => *corner_radii,
-            _ => panic!("expected Rectangle"),
-        };
-        assert_eq!(after_execute, new_radii, "execute: radii should be updated");
+        let op = SetCornerRadii { node_id, new_radii };
 
-        doc.undo().expect("undo");
-        let after_undo = match &doc.arena.get(node_id).expect("get").kind {
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+        let after = match &doc.arena.get(node_id).expect("get").kind {
             NodeKind::Rectangle { corner_radii } => *corner_radii,
             _ => panic!("expected Rectangle"),
         };
-        assert_eq!(after_undo, old_radii, "undo: radii should be restored");
-
-        doc.redo().expect("redo");
-        let after_redo = match &doc.arena.get(node_id).expect("get").kind {
-            NodeKind::Rectangle { corner_radii } => *corner_radii,
-            _ => panic!("expected Rectangle"),
-        };
-        assert_eq!(after_redo, new_radii, "redo: radii should be new again");
+        assert_eq!(after, new_radii);
     }
 
     #[test]
     fn test_set_corner_radii_rejects_nan() {
-        let (mut doc, node_id) = setup_doc_with_rect();
-        // NaN in first position.
-        let cmd = SetCornerRadii {
+        let (doc, node_id) = setup_doc_with_rect();
+        let op = SetCornerRadii {
             node_id,
             new_radii: [f64::NAN, 0.0, 0.0, 0.0],
-            old_radii: [0.0; 4],
         };
-        assert!(
-            cmd.apply(&mut doc).is_err(),
-            "NaN in corner_radii[0] must be rejected"
-        );
-        // NaN in last position.
-        let cmd2 = SetCornerRadii {
+        assert!(op.validate(&doc).is_err());
+
+        let op2 = SetCornerRadii {
             node_id,
             new_radii: [0.0, 0.0, 0.0, f64::NAN],
-            old_radii: [0.0; 4],
         };
-        assert!(
-            cmd2.apply(&mut doc).is_err(),
-            "NaN in corner_radii[3] must be rejected"
-        );
+        assert!(op2.validate(&doc).is_err());
     }
 
     #[test]
     fn test_set_corner_radii_rejects_negative() {
-        let (mut doc, node_id) = setup_doc_with_rect();
-        let cmd = SetCornerRadii {
+        let (doc, node_id) = setup_doc_with_rect();
+        let op = SetCornerRadii {
             node_id,
             new_radii: [4.0, -1.0, 4.0, 4.0],
-            old_radii: [0.0; 4],
         };
-        assert!(
-            cmd.apply(&mut doc).is_err(),
-            "negative corner radius must be rejected"
-        );
+        assert!(op.validate(&doc).is_err());
     }
 
     #[test]
     fn test_set_corner_radii_on_non_rectangle_fails() {
-        let (mut doc, frame_id) = setup_doc_with_frame();
-        let cmd = SetCornerRadii {
+        let (doc, frame_id) = setup_doc_with_frame();
+        let op = SetCornerRadii {
             node_id: frame_id,
             new_radii: [4.0; 4],
-            old_radii: [0.0; 4],
         };
-        assert!(
-            cmd.apply(&mut doc).is_err(),
-            "SetCornerRadii on a Frame node must return an error"
-        );
+        assert!(op.validate(&doc).is_err());
     }
 }

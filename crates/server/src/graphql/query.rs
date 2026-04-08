@@ -21,8 +21,6 @@ impl QueryRoot {
             name: doc.metadata.name.clone(),
             page_count: doc.pages.len(),
             node_count: doc.arena.len(),
-            can_undo: doc.can_undo(),
-            can_redo: doc.can_redo(),
         })
     }
 

@@ -99,9 +99,6 @@ function makeMockStore(initialNodes?: Map<string, DocumentNode>): ToolStore & {
     batchSetTransform: (entries: Array<{ uuid: string; transform: Transform }>) => {
       batchSetTransformCalls.push(entries);
     },
-    beginDrag: () => undefined,
-    commitDrag: () => undefined,
-    cancelDrag: () => undefined,
   };
 }
 

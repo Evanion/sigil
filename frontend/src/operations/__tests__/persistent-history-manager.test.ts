@@ -156,11 +156,19 @@ describe("PersistentHistoryManager", () => {
       expect(phm.canRedo()).toBe(false);
     });
 
-    it("should delegate transaction methods correctly", () => {
-      phm.beginTransaction("Multi-op");
-      phm.addOperation(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"));
-      phm.addOperation(createSetFieldOp(USER_ID, "node-2", "name", "D", "C"));
-      phm.commitTransaction();
+    it("should delegate pushTransaction correctly", () => {
+      const tx: Transaction = {
+        id: "tx-1",
+        userId: USER_ID,
+        operations: [
+          createSetFieldOp(USER_ID, "node-1", "name", "B", "A"),
+          createSetFieldOp(USER_ID, "node-2", "name", "D", "C"),
+        ],
+        description: "Multi-op",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      phm.pushTransaction(tx);
 
       expect(phm.canUndo()).toBe(true);
       const inv = assertNonNull(phm.undo());
@@ -168,29 +176,16 @@ describe("PersistentHistoryManager", () => {
       expect(inv.operations).toHaveLength(2);
     });
 
-    it("should delegate cancelTransaction correctly", () => {
-      phm.beginTransaction("Cancelled");
-      phm.addOperation(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"));
-      phm.cancelTransaction();
+    it("should delegate peekRedo correctly", () => {
+      expect(phm.peekRedo()).toBeNull();
 
-      expect(phm.canUndo()).toBe(false);
-    });
+      phm.apply(createSetFieldOp(USER_ID, "node-1", "name", "B", "A"), "Rename");
+      phm.undo();
 
-    it("should delegate drag methods correctly", () => {
-      phm.beginDrag("node-1", "transform.x");
-      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0));
-      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 20, 10));
-      phm.commitDrag();
-
-      expect(phm.canUndo()).toBe(true);
-    });
-
-    it("should delegate cancelDrag correctly", () => {
-      phm.beginDrag("node-1", "transform.x");
-      phm.updateDrag(createSetFieldOp(USER_ID, "node-1", "transform.x", 10, 0));
-      phm.cancelDrag();
-
-      expect(phm.canUndo()).toBe(false);
+      const peeked = phm.peekRedo();
+      expect(peeked).not.toBeNull();
+      // Peek should not consume it
+      expect(phm.canRedo()).toBe(true);
     });
   });
 });

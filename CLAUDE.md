@@ -23,7 +23,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Frontend: Vitest for unit tests.
 - Tests verify behavior, not implementation — no mocking internal details.
 - If you can't write a test for it, the interface needs redesign.
-- Every command added to `crates/core/` MUST have at least one integration test that exercises the full `execute -> undo -> redo` cycle through `Document::execute`, `Document::undo`, and `Document::redo` (not just direct calls to `apply`/`undo` on the command struct). The test must verify: (1) state after execute matches expectations, (2) state after undo matches the original state, (3) state after redo matches post-execute state. Test naming convention: `test_<command_name>_execute_undo_redo_cycle`.
+- Every `FieldOperation` added to `crates/core/` MUST have at least one test that exercises the full `validate` → `apply` cycle. The test must verify: (1) `validate` passes on valid input, (2) `apply` changes the document state as expected, (3) `validate` rejects invalid input (missing node, invalid values). Test naming convention: `test_<operation_name>_validate_and_apply`. Undo/redo is handled client-side (Spec 15) — the core crate provides forward-only operations.
 - Every new first-class entity type introduced to `crates/core/` (pages, components, layers, tokens, etc.) MUST ship with a complete command set covering at minimum: create, rename, delete, and any reorder or reparent operations the entity supports. A PR that adds an entity type without commands for it is incomplete — the entity is not usable by agents or clients without them.
 
 ### User Experience Consistency
@@ -32,7 +32,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Standard keyboard shortcuts (V select, F frame, R rect, T text, P pen, etc.).
 - Agents and humans see each other's changes in real time through the same operation pipeline.
 - The MCP interface must be token-efficient — agents shouldn't need verbose interactions.
-- Every operation must have undo/redo support — no exceptions.
+- Every user-facing operation must support undo/redo. Undo is handled client-side by the frontend HistoryManager (Spec 15). The core crate provides forward-only `FieldOperation`s; the frontend captures before/after state for undo.
 
 ### Performance Requirements
 
@@ -180,7 +180,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Never override Kobalte trigger or interactive primitives with non-interactive elements (`as="span"`, `as="div"`, `as="p"`). Kobalte renders triggers as `<button>` by default, which provides keyboard focus, Enter/Space activation, and ARIA semantics. Overriding with a non-interactive element removes all of these. If you need custom styling, use CSS on the default element or use `as="button"` explicitly.
 - Use `<Index>` (not `<For>`) for Solid.js lists that support reorder, insert, or delete. Solid's `<For>` keyed iteration destroys and recreates DOM nodes when items move positions — this loses focus, breaks CSS transitions, and causes visible flicker during drag-and-drop reorder. `<Index>` preserves DOM elements and updates them in place, which is correct for lists where the user can add, remove, or reorder items (fills, strokes, effects, layers, gradient stops). Reserve `<For>` for read-only lists where the data identity matters more than DOM stability.
 - Deep-cloning Solid store data requires `JSON.parse(JSON.stringify())` inside `produce()` callbacks — but `structuredClone` must be used everywhere else. Solid's `createStore` wraps objects in Proxy traps; `structuredClone` throws `DataCloneError` on these proxies. Inside a `produce()` callback (where the argument is a Solid proxy), use `JSON.parse(JSON.stringify(value))` and wrap it in try-catch. Outside `produce()` — when cloning plain objects, snapshots, or function arguments that are not store proxies — use `structuredClone`. Every `JSON.parse(JSON.stringify())` call site must have a comment: `// JSON clone: Solid proxy not structuredClone-safe`.
-- Plain class instances are not reactive in Solid.js. Wrapping a method call in an arrow function (`() => myClass.getValue()`) does NOT create a reactive binding — Solid's tracking only works with signals, stores, and memos. When bridging non-reactive state (plain classes, third-party libraries, imperative managers) into Solid's reactive graph, create explicit Solid signals that mirror the external state and update them after every mutation to the external object. Never expose a plain class method as a "reactive accessor" without a backing signal — it will return stale values and the UI will not update.
+- Plain class instances are not reactive in Solid.js. Wrapping a method call in an arrow function (`() => myClass.getValue()`) does NOT create a reactive binding — Solid's tracking only works with signals, stores, and memos. When bridging non-reactive state (plain classes, third-party libraries, imperative managers) into Solid's reactive graph, create explicit Solid signals that mirror the external state and update them after every mutation to the external object. Never expose a plain class method as a "reactive accessor" without a backing signal — it will return stale values and the UI will not update. This obligation applies in both directions: (1) reading from the class requires a signal-backed accessor, and (2) every mutation to the class's internal state — including async operations, callbacks, and event handlers — MUST call the corresponding signal setter immediately after the mutation. A mutation without a setter call is invisible to the reactive graph.
 
 ---
 
@@ -327,7 +327,7 @@ When an item is removed from a collection (popped from a stack, removed from a v
 
 ### Multi-Item Mutations Must Roll Back on Partial Failure
 
-When a single command's `apply` or `undo` method loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This is distinct from `CompoundCommand` rollback, which handles inter-command failures — this rule applies to loops WITHIN a single command. A loop that modifies 5 of 10 items and then returns an error has corrupted the document, because the history stack will not undo the partial modifications.
+When a mutation function loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This applies to loops within any single mutation function — whether a `FieldOperation`'s `apply()`, a GraphQL resolver, or an MCP tool handler. A loop that modifies 5 of 10 items and then returns an error has corrupted the document.
 
 ### No Silent Error Suppression in Rollback Paths
 
@@ -371,11 +371,11 @@ Any type in `crates/core/` that has validation logic in its constructor MUST NOT
 
 ### Validated Types Must Have Private Fields
 
-Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to command structs, value objects, and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. If a command needs internal mutable state (snapshots, cached indices), those fields must be private and populated by the command's own `execute`/`apply` method, never by the caller.
+Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to value objects and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. **Exception:** `FieldOperation` structs (forward-only operations with a `validate()` method on the trait) may have public fields. These are pure data carriers where validation happens at the trait level via `validate()` before `apply()`, not in a constructor. The server and MCP crates construct them via struct literal syntax, which is the intended pattern.
 
-### Commands Must Be Self-Contained
+### FieldOperations Must Be Self-Contained
 
-A command struct's `execute` (or `apply`) method must be callable immediately after construction without the caller performing any additional setup. All internal state needed for undo (snapshots of previous values, recorded indices, saved references) must be captured by the command itself during `execute`, not passed in by the caller or populated via public field mutation before execution. The constructor receives the operation's parameters (what to do); the execute method captures the undo state (what was there before). If a command's undo path depends on state that was not captured during execute, the command is broken — it cannot be replayed from the history stack. This rule exists because caller-populated snapshots create an implicit contract that is invisible to the type system, untestable in isolation, and guaranteed to be forgotten by future callers.
+A `FieldOperation` struct's `apply()` method must be callable immediately after construction and `validate()` without the caller performing any additional setup. The struct receives the operation's parameters (what to do); `validate()` checks preconditions against the document; `apply()` performs the mutation. Callers MUST call `validate()` before `apply()`. The caller (server/MCP) is responsible for rollback on partial failure in multi-step operations — `FieldOperation` structs are forward-only and do not capture undo state.
 
 ### Constant Enforcement Tests
 
@@ -465,6 +465,26 @@ When an operation fails and the error handler reverts local state, the revert me
 ### History Commits Must Contain At Least One Operation
 
 Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+
+### Behavioral Inventory Before Deleting Implementation Code
+
+When deleting a module, trait, struct, or function that carries non-trivial logic (computation, validation, state transitions, coordinate transforms, invariant maintenance), the PR MUST include a behavioral inventory before deletion. Enumerate: (1) every side effect and computation the deleted code performs beyond simple CRUD, (2) for each item, whether it is preserved in the replacement code, moved to a different location, or intentionally removed with rationale. "The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. This rule exists because PR #39 deleted Command structs that contained bounding box computation, transform adjustment, and child ordering logic. The replacement FieldOperations omitted this behavior, causing four Critical regressions that were only caught during review.
+
+### Validation Must Be Symmetric Across All Transports
+
+When a validation check exists at one API boundary (GraphQL resolver, MCP tool handler, REST endpoint), the same check MUST exist at every other boundary that accepts the same input type. When adding or modifying a validation rule, search all transport layers for the same input type and update them in the same PR. Asymmetric validation means one transport silently accepts input that another rejects, which is a security inconsistency.
+
+### RAII Guards Do Not Provide Transactional Rollback
+
+Dropping a lock guard (`MutexGuard`, `RwLockWriteGuard`) releases the lock — it does NOT revert mutations made while the lock was held. If a batch of N mutations is applied under a single lock acquisition and mutation K fails, mutations 0 through K-1 remain applied after the guard drops. The lock only serializes access; it provides no undo semantics. When a batch must be atomic (all-or-nothing), the code must implement explicit rollback: track completed mutations, and on failure, reverse them before releasing the lock. This also applies to TypeScript: holding a reference to an object during a sequence of mutations does not provide transactional semantics.
+
+### Capture Snapshots Before Mutations, Not After
+
+When an operation needs to record the previous value of a field for undo, rollback, or logging, read the field BEFORE applying the mutation. Do not read it after calling `produce()`, `setState()`, `applyOperation()`, or any other state-modifying function — the value has already changed. This is a TOCTOU error specific to reactive and mutable-state systems. Pattern: `const before = store.field; produce(s => { s.field = newValue; }); trackUndo(before);`. Anti-pattern: `produce(s => { s.field = newValue; }); trackUndo(store.field); // BUG: reads the new value`.
+
+### Temporary State Flags Must Use try-finally
+
+When a boolean or enum flag is set to temporarily change system behavior (suppress history recording, suppress broadcasts, mark undo-in-progress, enable batch mode), the flag MUST be reset in a `finally` block (TypeScript) or via an RAII guard (Rust). If the guarded operation throws or returns an error, the flag stays set permanently, breaking all subsequent operations that check it. Pattern: `flag = true; try { riskyOperation(); } finally { flag = false; }`. Anti-pattern: `flag = true; riskyOperation(); flag = false;` — if riskyOperation throws, the flag is never reset.
 
 ### Continuous-Value Controls Must Coalesce History Entries
 

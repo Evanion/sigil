@@ -20,7 +20,7 @@ pub const MAX_TREE_DEPTH: usize = 100;
 
 /// Builds a `DocumentInfo` from the current document state.
 ///
-/// Acquires the document lock, reads metadata/arena/pages/history, then drops
+/// Acquires the document lock, reads metadata/arena/pages, then drops
 /// the lock before returning. The lock is never held across an await point.
 #[must_use]
 pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {
@@ -29,8 +29,6 @@ pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {
         name: doc.metadata.name.clone(),
         page_count: doc.pages.len(),
         node_count: doc.arena.len(),
-        can_undo: doc.can_undo(),
-        can_redo: doc.can_redo(),
     }
 }
 
@@ -164,8 +162,6 @@ mod tests {
         assert_eq!(info.name, "Untitled");
         assert_eq!(info.page_count, 1);
         assert_eq!(info.node_count, 0);
-        assert!(!info.can_undo);
-        assert!(!info.can_redo);
     }
 
     #[test]

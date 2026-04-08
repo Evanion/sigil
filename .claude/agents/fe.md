@@ -80,6 +80,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - `window.devicePixelRatio` is NOT a Solid signal — changes to DPR (e.g., moving a window to a high-DPI monitor) will not trigger reactive updates. Listen for DPR changes via `matchMedia('(resolution: 1dppx)').addEventListener('change', ...)` and store the result in a signal.
 - Kobalte's `NumberField` fires `onRawValueChange` during mount with its initial value. If your effect or handler should only respond to user-initiated changes, gate it with a `mounted` flag set via `onMount` or `queueMicrotask`. Document the guard with a comment explaining the mount-time emission behavior.
 - Plain class instances are NOT reactive. `() => myManager.getValue()` will not re-run when the manager's internal state changes. Bridge external/imperative state into Solid by creating `createSignal` pairs and calling the setter after every mutation to the external object.
+- When capturing a "before" value for undo or rollback, read it BEFORE calling `produce()` or `setState()`. Reading after the mutation returns the new value, not the old one. Pattern: `const before = node.field; setState(produce(s => { s.field = newValue; })); trackUndo(before);`.
 
 ### Styling Conventions
 

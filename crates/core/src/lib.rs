@@ -17,7 +17,6 @@ pub mod serialize;
 pub mod token;
 pub mod tree;
 pub mod validate;
-pub mod wire;
 
 // ── Re-exports: Error ──────────────────────────────────────────────────
 pub use error::CoreError;
@@ -55,7 +54,7 @@ pub use token::{
 pub use arena::Arena;
 
 // ── Re-exports: Document ───────────────────────────────────────────────
-pub use document::{Document, DocumentMetadata, History, LayoutEngine, Page, Transition};
+pub use document::{Document, DocumentMetadata, LayoutEngine, Page, Transition};
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
@@ -64,7 +63,7 @@ pub use serialize::{
 };
 
 // ── Re-exports: Command ──────────────────────────────────────────────
-pub use command::{Command, CompoundCommand, SideEffect};
+pub use command::{FieldOperation, SideEffect};
 
 // ── Re-exports: Component ───────────────────────────────────────────────
 pub use component::{
@@ -73,12 +72,9 @@ pub use component::{
     validate_property_path,
 };
 
-// ── Re-exports: Wire ──────────────────────────────────────────────────
-pub use wire::{BroadcastCommand, SerializableCommand};
-
 // ── Re-exports: Validation ─────────────────────────────────────────────
 pub use validate::{
-    BEZIER_APPROXIMATION_SEGMENTS, CURRENT_SCHEMA_VERSION, DEFAULT_MAX_HISTORY, DEFAULT_MAX_NODES,
+    BEZIER_APPROXIMATION_SEGMENTS, CURRENT_SCHEMA_VERSION, DEFAULT_MAX_NODES,
     MAX_ALIAS_CHAIN_DEPTH, MAX_ASSET_REF_LEN, MAX_BATCH_SIZE, MAX_BOOLEAN_OP_POINTS,
     MAX_CHILDREN_PER_NODE, MAX_COMPONENTS_PER_DOCUMENT, MAX_EFFECTS_PER_STYLE, MAX_FILE_SIZE,
     MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MAX_GRADIENT_STOPS, MAX_GRID_TRACKS,

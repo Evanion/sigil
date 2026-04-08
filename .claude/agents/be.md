@@ -97,11 +97,11 @@ This project uses Rust Edition 2024. Be aware of:
 
 ## Defensive Coding
 
-- Arena undo operations must use `reinsert()` to preserve the original key — never `insert()` in an undo path.
+- Arena rollback operations must use `reinsert()` to preserve the original key — never `insert()` in a rollback path.
 - When popping from a stack/queue and the subsequent operation may fail, push the item back before returning the error.
-- Both `apply` and `undo` must validate inputs — asymmetric validation allows undo to corrupt state.
-- Command undo paths that restore items to ordered collections (Vec of children, Vec of siblings) must use `insert(index, element)` at the recorded original position — never `push(element)`. Verify this for every undo method you write.
-- Command structs must be self-contained: all undo state (snapshots, indices) must be captured during `apply`, never pre-populated by the caller. Fields on command structs must be private.
+- `FieldOperation::validate()` must check all preconditions. Callers MUST call `validate()` before `apply()`. Multi-step mutations in server/MCP handlers must roll back completed steps on partial failure.
+- Rollback paths that restore items to ordered collections (Vec of children, Vec of siblings) must use `insert(index, element)` at the recorded original position — never `push(element)`.
+- `FieldOperation` structs are forward-only data carriers with public fields. Validation happens at the trait level via `validate()`, not in a constructor. Callers construct them via struct literal syntax.
 - Every `f64` field from external input must be checked for NaN/infinity and domain range.
 - Prefer `VecDeque` over `Vec` for FIFO queues. `Vec::remove(0)` is O(n). Consider access patterns during review.
 - Never `#[derive(Deserialize)]` on types with validating constructors — implement `Deserialize` manually through the constructor. Fields must be private.
@@ -110,8 +110,10 @@ This project uses Rust Edition 2024. Be aware of:
 - Cross-field invariant validation: when two fields must be consistent, validate the relationship in the constructor.
 - Depth guard comparisons: use `>=` (not `>`) against the limit constant.
 - Named collections must reject duplicate names/identifiers at the insertion point — do not rely on HashMap deduplication silently.
-- Every command must have an integration test through `Document::execute` -> `undo` -> `redo`, not just direct `apply`/`undo` calls on the command struct.
-- Every new first-class entity type added to `crates/core/` (pages, layers, tokens, etc.) MUST ship with a complete command set: at minimum create, rename, delete, and any reorder/reparent operations. An entity without commands is not usable.
+- Every `FieldOperation` must have a test exercising the full `validate` → `apply` cycle, plus a test that `validate` rejects invalid input. Test naming: `test_<operation>_validate_and_apply`.
+- Every new first-class entity type added to `crates/core/` (pages, layers, tokens, etc.) MUST ship with a complete operation set: at minimum create, rename, delete, and any reorder/reparent operations. An entity without operations is not usable.
+- When deleting implementation code that carries non-trivial logic (computation, transforms, invariant maintenance), enumerate the behavior it carries and verify the replacement covers it. See CLAUDE.md "Behavioral Inventory Before Deleting Implementation Code".
+- When adding validation to one transport (GraphQL or MCP), add the same validation to the other. Asymmetric validation is a security bug.
 - Never split a read-then-write into two separate lock acquisitions (lock/read/drop then lock/write). This is a TOCTOU race. Hold a single write lock (or upgradeable read lock) for the entire read-modify-write sequence.
 - When implementing MCP tools that run over stdio transport, all tracing/logging MUST go to stderr. Any output to stdout corrupts the MCP protocol framing.
 - Never write blanket `unsafe impl Send/Sync` on wrapper types. Wrap the non-Send inner type in a newtype with a SAFETY comment. Add compile-time assertions that verify the invariant.
