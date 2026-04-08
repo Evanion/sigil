@@ -62,7 +62,7 @@ pub struct LayoutEngine;
 ///
 /// All mutations go through commands executed on the document (Plan 01b).
 /// For Plan 01a, the document provides direct access to the arena and pages.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Document {
     pub metadata: DocumentMetadata,
     pub arena: Arena,

@@ -26,7 +26,10 @@ use agent_designer_core::commands::style_commands::{
 };
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
-use agent_designer_core::validate::{MAX_BATCH_SIZE, validate_floats_in_value};
+use agent_designer_core::validate::{
+    MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
+    MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
+};
 use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPayload};
 
 use crate::state::ServerState;
@@ -96,10 +99,13 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
 /// Parses a `SetField` input, dispatching on the field path.
 #[allow(clippy::too_many_lines)]
 fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
-    let node_uuid_str = sf.node_uuid.clone();
-    let _parsed_uuid: uuid::Uuid = node_uuid_str
-        .parse()
-        .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
+    // RF-016: reject oversized JSON values before parsing
+    if sf.value.len() > MAX_FIELD_VALUE_SIZE {
+        return Err(async_graphql::Error::new(format!(
+            "field value exceeds maximum size of {MAX_FIELD_VALUE_SIZE} bytes (got {})",
+            sf.value.len()
+        )));
+    }
 
     let value: serde_json::Value = serde_json::from_str(&sf.value)
         .map_err(|e| async_graphql::Error::new(format!("invalid JSON value: {e}")))?;
@@ -113,7 +119,11 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
     };
 
     let path = sf.path.clone();
-    let uuid_str = sf.node_uuid.clone();
+    // RF-030: parse UUID once outside the builder closure
+    let parsed_uuid: uuid::Uuid = sf
+        .node_uuid
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
 
     match path.as_str() {
         "transform" => {
@@ -123,12 +133,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 .map_err(|e| async_graphql::Error::new(format!("invalid transform values: {e}")))?;
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetTransform {
                         node_id,
@@ -143,12 +150,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 .map_err(|e| async_graphql::Error::new(format!("invalid name: {e}")))?;
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(RenameNode { node_id, new_name }) as Box<dyn FieldOperation>)
                 }),
@@ -160,12 +164,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 .map_err(|e| async_graphql::Error::new(format!("invalid visible value: {e}")))?;
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetVisible {
                         node_id,
@@ -180,12 +181,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 .map_err(|e| async_graphql::Error::new(format!("invalid locked value: {e}")))?;
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetLocked {
                         node_id,
@@ -201,14 +199,18 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             })?;
             let new_fills: Vec<Fill> = serde_json::from_value(value)
                 .map_err(|e| async_graphql::Error::new(format!("invalid fills: {e}")))?;
+            // RF-022: validate array size
+            if new_fills.len() > MAX_FILLS_PER_STYLE {
+                return Err(async_graphql::Error::new(format!(
+                    "fills exceed maximum of {MAX_FILLS_PER_STYLE} (got {})",
+                    new_fills.len()
+                )));
+            }
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetFills { node_id, new_fills }) as Box<dyn FieldOperation>)
                 }),
@@ -221,14 +223,18 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             })?;
             let new_strokes: Vec<Stroke> = serde_json::from_value(value)
                 .map_err(|e| async_graphql::Error::new(format!("invalid strokes: {e}")))?;
+            // RF-022: validate array size
+            if new_strokes.len() > MAX_STROKES_PER_STYLE {
+                return Err(async_graphql::Error::new(format!(
+                    "strokes exceed maximum of {MAX_STROKES_PER_STYLE} (got {})",
+                    new_strokes.len()
+                )));
+            }
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetStrokes {
                         node_id,
@@ -244,14 +250,18 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             })?;
             let new_effects: Vec<Effect> = serde_json::from_value(value)
                 .map_err(|e| async_graphql::Error::new(format!("invalid effects: {e}")))?;
+            // RF-022: validate array size
+            if new_effects.len() > MAX_EFFECTS_PER_STYLE {
+                return Err(async_graphql::Error::new(format!(
+                    "effects exceed maximum of {MAX_EFFECTS_PER_STYLE} (got {})",
+                    new_effects.len()
+                )));
+            }
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetEffects {
                         node_id,
@@ -275,12 +285,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             }
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetOpacity {
                         node_id,
@@ -295,12 +302,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 .map_err(|e| async_graphql::Error::new(format!("invalid blend mode: {e}")))?;
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetBlendMode {
                         node_id,
@@ -349,12 +353,9 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             ];
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
-                    let uuid: uuid::Uuid = uuid_str
-                        .parse()
-                        .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
                     let node_id = doc
                         .arena
-                        .id_by_uuid(&uuid)
+                        .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetCornerRadii { node_id, new_radii }) as Box<dyn FieldOperation>)
                 }),
@@ -375,11 +376,26 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
         .parse()
         .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
 
+    // RF-016: reject oversized kind JSON before parsing
+    if cn.kind.len() > MAX_FIELD_VALUE_SIZE {
+        return Err(async_graphql::Error::new(format!(
+            "node kind value exceeds maximum size of {MAX_FIELD_VALUE_SIZE} bytes (got {})",
+            cn.kind.len()
+        )));
+    }
+
     let kind: NodeKind = serde_json::from_str(&cn.kind)
         .map_err(|e| async_graphql::Error::new(format!("invalid node kind: {e}")))?;
 
     let initial_transform: Option<Transform> = match cn.transform.as_ref() {
         Some(t) => {
+            // RF-016: reject oversized transform JSON before parsing
+            if t.len() > MAX_FIELD_VALUE_SIZE {
+                return Err(async_graphql::Error::new(format!(
+                    "transform value exceeds maximum size of {MAX_FIELD_VALUE_SIZE} bytes (got {})",
+                    t.len()
+                )));
+            }
             let parsed: Transform = serde_json::from_str(t)
                 .map_err(|e| async_graphql::Error::new(format!("invalid transform: {e}")))?;
             validate_transform(&parsed)
@@ -429,16 +445,15 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
 
 /// Parses a `DeleteNode` input.
 fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
-    let _parsed_uuid: uuid::Uuid = dn
+    // RF-030: parse UUID once outside the builder closure
+    let parsed_uuid: uuid::Uuid = dn
         .node_uuid
         .parse()
         .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
 
-    let node_uuid_str = dn.node_uuid.clone();
-
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
-        node_uuid: node_uuid_str.clone(),
+        node_uuid: dn.node_uuid.clone(),
         op_type: "delete_node".to_string(),
         path: String::new(),
         value: None,
@@ -446,12 +461,9 @@ fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
 
     Ok(ParsedOp {
         builder: Box::new(move |doc| {
-            let uuid: uuid::Uuid = node_uuid_str
-                .parse()
-                .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
             let node_id = doc
                 .arena
-                .id_by_uuid(&uuid)
+                .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
 
             // Find page ID for the node (needed by DeleteNode)
@@ -471,11 +483,12 @@ fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
 
 /// Parses a `Reparent` input.
 fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
-    let _parsed_uuid: uuid::Uuid = rp
+    // RF-030: parse UUIDs once outside the builder closure
+    let parsed_uuid: uuid::Uuid = rp
         .node_uuid
         .parse()
         .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
-    let _parent_uuid: uuid::Uuid = rp
+    let parsed_parent_uuid: uuid::Uuid = rp
         .new_parent_uuid
         .parse()
         .map_err(|_| async_graphql::Error::new("invalid parent UUID"))?;
@@ -486,36 +499,26 @@ fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
     #[allow(clippy::cast_sign_loss)]
     let position_usize = rp.position as usize;
 
-    let node_uuid_str = rp.node_uuid.clone();
-    let parent_uuid_str = rp.new_parent_uuid.clone();
-    let position = rp.position;
-
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
-        node_uuid: node_uuid_str.clone(),
+        node_uuid: rp.node_uuid.clone(),
         op_type: "reparent".to_string(),
         path: String::new(),
         value: Some(serde_json::json!({
-            "parentUuid": parent_uuid_str,
-            "position": position,
+            "parentUuid": rp.new_parent_uuid,
+            "position": rp.position,
         })),
     };
 
     Ok(ParsedOp {
         builder: Box::new(move |doc| {
-            let uuid: uuid::Uuid = node_uuid_str
-                .parse()
-                .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
-            let parent_uuid: uuid::Uuid = parent_uuid_str
-                .parse()
-                .map_err(|_| async_graphql::Error::new("invalid parent UUID"))?;
             let node_id = doc
                 .arena
-                .id_by_uuid(&uuid)
+                .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
             let parent_id = doc
                 .arena
-                .id_by_uuid(&parent_uuid)
+                .id_by_uuid(&parsed_parent_uuid)
                 .ok_or_else(|| async_graphql::Error::new("parent not found"))?;
             Ok(Box::new(ReparentNode {
                 node_id,
@@ -529,7 +532,8 @@ fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
 
 /// Parses a `Reorder` input.
 fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
-    let _parsed_uuid: uuid::Uuid = ro
+    // RF-030: parse UUID once outside the builder closure
+    let parsed_uuid: uuid::Uuid = ro
         .node_uuid
         .parse()
         .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
@@ -542,27 +546,21 @@ fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
     #[allow(clippy::cast_sign_loss)]
     let new_position_usize = ro.new_position as usize;
 
-    let node_uuid_str = ro.node_uuid.clone();
-    let new_position = ro.new_position;
-
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
-        node_uuid: node_uuid_str.clone(),
+        node_uuid: ro.node_uuid.clone(),
         op_type: "reorder".to_string(),
         path: String::new(),
         value: Some(serde_json::json!({
-            "newPosition": new_position,
+            "newPosition": ro.new_position,
         })),
     };
 
     Ok(ParsedOp {
         builder: Box::new(move |doc| {
-            let uuid: uuid::Uuid = node_uuid_str
-                .parse()
-                .map_err(|_| async_graphql::Error::new("invalid UUID"))?;
             let node_id = doc
                 .arena
-                .id_by_uuid(&uuid)
+                .id_by_uuid(&parsed_uuid)
                 .ok_or_else(|| async_graphql::Error::new("node not found"))?;
             Ok(Box::new(ReorderChildren {
                 node_id,
@@ -590,6 +588,14 @@ impl MutationRoot {
     ) -> Result<ApplyOperationsResult> {
         let state = ctx.data::<ServerState>()?;
 
+        // RF-015: validate user_id length
+        if user_id.len() > MAX_USER_ID_LEN {
+            return Err(async_graphql::Error::new(format!(
+                "user_id exceeds maximum length of {MAX_USER_ID_LEN} (got {})",
+                user_id.len()
+            )));
+        }
+
         if operations.is_empty() {
             return Err(async_graphql::Error::new(
                 "operations list must not be empty",
@@ -601,6 +607,15 @@ impl MutationRoot {
                 operations.len()
             )));
         }
+
+        // RF-007: derive broadcast event kind from the first operation
+        let event_kind = match &operations[0] {
+            OperationInput::CreateNode(_) => MutationEventKind::NodeCreated,
+            OperationInput::DeleteNode(_) => MutationEventKind::NodeDeleted,
+            OperationInput::SetField(_)
+            | OperationInput::Reparent(_)
+            | OperationInput::Reorder(_) => MutationEventKind::NodeUpdated,
+        };
 
         // First pass: parse all inputs (no lock needed).
         // This validates JSON formats, deserializes typed values, and checks
@@ -618,25 +633,45 @@ impl MutationRoot {
         // UUID→NodeId resolution happens inside the lock scope.
         // Operations are applied sequentially because later operations may
         // depend on earlier ones (e.g., create node then reparent it).
-        // The batch is still atomic: if any operation fails, no partial
-        // state escapes the lock scope (the guard is dropped without
-        // broadcasting or signaling dirty).
+        //
+        // RF-001: The batch is atomic — if any operation fails, the document
+        // is restored to its pre-batch state via snapshot rollback.
         {
             let mut doc_guard = acquire_document_lock(state);
 
+            // Snapshot the document state for rollback on partial failure
+            let snapshot = doc_guard.0.clone();
+
             for p in parsed {
-                let op = (p.builder)(&doc_guard)?;
-                op.validate(&doc_guard)
-                    .map_err(|e| async_graphql::Error::new(format!("validation failed: {e}")))?;
-                op.apply(&mut doc_guard)
-                    .map_err(|e| async_graphql::Error::new(format!("apply failed: {e}")))?;
+                let build_result = (p.builder)(&doc_guard);
+                let op = match build_result {
+                    Ok(op) => op,
+                    Err(e) => {
+                        doc_guard.0 = snapshot;
+                        return Err(e);
+                    }
+                };
+                if let Err(e) = op
+                    .validate(&doc_guard)
+                    .map_err(|e| async_graphql::Error::new(format!("validation failed: {e}")))
+                {
+                    doc_guard.0 = snapshot;
+                    return Err(e);
+                }
+                if let Err(e) = op
+                    .apply(&mut doc_guard)
+                    .map_err(|e| async_graphql::Error::new(format!("apply failed: {e}")))
+                {
+                    doc_guard.0 = snapshot;
+                    return Err(e);
+                }
             }
         }
 
         // Signal dirty + broadcast
         state.app.signal_dirty();
         state.app.publish_transaction(
-            MutationEventKind::NodeUpdated,
+            event_kind,
             None,
             multi_op_transaction(Some(user_id), broadcast_ops),
         );

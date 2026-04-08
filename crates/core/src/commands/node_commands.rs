@@ -98,8 +98,14 @@ impl FieldOperation for DeleteNode {
         {
             page.root_nodes.retain(|nid| *nid != self.node_id);
         }
+        // Collect all descendants before removal (iterative, depth-guarded by arena size)
+        let descendants = crate::tree::descendants(&doc.arena, self.node_id)?;
         // Detach from parent
         crate::tree::remove_child(&mut doc.arena, self.node_id)?;
+        // Remove all descendants from the arena (children first, then the node itself)
+        for desc_id in descendants {
+            doc.arena.remove(desc_id)?;
+        }
         doc.arena.remove(self.node_id)?;
         Ok(())
     }
@@ -552,5 +558,57 @@ mod tests {
         };
         // Frame node is not a Text node — apply must reject
         assert!(op.apply(&mut doc).is_err());
+    }
+
+    // ── RF-013: DeleteNode cleans up children ────────────────────────
+
+    #[test]
+    fn test_delete_node_removes_children_from_arena() {
+        let mut doc = Document::new("Test".to_string());
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame { layout: None },
+            "Parent".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent).expect("insert parent");
+
+        let child = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            "Child".to_string(),
+        )
+        .expect("create child");
+        let child_id = doc.arena.insert(child).expect("insert child");
+
+        let grandchild = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Rectangle {
+                corner_radii: [0.0; 4],
+            },
+            "Grandchild".to_string(),
+        )
+        .expect("create grandchild");
+        let grandchild_id = doc.arena.insert(grandchild).expect("insert grandchild");
+
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
+        crate::tree::add_child(&mut doc.arena, child_id, grandchild_id).expect("add grandchild");
+
+        let op = DeleteNode {
+            node_id: parent_id,
+            page_id: None,
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        // All three nodes should be removed from the arena
+        assert!(doc.arena.get(parent_id).is_err());
+        assert!(doc.arena.get(child_id).is_err());
+        assert!(doc.arena.get(grandchild_id).is_err());
     }
 }

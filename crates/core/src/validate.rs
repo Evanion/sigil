@@ -112,6 +112,18 @@ pub const MAX_FONT_WEIGHT: u16 = 1000;
 /// Minimum font weight value (CSS range).
 pub const MIN_FONT_WEIGHT: u16 = 1;
 
+/// Maximum number of JSON elements (values) to visit during float validation.
+/// Prevents unbounded traversal of adversarially large JSON payloads.
+/// Set high enough to accommodate legitimate max-sized paths
+/// (`MAX_SEGMENTS_PER_SUBPATH` segments x ~10 fields each).
+pub const MAX_JSON_VALIDATION_ELEMENTS: usize = 2_000_000;
+
+/// Maximum byte length of a JSON field value string before parsing (1 MB).
+pub const MAX_FIELD_VALUE_SIZE: usize = 1_024 * 1_024;
+
+/// Maximum length of a `user_id` string.
+pub const MAX_USER_ID_LEN: usize = 128;
+
 // ── Validation Functions ───────────────────────────────────────────────
 
 /// Validates that a float value is finite (not NaN or infinity).
@@ -135,8 +147,15 @@ pub fn validate_finite(name: &str, value: f64) -> Result<(), CoreError> {
 /// Returns `CoreError::ValidationError` if any float value is non-finite.
 pub fn validate_floats_in_value(value: &serde_json::Value) -> Result<(), CoreError> {
     let mut stack = vec![value];
+    let mut visited: usize = 0;
 
     while let Some(v) = stack.pop() {
+        visited += 1;
+        if visited >= MAX_JSON_VALIDATION_ELEMENTS {
+            return Err(CoreError::ValidationError(format!(
+                "JSON value exceeds maximum of {MAX_JSON_VALIDATION_ELEMENTS} elements"
+            )));
+        }
         match v {
             serde_json::Value::Number(n) => {
                 if let Some(f) = n.as_f64()
@@ -802,6 +821,33 @@ mod tests {
     #[test]
     fn test_validate_floats_in_value_accepts_bool() {
         let v = serde_json::json!(true);
+        assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    // ── RF-014: iteration limit enforcement ─────────────────────────
+
+    #[test]
+    fn test_max_json_validation_elements_enforced() {
+        // Build a JSON array with more elements than the limit.
+        // Use a nested structure to keep memory manageable while exceeding
+        // the element count: 2001 arrays of 1000 elements each = 2,001,000 + 2001 containers.
+        let inner: Vec<serde_json::Value> = (0..1000).map(|i| serde_json::json!(i)).collect();
+        let outers: Vec<serde_json::Value> = (0..=MAX_JSON_VALIDATION_ELEMENTS / 1000)
+            .map(|_| serde_json::Value::Array(inner.clone()))
+            .collect();
+        let v = serde_json::Value::Array(outers);
+        let result = validate_floats_in_value(&v);
+        assert!(
+            result.is_err(),
+            "should reject JSON exceeding element limit"
+        );
+    }
+
+    #[test]
+    fn test_validate_floats_in_value_within_limit_accepted() {
+        // A modest-sized JSON should be fine
+        let elements: Vec<serde_json::Value> = (0..100).map(|i| serde_json::json!(i)).collect();
+        let v = serde_json::Value::Array(elements);
         assert!(validate_floats_in_value(&v).is_ok());
     }
 }
