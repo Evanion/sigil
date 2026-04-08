@@ -100,7 +100,7 @@ pub fn list_tokens_impl(state: &AppState) -> Result<Vec<TokenInfo>, McpToolError
 ///
 /// Parses the token type string and deserializes the value JSON, then
 /// constructs the `Token` (which runs all validation), and executes
-/// `AddToken` through `Document::execute`.
+/// `AddToken` via `validate` then `apply`.
 ///
 /// # Errors
 ///
@@ -203,7 +203,7 @@ pub fn update_token_impl(
 
 /// Deletes a token by name.
 ///
-/// Snapshots the existing token for the undo payload, then executes `RemoveToken`.
+/// Looks up the token by name, then executes `RemoveToken`.
 ///
 /// # Errors
 ///

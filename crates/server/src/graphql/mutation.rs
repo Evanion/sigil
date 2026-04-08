@@ -26,7 +26,7 @@ use agent_designer_core::commands::style_commands::{
 };
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
-use agent_designer_core::validate::MAX_BATCH_SIZE;
+use agent_designer_core::validate::{MAX_BATCH_SIZE, validate_floats_in_value};
 use agent_designer_core::{NodeId, PageId};
 use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPayload};
 
@@ -189,7 +189,6 @@ impl MutationRoot {
         let node_uuid = uuid::Uuid::new_v4();
 
         let cmd = CreateNode {
-            node_id: NodeId::new(0, 0),
             uuid: node_uuid,
             kind: node_kind,
             name: name.clone(),
@@ -831,6 +830,12 @@ impl MutationRoot {
         // Clone for broadcast before deserialization consumes the value
         let fills_json = fills.0.clone();
 
+        // RF-016: Validate floats before deserialization (match MCP tool behavior)
+        validate_floats_in_value(&fills_json).map_err(|e| {
+            tracing::warn!("fills contain invalid floats: {e}");
+            async_graphql::Error::new("fills contain invalid floats")
+        })?;
+
         // Deserialize fills before lock acquisition
         let new_fills: Vec<Fill> = serde_json::from_value(fills.0).map_err(|e| {
             tracing::warn!("invalid fills in setFills: {e}");
@@ -887,6 +892,12 @@ impl MutationRoot {
 
         // Clone for broadcast before deserialization consumes the value
         let strokes_json = strokes.0.clone();
+
+        // RF-016: Validate floats before deserialization (match MCP tool behavior)
+        validate_floats_in_value(&strokes_json).map_err(|e| {
+            tracing::warn!("strokes contain invalid floats: {e}");
+            async_graphql::Error::new("strokes contain invalid floats")
+        })?;
 
         // Deserialize strokes before lock acquisition
         let new_strokes: Vec<Stroke> = serde_json::from_value(strokes.0).map_err(|e| {
@@ -952,6 +963,12 @@ impl MutationRoot {
 
         // Clone for broadcast before deserialization consumes the value
         let effects_json = effects.0.clone();
+
+        // RF-016: Validate floats before deserialization (match MCP tool behavior)
+        validate_floats_in_value(&effects_json).map_err(|e| {
+            tracing::warn!("effects contain invalid floats: {e}");
+            async_graphql::Error::new("effects contain invalid floats")
+        })?;
 
         // Deserialize effects before lock acquisition
         let new_effects: Vec<Effect> = serde_json::from_value(effects.0).map_err(|e| {
@@ -1138,7 +1155,9 @@ impl MutationRoot {
             let mut doc_guard = acquire_document_lock(state);
 
             // Validate all transforms before applying any (all-or-nothing semantics)
-            let mut resolved: Vec<(NodeId, Transform)> = Vec::with_capacity(parsed_entries.len());
+            // RF-023: Store (NodeId, uuid) pairs to avoid re-resolving in the response loop.
+            let mut resolved: Vec<(NodeId, uuid::Uuid, Transform)> =
+                Vec::with_capacity(parsed_entries.len());
             for (uuid, new_transform) in &parsed_entries {
                 let node_id = doc_guard
                     .arena
@@ -1152,12 +1171,12 @@ impl MutationRoot {
                     tracing::warn!("batchSetTransform validation failed for {uuid}: {e}");
                     async_graphql::Error::new("batch set transform validation failed")
                 })?;
-                resolved.push((node_id, *new_transform));
+                resolved.push((node_id, *uuid, *new_transform));
             }
 
             // RF-006: Record original transforms before applying, for rollback on partial failure.
             let mut originals: Vec<(NodeId, Transform)> = Vec::with_capacity(resolved.len());
-            for &(node_id, ref new_transform) in &resolved {
+            for &(node_id, _, ref new_transform) in &resolved {
                 let old_transform = doc_guard
                     .arena
                     .get(node_id)
@@ -1185,12 +1204,10 @@ impl MutationRoot {
             }
 
             // Build response inside lock scope (RF-005)
-            let mut nodes = Vec::with_capacity(parsed_entries.len());
-            for (uuid, _) in &parsed_entries {
-                let node_id = doc_guard.arena.id_by_uuid(uuid).ok_or_else(|| {
-                    async_graphql::Error::new("node disappeared after batch transform")
-                })?;
-                nodes.push(node_to_gql(&doc_guard, node_id, *uuid)?);
+            // RF-023: Reuse already-resolved (NodeId, uuid) pairs instead of re-resolving.
+            let mut nodes = Vec::with_capacity(resolved.len());
+            for &(node_id, uuid, _) in &resolved {
+                nodes.push(node_to_gql(&doc_guard, node_id, uuid)?);
             }
             nodes
         };
@@ -1329,7 +1346,6 @@ impl MutationRoot {
 
             // Create the group node with the bounding box transform
             let create_cmd = CreateNode {
-                node_id: NodeId::new(0, 0),
                 uuid: group_uuid,
                 kind: NodeKind::Group,
                 name,

@@ -5,15 +5,13 @@ use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::{NodeId, PageId};
 use crate::node::{Node, NodeKind, Transform};
-use crate::validate::{validate_node_name, validate_text_content};
+use crate::validate::{validate_finite, validate_node_name, validate_text_content};
 use uuid::Uuid;
 
 /// Creates a new node and inserts it into the arena.
 /// Optionally adds it as a root node on a page.
 #[derive(Debug)]
 pub struct CreateNode {
-    /// The initial `NodeId` hint (arena may reassign the actual index).
-    pub node_id: NodeId,
     /// The UUID for the new node.
     pub uuid: Uuid,
     /// The kind of node to create.
@@ -30,6 +28,26 @@ pub struct CreateNode {
 impl FieldOperation for CreateNode {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         validate_node_name(&self.name)?;
+        // Validate float fields in NodeKind variants
+        match &self.kind {
+            NodeKind::Rectangle { corner_radii } => {
+                for (i, &r) in corner_radii.iter().enumerate() {
+                    validate_finite(&format!("corner_radii[{i}]"), r)?;
+                    if r < 0.0 {
+                        return Err(CoreError::ValidationError(format!(
+                            "corner_radii[{i}] must be non-negative, got {r}"
+                        )));
+                    }
+                }
+            }
+            NodeKind::Ellipse {
+                arc_start, arc_end, ..
+            } => {
+                validate_finite("arc_start", *arc_start)?;
+                validate_finite("arc_end", *arc_end)?;
+            }
+            _ => {}
+        }
         if let Some(ref t) = self.initial_transform {
             crate::commands::style_commands::validate_transform(t)?;
         }
@@ -41,7 +59,7 @@ impl FieldOperation for CreateNode {
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let mut node = Node::new(
-            self.node_id,
+            NodeId::new(0, 0),
             self.uuid,
             self.kind.clone(),
             self.name.clone(),
@@ -223,7 +241,6 @@ mod tests {
             .expect("add page");
 
         let op = CreateNode {
-            node_id: NodeId::new(0, 0),
             uuid: make_uuid(1),
             kind: NodeKind::Rectangle {
                 corner_radii: [0.0; 4],
@@ -451,5 +468,89 @@ mod tests {
             new_visible: false,
         };
         assert!(op.validate(&doc).is_err());
+    }
+
+    // ── RF-015: NodeKind float validation ─────────────────────────────
+
+    #[test]
+    fn test_create_node_rejects_nan_corner_radii() {
+        let doc = Document::new("Test".to_string());
+        let op = CreateNode {
+            uuid: make_uuid(1),
+            kind: NodeKind::Rectangle {
+                corner_radii: [0.0, f64::NAN, 0.0, 0.0],
+            },
+            name: "Rect".to_string(),
+            page_id: None,
+            initial_transform: None,
+        };
+        assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_create_node_rejects_negative_corner_radii() {
+        let doc = Document::new("Test".to_string());
+        let op = CreateNode {
+            uuid: make_uuid(1),
+            kind: NodeKind::Rectangle {
+                corner_radii: [0.0, 0.0, -1.0, 0.0],
+            },
+            name: "Rect".to_string(),
+            page_id: None,
+            initial_transform: None,
+        };
+        assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_create_node_rejects_nan_arc_fields() {
+        let doc = Document::new("Test".to_string());
+        let op = CreateNode {
+            uuid: make_uuid(1),
+            kind: NodeKind::Ellipse {
+                arc_start: f64::NAN,
+                arc_end: 360.0,
+            },
+            name: "Ellipse".to_string(),
+            page_id: None,
+            initial_transform: None,
+        };
+        assert!(op.validate(&doc).is_err());
+    }
+
+    // ── RF-024: apply-without-validate tests ──────────────────────────
+
+    #[test]
+    fn test_set_transform_apply_on_missing_node_returns_error() {
+        use crate::commands::style_commands::SetTransform;
+
+        let mut doc = Document::new("Test".to_string());
+        let op = SetTransform {
+            node_id: NodeId::new(99, 0),
+            new_transform: crate::node::Transform::default(),
+        };
+        // Calling apply directly without validate — apply must still be self-protecting
+        assert!(op.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_rename_node_apply_on_missing_node_returns_error() {
+        let mut doc = Document::new("Test".to_string());
+        let op = RenameNode {
+            node_id: NodeId::new(99, 0),
+            new_name: "New".to_string(),
+        };
+        assert!(op.apply(&mut doc).is_err());
+    }
+
+    #[test]
+    fn test_set_text_content_apply_on_non_text_node_returns_error() {
+        let (mut doc, node_id) = setup_doc_with_frame();
+        let op = SetTextContent {
+            node_id,
+            new_content: "text".to_string(),
+        };
+        // Frame node is not a Text node — apply must reject
+        assert!(op.apply(&mut doc).is_err());
     }
 }

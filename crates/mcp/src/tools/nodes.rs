@@ -203,7 +203,6 @@ pub fn create_node_impl(
             .transpose()?;
 
         let cmd = CreateNode {
-            node_id: NodeId::new(0, 0),
             uuid: node_uuid,
             kind,
             name: name.to_string(),
@@ -276,7 +275,7 @@ pub fn create_node_impl(
 
 /// Deletes a node identified by UUID.
 ///
-/// Captures a full snapshot of the node (for undo) then executes `DeleteNode`.
+/// Resolves the UUID to a `NodeId`, then executes `DeleteNode`.
 ///
 /// # Errors
 ///

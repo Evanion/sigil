@@ -20,7 +20,7 @@ pub const MAX_TREE_DEPTH: usize = 100;
 
 /// Builds a `DocumentInfo` from the current document state.
 ///
-/// Acquires the document lock, reads metadata/arena/pages/history, then drops
+/// Acquires the document lock, reads metadata/arena/pages, then drops
 /// the lock before returning. The lock is never held across an await point.
 #[must_use]
 pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {

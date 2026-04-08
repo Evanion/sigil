@@ -71,7 +71,6 @@ pub struct Document {
     pub transitions: Vec<Transition>,
     pub token_context: TokenContext,
     pub layout_engine: LayoutEngine,
-    seq: u64,
 }
 
 impl Document {
@@ -86,7 +85,6 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
-            seq: 0,
         }
     }
 
@@ -101,21 +99,7 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
-            seq: 0,
         }
-    }
-
-    /// Returns the current sequence number.
-    #[must_use]
-    pub fn seq(&self) -> u64 {
-        self.seq
-    }
-
-    /// Increments and returns the next sequence number.
-    /// Called by the server after committing a transaction.
-    pub fn next_seq(&mut self) -> u64 {
-        self.seq += 1;
-        self.seq
     }
 
     /// Adds a page to the document.
@@ -157,27 +141,6 @@ impl Document {
         Ok(())
     }
 
-    /// Restores a component definition (for undo paths).
-    ///
-    /// Skips the duplicate ID check but keeps the capacity check.
-    ///
-    /// # Errors
-    /// Returns `CoreError::ValidationError` if the document already has the maximum
-    /// number of components.
-    pub fn restore_component(&mut self, def: ComponentDef) -> Result<(), CoreError> {
-        if self.components.len() >= crate::validate::MAX_COMPONENTS_PER_DOCUMENT
-            && !self.components.contains_key(&def.id())
-        {
-            return Err(CoreError::ValidationError(format!(
-                "document already has {} components (maximum {})",
-                self.components.len(),
-                crate::validate::MAX_COMPONENTS_PER_DOCUMENT
-            )));
-        }
-        self.components.insert(def.id(), def);
-        Ok(())
-    }
-
     /// Adds a transition to the document.
     ///
     /// # Errors
@@ -195,31 +158,6 @@ impl Document {
             )));
         }
         if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT {
-            return Err(CoreError::ValidationError(format!(
-                "document already has {} transitions (maximum {})",
-                self.transitions.len(),
-                crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
-            )));
-        }
-        self.transitions.push(transition);
-        Ok(())
-    }
-
-    /// Restores a transition (for undo paths).
-    ///
-    /// Validates the transition and checks capacity, but skips the duplicate ID check.
-    ///
-    /// # Errors
-    /// Returns `CoreError::ValidationError` if the transition is invalid or the document
-    /// is at capacity.
-    pub fn restore_transition(
-        &mut self,
-        transition: crate::prototype::Transition,
-    ) -> Result<(), CoreError> {
-        crate::prototype::validate_transition(&transition)?;
-        if self.transitions.len() >= crate::validate::MAX_TRANSITIONS_PER_DOCUMENT
-            && !self.transitions.iter().any(|t| t.id == transition.id)
-        {
             return Err(CoreError::ValidationError(format!(
                 "document already has {} transitions (maximum {})",
                 self.transitions.len(),
@@ -644,21 +582,5 @@ mod tests {
         )
         .expect("valid");
         assert!(doc.add_component(overflow).is_err());
-    }
-
-    // ── Sequence counter ─────────────────────────────────────────────
-
-    #[test]
-    fn test_document_seq_starts_at_zero() {
-        let doc = Document::new("Test".to_string());
-        assert_eq!(doc.seq(), 0);
-    }
-
-    #[test]
-    fn test_document_next_seq_increments() {
-        let mut doc = Document::new("Test".to_string());
-        assert_eq!(doc.next_seq(), 1);
-        assert_eq!(doc.next_seq(), 2);
-        assert_eq!(doc.seq(), 2);
     }
 }
