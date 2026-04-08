@@ -193,12 +193,51 @@ function parsePagesResponse(data: unknown): {
  * for the applyOperations mutation.
  */
 function transactionToServerOps(tx: Transaction): Record<string, unknown>[] {
-  const serverOps: Record<string, unknown>[] = [];
+  // Collect UUIDs of nodes being deleted in this transaction.
+  // Field changes on soon-to-be-deleted nodes are pointless and cause
+  // "node not found" errors if the delete is processed first.
+  const deletedUuids = new Set<string>();
   for (const op of tx.operations) {
-    const mapped = operationToServerOp(op);
-    if (mapped) serverOps.push(mapped);
+    if (op.type === "delete_node") {
+      deletedUuids.add(op.nodeUuid);
+    }
   }
-  return serverOps;
+
+  // Similarly, collect UUIDs of nodes being created — field changes on
+  // these nodes (like setTransform after create) should come AFTER the create.
+  // We reorder: creates first, then field changes, then deletes last.
+  const creates: Record<string, unknown>[] = [];
+  const fieldOps: Record<string, unknown>[] = [];
+  const deletes: Record<string, unknown>[] = [];
+  const structuralOther: Record<string, unknown>[] = []; // reparent, reorder
+
+  for (const op of tx.operations) {
+    // Skip field changes on nodes being deleted in this batch
+    if (op.type === "set_field" && deletedUuids.has(op.nodeUuid)) {
+      continue;
+    }
+
+    const mapped = operationToServerOp(op);
+    if (!mapped) continue;
+
+    switch (op.type) {
+      case "create_node":
+        creates.push(mapped);
+        break;
+      case "delete_node":
+        deletes.push(mapped);
+        break;
+      case "set_field":
+        fieldOps.push(mapped);
+        break;
+      default: // reparent, reorder
+        structuralOther.push(mapped);
+        break;
+    }
+  }
+
+  // Order: creates → field changes → reparent/reorder → deletes
+  return [...creates, ...fieldOps, ...structuralOther, ...deletes];
 }
 
 function operationToServerOp(op: Operation): Record<string, unknown> | null {
@@ -498,8 +537,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Track structural operation for undo
     interceptor.trackStructural(createCreateNodeOp(clientSessionId, nodeData));
 
-    // RF-026: Queue server op — sent when interceptor commits (coalesced)
-    pendingServerOps.push({
+    // Structural ops send immediately — they MUST reach the server before any
+    // undo attempt. Field changes (coalesced via pendingServerOps) can be deferred,
+    // but create/delete cannot.
+    sendOps([{
       createNode: {
         nodeUuid: optimisticUuid,
         kind: JSON.stringify(kind),
@@ -507,7 +548,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         transform: JSON.stringify(transform),
         pageId,
       },
-    });
+    }]);
 
     return optimisticUuid;
   }
@@ -567,8 +608,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       setSelectedNodeIds(filteredIds);
     }
 
-    // RF-026: Queue server op — sent when interceptor commits (coalesced)
-    pendingServerOps.push({ deleteNode: { nodeUuid: uuid } });
+    // Structural ops send immediately (not coalesced) — must reach server
+    // before any undo attempt.
+    sendOps([{ deleteNode: { nodeUuid: uuid } }]);
   }
 
   function setVisible(uuid: string, visible: boolean): void {
