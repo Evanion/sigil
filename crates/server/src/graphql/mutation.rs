@@ -1086,6 +1086,7 @@ impl MutationRoot {
     ///
     /// Used by multi-select move, align, and distribute operations.
     /// All transforms are validated before any are applied.
+    #[allow(clippy::too_many_lines)]
     async fn batch_set_transform(
         &self,
         ctx: &Context<'_>,
@@ -1154,16 +1155,33 @@ impl MutationRoot {
                 resolved.push((node_id, *new_transform));
             }
 
-            // Apply all transforms
-            for (node_id, new_transform) in &resolved {
+            // RF-006: Record original transforms before applying, for rollback on partial failure.
+            let mut originals: Vec<(NodeId, Transform)> = Vec::with_capacity(resolved.len());
+            for &(node_id, ref new_transform) in &resolved {
+                let old_transform = doc_guard
+                    .arena
+                    .get(node_id)
+                    .map_err(|e| {
+                        tracing::warn!("batchSetTransform snapshot failed: {e}");
+                        async_graphql::Error::new("batch set transform failed")
+                    })?
+                    .transform;
+                originals.push((node_id, old_transform));
+
                 let cmd = SetTransform {
-                    node_id: *node_id,
+                    node_id,
                     new_transform: *new_transform,
                 };
-                cmd.apply(&mut doc_guard).map_err(|e| {
-                    tracing::warn!("batchSetTransform apply failed: {e}");
-                    async_graphql::Error::new("batch set transform failed")
-                })?;
+                if let Err(e) = cmd.apply(&mut doc_guard) {
+                    tracing::warn!("batchSetTransform apply failed at node {node_id:?}: {e}");
+                    // Rollback all previously applied transforms (in reverse order)
+                    for &(rid, ref rt) in originals.iter().rev().skip(1) {
+                        if let Ok(node) = doc_guard.arena.get_mut(rid) {
+                            node.transform = *rt;
+                        }
+                    }
+                    return Err(async_graphql::Error::new("batch set transform failed"));
+                }
             }
 
             // Build response inside lock scope (RF-005)
@@ -1208,6 +1226,10 @@ impl MutationRoot {
 
     /// Group multiple nodes under a new Group node.
     ///
+    /// Computes a union bounding box for the children, creates the group with
+    /// that bounding box as its transform, adjusts children to group-relative
+    /// coordinates, removes children from page `root_nodes`, and reparents them.
+    ///
     /// Returns the UUID of the created group node.
     #[allow(clippy::too_many_lines)]
     async fn group_nodes(
@@ -1217,7 +1239,17 @@ impl MutationRoot {
         name: String,
         user_id: Option<String>,
     ) -> Result<String> {
+        use agent_designer_core::validate::MIN_GROUP_MEMBERS;
+
         let state = ctx.data::<ServerState>()?;
+
+        // RF-008: Validate minimum group members before any work.
+        if uuids.len() < MIN_GROUP_MEMBERS {
+            return Err(async_graphql::Error::new(format!(
+                "grouping requires at least {MIN_GROUP_MEMBERS} nodes, got {}",
+                uuids.len()
+            )));
+        }
 
         let mut parsed_uuids: Vec<uuid::Uuid> = Vec::with_capacity(uuids.len());
         for uuid_str in &uuids {
@@ -1243,12 +1275,50 @@ impl MutationRoot {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // Determine page and parent from the first child node
-            let first_node_parent = doc_guard
+            // Verify all nodes share the same parent
+            let first_parent = doc_guard
                 .arena
                 .get(node_ids[0])
                 .map_err(|_| async_graphql::Error::new("child lookup failed"))?
                 .parent;
+            for &nid in &node_ids[1..] {
+                let parent = doc_guard
+                    .arena
+                    .get(nid)
+                    .map_err(|_| async_graphql::Error::new("child lookup failed"))?
+                    .parent;
+                if parent != first_parent {
+                    return Err(async_graphql::Error::new(
+                        "all nodes in a group must share the same parent",
+                    ));
+                }
+            }
+
+            // RF-001: Compute union bounding box across all children.
+            let mut min_x = f64::INFINITY;
+            let mut min_y = f64::INFINITY;
+            let mut max_x = f64::NEG_INFINITY;
+            let mut max_y = f64::NEG_INFINITY;
+            for &nid in &node_ids {
+                let t = doc_guard
+                    .arena
+                    .get(nid)
+                    .map_err(|_| async_graphql::Error::new("child lookup failed"))?
+                    .transform;
+                min_x = min_x.min(t.x);
+                min_y = min_y.min(t.y);
+                max_x = max_x.max(t.x + t.width);
+                max_y = max_y.max(t.y + t.height);
+            }
+            let group_transform = Transform {
+                x: min_x,
+                y: min_y,
+                width: max_x - min_x,
+                height: max_y - min_y,
+                ..Transform::default()
+            };
+
+            // Determine which page these nodes are on (for root node management)
             let page_id = doc_guard.pages.iter().find_map(|page| {
                 if page.root_nodes.contains(&node_ids[0]) {
                     Some(page.id)
@@ -1257,14 +1327,14 @@ impl MutationRoot {
                 }
             });
 
-            // Create the group node
+            // Create the group node with the bounding box transform
             let create_cmd = CreateNode {
                 node_id: NodeId::new(0, 0),
                 uuid: group_uuid,
                 kind: NodeKind::Group,
                 name,
                 page_id,
-                initial_transform: None,
+                initial_transform: Some(group_transform),
             };
             create_cmd.validate(&doc_guard).map_err(|e| {
                 tracing::warn!("groupNodes create validation failed: {e}");
@@ -1281,12 +1351,25 @@ impl MutationRoot {
                 .id_by_uuid(&group_uuid)
                 .ok_or_else(|| async_graphql::Error::new("group node not found after creation"))?;
 
-            // If the first child had a parent, reparent the group under that parent
-            if let Some(parent_id) = first_node_parent {
+            // If the children had a parent, reparent the group under that parent
+            // at the topmost child index (earliest position among the grouped children).
+            if let Some(parent_id) = first_parent {
+                let parent_children = &doc_guard
+                    .arena
+                    .get(parent_id)
+                    .map_err(|_| async_graphql::Error::new("parent lookup failed"))?
+                    .children
+                    .clone();
+                let topmost_index = node_ids
+                    .iter()
+                    .filter_map(|nid| parent_children.iter().position(|c| c == nid))
+                    .min()
+                    .unwrap_or(0);
+
                 let reparent_group = ReparentNode {
                     node_id: group_node_id,
                     new_parent_id: parent_id,
-                    new_position: 0,
+                    new_position: topmost_index,
                 };
                 reparent_group.validate(&doc_guard).map_err(|e| {
                     tracing::warn!("groupNodes reparent group failed: {e}");
@@ -1298,21 +1381,68 @@ impl MutationRoot {
                 })?;
             }
 
-            // Reparent each child under the group
+            // RF-001, RF-002, RF-007: Reparent each child under the group,
+            // adjusting transforms and removing from page roots. Track progress
+            // for rollback on partial failure.
+            let mut reparented: Vec<(NodeId, Transform)> = Vec::with_capacity(node_ids.len());
             for (i, &child_id) in node_ids.iter().enumerate() {
+                // Record original transform for rollback
+                let original_transform = doc_guard
+                    .arena
+                    .get(child_id)
+                    .map_err(|_| async_graphql::Error::new("child lookup failed"))?
+                    .transform;
+
+                // Adjust child transform to group-relative coordinates
+                let adjusted = Transform {
+                    x: original_transform.x - group_transform.x,
+                    y: original_transform.y - group_transform.y,
+                    ..original_transform
+                };
+                let set_cmd = SetTransform {
+                    node_id: child_id,
+                    new_transform: adjusted,
+                };
+                if let Err(e) = set_cmd.apply(&mut doc_guard) {
+                    tracing::warn!("groupNodes transform adjust failed: {e}");
+                    // Rollback previously adjusted transforms
+                    for &(rid, ref rt) in reparented.iter().rev() {
+                        if let Ok(node) = doc_guard.arena.get_mut(rid) {
+                            node.transform = *rt;
+                        }
+                    }
+                    return Err(async_graphql::Error::new("group nodes failed"));
+                }
+
+                // RF-002: Remove child from page root_nodes if present
+                if let Some(pid) = page_id
+                    && let Ok(page) = doc_guard.page_mut(pid)
+                {
+                    page.root_nodes.retain(|nid| *nid != child_id);
+                }
+
+                // Reparent child under the group
                 let reparent_cmd = ReparentNode {
                     node_id: child_id,
                     new_parent_id: group_node_id,
                     new_position: i,
                 };
-                reparent_cmd.validate(&doc_guard).map_err(|e| {
+                if let Err(e) = reparent_cmd.apply(&mut doc_guard) {
                     tracing::warn!("groupNodes reparent child failed: {e}");
-                    async_graphql::Error::new("group nodes failed")
-                })?;
-                reparent_cmd.apply(&mut doc_guard).map_err(|e| {
-                    tracing::warn!("groupNodes reparent child failed: {e}");
-                    async_graphql::Error::new("group nodes failed")
-                })?;
+                    // Restore this child's transform (it was adjusted but not reparented)
+                    if let Ok(node) = doc_guard.arena.get_mut(child_id) {
+                        node.transform = original_transform;
+                    }
+                    // Rollback previously completed children
+                    for &(rid, ref rt) in reparented.iter().rev() {
+                        if let Ok(node) = doc_guard.arena.get_mut(rid) {
+                            node.transform = *rt;
+                        }
+                    }
+                    return Err(async_graphql::Error::new("group nodes failed"));
+                }
+
+                reparented.push((child_id, original_transform));
             }
         }
 
@@ -1346,7 +1476,12 @@ impl MutationRoot {
 
     /// Ungroup one or more group nodes, reparenting their children.
     ///
+    /// For each group: adjusts child transforms back to absolute coordinates,
+    /// reparents children to the group's parent (or makes them page roots),
+    /// then deletes the group node.
+    ///
     /// Returns the UUIDs of the ungrouped children.
+    #[allow(clippy::too_many_lines)]
     async fn ungroup_nodes(
         &self,
         ctx: &Context<'_>,
@@ -1363,9 +1498,6 @@ impl MutationRoot {
             parsed_uuids.push(parsed);
         }
 
-        // RF-003: capture child UUIDs and their new parent/position inside the
-        // lock scope so the reparent broadcast payload matches applyReparent's
-        // expected format: { "parentUuid": "...", "position": N }
         let (child_uuids, operations): (Vec<String>, Vec<OperationPayload>) = {
             let mut doc_guard = acquire_document_lock(state);
 
@@ -1379,15 +1511,53 @@ impl MutationRoot {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // For each group: reparent children to the group's parent, then delete the group
+            // Verify all targets are groups
+            for &gid in &group_ids {
+                let node = doc_guard
+                    .arena
+                    .get(gid)
+                    .map_err(|_| async_graphql::Error::new("group lookup failed"))?;
+                if !matches!(node.kind, NodeKind::Group) {
+                    return Err(async_graphql::Error::new(
+                        "ungroup target is not a Group node",
+                    ));
+                }
+            }
+
             let mut all_child_uuids = Vec::new();
+
             for &gid in &group_ids {
                 let group = doc_guard
                     .arena
                     .get(gid)
                     .map_err(|_| async_graphql::Error::new("group lookup failed"))?;
                 let group_parent = group.parent;
+                let group_transform = group.transform;
                 let children: Vec<NodeId> = group.children.clone();
+
+                // Find the group's index in its parent's children list (for insertion position)
+                let group_index_in_parent = if let Some(pid) = group_parent {
+                    let parent_node = doc_guard
+                        .arena
+                        .get(pid)
+                        .map_err(|_| async_graphql::Error::new("parent lookup failed"))?;
+                    parent_node
+                        .children
+                        .iter()
+                        .position(|&c| c == gid)
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+
+                // Find which page the group is on
+                let page_id = doc_guard.pages.iter().find_map(|page| {
+                    if page.root_nodes.contains(&gid) {
+                        Some(page.id)
+                    } else {
+                        None
+                    }
+                });
 
                 // Collect child UUIDs for response
                 for &cid in &children {
@@ -1398,33 +1568,76 @@ impl MutationRoot {
                     all_child_uuids.push(child_uuid.to_string());
                 }
 
-                // Reparent each child to the group's parent (or make it a root)
-                if let Some(parent_id) = group_parent {
-                    for (i, &cid) in children.iter().enumerate() {
+                // RF-004, RF-003, RF-007: Process each child — adjust transform
+                // and reparent. Track completed operations for rollback.
+                let mut completed: Vec<(NodeId, Transform)> = Vec::with_capacity(children.len());
+                for (i, &cid) in children.iter().enumerate() {
+                    let original_transform = doc_guard
+                        .arena
+                        .get(cid)
+                        .map_err(|_| async_graphql::Error::new("child lookup failed"))?
+                        .transform;
+
+                    // RF-004: Adjust child transform back to absolute coordinates
+                    let absolute_transform = Transform {
+                        x: original_transform.x + group_transform.x,
+                        y: original_transform.y + group_transform.y,
+                        ..original_transform
+                    };
+                    let set_cmd = SetTransform {
+                        node_id: cid,
+                        new_transform: absolute_transform,
+                    };
+                    if let Err(e) = set_cmd.apply(&mut doc_guard) {
+                        tracing::warn!("ungroupNodes transform adjust failed: {e}");
+                        // Rollback previously adjusted transforms
+                        for &(rid, ref rt) in completed.iter().rev() {
+                            if let Ok(node) = doc_guard.arena.get_mut(rid) {
+                                node.transform = *rt;
+                            }
+                        }
+                        return Err(async_graphql::Error::new("ungroup nodes failed"));
+                    }
+
+                    if let Some(parent_id) = group_parent {
+                        // Reparent child under the group's parent
                         let reparent_cmd = ReparentNode {
                             node_id: cid,
                             new_parent_id: parent_id,
-                            new_position: i,
+                            new_position: group_index_in_parent + i,
                         };
-                        reparent_cmd.validate(&doc_guard).map_err(|e| {
+                        if let Err(e) = reparent_cmd.apply(&mut doc_guard) {
                             tracing::warn!("ungroupNodes reparent failed: {e}");
-                            async_graphql::Error::new("ungroup nodes failed")
-                        })?;
-                        reparent_cmd.apply(&mut doc_guard).map_err(|e| {
-                            tracing::warn!("ungroupNodes reparent failed: {e}");
-                            async_graphql::Error::new("ungroup nodes failed")
-                        })?;
-                    }
-                }
-
-                // Find which page the group is on (for DeleteNode)
-                let page_id = doc_guard.pages.iter().find_map(|page| {
-                    if page.root_nodes.contains(&gid) {
-                        Some(page.id)
+                            // Restore this child's transform
+                            if let Ok(node) = doc_guard.arena.get_mut(cid) {
+                                node.transform = original_transform;
+                            }
+                            // Rollback previously completed children
+                            for &(rid, ref rt) in completed.iter().rev() {
+                                if let Ok(node) = doc_guard.arena.get_mut(rid) {
+                                    node.transform = *rt;
+                                }
+                            }
+                            return Err(async_graphql::Error::new("ungroup nodes failed"));
+                        }
                     } else {
-                        None
+                        // RF-003: Group is a page root — detach child from group
+                        // and add it to page root_nodes.
+                        agent_designer_core::tree::remove_child(&mut doc_guard.arena, cid)
+                            .map_err(|e| {
+                                tracing::warn!("ungroupNodes remove_child failed: {e}");
+                                async_graphql::Error::new("ungroup nodes failed")
+                            })?;
+                        if let Some(pid) = page_id {
+                            doc_guard.add_root_node_to_page(pid, cid).map_err(|e| {
+                                tracing::warn!("ungroupNodes add_root failed: {e}");
+                                async_graphql::Error::new("ungroup nodes failed")
+                            })?;
+                        }
                     }
-                });
+
+                    completed.push((cid, original_transform));
+                }
 
                 // Delete the group node
                 let delete_cmd = DeleteNode {

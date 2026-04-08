@@ -1,4 +1,9 @@
 # .devcontainer/Dockerfile
+# The base image provides the OS and a bootstrapping Rust toolchain.
+# The actual Rust version used for builds is controlled by rust-toolchain.toml
+# via rustup, so the base image tag only needs to provide a compatible OS.
+# TODO(RF-005): Pin to a SHA256 digest once the team agrees on a base image version.
+#   e.g. FROM mcr.microsoft.com/devcontainers/rust:1-bookworm@sha256:<digest>
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
 # Install Node.js 22 LTS
