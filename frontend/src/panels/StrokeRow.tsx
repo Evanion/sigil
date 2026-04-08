@@ -124,16 +124,8 @@ export function StrokeRow(props: StrokeRowProps) {
         />
       </div>
 
-      <select
-        class="sigil-stroke-row__alignment"
-        value={props.stroke.alignment}
-        onChange={handleAlignmentChange}
-        aria-label="Stroke alignment"
-      >
-        {ALIGNMENT_OPTIONS.map((opt) => (
-          <option value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
+      {/* Stroke alignment hidden until WebGL renderer supports inside/outside.
+          Canvas 2D only renders center-aligned strokes. */}
 
       <button
         class="sigil-stroke-row__remove"
