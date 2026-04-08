@@ -12,7 +12,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Install pnpm
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
 
 # Install Rust components
 RUN rustup component add clippy rustfmt rust-analyzer

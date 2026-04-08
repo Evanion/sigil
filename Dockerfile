@@ -1,6 +1,6 @@
 # Stage 1: Build frontend
 FROM node:22-bookworm-slim AS frontend-builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.0.0 --activate
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile

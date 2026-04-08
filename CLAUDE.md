@@ -23,7 +23,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Frontend: Vitest for unit tests.
 - Tests verify behavior, not implementation — no mocking internal details.
 - If you can't write a test for it, the interface needs redesign.
-- Every command added to `crates/core/` MUST have at least one integration test that exercises the full `execute -> undo -> redo` cycle through `Document::execute`, `Document::undo`, and `Document::redo` (not just direct calls to `apply`/`undo` on the command struct). The test must verify: (1) state after execute matches expectations, (2) state after undo matches the original state, (3) state after redo matches post-execute state. Test naming convention: `test_<command_name>_execute_undo_redo_cycle`.
+- Every `FieldOperation` added to `crates/core/` MUST have at least one test that exercises the full `validate` → `apply` cycle. The test must verify: (1) `validate` passes on valid input, (2) `apply` changes the document state as expected, (3) `validate` rejects invalid input (missing node, invalid values). Test naming convention: `test_<operation_name>_validate_and_apply`. Undo/redo is handled client-side (Spec 15) — the core crate provides forward-only operations.
 - Every new first-class entity type introduced to `crates/core/` (pages, components, layers, tokens, etc.) MUST ship with a complete command set covering at minimum: create, rename, delete, and any reorder or reparent operations the entity supports. A PR that adds an entity type without commands for it is incomplete — the entity is not usable by agents or clients without them.
 
 ### User Experience Consistency
@@ -32,7 +32,7 @@ These principles are the governing rules of this project. They explain the _why_
 - Standard keyboard shortcuts (V select, F frame, R rect, T text, P pen, etc.).
 - Agents and humans see each other's changes in real time through the same operation pipeline.
 - The MCP interface must be token-efficient — agents shouldn't need verbose interactions.
-- Every operation must have undo/redo support — no exceptions.
+- Every user-facing operation must support undo/redo. Undo is handled client-side by the frontend HistoryManager (Spec 15). The core crate provides forward-only `FieldOperation`s; the frontend captures before/after state for undo.
 
 ### Performance Requirements
 
@@ -371,11 +371,11 @@ Any type in `crates/core/` that has validation logic in its constructor MUST NOT
 
 ### Validated Types Must Have Private Fields
 
-Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to command structs, value objects, and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. If a command needs internal mutable state (snapshots, cached indices), those fields must be private and populated by the command's own `execute`/`apply` method, never by the caller.
+Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to value objects and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. **Exception:** `FieldOperation` structs (forward-only operations with a `validate()` method on the trait) may have public fields. These are pure data carriers where validation happens at the trait level via `validate()` before `apply()`, not in a constructor. The server and MCP crates construct them via struct literal syntax, which is the intended pattern.
 
-### Commands Must Be Self-Contained
+### FieldOperations Must Be Self-Contained
 
-A command struct's `execute` (or `apply`) method must be callable immediately after construction without the caller performing any additional setup. All internal state needed for undo (snapshots of previous values, recorded indices, saved references) must be captured by the command itself during `execute`, not passed in by the caller or populated via public field mutation before execution. The constructor receives the operation's parameters (what to do); the execute method captures the undo state (what was there before). If a command's undo path depends on state that was not captured during execute, the command is broken — it cannot be replayed from the history stack. This rule exists because caller-populated snapshots create an implicit contract that is invisible to the type system, untestable in isolation, and guaranteed to be forgotten by future callers.
+A `FieldOperation` struct's `apply()` method must be callable immediately after construction and `validate()` without the caller performing any additional setup. The struct receives the operation's parameters (what to do); `validate()` checks preconditions against the document; `apply()` performs the mutation. Callers MUST call `validate()` before `apply()`. The caller (server/MCP) is responsible for rollback on partial failure in multi-step operations — `FieldOperation` structs are forward-only and do not capture undo state.
 
 ### Constant Enforcement Tests
 
