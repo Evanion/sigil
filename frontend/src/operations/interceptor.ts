@@ -191,14 +191,23 @@ export function createInterceptor(
     sideEffectReaders.setViewport(ctx.viewport);
   }
 
+  /**
+   * Idle coalescing: commit buffer after no writes for ~100ms.
+   *
+   * Uses setTimeout instead of rAF because rAF fires at the end of each frame,
+   * which is too soon for continuous gestures that span multiple frames (color
+   * picker drag, canvas drag). The 100ms window groups an entire continuous
+   * interaction into one undo step while still feeling responsive for discrete
+   * actions (rename, toggle).
+   */
   function scheduleFlush(): void {
     if (rafHandle !== null) {
-      cancelAnimationFrame(rafHandle);
+      clearTimeout(rafHandle);
     }
-    rafHandle = requestAnimationFrame(() => {
+    rafHandle = window.setTimeout(() => {
       rafHandle = null;
       commitBuffer();
-    });
+    }, 100);
   }
 
   function commitBuffer(): void {
@@ -233,7 +242,7 @@ export function createInterceptor(
     };
 
     // Store context snapshot WITH the transaction for undo/redo restoration
-    tx._context = contextSnapshot;
+    tx._context = contextSnapshot ?? undefined;
 
     historyManager.pushTransaction(tx);
 
@@ -245,7 +254,7 @@ export function createInterceptor(
 
   function forceFlush(): void {
     if (rafHandle !== null) {
-      cancelAnimationFrame(rafHandle);
+      clearTimeout(rafHandle);
       rafHandle = null;
     }
     commitBuffer();
@@ -353,7 +362,7 @@ export function createInterceptor(
 
     destroy(): void {
       if (rafHandle !== null) {
-        cancelAnimationFrame(rafHandle);
+        clearTimeout(rafHandle);
         rafHandle = null;
       }
     },

@@ -95,40 +95,55 @@ Undoing a transaction applies the inverse of every operation in reverse order.
 
 ## 4. Client History Manager
 
-### 4.1 HistoryManager
+### 4.1 Transparent Undo Tracking
 
-Per-user component that manages undo/redo stacks:
+**Core principle:** Mutations MUST NOT know about the undo system. Undo tracking is a transparent layer that observes store changes and records them automatically. One user action = one undo step.
+
+The store exposes a `set(nodeUuid, path, value)` method that:
+1. Snapshots the current value at that path (the "before")
+2. Applies the new value to the Solid store
+3. Records the change for undo
+
+Changes are **auto-coalesced**: all `set()` calls within the same animation frame become ONE undo step. This means:
+- A rename (one `set` call) = one undo step
+- A color picker drag (many `set` calls per frame, many frames) = one undo step per frame... unless an **edit session** is active
+
+**Edit sessions** group all changes from open to close into one undo step:
+- `beginEdit(description)` — starts an edit session (e.g., when color picker opens)
+- `commitEdit()` — ends the session, commits all changes as one undo step
+- `cancelEdit()` — ends the session, reverts all changes
+
+Edit sessions are called by **UI components** (popover open/close, pointerDown/pointerUp), NOT by mutations. Mutations are completely unaware.
+
+For multi-node operations (align, batch transform), use `beginBatch`/`commitBatch` — the only explicit grouping API mutations use.
 
 ```typescript
-interface HistoryManager {
-  // Apply a single operation (auto-wrapped in transaction)
-  apply(op: Operation): void;
+interface TrackedStore {
+  /** Set a field on a node. Automatically tracked for undo. */
+  set(nodeUuid: string, path: string, value: unknown): void;
 
-  // Grouped operations
-  beginTransaction(description: string): void;
-  addOperation(op: Operation): void;
-  commitTransaction(): void;
-  cancelTransaction(): void;
+  /** Begin a batch — all changes until commitBatch() become one undo step. */
+  beginBatch(description: string): void;
+  commitBatch(): void;
+  cancelBatch(): void;
+}
 
-  // Drag coalescing
-  beginDrag(nodeUuid: string, path: string): void;
-  updateDrag(op: Operation): void;  // merges with current drag
-  commitDrag(): void;
-  cancelDrag(): void;
+interface UndoTracker {
+  tracked: TrackedStore;
 
-  // Undo/redo — returns the inverse transaction to send to server
-  undo(): Transaction | null;
-  redo(): Transaction | null;
+  /** Begin an edit session (called by UI components, not mutations). */
+  beginEdit(description: string): void;
+  commitEdit(): void;
+  cancelEdit(): void;
 
-  canUndo(): boolean;
-  canRedo(): boolean;
-
-  // Persistence
-  persist(): Promise<void>;
-  restore(documentId: string): Promise<void>;
-  clear(): void;
+  undo(): void;
+  redo(): void;
+  canUndo(): boolean;   // reactive signal
+  canRedo(): boolean;   // reactive signal
 }
 ```
+
+The HistoryManager (undo/redo stack management) remains internally but is not exposed to mutations.
 
 ### 4.2 IndexedDB Persistence
 

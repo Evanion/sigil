@@ -450,10 +450,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const optimisticUuid = crypto.randomUUID();
     const pageId = state.pages[0]?.id ?? null;
 
-    const nodeData = {
+    const nodeData: MutableDocumentNode = {
+      id: PLACEHOLDER_NODE_ID,
       uuid: optimisticUuid,
       kind,
       name: name.slice(0, MAX_NODE_NAME_LENGTH),
+      parent: null,
+      children: [],
       transform,
       style: {
         fills: [],
@@ -462,6 +465,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         blend_mode: "normal" as const,
         effects: [],
       },
+      constraints: { horizontal: "start", vertical: "start" },
+      grid_placement: null,
       visible: true,
       locked: false,
       parentUuid: null,
@@ -892,10 +897,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       scale_y: 1,
     };
 
-    const groupNodeData = {
+    const groupNodeData: MutableDocumentNode = {
+      id: PLACEHOLDER_NODE_ID,
       uuid: groupUuid,
-      kind: { type: "frame" as const },
+      kind: { type: "frame" as const, layout: null },
       name: name.slice(0, MAX_NODE_NAME_LENGTH),
+      parent: null,
+      children: [],
       transform: groupTransform,
       style: {
         fills: [],
@@ -904,6 +912,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         blend_mode: "normal" as const,
         effects: [],
       },
+      constraints: { horizontal: "start", vertical: "start" },
+      grid_placement: null,
       visible: true,
       locked: false,
       parentUuid: null,
