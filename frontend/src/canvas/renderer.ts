@@ -10,6 +10,7 @@
  */
 
 import type {
+  BlendMode,
   ColorSrgb,
   ConicGradientDef,
   DocumentNode,
@@ -261,6 +262,79 @@ function getEffectiveTransform(
 }
 
 /**
+ * Resolve the first stroke's color and width from a node's style.
+ * Returns null if no stroke with a valid literal color and positive finite width
+ * is found.
+ *
+ * RF-001: `Stroke` has no `type` discriminant — every entry is a solid stroke.
+ * RF-007: Stroke alignment (inside/outside/center) is not yet supported —
+ *         all strokes render as centered (canvas default). Deferred to WebGL.
+ * RF-008: Uses the shared `srgbColorToRgba` helper for channel validation and
+ *         CSS construction, avoiding duplication with fill resolution.
+ */
+function resolveStroke(node: DocumentNode): {
+  color: string;
+  width: number;
+} | null {
+  for (const stroke of node.style.strokes) {
+    const colorValue = stroke.color;
+    if (colorValue.type !== "literal") continue;
+    const resolved = colorValue.value;
+    if (resolved.space !== "srgb") continue;
+    const rgba = srgbColorToRgba(resolved);
+    if (rgba === null) continue;
+    const w = stroke.width.type === "literal" ? stroke.width.value : 1;
+    if (!Number.isFinite(w) || w <= 0) continue;
+    return { color: rgba, width: w };
+  }
+  return null;
+}
+
+/**
+ * RF-002 / RF-006: Map a `BlendMode` to the canvas `globalCompositeOperation`.
+ *
+ * Typed as `BlendMode` for exhaustiveness checking — every variant added to the
+ * BlendMode union must be handled here at compile time. Multi-word modes use
+ * underscores in the BlendMode union but hyphens in the canvas API.
+ */
+function blendModeToComposite(mode: BlendMode): GlobalCompositeOperation {
+  switch (mode) {
+    case "normal":
+      return "source-over";
+    case "multiply":
+      return "multiply";
+    case "screen":
+      return "screen";
+    case "overlay":
+      return "overlay";
+    case "darken":
+      return "darken";
+    case "lighten":
+      return "lighten";
+    case "color_dodge":
+      return "color-dodge";
+    case "color_burn":
+      return "color-burn";
+    case "hard_light":
+      return "hard-light";
+    case "soft_light":
+      return "soft-light";
+    case "difference":
+      return "difference";
+    case "exclusion":
+      return "exclusion";
+    case "hue":
+      return "hue";
+    case "saturation":
+      return "saturation";
+    case "color":
+      return "color";
+    case "luminosity":
+      return "luminosity";
+  }
+}
+
+/**
  * Draw a single node onto the canvas context.
  *
  * Assumes the viewport transform is already applied to the context.
@@ -273,6 +347,22 @@ function drawNode(
 ): void {
   const { x, y, width, height } = transform;
 
+  // Save context state so opacity/blend mode don't leak to other nodes.
+  // RF-024: clampOpacity + the save/restore pair are the rendering-boundary
+  // safety net for token-ref and expression opacity values.
+  ctx.save();
+
+  // Apply opacity — resolve token refs/expressions via the token store, then
+  // clamp to [0, 1] at the rendering boundary (RF-024). clampOpacity returns
+  // 1 for non-finite values so the artifact remains visible for debugging.
+  const resolvedOpacity = resolveStyleValueNumber(node.style.opacity, tokens, 1);
+  ctx.globalAlpha = clampOpacity(resolvedOpacity);
+
+  // Apply blend mode. blendModeToComposite is exhaustive over BlendMode, so
+  // every variant added to the type triggers a compile error here.
+  ctx.globalCompositeOperation = blendModeToComposite(node.style.blend_mode);
+
+  // Draw fill
   switch (node.kind.type) {
     case "frame":
     case "rectangle":
@@ -428,6 +518,34 @@ function drawNode(
       break;
     }
   }
+
+  // Draw stroke (after fill, so stroke renders on top). resolveStroke already
+  // guards against non-finite / non-positive widths; the outer check here is
+  // redundant but documents the invariant at the call site.
+  const stroke = resolveStroke(node);
+  if (stroke && Number.isFinite(stroke.width) && stroke.width > 0) {
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.width;
+    // RF-007: stroke alignment / cap / join are deferred to the WebGL renderer.
+    // Canvas defaults (butt cap, miter join, centered alignment) are used.
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    switch (node.kind.type) {
+      case "ellipse": {
+        ctx.beginPath();
+        ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      default: {
+        ctx.strokeRect(x, y, width, height);
+        break;
+      }
+    }
+  }
+
+  // Restore context state (resets globalAlpha, globalCompositeOperation)
+  ctx.restore();
 }
 
 /**
