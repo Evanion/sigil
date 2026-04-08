@@ -9,7 +9,7 @@
  */
 
 import type { Transaction } from "./types";
-import { MAX_HISTORY_SIZE } from "./types";
+import { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "./types";
 import { createInverseTransaction } from "./operation-helpers";
 
 export class HistoryManager {
@@ -44,6 +44,12 @@ export class HistoryManager {
 
   /** Push a pre-built transaction to the undo stack. Clears redo. */
   pushTransaction(tx: Transaction): void {
+    // RF-008: Enforce MAX_OPERATIONS_PER_TRANSACTION
+    if (tx.operations.length > MAX_OPERATIONS_PER_TRANSACTION) {
+      console.error(
+        `pushTransaction: transaction has ${tx.operations.length} operations, exceeding MAX_OPERATIONS_PER_TRANSACTION (${MAX_OPERATIONS_PER_TRANSACTION}).`,
+      );
+    }
     this.pushUndo(tx);
     this.redoStack = [];
   }
@@ -119,6 +125,11 @@ export class HistoryManager {
   /** Peek at the top of the redo stack without popping. */
   peekRedo(): Transaction | null {
     return this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1] : null;
+  }
+
+  /** Peek at the top of the undo stack without popping. */
+  peekUndo(): Transaction | null {
+    return this.undoStack.length > 0 ? this.undoStack[this.undoStack.length - 1] : null;
   }
 
   /**

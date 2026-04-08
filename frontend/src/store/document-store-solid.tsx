@@ -20,12 +20,13 @@ import type { Operation, Transaction, ReparentValue, ReorderValue } from "../ope
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
 import { HistoryManager } from "../operations/history-manager";
-import { createInterceptor } from "../operations/interceptor";
+import { createInterceptor, deepClone as sharedDeepClone } from "../operations/interceptor";
 import {
   createCreateNodeOp,
   createDeleteNodeOp,
   createReparentOp,
   createReorderOp,
+  createSetFieldOp,
 } from "../operations/operation-helpers";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -109,16 +110,9 @@ const PLACEHOLDER_NODE_ID: NodeId = { index: 0, generation: 0 };
 const MAX_NODE_NAME_LENGTH = 1024;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-// ── Clone helper ──────────────────────────────────────────────────────
-
-/**
- * Deep clone a value. Uses JSON round-trip because Solid store proxies
- * throw DataCloneError with structuredClone.
- */
-function deepClone<T>(value: T): T {
-  // JSON clone: Solid proxy not structuredClone-safe
-  return JSON.parse(JSON.stringify(value)) as T;
-}
+// RF-028: deepClone is imported from operations/interceptor as sharedDeepClone.
+// Alias it as deepClone for local use to keep call sites unchanged.
+const deepClone = sharedDeepClone;
 
 // ── Parse GraphQL response ────────────────────────────────────────────
 
@@ -283,11 +277,28 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   const historyManager = new HistoryManager(clientSessionId);
 
   // ── Interceptor ───────────────────────────────────────────────────────
+
+  // RF-026: Pending server ops accumulated during the coalesce window.
+  // Sent in a single batch when the interceptor commits (onCommit callback).
+  let pendingServerOps: Record<string, unknown>[] = [];
+
+  // RF-003: onCommit callback syncs canUndo/canRedo signals after every commit,
+  // undo, and redo. Also flushes pending server ops (RF-026).
+  function onInterceptorCommit(): void {
+    syncHistorySignals();
+    if (pendingServerOps.length > 0) {
+      const ops = pendingServerOps;
+      pendingServerOps = [];
+      sendOps(ops);
+    }
+  }
+
   const interceptor = createInterceptor(
     state as unknown as Record<string, unknown>,
     setState as unknown as import("../operations/apply-to-store").StoreStateSetter,
     historyManager,
     clientSessionId,
+    onInterceptorCommit,
   );
 
   // UI signals — multi-select with backwards-compatible single-select accessors
@@ -422,6 +433,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // ── Send operations to server ──────────────────────────────────────
 
+  // RF-002: On server error, resync state via fetchPages() — this is the simplest
+  // correct approach (full refetch on error). The optimistic local state may have
+  // diverged from the server, so a full refetch is the safe recovery path.
   function sendOps(operations: Record<string, unknown>[]): void {
     client
       .mutation(gql(APPLY_OPERATIONS_MUTATION), {
@@ -432,11 +446,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("applyOperations error:", r.error.message);
-          // TODO: revert optimistic state via interceptor rollback
+          void fetchPages();
         }
       })
       .catch((err: unknown) => {
         console.error("applyOperations exception:", err);
+        void fetchPages();
       });
   }
 
@@ -483,18 +498,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Track structural operation for undo
     interceptor.trackStructural(createCreateNodeOp(clientSessionId, nodeData));
 
-    // Send to server
-    sendOps([
-      {
-        createNode: {
-          nodeUuid: optimisticUuid,
-          kind: JSON.stringify(kind),
-          name,
-          transform: JSON.stringify(transform),
-          pageId,
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      createNode: {
+        nodeUuid: optimisticUuid,
+        kind: JSON.stringify(kind),
+        name,
+        transform: JSON.stringify(transform),
+        pageId,
       },
-    ]);
+    });
 
     return optimisticUuid;
   }
@@ -507,15 +520,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "transform", { ...transform });
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "transform",
-          value: JSON.stringify(transform),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "transform",
+        value: JSON.stringify(transform),
       },
-    ]);
+    });
   }
 
   function renameNode(uuid: string, newName: string): void {
@@ -523,15 +535,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "name", newName);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "name",
-          value: JSON.stringify(newName),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "name",
+        value: JSON.stringify(newName),
       },
-    ]);
+    });
   }
 
   function deleteNode(uuid: string): void {
@@ -556,7 +567,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       setSelectedNodeIds(filteredIds);
     }
 
-    sendOps([{ deleteNode: { nodeUuid: uuid } }]);
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({ deleteNode: { nodeUuid: uuid } });
   }
 
   function setVisible(uuid: string, visible: boolean): void {
@@ -564,15 +576,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "visible", visible);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "visible",
-          value: JSON.stringify(visible),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "visible",
+        value: JSON.stringify(visible),
       },
-    ]);
+    });
   }
 
   function setLocked(uuid: string, locked: boolean): void {
@@ -580,24 +591,28 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "locked", locked);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "locked",
-          value: JSON.stringify(locked),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "locked",
+        value: JSON.stringify(locked),
       },
-    ]);
+    });
   }
 
   function reparentNode(uuid: string, newParentUuid: string, position: number): void {
     if (!Number.isFinite(position)) return;
+    // RF-021: Reject negative positions instead of silently clamping
+    if (position < 0) {
+      console.error(`reparentNode: negative position ${position} for node ${uuid}`);
+      return;
+    }
+    const roundedPos = Math.round(position);
     const node = state.nodes[uuid];
     if (!node) return;
 
     const oldParentUuid = node.parentUuid;
-    const clampedPos = Math.max(0, Math.round(position));
 
     // Determine old position within old parent
     const oldPosition = oldParentUuid
@@ -616,7 +631,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         // Add to new parent's children
         if (s.nodes[newParentUuid]) {
           const children = [...s.nodes[newParentUuid].childrenUuids];
-          children.splice(clampedPos, 0, uuid);
+          children.splice(roundedPos, 0, uuid);
           s.nodes[newParentUuid].childrenUuids = children;
         }
         // Update the node's parent reference
@@ -632,31 +647,34 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         clientSessionId,
         uuid,
         newParentUuid,
-        clampedPos,
+        roundedPos,
         oldParentUuid ?? "",
         Math.max(0, oldPosition),
       ),
     );
 
-    sendOps([
-      {
-        reparent: {
-          nodeUuid: uuid,
-          newParentUuid,
-          position: clampedPos,
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      reparent: {
+        nodeUuid: uuid,
+        newParentUuid,
+        position: roundedPos,
       },
-    ]);
+    });
   }
 
   function reorderChildren(uuid: string, newPosition: number): void {
     if (!Number.isFinite(newPosition)) return;
+    // RF-021: Reject negative positions instead of silently clamping
+    if (newPosition < 0) {
+      console.error(`reorderChildren: negative position ${newPosition} for node ${uuid}`);
+      return;
+    }
+    const roundedPos = Math.round(newPosition);
     const node = state.nodes[uuid];
     if (!node) return;
     const parentUuid = node.parentUuid;
     if (!parentUuid) return;
-
-    const clampedPos = Math.max(0, Math.round(newPosition));
 
     // Determine old position within parent
     const oldPosition = (state.nodes[parentUuid]?.childrenUuids ?? []).indexOf(uuid);
@@ -666,7 +684,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       produce((s) => {
         if (s.nodes[parentUuid]) {
           const children = s.nodes[parentUuid].childrenUuids.filter((id) => id !== uuid);
-          children.splice(clampedPos, 0, uuid);
+          children.splice(roundedPos, 0, uuid);
           s.nodes[parentUuid].childrenUuids = children;
         }
       }),
@@ -674,17 +692,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Track structural operation for undo
     interceptor.trackStructural(
-      createReorderOp(clientSessionId, uuid, clampedPos, Math.max(0, oldPosition)),
+      createReorderOp(clientSessionId, uuid, roundedPos, Math.max(0, oldPosition)),
     );
 
-    sendOps([
-      {
-        reorder: {
-          nodeUuid: uuid,
-          newPosition: clampedPos,
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      reorder: {
+        nodeUuid: uuid,
+        newPosition: roundedPos,
       },
-    ]);
+    });
   }
 
   function setOpacity(uuid: string, opacity: number): void {
@@ -694,15 +711,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "style.opacity", { type: "literal", value: opacity });
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "style.opacity",
-          value: JSON.stringify({ type: "literal", value: opacity }),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "style.opacity",
+        value: JSON.stringify({ type: "literal", value: opacity }),
       },
-    ]);
+    });
   }
 
   function setBlendMode(uuid: string, blendMode: BlendMode): void {
@@ -710,15 +726,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (!node) return;
 
     interceptor.set(uuid, "style.blend_mode", blendMode);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "style.blend_mode",
-          value: JSON.stringify(blendMode),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "style.blend_mode",
+        value: JSON.stringify(blendMode),
       },
-    ]);
+    });
   }
 
   function setFills(uuid: string, fills: Fill[]): void {
@@ -734,15 +749,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     interceptor.set(uuid, "style.fills", clonedFills);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "style.fills",
-          value: JSON.stringify(clonedFills),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "style.fills",
+        value: JSON.stringify(clonedFills),
       },
-    ]);
+    });
   }
 
   function setStrokes(uuid: string, strokes: Stroke[]): void {
@@ -758,15 +772,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     interceptor.set(uuid, "style.strokes", clonedStrokes);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "style.strokes",
-          value: JSON.stringify(clonedStrokes),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "style.strokes",
+        value: JSON.stringify(clonedStrokes),
       },
-    ]);
+    });
   }
 
   function setEffects(uuid: string, effects: Effect[]): void {
@@ -782,15 +795,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     interceptor.set(uuid, "style.effects", clonedEffects);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "style.effects",
-          value: JSON.stringify(clonedEffects),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "style.effects",
+        value: JSON.stringify(clonedEffects),
       },
-    ]);
+    });
   }
 
   function setCornerRadii(uuid: string, radii: [number, number, number, number]): void {
@@ -808,15 +820,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const newKind = { ...previousKind, corner_radii: radii };
 
     interceptor.set(uuid, "kind", newKind);
-    sendOps([
-      {
-        setField: {
-          nodeUuid: uuid,
-          path: "kind",
-          value: JSON.stringify(newKind),
-        },
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "kind",
+        value: JSON.stringify(newKind),
       },
-    ]);
+    });
   }
 
   function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
@@ -839,7 +850,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }
     }
 
-    const serverOps: Record<string, unknown>[] = [];
     let opsApplied = 0;
 
     for (const entry of entries) {
@@ -847,7 +857,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       if (!node) continue;
 
       interceptor.set(entry.uuid, "transform", { ...entry.transform });
-      serverOps.push({
+      // RF-026: Queue server op — sent when interceptor commits (coalesced)
+      pendingServerOps.push({
         setField: {
           nodeUuid: entry.uuid,
           path: "transform",
@@ -857,9 +868,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       opsApplied++;
     }
 
-    if (opsApplied > 0 && serverOps.length > 0) {
-      sendOps(serverOps);
-    }
+    // No-op guard: avoid empty commit
+    if (opsApplied === 0) return;
   }
 
   // NOTE: groupNodes is implemented as a client-side compound operation.
@@ -897,6 +907,24 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       scale_y: 1,
     };
 
+    // RF-004: Capture each child's parentUuid and position BEFORE the produce() call
+    // that mutates the store. After produce(), node.parentUuid will have changed.
+    const childSnapshots: Array<{ childUuid: string; oldParentUuid: string; oldPosition: number }> =
+      [];
+    for (let i = 0; i < uuids.length; i++) {
+      const childNode = state.nodes[uuids[i]];
+      if (!childNode) continue;
+      const parentUuid = childNode.parentUuid ?? "";
+      const oldPosition = parentUuid
+        ? (state.nodes[parentUuid]?.childrenUuids ?? []).indexOf(uuids[i])
+        : 0;
+      childSnapshots.push({
+        childUuid: uuids[i],
+        oldParentUuid: parentUuid,
+        oldPosition: Math.max(0, oldPosition),
+      });
+    }
+
     const groupNodeData: MutableDocumentNode = {
       id: PLACEHOLDER_NODE_ID,
       uuid: groupUuid,
@@ -920,7 +948,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       childrenUuids: [...uuids],
     };
 
-    // Apply to store: create group, reparent children
+    // Apply to store: create group, reparent children, adjust transforms
     setState(
       produce((s) => {
         s.nodes[groupUuid] = groupNodeData;
@@ -936,42 +964,87 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
             // Set new parent
             s.nodes[childUuid].parentUuid = groupUuid;
+
+            // RF-006: Adjust child transforms to be relative to group origin.
+            // JSON clone: Solid proxy not structuredClone-safe
+            const oldTransform = JSON.parse(
+              JSON.stringify(s.nodes[childUuid].transform),
+            ) as Transform;
+            s.nodes[childUuid].transform = {
+              ...oldTransform,
+              x: oldTransform.x - groupTransform.x,
+              y: oldTransform.y - groupTransform.y,
+            };
           }
         }
       }),
     );
 
-    // Track structural: create group + reparent each child
+    // Track structural: create group + reparent each child + transform adjustments
     interceptor.trackStructural(createCreateNodeOp(clientSessionId, deepClone(groupNodeData)));
-    for (let i = 0; i < uuids.length; i++) {
-      const childNode = state.nodes[uuids[i]];
+    for (const snap of childSnapshots) {
       interceptor.trackStructural(
-        createReparentOp(clientSessionId, uuids[i], groupUuid, i, childNode?.parentUuid ?? "", 0),
+        createReparentOp(
+          clientSessionId,
+          snap.childUuid,
+          groupUuid,
+          childSnapshots.indexOf(snap),
+          snap.oldParentUuid,
+          snap.oldPosition,
+        ),
       );
+      // RF-006: Track the transform adjustment as a set_field operation for undo.
+      const childNode = state.nodes[snap.childUuid];
+      if (childNode) {
+        const newTransform = deepClone(childNode.transform);
+        // The old transform is the current (adjusted) + group offset
+        const oldTransform: Transform = {
+          ...newTransform,
+          x: newTransform.x + groupTransform.x,
+          y: newTransform.y + groupTransform.y,
+        };
+        interceptor.trackStructural(
+          createSetFieldOp(
+            clientSessionId,
+            snap.childUuid,
+            "transform",
+            newTransform,
+            oldTransform,
+          ),
+        );
+      }
     }
 
-    // Build server ops
-    const serverOps: Record<string, unknown>[] = [
-      {
-        createNode: {
-          nodeUuid: groupUuid,
-          kind: JSON.stringify({ type: "frame" }),
-          name,
-          transform: JSON.stringify(groupTransform),
-          pageId: state.pages[0]?.id ?? null,
-        },
+    // RF-026: Queue server ops — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      createNode: {
+        nodeUuid: groupUuid,
+        kind: JSON.stringify({ type: "frame" }),
+        name,
+        transform: JSON.stringify(groupTransform),
+        pageId: state.pages[0]?.id ?? null,
       },
-    ];
+    });
     for (let i = 0; i < uuids.length; i++) {
-      serverOps.push({
+      pendingServerOps.push({
         reparent: {
           nodeUuid: uuids[i],
           newParentUuid: groupUuid,
           position: i,
         },
       });
+      // RF-006: Also send transform adjustment to server
+      const childNode = state.nodes[uuids[i]];
+      if (childNode) {
+        pendingServerOps.push({
+          setField: {
+            nodeUuid: uuids[i],
+            path: "transform",
+            value: JSON.stringify(childNode.transform),
+          },
+        });
+      }
     }
-    sendOps(serverOps);
 
     setSelectedNodeIds([groupUuid]);
     syncHistorySignals();
@@ -982,7 +1055,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (uuids.length === 0) return;
 
     const allChildUuids: string[] = [];
-    const serverOps: Record<string, unknown>[] = [];
 
     for (const groupUuid of uuids) {
       const groupNode = state.nodes[groupUuid];
@@ -990,7 +1062,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
       const children = [...groupNode.childrenUuids];
       const groupParent = groupNode.parentUuid;
+      const groupTransform = deepClone(groupNode.transform);
       const groupSnapshot = deepClone(groupNode);
+
+      // RF-005: Handle root-level groups (no parent).
+      // When group has no parent, children become page roots (parentUuid = null).
+      // We skip reparent server ops for root-level groups and just delete the group.
 
       // Reparent children to group's parent (or root)
       setState(
@@ -999,6 +1076,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             const childUuid = children[i];
             if (s.nodes[childUuid]) {
               s.nodes[childUuid].parentUuid = groupParent;
+              // RF-006: Adjust child transforms back to absolute coordinates
+              // JSON clone: Solid proxy not structuredClone-safe
+              const childTransform = JSON.parse(
+                JSON.stringify(s.nodes[childUuid].transform),
+              ) as Transform;
+              s.nodes[childUuid].transform = {
+                ...childTransform,
+                x: childTransform.x + groupTransform.x,
+                y: childTransform.y + groupTransform.y,
+              };
               if (groupParent && s.nodes[groupParent]) {
                 s.nodes[groupParent].childrenUuids.push(childUuid);
               }
@@ -1012,27 +1099,49 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         }),
       );
 
-      // Track structural: reparent children, then delete group
+      // Track structural: reparent children (if parent exists), adjust transforms, then delete group
       for (let i = 0; i < children.length; i++) {
-        interceptor.trackStructural(
-          createReparentOp(clientSessionId, children[i], groupParent ?? "", i, groupUuid, i),
-        );
-        serverOps.push({
-          reparent: {
-            nodeUuid: children[i],
-            newParentUuid: groupParent ?? "",
-            position: i,
-          },
-        });
+        // RF-005: Only track reparent if group has a parent. Root-level children
+        // remain at root (parentUuid = null) — no reparent needed.
+        if (groupParent) {
+          interceptor.trackStructural(
+            createReparentOp(clientSessionId, children[i], groupParent, i, groupUuid, i),
+          );
+          pendingServerOps.push({
+            reparent: {
+              nodeUuid: children[i],
+              newParentUuid: groupParent,
+              position: i,
+            },
+          });
+        }
+
+        // RF-006: Track transform restoration as a set_field operation for undo
+        const childNode = state.nodes[children[i]];
+        if (childNode) {
+          const newTransform = deepClone(childNode.transform);
+          // Old transform was group-relative
+          const oldTransform: Transform = {
+            ...newTransform,
+            x: newTransform.x - groupTransform.x,
+            y: newTransform.y - groupTransform.y,
+          };
+          interceptor.trackStructural(
+            createSetFieldOp(clientSessionId, children[i], "transform", newTransform, oldTransform),
+          );
+          pendingServerOps.push({
+            setField: {
+              nodeUuid: children[i],
+              path: "transform",
+              value: JSON.stringify(newTransform),
+            },
+          });
+        }
       }
       interceptor.trackStructural(createDeleteNodeOp(clientSessionId, groupUuid, groupSnapshot));
-      serverOps.push({ deleteNode: { nodeUuid: groupUuid } });
+      pendingServerOps.push({ deleteNode: { nodeUuid: groupUuid } });
 
       allChildUuids.push(...children);
-    }
-
-    if (serverOps.length > 0) {
-      sendOps(serverOps);
     }
 
     if (allChildUuids.length > 0) {
@@ -1047,20 +1156,21 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const inverseTx = interceptor.undo();
     if (!inverseTx) return;
 
-    // Send inverse operations to server so other clients see the revert
+    // Send inverse operations to server so other clients see the revert.
+    // Undo/redo send ops directly (not coalesced) because they are discrete actions.
     const serverOps = transactionToServerOps(inverseTx);
     if (serverOps.length > 0) sendOps(serverOps);
-    syncHistorySignals();
+    // RF-003: syncHistorySignals is already called by the interceptor's onCommit callback.
   }
 
   function redo(): void {
     const redoTx = interceptor.redo();
     if (!redoTx) return;
 
-    // Send redo operations to server so other clients see the re-application
+    // Send redo operations to server so other clients see the re-application.
     const serverOps = transactionToServerOps(redoTx);
     if (serverOps.length > 0) sendOps(serverOps);
-    syncHistorySignals();
+    // RF-003: syncHistorySignals is already called by the interceptor's onCommit callback.
   }
 
   // ── Lifecycle (RF-002) ──────────────────────────────────────────────

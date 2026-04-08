@@ -2,8 +2,10 @@
 # The base image provides the OS and a bootstrapping Rust toolchain.
 # The actual Rust version used for builds is controlled by rust-toolchain.toml
 # via rustup, so the base image tag only needs to provide a compatible OS.
-# TODO(RF-005): Pin to a SHA256 digest once the team agrees on a base image version.
-#   e.g. FROM mcr.microsoft.com/devcontainers/rust:1-bookworm@sha256:<digest>
+# TODO(RF-005, RF-009): Pin to a SHA256 digest once the team agrees on a base image version.
+#   Run: docker pull mcr.microsoft.com/devcontainers/rust:1-bookworm
+#   Then use: FROM mcr.microsoft.com/devcontainers/rust:1-bookworm@sha256:<digest>
+#   The 1-bookworm tag is floating; a digest pin is needed for reproducible builds.
 FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
 # Install Node.js 22 LTS

@@ -13,8 +13,8 @@
  */
 
 import { batch } from "solid-js";
-import { produce } from "solid-js/store";
-import type { Operation, Transaction } from "./types";
+import type { Operation, Transaction, SideEffectContext } from "./types";
+import { MAX_OPERATIONS_PER_TRANSACTION } from "./types";
 import type { HistoryManager } from "./history-manager";
 import { createSetFieldOp } from "./operation-helpers";
 import {
@@ -29,13 +29,6 @@ interface BufferedChange {
   path: string;
   beforeValue: unknown;
   afterValue: unknown;
-}
-
-/** Side-effect context snapshot (restored on undo/redo). */
-interface SideEffectContext {
-  selectedNodeIds: string[];
-  activeTool: string;
-  viewport: { x: number; y: number; zoom: number };
 }
 
 export interface SideEffectReaders {
@@ -86,11 +79,19 @@ export interface Interceptor {
   destroy(): void;
 }
 
+// RF-017: Maximum number of entries in the coalesce buffer before force-flush.
+const MAX_BUFFER_ENTRIES = 1000;
+
+// RF-018: Maximum age in ms for the coalesce buffer before force-flush.
+const MAX_BUFFER_AGE_MS = 5000;
+
 /**
  * Deep clone a value. Uses JSON round-trip because Solid store proxies
  * throw DataCloneError with structuredClone.
+ *
+ * RF-028: Exported for shared use across operations modules.
  */
-function deepClone<T>(value: T): T {
+export function deepClone<T>(value: T): T {
   if (value === null || value === undefined) return value;
   if (typeof value !== "object") return value;
   // JSON clone: Solid proxy not structuredClone-safe
@@ -126,7 +127,10 @@ export function readStorePath(
 
 /**
  * Apply a value to the store at the given node+path.
- * Mirrors the logic in apply-to-store.ts for set_field operations.
+ *
+ * RF-020: Delegates to applyOperationToStore for set_field operations,
+ * eliminating duplicated write logic. The synthetic operation is constructed
+ * with a dummy id/userId since applyOperationToStore only reads type/nodeUuid/path/value.
  */
 export function writeStorePath(
   setState: StoreStateSetter,
@@ -134,24 +138,22 @@ export function writeStorePath(
   path: string,
   value: unknown,
 ): void {
-  if (path.startsWith("style.")) {
-    const styleProp = path.slice(6);
-    // Use produce for nested style fields
-    setState(
-      produce((s: Record<string, Record<string, Record<string, Record<string, unknown>>>>) => {
-        if (s["nodes"][nodeUuid]) {
-          s["nodes"][nodeUuid]["style"] = {
-            ...s["nodes"][nodeUuid]["style"],
-            [styleProp]: value,
-          };
-        }
-      }),
-    );
-    return;
-  }
-
-  // Top-level field
-  setState("nodes", nodeUuid, path, value);
+  const syntheticOp: Operation = {
+    id: "",
+    userId: "",
+    nodeUuid,
+    type: "set_field",
+    path,
+    value,
+    previousValue: null,
+    seq: 0,
+  };
+  const reader: StoreStateReader = {
+    // writeStorePath callers already verify node exists; provide a pass-through
+    // reader that returns a minimal object so applyOperationToStore proceeds.
+    getNode: () => ({}) as Record<string, unknown>,
+  };
+  applyOperationToStore(syntheticOp, setState, reader);
 }
 
 export function createInterceptor(
@@ -159,12 +161,13 @@ export function createInterceptor(
   setState: StoreStateSetter,
   historyManager: HistoryManager,
   userId: string,
+  onCommit?: () => void,
 ): Interceptor {
   /** Buffer of changes awaiting coalesce commit. */
   const buffer: Map<string, BufferedChange> = new Map(); // key: "nodeUuid::path"
   /** Structural operations in the current buffer. */
   const structuralBuffer: Operation[] = [];
-  /** rAF handle for idle detection. */
+  /** setTimeout handle for idle detection. */
   let rafHandle: number | null = null;
   /** Flag to suppress tracking during undo/redo application. */
   let isUndoing = false;
@@ -172,6 +175,8 @@ export function createInterceptor(
   let contextSnapshot: SideEffectContext | null = null;
   /** Side-effect readers/writers — set during store init. */
   let sideEffectReaders: SideEffectReaders | null = null;
+  /** RF-018: Timestamp of the first write in the current buffer window. */
+  let bufferStartTime: number | null = null;
 
   function captureContext(): SideEffectContext {
     if (!sideEffectReaders) {
@@ -186,9 +191,9 @@ export function createInterceptor(
 
   function restoreContext(ctx: SideEffectContext): void {
     if (!sideEffectReaders) return;
-    sideEffectReaders.setSelectedNodeIds(ctx.selectedNodeIds);
+    sideEffectReaders.setSelectedNodeIds([...ctx.selectedNodeIds]);
     sideEffectReaders.setActiveTool(ctx.activeTool);
-    sideEffectReaders.setViewport(ctx.viewport);
+    sideEffectReaders.setViewport({ ...ctx.viewport });
   }
 
   /**
@@ -199,11 +204,22 @@ export function createInterceptor(
    * picker drag, canvas drag). The 100ms window groups an entire continuous
    * interaction into one undo step while still feeling responsive for discrete
    * actions (rename, toggle).
+   *
+   * RF-018: If the buffer has been open longer than MAX_BUFFER_AGE_MS, force-flush
+   * immediately instead of rescheduling, to prevent unbounded coalesce windows.
    */
   function scheduleFlush(): void {
     if (rafHandle !== null) {
       clearTimeout(rafHandle);
     }
+
+    // RF-018: Force-flush if the buffer has been open too long
+    if (bufferStartTime !== null && Date.now() - bufferStartTime > MAX_BUFFER_AGE_MS) {
+      rafHandle = null;
+      commitBuffer();
+      return;
+    }
+
     rafHandle = window.setTimeout(() => {
       rafHandle = null;
       commitBuffer();
@@ -231,18 +247,24 @@ export function createInterceptor(
 
     if (ops.length === 0) return;
 
-    // Create transaction and push to history
-    const tx: Transaction & { _context?: SideEffectContext } = {
+    // RF-008: Enforce MAX_OPERATIONS_PER_TRANSACTION
+    if (ops.length > MAX_OPERATIONS_PER_TRANSACTION) {
+      console.error(
+        `commitBuffer: transaction has ${ops.length} operations, exceeding MAX_OPERATIONS_PER_TRANSACTION (${MAX_OPERATIONS_PER_TRANSACTION}). Truncating to limit.`,
+      );
+      ops.length = MAX_OPERATIONS_PER_TRANSACTION;
+    }
+
+    // RF-019: Create transaction with type-safe sideEffectContext
+    const tx: Transaction = {
       id: crypto.randomUUID(),
       userId,
       operations: ops,
       description: "",
       timestamp: Date.now(),
       seq: 0,
+      sideEffectContext: contextSnapshot ?? undefined,
     };
-
-    // Store context snapshot WITH the transaction for undo/redo restoration
-    tx._context = contextSnapshot ?? undefined;
 
     historyManager.pushTransaction(tx);
 
@@ -250,6 +272,10 @@ export function createInterceptor(
     buffer.clear();
     structuralBuffer.length = 0;
     contextSnapshot = null;
+    bufferStartTime = null;
+
+    // RF-003: Notify the store to sync history signals after commit
+    if (onCommit) onCommit();
   }
 
   function forceFlush(): void {
@@ -264,6 +290,11 @@ export function createInterceptor(
     set(nodeUuid: string, path: string, value: unknown): void {
       if (isUndoing) return; // ignore writes during undo/redo
 
+      // RF-017: Force-flush if buffer is at capacity before adding
+      if (buffer.size >= MAX_BUFFER_ENTRIES && !buffer.has(`${nodeUuid}::${path}`)) {
+        forceFlush();
+      }
+
       const key = `${nodeUuid}::${path}`;
       const existing = buffer.get(key);
 
@@ -271,6 +302,8 @@ export function createInterceptor(
         // First write to this path — capture before value and context
         if (buffer.size === 0 && structuralBuffer.length === 0) {
           contextSnapshot = captureContext();
+          // RF-018: Record when the buffer window started
+          bufferStartTime = Date.now();
         }
         const beforeValue = readStorePath(state, nodeUuid, path);
         buffer.set(key, { nodeUuid, path, beforeValue, afterValue: value });
@@ -291,6 +324,8 @@ export function createInterceptor(
 
       if (buffer.size === 0 && structuralBuffer.length === 0) {
         contextSnapshot = captureContext();
+        // RF-018: Record when the buffer window started
+        bufferStartTime = Date.now();
       }
       structuralBuffer.push(op);
       scheduleFlush();
@@ -309,24 +344,31 @@ export function createInterceptor(
       const inverseTx = historyManager.undo();
       if (!inverseTx) return null;
 
-      // Apply inverse to store without triggering interceptor
+      // RF-012: Apply inverse to store without triggering interceptor.
+      // Wrap in try-finally to ensure isUndoing is always reset.
       isUndoing = true;
-      const reader: StoreStateReader = {
-        getNode: (uuid: string) =>
-          (state as { nodes: Record<string, Record<string, unknown>> }).nodes[uuid],
-      };
-      batch(() => {
-        for (const op of inverseTx.operations) {
-          applyOperationToStore(op, setState, reader);
-        }
-      });
+      try {
+        const reader: StoreStateReader = {
+          getNode: (uuid: string) =>
+            (state as { nodes: Record<string, Record<string, unknown>> }).nodes[uuid],
+        };
+        batch(() => {
+          for (const op of inverseTx.operations) {
+            applyOperationToStore(op, setState, reader);
+          }
+        });
 
-      // Restore side-effect context from the ORIGINAL transaction (now on redo stack)
-      const originalTx = historyManager.peekRedo();
-      const ctx = (originalTx as (Transaction & { _context?: SideEffectContext }) | null)?._context;
-      if (ctx) restoreContext(ctx);
+        // Restore side-effect context from the ORIGINAL transaction (now on redo stack)
+        const originalTx = historyManager.peekRedo();
+        const ctx = originalTx?.sideEffectContext;
+        if (ctx) restoreContext(ctx);
+      } finally {
+        isUndoing = false;
+      }
 
-      isUndoing = false;
+      // RF-003: Sync history signals after undo
+      if (onCommit) onCommit();
+
       return inverseTx;
     },
 
@@ -334,17 +376,34 @@ export function createInterceptor(
       const redoTx = historyManager.redo();
       if (!redoTx) return null;
 
+      // RF-012: Wrap in try-finally to ensure isUndoing is always reset.
       isUndoing = true;
-      const reader: StoreStateReader = {
-        getNode: (uuid: string) =>
-          (state as { nodes: Record<string, Record<string, unknown>> }).nodes[uuid],
-      };
-      batch(() => {
-        for (const op of redoTx.operations) {
-          applyOperationToStore(op, setState, reader);
-        }
-      });
-      isUndoing = false;
+      try {
+        const reader: StoreStateReader = {
+          getNode: (uuid: string) =>
+            (state as { nodes: Record<string, Record<string, unknown>> }).nodes[uuid],
+        };
+        batch(() => {
+          for (const op of redoTx.operations) {
+            applyOperationToStore(op, setState, reader);
+          }
+        });
+
+        // RF-027: Restore side-effect context from the redo transaction.
+        // The redo transaction is the original forward transaction that was on the redo stack.
+        // Its sideEffectContext captures the state at the time of the original mutation,
+        // which should be restored when redoing.
+        // Look at the original transaction that was just pushed back to undo stack.
+        const originalTx = historyManager.peekUndo();
+        const ctx = originalTx?.sideEffectContext;
+        if (ctx) restoreContext(ctx);
+      } finally {
+        isUndoing = false;
+      }
+
+      // RF-003: Sync history signals after redo
+      if (onCommit) onCommit();
+
       return redoTx;
     },
 
