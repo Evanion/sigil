@@ -2,15 +2,15 @@
  * Integration tests for the full undo/redo flow:
  * mutation -> undo -> redo, verifying store state at each step.
  *
- * Uses a StoreHistoryBridge with a real HistoryManager and a simulated
- * store state (plain object + setState mock) to test the operation tracking,
- * undo, and redo without a full urql client.
+ * Uses a HistoryManager with a simulated store state (plain object +
+ * setState function) and applyOperationToStore to test the operation
+ * tracking, undo, and redo without a full urql client.
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
-import { createStoreHistoryBridge, type StoreHistoryBridge } from "../../operations/store-history";
 import { createSetFieldOp, createDeleteNodeOp } from "../../operations/operation-helpers";
-import type { StoreStateReader } from "../../operations/apply-to-store";
+import { applyOperationToStore, type StoreStateReader } from "../../operations/apply-to-store";
+import type { Transaction, Operation } from "../../operations/types";
 
 // ── Test helpers ────────────────────────────────────────────────────────
 
@@ -109,15 +109,53 @@ function createTestStore() {
   return { storeData, getNodes, reader, setState };
 }
 
+/** Helper: apply op to store and track in HistoryManager. */
+function applyAndTrack(
+  op: Operation,
+  description: string,
+  historyManager: HistoryManager,
+  setState: (...args: unknown[]) => void,
+  reader: StoreStateReader,
+): void {
+  applyOperationToStore(op, setState, reader);
+  historyManager.apply(op, description);
+}
+
+/** Helper: undo via HistoryManager, apply inverse to store. */
+function undoAndApply(
+  historyManager: HistoryManager,
+  setState: (...args: unknown[]) => void,
+  reader: StoreStateReader,
+): Transaction | null {
+  const inverseTx = historyManager.undo();
+  if (!inverseTx) return null;
+  for (const op of inverseTx.operations) {
+    applyOperationToStore(op, setState, reader);
+  }
+  return inverseTx;
+}
+
+/** Helper: redo via HistoryManager, apply forward ops to store. */
+function redoAndApply(
+  historyManager: HistoryManager,
+  setState: (...args: unknown[]) => void,
+  reader: StoreStateReader,
+): Transaction | null {
+  const redoTx = historyManager.redo();
+  if (!redoTx) return null;
+  for (const op of redoTx.operations) {
+    applyOperationToStore(op, setState, reader);
+  }
+  return redoTx;
+}
+
 describe("undo/redo integration", () => {
   let historyManager: HistoryManager;
-  let history: StoreHistoryBridge;
   let store: ReturnType<typeof createTestStore>;
 
   beforeEach(() => {
     historyManager = new HistoryManager(TEST_USER_ID);
     store = createTestStore();
-    history = createStoreHistoryBridge(historyManager, store.setState, store.reader);
 
     // Seed the store with a test node
     const nodes = store.getNodes();
@@ -144,20 +182,20 @@ describe("undo/redo integration", () => {
       newTransform,
       originalTransform,
     );
-    history.applyAndTrack(op, "Move Rectangle 1");
+    applyAndTrack(op, "Move Rectangle 1", historyManager, store.setState, store.reader);
 
     // Verify new value applied
     expect(store.getNodes()["node-1"]["transform"]).toEqual(newTransform);
 
     // Undo
-    const inverseTx = history.undo();
+    const inverseTx = undoAndApply(historyManager, store.setState, store.reader);
     expect(inverseTx).not.toBeNull();
 
     // Verify original value restored
     expect(store.getNodes()["node-1"]["transform"]).toEqual(originalTransform);
 
     // Redo
-    const redoTx = history.redo();
+    const redoTx = redoAndApply(historyManager, store.setState, store.reader);
     expect(redoTx).not.toBeNull();
 
     // Verify new value re-applied
@@ -166,32 +204,38 @@ describe("undo/redo integration", () => {
 
   it("should restore previous name on undo after renameNode", () => {
     const op = createSetFieldOp(TEST_USER_ID, "node-1", "name", "New Name", "Rectangle 1");
-    history.applyAndTrack(op, "Rename Rectangle 1 to New Name");
+    applyAndTrack(
+      op,
+      "Rename Rectangle 1 to New Name",
+      historyManager,
+      store.setState,
+      store.reader,
+    );
 
     expect(store.getNodes()["node-1"]["name"]).toBe("New Name");
 
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["name"]).toBe("Rectangle 1");
 
-    history.redo();
+    redoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["name"]).toBe("New Name");
   });
 
   it("should restore the node on undo after deleteNode", () => {
     const nodeSnapshot = deepClone(store.getNodes()["node-1"]);
     const op = createDeleteNodeOp(TEST_USER_ID, "node-1", nodeSnapshot);
-    history.applyAndTrack(op, "Delete Rectangle 1");
+    applyAndTrack(op, "Delete Rectangle 1", historyManager, store.setState, store.reader);
 
     // Node should be deleted
     expect(store.getNodes()["node-1"]).toBeUndefined();
 
     // Undo restores the node
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]).toBeDefined();
     expect(store.getNodes()["node-1"]["name"]).toBe("Rectangle 1");
 
     // Redo deletes again
-    history.redo();
+    redoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]).toBeUndefined();
   });
 
@@ -208,19 +252,28 @@ describe("undo/redo integration", () => {
     const new1 = { x: 10, y: 10, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 };
     const new2 = { x: 20, y: 20, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 };
 
-    // Use transaction for batch
-    history.beginTransaction("Align 2 nodes");
+    // Apply both ops to store
     const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", new1, prev1);
-    history.applyInTransaction(op1);
     const op2 = createSetFieldOp(TEST_USER_ID, "node-2", "transform", new2, prev2);
-    history.applyInTransaction(op2);
-    history.commitTransaction();
+    applyOperationToStore(op1, store.setState, store.reader);
+    applyOperationToStore(op2, store.setState, store.reader);
+
+    // Push as single transaction
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [op1, op2],
+      description: "Align 2 nodes",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+    historyManager.pushTransaction(tx);
 
     expect(store.getNodes()["node-1"]["transform"]).toEqual(new1);
     expect(store.getNodes()["node-2"]["transform"]).toEqual(new2);
 
     // Single undo reverts both
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["transform"]).toEqual(prev1);
     expect(store.getNodes()["node-2"]["transform"]).toEqual(prev2);
   });
@@ -245,28 +298,28 @@ describe("undo/redo integration", () => {
       newTransform,
       originalTransform,
     );
-    history.applyAndTrack(op1, "Move Rectangle 1");
+    applyAndTrack(op1, "Move Rectangle 1", historyManager, store.setState, store.reader);
 
     // Mutation 2: rename
     const op2 = createSetFieldOp(TEST_USER_ID, "node-1", "name", "Renamed", "Rectangle 1");
-    history.applyAndTrack(op2, "Rename");
+    applyAndTrack(op2, "Rename", historyManager, store.setState, store.reader);
 
     // Mutation 3: toggle visible
     const op3 = createSetFieldOp(TEST_USER_ID, "node-1", "visible", false, true);
-    history.applyAndTrack(op3, "Hide");
+    applyAndTrack(op3, "Hide", historyManager, store.setState, store.reader);
 
     // Undo 3: visible reverts
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["visible"]).toBe(true);
     expect(store.getNodes()["node-1"]["name"]).toBe("Renamed");
 
     // Undo 2: name reverts
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["name"]).toBe("Rectangle 1");
     expect(store.getNodes()["node-1"]["transform"]).toEqual(newTransform);
 
     // Undo 1: transform reverts
-    history.undo();
+    undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]["transform"]).toEqual(originalTransform);
   });
 
@@ -276,19 +329,19 @@ describe("undo/redo integration", () => {
 
     // Mutate
     const op1 = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newVal, original);
-    history.applyAndTrack(op1, "Move");
+    applyAndTrack(op1, "Move", historyManager, store.setState, store.reader);
 
     // Undo
-    history.undo();
-    expect(history.canRedo()).toBe(true);
+    undoAndApply(historyManager, store.setState, store.reader);
+    expect(historyManager.canRedo()).toBe(true);
 
     // New mutation clears redo
     const op2 = createSetFieldOp(TEST_USER_ID, "node-1", "name", "New Name", "Rectangle 1");
-    history.applyAndTrack(op2, "Rename");
+    applyAndTrack(op2, "Rename", historyManager, store.setState, store.reader);
 
-    expect(history.canRedo()).toBe(false);
+    expect(historyManager.canRedo()).toBe(false);
     // Redo should return null
-    const redoTx = history.redo();
+    const redoTx = historyManager.redo();
     expect(redoTx).toBeNull();
   });
 
@@ -297,9 +350,9 @@ describe("undo/redo integration", () => {
     const newVal = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
 
     const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newVal, original);
-    history.applyAndTrack(op, "Move");
+    applyAndTrack(op, "Move", historyManager, store.setState, store.reader);
 
-    const inverseTx = history.undo();
+    const inverseTx = undoAndApply(historyManager, store.setState, store.reader);
     expect(inverseTx).not.toBeNull();
     if (inverseTx === null) return; // type narrowing for strict TS
     expect(inverseTx.operations).toHaveLength(1);
@@ -317,10 +370,10 @@ describe("undo/redo integration", () => {
     const newVal = { x: 50, y: 50, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 };
 
     const op = createSetFieldOp(TEST_USER_ID, "node-1", "transform", newVal, original);
-    history.applyAndTrack(op, "Move");
+    applyAndTrack(op, "Move", historyManager, store.setState, store.reader);
 
-    history.undo();
-    const redoTx = history.redo();
+    undoAndApply(historyManager, store.setState, store.reader);
+    const redoTx = redoAndApply(historyManager, store.setState, store.reader);
     expect(redoTx).not.toBeNull();
     if (redoTx === null) return; // type narrowing for strict TS
     expect(redoTx.operations).toHaveLength(1);
@@ -332,21 +385,21 @@ describe("undo/redo integration", () => {
   });
 
   it("should report canUndo/canRedo correctly", () => {
-    expect(history.canUndo()).toBe(false);
-    expect(history.canRedo()).toBe(false);
+    expect(historyManager.canUndo()).toBe(false);
+    expect(historyManager.canRedo()).toBe(false);
 
     const op = createSetFieldOp(TEST_USER_ID, "node-1", "name", "New", "Rectangle 1");
-    history.applyAndTrack(op, "Rename");
+    applyAndTrack(op, "Rename", historyManager, store.setState, store.reader);
 
-    expect(history.canUndo()).toBe(true);
-    expect(history.canRedo()).toBe(false);
+    expect(historyManager.canUndo()).toBe(true);
+    expect(historyManager.canRedo()).toBe(false);
 
-    history.undo();
-    expect(history.canUndo()).toBe(false);
-    expect(history.canRedo()).toBe(true);
+    undoAndApply(historyManager, store.setState, store.reader);
+    expect(historyManager.canUndo()).toBe(false);
+    expect(historyManager.canRedo()).toBe(true);
 
-    history.redo();
-    expect(history.canUndo()).toBe(true);
-    expect(history.canRedo()).toBe(false);
+    redoAndApply(historyManager, store.setState, store.reader);
+    expect(historyManager.canUndo()).toBe(true);
+    expect(historyManager.canRedo()).toBe(false);
   });
 });
