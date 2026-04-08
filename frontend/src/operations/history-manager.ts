@@ -267,6 +267,17 @@ export class HistoryManager {
     return this.redoStack.length > 0;
   }
 
+  /** Push a pre-built transaction to the undo stack. Clears redo. */
+  pushTransaction(tx: Transaction): void {
+    this.pushUndo(tx);
+    this.redoStack = [];
+  }
+
+  /** Peek at the top of the redo stack without popping. */
+  peekRedo(): Transaction | null {
+    return this.redoStack.length > 0 ? this.redoStack[this.redoStack.length - 1] : null;
+  }
+
   /**
    * Pop the last undo entry WITHOUT pushing to the redo stack.
    *
