@@ -108,6 +108,9 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: "10.0.0"
+          package_json_file: frontend/package.json
 
       - name: Install Node.js
         uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
@@ -171,24 +174,16 @@ jobs:
               ERRORS=$((ERRORS + 1))
             fi
           done
-          # Check GitHub Actions for uses: lines without SHA pins (40-char hex)
-          while IFS= read -r line; do
-            # Skip comment-only lines
-            stripped=$(echo "$line" | sed 's/^[[:space:]]*//')
-            if echo "$stripped" | grep -qE '^#'; then
-              continue
-            fi
-            # Extract the action reference (everything after 'uses:' up to first space or comment)
-            ref=$(echo "$line" | sed -n 's/.*uses:[[:space:]]*\([^[:space:]#]*\).*/\1/p')
-            if [ -z "$ref" ]; then
-              continue
-            fi
-            # Check if the ref contains a 40-char hex SHA after @
-            if ! echo "$ref" | grep -qE '@[0-9a-f]{40}$'; then
+          # Check GitHub Actions for uses: lines without SHA pins (40-char hex).
+          # Only match YAML key lines (indented "- uses:" or "uses:"), not strings
+          # inside run: blocks that happen to contain "uses:".
+          while IFS= read -r ref; do
+            if [ -z "$ref" ]; then continue; fi
+            if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
               echo "::error file=.github/workflows/ci.yml::Action not pinned to SHA: $ref"
               ERRORS=$((ERRORS + 1))
             fi
-          done < <(grep -n 'uses:' .github/workflows/ci.yml)
+          done < <(grep -E '^\s+uses:\s' .github/workflows/ci.yml | sed 's/.*uses:\s*//' | sed 's/\s*#.*//')
           if [ "$ERRORS" -gt 0 ]; then
             echo "Found $ERRORS floating version reference(s). Pin to exact versions."
             exit 1
