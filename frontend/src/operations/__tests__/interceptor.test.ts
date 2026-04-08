@@ -31,7 +31,8 @@ describe("Interceptor", () => {
   let state: Record<string, unknown>;
   let historyManager: HistoryManager;
   let interceptor: Interceptor;
-  let onCommitSpy: ReturnType<typeof vi.fn>;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- vi.fn() type doesn't match (() => void) exactly
+  let onCommitSpy: any;
 
   beforeEach(() => {
     vi.useFakeTimers();
@@ -45,7 +46,7 @@ describe("Interceptor", () => {
     setState = ss as unknown as (...args: unknown[]) => void;
 
     historyManager = new HistoryManager("test-user");
-    onCommitSpy = vi.fn();
+    onCommitSpy = vi.fn() as unknown as () => void;
     interceptor = createInterceptor(state, setState, historyManager, "test-user", onCommitSpy);
   });
 
