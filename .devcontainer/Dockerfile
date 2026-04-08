@@ -1,5 +1,5 @@
 # .devcontainer/Dockerfile
-FROM mcr.microsoft.com/devcontainers/rust:1.94.1-bookworm
+FROM mcr.microsoft.com/devcontainers/rust:1-bookworm
 
 # Install Node.js 22 LTS
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
