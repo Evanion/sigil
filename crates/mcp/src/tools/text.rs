@@ -413,13 +413,17 @@ pub fn set_text_style_impl(
             cmd.validate(&doc)?;
         }
 
+        // Capture ALL old values in a single pass before any mutations.
+        // Per CLAUDE.md: capture snapshots before mutations, not after.
+        let old_fields: Vec<TextStyleField> = fields
+            .iter()
+            .map(|(field, _, _)| capture_old_field(&doc, node_id, field))
+            .collect::<Result<Vec<_>, _>>()?;
+
         // Apply with rollback tracking.
         let mut applied: Vec<TextStyleField> = Vec::with_capacity(fields.len());
 
-        for (field, _, _) in &fields {
-            // Capture old value before applying (CLAUDE.md: capture snapshots before mutations).
-            let old_field = capture_old_field(&doc, node_id, field)?;
-
+        for (i, (field, _, _)) in fields.iter().enumerate() {
             let cmd = SetTextStyleField {
                 node_id,
                 field: field.clone(),
@@ -445,7 +449,8 @@ pub fn set_text_style_impl(
                     rollback_errors.join("; ")
                 )));
             }
-            applied.push(old_field);
+            // old_fields[i] is safe — old_fields has the same length as fields.
+            applied.push(old_fields[i].clone());
         }
     }
 

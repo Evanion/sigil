@@ -11,6 +11,7 @@
  */
 
 import type { TextStyle } from "../types/document";
+import { validateCssIdentifier } from "../validation/css-identifiers";
 
 /** Default font size used when the TextStyle font_size is a token_ref. */
 export const DEFAULT_FONT_SIZE_PX = 16;
@@ -142,7 +143,10 @@ export function buildFontString(style: TextStyle): string {
     fontSize = DEFAULT_FONT_SIZE_PX;
   }
 
-  return `${italic}${String(style.font_weight)} ${String(fontSize)}px ${style.font_family}`;
+  // RF-006: Use fallback font if font_family contains CSS-significant characters.
+  const family = validateCssIdentifier(style.font_family) ? style.font_family : "sans-serif";
+
+  return `${italic}${String(style.font_weight)} ${String(fontSize)}px ${family}`;
 }
 
 // ---------------------------------------------------------------------------

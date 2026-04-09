@@ -394,7 +394,7 @@ pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreErr
 }
 
 /// Characters forbidden in font family names (CSS-significant or injection-prone).
-const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\'];
+pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\'];
 
 /// Validates a `TextStyle` struct.
 ///

@@ -6,8 +6,8 @@ use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow};
 use crate::validate::{
-    MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE,
-    MIN_FONT_WEIGHT, validate_finite,
+    FONT_FAMILY_FORBIDDEN_CHARS, MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT,
+    MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT, validate_finite,
 };
 
 /// Which field of `TextStyle` to update.
@@ -119,9 +119,7 @@ impl FieldOperation for SetTextStyleField {
                         "font_family contains control character at byte position {pos}"
                     )));
                 }
-                if let Some(pos) =
-                    family.find(|c: char| ['\'', '"', ';', '{', '}', '\\'].contains(&c))
-                {
+                if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
                     return Err(CoreError::ValidationError(format!(
                         "font_family contains forbidden character at byte position {pos}"
                     )));

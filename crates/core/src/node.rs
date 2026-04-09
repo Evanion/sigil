@@ -358,16 +358,75 @@ impl Serialize for TextShadow {
 
 impl<'de> Deserialize<'de> for TextShadow {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct TextShadowVisitor;
+
+        /// Field discriminant for tracking seen keys.
         #[derive(Deserialize)]
-        struct TextShadowRaw {
-            offset_x: f64,
-            offset_y: f64,
-            blur_radius: f64,
-            color: StyleValue<Color>,
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            OffsetX,
+            OffsetY,
+            BlurRadius,
+            Color,
         }
-        let raw = TextShadowRaw::deserialize(deserializer)?;
-        TextShadow::new(raw.offset_x, raw.offset_y, raw.blur_radius, raw.color)
-            .map_err(serde::de::Error::custom)
+
+        impl<'de> Visitor<'de> for TextShadowVisitor {
+            type Value = TextShadow;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("struct TextShadow")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut offset_x: Option<f64> = None;
+                let mut offset_y: Option<f64> = None;
+                let mut blur_radius: Option<f64> = None;
+                let mut color: Option<StyleValue<Color>> = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::OffsetX => {
+                            if offset_x.is_some() {
+                                return Err(de::Error::duplicate_field("offset_x"));
+                            }
+                            offset_x = Some(map.next_value()?);
+                        }
+                        Field::OffsetY => {
+                            if offset_y.is_some() {
+                                return Err(de::Error::duplicate_field("offset_y"));
+                            }
+                            offset_y = Some(map.next_value()?);
+                        }
+                        Field::BlurRadius => {
+                            if blur_radius.is_some() {
+                                return Err(de::Error::duplicate_field("blur_radius"));
+                            }
+                            blur_radius = Some(map.next_value()?);
+                        }
+                        Field::Color => {
+                            if color.is_some() {
+                                return Err(de::Error::duplicate_field("color"));
+                            }
+                            color = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let offset_x = offset_x.ok_or_else(|| de::Error::missing_field("offset_x"))?;
+                let offset_y = offset_y.ok_or_else(|| de::Error::missing_field("offset_y"))?;
+                let blur_radius =
+                    blur_radius.ok_or_else(|| de::Error::missing_field("blur_radius"))?;
+                let color = color.ok_or_else(|| de::Error::missing_field("color"))?;
+
+                TextShadow::new(offset_x, offset_y, blur_radius, color).map_err(de::Error::custom)
+            }
+        }
+
+        const FIELDS: &[&str] = &["offset_x", "offset_y", "blur_radius", "color"];
+        deserializer.deserialize_struct("TextShadow", FIELDS, TextShadowVisitor)
     }
 }
 
@@ -2525,5 +2584,20 @@ mod tests {
     #[test]
     fn test_text_style_default_has_no_shadow() {
         assert!(TextStyle::default().text_shadow.is_none());
+    }
+
+    #[test]
+    fn test_text_shadow_deserialize_rejects_duplicate_keys() {
+        let json = r#"{"offset_x":0.0,"offset_y":0.0,"blur_radius":4.0,"color":{"type":"literal","value":{"space":"srgb","r":0.0,"g":0.0,"b":0.0,"a":1.0}},"offset_x":1.0}"#;
+        let result: Result<TextShadow, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "deserializing TextShadow with duplicate keys should fail"
+        );
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("duplicate"),
+            "error should mention duplicate: {err_msg}"
+        );
     }
 }

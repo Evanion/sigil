@@ -47,6 +47,7 @@ import {
   Underline,
   Strikethrough,
 } from "lucide-solid";
+import { validateCssIdentifier } from "../validation/css-identifiers";
 import "./TypographySection.css";
 
 // ── Validation constants ─────────────────────────────────────────────
@@ -219,6 +220,8 @@ export const TypographySection: Component = () => {
   function handleFontFamilyChange(value: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
+    // RF-006: Reject font families containing CSS-significant characters.
+    if (!validateCssIdentifier(value)) return;
     store.setTextStyle(uuid, { field: "font_family", value });
   }
 
@@ -348,6 +351,9 @@ export const TypographySection: Component = () => {
   // ── Keyboard shortcuts (Cmd+B, Cmd+I, Cmd+U) ─────────────────────
 
   function handleKeyDown(e: KeyboardEvent): void {
+    // RF-009: Respect other handlers that already handled this event.
+    if (e.defaultPrevented) return;
+
     // Only act when a text node is selected
     if (!textKind()) return;
 
@@ -359,18 +365,21 @@ export const TypographySection: Component = () => {
 
     if (e.key === "b" || e.key === "B") {
       e.preventDefault();
+      e.stopPropagation();
       const current = fontWeight();
       const newWeight = current >= 700 ? 400 : 700;
       store.setTextStyle(uuid, { field: "font_weight", value: newWeight });
       announce(`Font weight ${newWeight === 700 ? "bold" : "regular"}`);
     } else if (e.key === "i" || e.key === "I") {
       e.preventDefault();
+      e.stopPropagation();
       const current = fontStyle();
       const newStyle: FontStyle = current === "italic" ? "normal" : "italic";
       store.setTextStyle(uuid, { field: "font_style", value: newStyle });
       announce(`Font style ${newStyle}`);
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
+      e.stopPropagation();
       const current = textDecoration();
       const newDecoration: TextDecoration = current === "underline" ? "none" : "underline";
       store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
