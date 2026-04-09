@@ -112,6 +112,12 @@ pub const MAX_FONT_WEIGHT: u16 = 1000;
 /// Minimum font weight value (CSS range).
 pub const MIN_FONT_WEIGHT: u16 = 1;
 
+/// Minimum font size in pixels.
+pub const MIN_FONT_SIZE: f64 = 0.1;
+
+/// Maximum font size in pixels.
+pub const MAX_FONT_SIZE: f64 = 10_000.0;
+
 /// Maximum number of JSON elements (values) to visit during float validation.
 /// Prevents unbounded traversal of adversarially large JSON payloads.
 /// Set high enough to accommodate legitimate max-sized paths
@@ -849,5 +855,25 @@ mod tests {
         let elements: Vec<serde_json::Value> = (0..100).map(|i| serde_json::json!(i)).collect();
         let v = serde_json::Value::Array(elements);
         assert!(validate_floats_in_value(&v).is_ok());
+    }
+
+    // ── MIN_FONT_SIZE / MAX_FONT_SIZE constant definitions ────────────
+    // Enforcement is tested in node.rs via Node::new validation.
+    // These tests verify the constant values are within sensible ranges.
+
+    #[test]
+    fn test_min_font_size_value() {
+        assert!(
+            MIN_FONT_SIZE > 0.0,
+            "MIN_FONT_SIZE must be positive, got {MIN_FONT_SIZE}"
+        );
+    }
+
+    #[test]
+    fn test_max_font_size_value() {
+        assert!(
+            MAX_FONT_SIZE > MIN_FONT_SIZE,
+            "MAX_FONT_SIZE must be greater than MIN_FONT_SIZE"
+        );
     }
 }

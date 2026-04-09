@@ -183,9 +183,11 @@ pub struct TextStyle {
     pub font_family: String,
     pub font_size: StyleValue<f64>,
     pub font_weight: u16,
+    pub font_style: FontStyle,
     pub line_height: StyleValue<f64>,
     pub letter_spacing: StyleValue<f64>,
     pub text_align: TextAlign,
+    pub text_decoration: TextDecoration,
     pub text_color: StyleValue<Color>,
 }
 
@@ -195,9 +197,11 @@ impl Default for TextStyle {
             font_family: "Inter".to_string(),
             font_size: StyleValue::Literal { value: 16.0 },
             font_weight: 400,
+            font_style: FontStyle::Normal,
             line_height: StyleValue::Literal { value: 1.5 },
             letter_spacing: StyleValue::Literal { value: 0.0 },
             text_align: TextAlign::Left,
+            text_decoration: TextDecoration::None,
             text_color: StyleValue::Literal {
                 value: Color::Srgb {
                     r: 0.0,
@@ -218,6 +222,36 @@ pub enum TextAlign {
     Center,
     Right,
     Justify,
+}
+
+/// Font style (normal or italic).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FontStyle {
+    #[default]
+    Normal,
+    Italic,
+}
+
+/// Text decoration applied to text runs.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextDecoration {
+    #[default]
+    None,
+    Underline,
+    Strikethrough,
+}
+
+/// How a text node sizes itself.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextSizing {
+    /// The node width expands to fit the text content.
+    #[default]
+    AutoWidth,
+    /// The node has a fixed width; text wraps within it.
+    FixedWidth,
 }
 
 // ── Core Node Types ────────────────────────────────────────────────────
@@ -546,6 +580,7 @@ pub enum NodeKind {
     Text {
         content: String,
         text_style: TextStyle,
+        sizing: TextSizing,
     },
     Image {
         asset_ref: String,
@@ -669,6 +704,7 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
         NodeKind::Text {
             content,
             text_style,
+            ..
         } => {
             validate_text_content(content)?;
             if text_style.font_family.len() > MAX_FONT_FAMILY_LEN {
@@ -684,6 +720,7 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
                     MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, text_style.font_weight
                 )));
             }
+            validate_font_size(text_style)?;
         }
         NodeKind::Rectangle { corner_radii } => {
             for (i, r) in corner_radii.iter().enumerate() {
@@ -783,6 +820,24 @@ fn validate_grid_layout(grid: &GridLayout) -> Result<(), crate::error::CoreError
     }
     for track in &grid.rows {
         validate_grid_track(track)?;
+    }
+    Ok(())
+}
+
+/// Validates the `font_size` field of a `TextStyle`.
+///
+/// Font size must be finite and within `[MIN_FONT_SIZE, MAX_FONT_SIZE]`.
+/// Only `StyleValue::Literal` values are validated; token references are
+/// resolved at render time and cannot be checked here.
+fn validate_font_size(text_style: &TextStyle) -> Result<(), crate::error::CoreError> {
+    use crate::validate::{MAX_FONT_SIZE, MIN_FONT_SIZE, validate_finite};
+    if let StyleValue::Literal { value } = text_style.font_size {
+        validate_finite("font_size", value)?;
+        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value) {
+            return Err(crate::error::CoreError::ValidationError(format!(
+                "font_size must be in {MIN_FONT_SIZE}..={MAX_FONT_SIZE}, got {value}"
+            )));
+        }
     }
     Ok(())
 }
@@ -895,6 +950,7 @@ mod tests {
             NodeKind::Text {
                 content: "Hello".to_string(),
                 text_style: TextStyle::default(),
+                sizing: TextSizing::AutoWidth,
             },
             "Text 1".to_string(),
         )
@@ -1591,6 +1647,7 @@ mod tests {
         let kind = NodeKind::Text {
             content: "Hello World".to_string(),
             text_style: TextStyle::default(),
+            sizing: TextSizing::AutoWidth,
         };
         let json = serde_json::to_string(&kind).expect("serialize");
         let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
@@ -1702,6 +1759,7 @@ mod tests {
             NodeKind::Text {
                 content,
                 text_style: TextStyle::default(),
+                sizing: TextSizing::AutoWidth,
             },
             "Text".to_string(),
         );
@@ -1720,6 +1778,7 @@ mod tests {
                     font_family,
                     ..TextStyle::default()
                 },
+                sizing: TextSizing::AutoWidth,
             },
             "Text".to_string(),
         );
@@ -1737,6 +1796,7 @@ mod tests {
                     font_weight: 0,
                     ..TextStyle::default()
                 },
+                sizing: TextSizing::AutoWidth,
             },
             "Text".to_string(),
         );
@@ -1754,6 +1814,7 @@ mod tests {
                     font_weight: 1001,
                     ..TextStyle::default()
                 },
+                sizing: TextSizing::AutoWidth,
             },
             "Text".to_string(),
         );
@@ -1772,6 +1833,7 @@ mod tests {
                         font_weight: weight,
                         ..TextStyle::default()
                     },
+                    sizing: TextSizing::AutoWidth,
                 },
                 "Text".to_string(),
             );
@@ -2036,5 +2098,195 @@ mod tests {
             "Instance".to_string(),
         );
         assert!(result.is_err());
+    }
+
+    // ── FontStyle, TextDecoration, TextSizing ────────────────────────
+
+    #[test]
+    fn test_font_style_default_is_normal() {
+        assert_eq!(FontStyle::default(), FontStyle::Normal);
+    }
+
+    #[test]
+    fn test_text_decoration_default_is_none() {
+        assert_eq!(TextDecoration::default(), TextDecoration::None);
+    }
+
+    #[test]
+    fn test_text_sizing_default_is_auto_width() {
+        assert_eq!(TextSizing::default(), TextSizing::AutoWidth);
+    }
+
+    #[test]
+    fn test_text_style_default_includes_new_fields() {
+        let style = TextStyle::default();
+        assert_eq!(style.font_style, FontStyle::Normal);
+        assert_eq!(style.text_decoration, TextDecoration::None);
+    }
+
+    #[test]
+    fn test_font_style_serde_round_trip() {
+        for variant in [FontStyle::Normal, FontStyle::Italic] {
+            let json = serde_json::to_string(&variant).expect("serialize");
+            let deserialized: FontStyle = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_text_decoration_serde_round_trip() {
+        for variant in [
+            TextDecoration::None,
+            TextDecoration::Underline,
+            TextDecoration::Strikethrough,
+        ] {
+            let json = serde_json::to_string(&variant).expect("serialize");
+            let deserialized: TextDecoration = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_text_sizing_serde_round_trip() {
+        for variant in [TextSizing::AutoWidth, TextSizing::FixedWidth] {
+            let json = serde_json::to_string(&variant).expect("serialize");
+            let deserialized: TextSizing = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(variant, deserialized);
+        }
+    }
+
+    #[test]
+    fn test_text_node_with_italic_and_underline() {
+        let node = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Styled".to_string(),
+                text_style: TextStyle {
+                    font_style: FontStyle::Italic,
+                    text_decoration: TextDecoration::Underline,
+                    ..TextStyle::default()
+                },
+                sizing: TextSizing::FixedWidth,
+            },
+            "Text".to_string(),
+        )
+        .expect("valid text node");
+        match &node.kind {
+            NodeKind::Text {
+                text_style, sizing, ..
+            } => {
+                assert_eq!(text_style.font_style, FontStyle::Italic);
+                assert_eq!(text_style.text_decoration, TextDecoration::Underline);
+                assert_eq!(*sizing, TextSizing::FixedWidth);
+            }
+            other => panic!("expected Text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_text_node_kind_serde_with_sizing() {
+        let kind = NodeKind::Text {
+            content: "Round trip".to_string(),
+            text_style: TextStyle {
+                font_style: FontStyle::Italic,
+                text_decoration: TextDecoration::Strikethrough,
+                ..TextStyle::default()
+            },
+            sizing: TextSizing::FixedWidth,
+        };
+        let json = serde_json::to_string(&kind).expect("serialize");
+        let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(kind, deserialized);
+    }
+
+    // ── MIN_FONT_SIZE / MAX_FONT_SIZE enforcement ────────────────────
+
+    #[test]
+    fn test_min_font_size_enforced() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hi".to_string(),
+                text_style: TextStyle {
+                    font_size: StyleValue::Literal { value: 0.0 },
+                    ..TextStyle::default()
+                },
+                sizing: TextSizing::AutoWidth,
+            },
+            "Text".to_string(),
+        );
+        assert!(
+            result.is_err(),
+            "font_size 0.0 should be rejected (below MIN_FONT_SIZE)"
+        );
+    }
+
+    #[test]
+    fn test_max_font_size_enforced() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hi".to_string(),
+                text_style: TextStyle {
+                    font_size: StyleValue::Literal {
+                        value: crate::validate::MAX_FONT_SIZE + 1.0,
+                    },
+                    ..TextStyle::default()
+                },
+                sizing: TextSizing::AutoWidth,
+            },
+            "Text".to_string(),
+        );
+        assert!(
+            result.is_err(),
+            "font_size above MAX_FONT_SIZE should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_font_size_nan_rejected() {
+        let result = Node::new(
+            NodeId::new(0, 0),
+            Uuid::nil(),
+            NodeKind::Text {
+                content: "Hi".to_string(),
+                text_style: TextStyle {
+                    font_size: StyleValue::Literal { value: f64::NAN },
+                    ..TextStyle::default()
+                },
+                sizing: TextSizing::AutoWidth,
+            },
+            "Text".to_string(),
+        );
+        assert!(result.is_err(), "NaN font_size should be rejected");
+    }
+
+    #[test]
+    fn test_font_size_at_boundaries_accepted() {
+        for value in [
+            crate::validate::MIN_FONT_SIZE,
+            crate::validate::MAX_FONT_SIZE,
+        ] {
+            let result = Node::new(
+                NodeId::new(0, 0),
+                Uuid::nil(),
+                NodeKind::Text {
+                    content: "Hi".to_string(),
+                    text_style: TextStyle {
+                        font_size: StyleValue::Literal { value },
+                        ..TextStyle::default()
+                    },
+                    sizing: TextSizing::AutoWidth,
+                },
+                "Text".to_string(),
+            );
+            assert!(
+                result.is_ok(),
+                "font_size {value} at boundary should be valid"
+            );
+        }
     }
 }

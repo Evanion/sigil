@@ -413,6 +413,7 @@ mod tests {
             NodeKind::Text {
                 content: "Hello".to_string(),
                 text_style: TextStyle::default(),
+                sizing: crate::node::TextSizing::AutoWidth,
             },
             "Text 1".to_string(),
         )
