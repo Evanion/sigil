@@ -28,6 +28,7 @@ import { createSelectTool, type PreviewTransform, type MarqueeRect } from "../to
 import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
 import { createTextTool } from "../tools/text-tool";
+import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overlay";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
@@ -176,13 +177,60 @@ export const Canvas: Component = () => {
     const rectangleTool = makeShapeTool(rectKind, "Rectangle");
     const ellipseTool = makeShapeTool(ellipseKind, "Ellipse");
 
-    // Text tool: onEditRequest is a no-op until the text overlay (Task 7) is wired up.
-    // TODO(text-overlay): replace no-op with overlay activation callback.
+    // -- Text overlay state ---------------------------------------------------
+
+    let activeOverlay: TextOverlayHandle | null = null;
+    let editingUuid: string | null = null;
+
+    function commitAndCloseOverlay(): void {
+      if (!activeOverlay || !editingUuid) return;
+      const content = activeOverlay.getContent();
+      if (!content.trim()) {
+        store.deleteNode(editingUuid);
+      } else {
+        store.setTextContent(editingUuid, content);
+      }
+      activeOverlay.destroy();
+      activeOverlay = null;
+      editingUuid = null;
+    }
+
+    function openTextOverlay(uuid: string): void {
+      if (activeOverlay) commitAndCloseOverlay();
+      const node = store.state.nodes[uuid];
+      if (!node || node.kind.type !== "text") return;
+
+      activeOverlay = createTextOverlay(node, store.viewport(), canvas);
+      editingUuid = uuid;
+
+      // Input handler: sync content to store on each keystroke
+      activeOverlay.element.addEventListener("input", () => {
+        if (activeOverlay && editingUuid) {
+          store.setTextContent(editingUuid, activeOverlay.getContent());
+        }
+      });
+
+      // Blur handler: commit on click outside
+      activeOverlay.element.addEventListener("blur", () => {
+        commitAndCloseOverlay();
+      });
+
+      // Escape handler: commit and switch to select tool
+      activeOverlay.element.addEventListener("keydown", (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          commitAndCloseOverlay();
+          store.setActiveTool("select");
+        }
+      });
+    }
+
+    // Text tool: onEditRequest opens the inline text editing overlay.
     const textTool = createTextTool(
       storeAdapter,
       () => store.setActiveTool("select"),
-      (_uuid: string) => {
-        /* text overlay not yet implemented — Task 7 */
+      (uuid: string) => {
+        openTextOverlay(uuid);
       },
     );
 
@@ -198,8 +246,23 @@ export const Canvas: Component = () => {
 
     // Sync tool manager with store's active tool signal
     createEffect(() => {
-      toolManager.setActiveTool(store.activeTool());
+      const tool = store.activeTool();
+      // Close the text overlay when switching tools — the user expects
+      // tool changes to commit the current edit.
+      if (activeOverlay && tool !== "text") {
+        commitAndCloseOverlay();
+      }
+      toolManager.setActiveTool(tool);
       setCursor(toolManager.getCursor());
+    });
+
+    // Viewport sync: keep the text overlay positioned correctly when
+    // the user pans or zooms while editing text.
+    createEffect(() => {
+      const vp = store.viewport();
+      if (activeOverlay) {
+        activeOverlay.updatePosition(vp);
+      }
     });
 
     // -- Pointer events -------------------------------------------------------
@@ -295,10 +358,32 @@ export const Canvas: Component = () => {
       isPanning = false;
     }
 
+    // Double-click on a text node enters inline editing mode
+    function handleDblClick(e: MouseEvent): void {
+      const rect = canvas.getBoundingClientRect();
+      const vp = store.viewport();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const [wx, wy] = screenToWorld(vp, sx, sy);
+
+      // Find a text node at this world position
+      const nodes = store.state.nodes;
+      for (const uuid of Object.keys(nodes)) {
+        const node = nodes[uuid];
+        if (!node || node.kind.type !== "text" || !node.visible || node.locked) continue;
+        const t = node.transform;
+        if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) {
+          openTextOverlay(uuid);
+          return;
+        }
+      }
+    }
+
     canvas.addEventListener("pointerdown", handlePointerDown);
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerup", handlePointerUp);
     canvas.addEventListener("lostpointercapture", handleLostPointerCapture);
+    canvas.addEventListener("dblclick", handleDblClick);
 
     // -- Viewport: zoom via wheel ---------------------------------------------
 
@@ -526,6 +611,10 @@ export const Canvas: Component = () => {
     // -- Cleanup --------------------------------------------------------------
 
     onCleanup(() => {
+      // Close text overlay if still open
+      if (activeOverlay) {
+        commitAndCloseOverlay();
+      }
       observer.disconnect();
       unbindKeys();
       window.removeEventListener("keydown", onKeyDown);
@@ -534,6 +623,7 @@ export const Canvas: Component = () => {
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("lostpointercapture", handleLostPointerCapture);
+      canvas.removeEventListener("dblclick", handleDblClick);
       canvas.removeEventListener("wheel", handleWheel);
     });
   });
@@ -541,15 +631,17 @@ export const Canvas: Component = () => {
   // TODO(a11y): Add discrete aria-live announcements for resize start/commit/cancel
 
   return (
-    <canvas
-      ref={(el) => {
-        canvasRef = el;
-      }}
-      class="sigil-canvas-container__canvas"
-      role="application"
-      aria-label={canvasAriaLabel()}
-      tabindex={0}
-      style={{ cursor: cursor() }}
-    />
+    <div class="sigil-canvas-container">
+      <canvas
+        ref={(el) => {
+          canvasRef = el;
+        }}
+        class="sigil-canvas-container__canvas"
+        role="application"
+        aria-label={canvasAriaLabel()}
+        tabindex={0}
+        style={{ cursor: cursor() }}
+      />
+    </div>
   );
 };
