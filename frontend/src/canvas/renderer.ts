@@ -158,6 +158,24 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
         lh,
       );
 
+      // Apply text shadow if present
+      if (ts.text_shadow) {
+        const shadowColor =
+          ts.text_shadow.color.type === "literal" && ts.text_shadow.color.value.space === "srgb"
+            ? (srgbColorToRgba(ts.text_shadow.color.value) ?? "rgba(0,0,0,0.3)")
+            : "rgba(0,0,0,0.3)";
+        if (
+          Number.isFinite(ts.text_shadow.offset_x) &&
+          Number.isFinite(ts.text_shadow.offset_y) &&
+          Number.isFinite(ts.text_shadow.blur_radius)
+        ) {
+          ctx.shadowOffsetX = ts.text_shadow.offset_x;
+          ctx.shadowOffsetY = ts.text_shadow.offset_y;
+          ctx.shadowBlur = ts.text_shadow.blur_radius;
+          ctx.shadowColor = shadowColor;
+        }
+      }
+
       for (const line of measurement.lines) {
         // Compute horizontal offset from the text_align setting.
         let lineX = x;
@@ -192,6 +210,12 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
           ctx.stroke();
         }
       }
+
+      // Reset text shadow to prevent bleeding into subsequent draw calls
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 0;
+      ctx.shadowBlur = 0;
+      ctx.shadowColor = "transparent";
       break;
     }
     case "path": {

@@ -22,6 +22,14 @@ import type {
   NodeId,
 } from "../types/document";
 
+/**
+ * Recursively strips `readonly` from all properties.
+ * Used inside `produce()` callbacks where Solid guarantees mutable access.
+ */
+type DeepMutable<T> = {
+  -readonly [K in keyof T]: T[K] extends object ? DeepMutable<T[K]> : T[K];
+};
+
 // ── Remote payload types ──────────────────────────────────────────────
 
 /**
@@ -206,7 +214,50 @@ function applyFieldSet(
     case "kind":
       setState("nodes", nodeUuid, "kind", value as NodeKind);
       break;
+    case "kind.content":
+      if (node.kind.type === "text") {
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "text") {
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              mutableKind.content = value as string;
+            }
+          }),
+        );
+      }
+      break;
+    case "kind.corner_radii":
+      if (node.kind.type === "rectangle") {
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "rectangle") {
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              mutableKind.corner_radii = value as [number, number, number, number];
+            }
+          }),
+        );
+      }
+      break;
     default:
+      // Handle kind.text_style.* sub-field paths
+      if (path.startsWith("kind.text_style.") && node.kind.type === "text") {
+        const subField = path.slice("kind.text_style.".length);
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "text") {
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              (mutableKind.text_style as Record<string, unknown>)[subField] = value;
+            }
+          }),
+        );
+        break;
+      }
       console.warn(`Unknown field path in remote operation: ${path}`);
   }
 }

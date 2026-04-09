@@ -7,7 +7,7 @@
 use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
 use agent_designer_core::commands::page_commands::{CreatePage, DeletePage, RenamePage};
-use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
+use agent_designer_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -56,13 +56,14 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::PageCreated,
-        uuid: Some(page_uuid.to_string()),
-        data: None,
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::PageCreated,
+        &page_uuid.to_string(),
+        "create",
+        "page",
+        Some(serde_json::json!({"name": name})),
+    );
 
     Ok(PageInfo {
         id: page_uuid.to_string(),
@@ -100,13 +101,14 @@ pub fn delete_page_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::PageDeleted,
-        uuid: Some(page_uuid_str.to_string()),
-        data: None,
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::PageDeleted,
+        page_uuid_str,
+        "delete",
+        "page",
+        None,
+    );
 
     Ok(MutationResult {
         success: true,
@@ -153,13 +155,14 @@ pub fn rename_page_impl(
             .collect::<Vec<_>>()
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::PageUpdated,
-        uuid: Some(page_uuid_str.to_string()),
-        data: Some(serde_json::json!({"field": "name"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::PageUpdated,
+        page_uuid_str,
+        "set_field",
+        "name",
+        Some(serde_json::json!(new_name)),
+    );
 
     Ok(PageInfo {
         id: page_uuid_str.to_string(),

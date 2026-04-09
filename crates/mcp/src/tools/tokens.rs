@@ -12,7 +12,7 @@ use agent_designer_core::{
     FieldOperation, Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, UpdateToken},
 };
-use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
+use agent_designer_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -133,13 +133,13 @@ pub fn create_token_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::TokenCreated,
-        uuid: None,
-        data: Some(serde_json::json!({"name": input.name})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_token_and_persist(
+        state,
+        MutationEventKind::TokenCreated,
+        &input.name,
+        "create",
+        Some(serde_json::json!({"name": input.name})),
+    );
     Ok(info)
 }
 
@@ -191,13 +191,13 @@ pub fn update_token_impl(
         info
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::TokenUpdated,
-        uuid: None,
-        data: Some(serde_json::json!({"name": input.name})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_token_and_persist(
+        state,
+        MutationEventKind::TokenUpdated,
+        &input.name,
+        "update",
+        Some(serde_json::json!({"name": input.name})),
+    );
     Ok(info)
 }
 
@@ -222,13 +222,13 @@ pub fn delete_token_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::TokenDeleted,
-        uuid: None,
-        data: Some(serde_json::json!({"name": token_name})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_token_and_persist(
+        state,
+        MutationEventKind::TokenDeleted,
+        token_name,
+        "delete",
+        Some(serde_json::json!({"name": token_name})),
+    );
     Ok(MutationResult {
         success: true,
         message: format!("Token '{token_name}' deleted"),

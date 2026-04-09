@@ -14,7 +14,7 @@ use agent_designer_core::{
     commands::tree_commands::{ReorderChildren, ReparentNode},
     validate_floats_in_value,
 };
-use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
+use agent_designer_state::{AppState, MutationEventKind};
 use uuid::Uuid;
 
 use crate::error::McpToolError;
@@ -260,13 +260,18 @@ pub fn create_node_impl(
     };
 
     let _ = node_id; // node_id is not used after lock drop; uuid is returned
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeCreated,
-        uuid: Some(node_uuid.to_string()),
-        data: None,
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeCreated,
+        &node_uuid.to_string(),
+        "create_node",
+        "",
+        Some(serde_json::json!({
+            "uuid": node_uuid.to_string(),
+            "kind": kind_str,
+            "name": name,
+        })),
+    );
 
     Ok(CreateNodeResult {
         uuid: node_uuid.to_string(),
@@ -310,13 +315,14 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeDeleted,
-        uuid: Some(node_uuid.to_string()),
-        data: None,
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeDeleted,
+        &node_uuid.to_string(),
+        "delete_node",
+        "",
+        None,
+    );
 
     Ok(MutationResult {
         success: true,
@@ -358,13 +364,14 @@ pub fn rename_node_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "name"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "name",
+        Some(serde_json::json!(new_name)),
+    );
     Ok(node_info)
 }
 
@@ -410,13 +417,20 @@ pub fn set_transform_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "transform"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "transform",
+        match serde_json::to_value(new_transform) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::error!("failed to serialize transform for broadcast: {e}");
+                None
+            }
+        },
+    );
     Ok(node_info)
 }
 
@@ -454,13 +468,14 @@ pub fn set_visible_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "visible"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "visible",
+        Some(serde_json::json!(visible)),
+    );
     Ok(node_info)
 }
 
@@ -498,13 +513,14 @@ pub fn set_locked_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "locked"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "locked",
+        Some(serde_json::json!(locked)),
+    );
     Ok(node_info)
 }
 
@@ -552,13 +568,17 @@ pub fn reparent_node_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "parent"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "reparent",
+        "",
+        Some(serde_json::json!({
+            "parentUuid": new_parent_uuid_str,
+            "position": position,
+        })),
+    );
     Ok(node_info)
 }
 
@@ -597,13 +617,16 @@ pub fn reorder_children_impl(
         build_node_info(&doc, node_id, node_uuid)?
     };
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "order"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "reorder",
+        "",
+        Some(serde_json::json!({
+            "newPosition": new_position,
+        })),
+    );
     Ok(node_info)
 }
 
@@ -653,13 +676,14 @@ pub fn set_opacity_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "opacity"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "style.opacity",
+        Some(serde_json::json!({"type": "literal", "value": opacity})),
+    );
 
     Ok(MutationResult {
         success: true,
@@ -713,13 +737,14 @@ pub fn set_blend_mode_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "blend_mode"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "style.blend_mode",
+        Some(serde_json::json!(blend_mode_str)),
+    );
 
     Ok(MutationResult {
         success: true,
@@ -775,13 +800,14 @@ pub fn set_fills_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "fills"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "style.fills",
+        Some(fills_value.clone()),
+    );
 
     Ok(MutationResult {
         success: true,
@@ -840,13 +866,14 @@ pub fn set_strokes_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "strokes"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "style.strokes",
+        Some(strokes_value.clone()),
+    );
 
     Ok(MutationResult {
         success: true,
@@ -905,13 +932,14 @@ pub fn set_effects_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "effects"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "style.effects",
+        Some(effects_value.clone()),
+    );
 
     Ok(MutationResult {
         success: true,
@@ -971,13 +999,14 @@ pub fn set_corner_radii_impl(
         cmd.apply(&mut doc)?;
     }
 
-    state.signal_dirty();
-    state.publish_event(MutationEvent {
-        kind: MutationEventKind::NodeUpdated,
-        uuid: Some(node_uuid.to_string()),
-        data: Some(serde_json::json!({"field": "corner_radii"})),
-        transaction: None,
-    });
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::NodeUpdated,
+        &node_uuid.to_string(),
+        "set_field",
+        "kind.corner_radii",
+        Some(serde_json::json!(radii)),
+    );
 
     Ok(MutationResult {
         success: true,

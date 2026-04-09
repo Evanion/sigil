@@ -22,7 +22,7 @@
  * - Cmd+I toggles font_style normal/italic
  * - Cmd+U toggles text_decoration none/underline
  */
-import { createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type Component } from "solid-js";
 import type {
   Color,
   FontStyle,
@@ -30,6 +30,7 @@ import type {
   StyleValue,
   TextAlign,
   TextDecoration,
+  TextShadow,
 } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { TextInput } from "../components/text-input/TextInput";
@@ -46,12 +47,30 @@ import {
   Underline,
   Strikethrough,
 } from "lucide-solid";
+import { validateCssIdentifier } from "../validation/css-identifiers";
 import "./TypographySection.css";
 
 // ── Validation constants ─────────────────────────────────────────────
 
 /** RF-022: Maximum font size in pixels. Values above this are rejected. */
 const MAX_FONT_SIZE = 10_000;
+
+/** Maximum text shadow blur radius in pixels. */
+const MAX_SHADOW_BLUR = 1000;
+
+/** RF-018: Maximum shadow offset value in pixels. */
+const MAX_SHADOW_OFFSET = 1000;
+
+/** RF-018: Minimum shadow offset value in pixels. */
+const MIN_SHADOW_OFFSET = -1000;
+
+/** Default text shadow values when toggling shadow on. */
+const DEFAULT_TEXT_SHADOW: TextShadow = {
+  offset_x: 0,
+  offset_y: 2,
+  blur_radius: 4,
+  color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 0.3 } },
+};
 
 // ── Font weight options ──────────────────────────────────────────────
 
@@ -169,11 +188,46 @@ export const TypographySection: Component = () => {
     return sv.value;
   });
 
+  const textShadow = createMemo((): TextShadow | null => {
+    const kind = textKind();
+    if (!kind) return null;
+    return kind.text_style.text_shadow ?? null;
+  });
+
+  const shadowEnabled = createMemo((): boolean => textShadow() !== null);
+
+  const shadowOffsetX = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 0;
+    return Number.isFinite(shadow.offset_x) ? shadow.offset_x : 0;
+  });
+
+  const shadowOffsetY = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 2;
+    return Number.isFinite(shadow.offset_y) ? shadow.offset_y : 2;
+  });
+
+  const shadowBlur = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 4;
+    return Number.isFinite(shadow.blur_radius) ? shadow.blur_radius : 4;
+  });
+
+  const shadowColor = createMemo((): Color => {
+    const shadow = textShadow();
+    if (!shadow) return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
+    if (shadow.color.type !== "literal") return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
+    return shadow.color.value;
+  });
+
   // ── Handlers ──────────────────────────────────────────────────────
 
   function handleFontFamilyChange(value: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
+    // RF-006: Reject font families containing CSS-significant characters.
+    if (!validateCssIdentifier(value)) return;
     store.setTextStyle(uuid, { field: "font_family", value });
   }
 
@@ -244,9 +298,70 @@ export const TypographySection: Component = () => {
     store.setTextStyle(uuid, { field: "text_color", value: sv });
   }
 
+  function handleShadowToggle(enabled: boolean): void {
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    if (enabled) {
+      store.setTextStyle(uuid, {
+        field: "text_shadow",
+        value: structuredClone(DEFAULT_TEXT_SHADOW),
+      });
+      announce("Text shadow enabled");
+    } else {
+      store.setTextStyle(uuid, { field: "text_shadow", value: null });
+      announce("Text shadow disabled");
+    }
+  }
+
+  function handleShadowOffsetXChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    if (value < MIN_SHADOW_OFFSET || value > MAX_SHADOW_OFFSET) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, offset_x: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowOffsetYChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    if (value < MIN_SHADOW_OFFSET || value > MAX_SHADOW_OFFSET) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, offset_y: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowBlurChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    if (value < 0 || value > MAX_SHADOW_BLUR) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, blur_radius: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowColorChange(color: Color): void {
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const sv: StyleValue<Color> = { type: "literal", value: color };
+    const updated: TextShadow = { ...current, color: sv };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
   // ── Keyboard shortcuts (Cmd+B, Cmd+I, Cmd+U) ─────────────────────
 
   function handleKeyDown(e: KeyboardEvent): void {
+    // RF-009: Respect other handlers that already handled this event.
+    if (e.defaultPrevented) return;
+
     // Only act when a text node is selected
     if (!textKind()) return;
 
@@ -258,18 +373,21 @@ export const TypographySection: Component = () => {
 
     if (e.key === "b" || e.key === "B") {
       e.preventDefault();
+      e.stopPropagation();
       const current = fontWeight();
       const newWeight = current >= 700 ? 400 : 700;
       store.setTextStyle(uuid, { field: "font_weight", value: newWeight });
       announce(`Font weight ${newWeight === 700 ? "bold" : "regular"}`);
     } else if (e.key === "i" || e.key === "I") {
       e.preventDefault();
+      e.stopPropagation();
       const current = fontStyle();
       const newStyle: FontStyle = current === "italic" ? "normal" : "italic";
       store.setTextStyle(uuid, { field: "font_style", value: newStyle });
       announce(`Font style ${newStyle}`);
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
+      e.stopPropagation();
       const current = textDecoration();
       const newDecoration: TextDecoration = current === "underline" ? "none" : "underline";
       store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
@@ -291,9 +409,9 @@ export const TypographySection: Component = () => {
 
   return (
     <div class="sigil-typography-section" role="region" aria-labelledby="typography-section-title">
-      <span class="sigil-typography-section__title" id="typography-section-title">
+      <h3 class="sigil-typography-section__title" id="typography-section-title">
         Typography
-      </span>
+      </h3>
 
       {/* ── Font family + weight ───────────────────────────────────── */}
       <div class="sigil-typography-section__font-row">
@@ -321,7 +439,7 @@ export const TypographySection: Component = () => {
           aria-label="Font size"
           step={1}
           min={1}
-          max={1000}
+          max={MAX_FONT_SIZE}
           suffix="px"
           disabled={disabled()}
         />
@@ -384,23 +502,25 @@ export const TypographySection: Component = () => {
           }
         }}
       >
-        {TEXT_ALIGN_OPTIONS.map((opt) => (
-          <button
-            class="sigil-typography-section__align-btn"
-            classList={{
-              "sigil-typography-section__align-btn--active": textAlign() === opt.value,
-            }}
-            type="button"
-            role="radio"
-            aria-checked={textAlign() === opt.value}
-            aria-label={opt.label}
-            disabled={disabled()}
-            tabIndex={textAlign() === opt.value ? 0 : -1}
-            onClick={() => handleTextAlignChange(opt.value)}
-          >
-            <opt.icon size={14} />
-          </button>
-        ))}
+        <For each={TEXT_ALIGN_OPTIONS}>
+          {(opt) => (
+            <button
+              class="sigil-typography-section__align-btn"
+              classList={{
+                "sigil-typography-section__align-btn--active": textAlign() === opt.value,
+              }}
+              type="button"
+              role="radio"
+              aria-checked={textAlign() === opt.value}
+              aria-label={opt.label}
+              disabled={disabled()}
+              tabIndex={textAlign() === opt.value ? 0 : -1}
+              onClick={() => handleTextAlignChange(opt.value)}
+            >
+              <opt.icon size={14} />
+            </button>
+          )}
+        </For>
       </div>
 
       {/* ── Text decoration toggles ────────────────────────────────── */}
@@ -425,12 +545,72 @@ export const TypographySection: Component = () => {
 
       {/* ── Text color ─────────────────────────────────────────────── */}
       <div class="sigil-typography-section__color-row">
-        <span class="sigil-typography-section__color-label">Color</span>
+        <span class="sigil-typography-section__color-label" aria-hidden="true">
+          Color
+        </span>
         <ColorSwatch
           color={textColor()}
           onColorChange={handleTextColorChange}
           aria-label="Text color"
         />
+      </div>
+
+      {/* ── Text shadow ──────────────────────────────────────────── */}
+      <div class="sigil-typography-section__shadow-section" role="group" aria-label="Text shadow">
+        <div class="sigil-typography-section__shadow-header">
+          <span class="sigil-typography-section__shadow-label" aria-hidden="true">
+            Shadow
+          </span>
+          <ToggleButton
+            pressed={shadowEnabled()}
+            onPressedChange={handleShadowToggle}
+            aria-label="Toggle text shadow"
+            aria-expanded={shadowEnabled()}
+            aria-controls="shadow-controls"
+            disabled={disabled()}
+          >
+            {shadowEnabled() ? "On" : "Off"}
+          </ToggleButton>
+        </div>
+        <Show when={shadowEnabled()}>
+          <div id="shadow-controls" class="sigil-typography-section__shadow-controls">
+            <NumberInput
+              value={shadowOffsetX()}
+              onValueChange={handleShadowOffsetXChange}
+              aria-label="Shadow offset X"
+              step={1}
+              min={MIN_SHADOW_OFFSET}
+              max={MAX_SHADOW_OFFSET}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <NumberInput
+              value={shadowOffsetY()}
+              onValueChange={handleShadowOffsetYChange}
+              aria-label="Shadow offset Y"
+              step={1}
+              min={MIN_SHADOW_OFFSET}
+              max={MAX_SHADOW_OFFSET}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <NumberInput
+              value={shadowBlur()}
+              onValueChange={handleShadowBlurChange}
+              aria-label="Shadow blur radius"
+              step={1}
+              min={0}
+              max={1000}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <ColorSwatch
+              color={shadowColor()}
+              onColorChange={handleShadowColorChange}
+              aria-label="Shadow color"
+            />
+          </div>
+        </Show>
       </div>
 
       {/* Live region for discrete status announcements (RF-009) */}

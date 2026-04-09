@@ -328,6 +328,13 @@ export type FontStyle = "normal" | "italic";
 export type TextDecoration = "none" | "underline" | "strikethrough";
 export type TextSizing = "auto_width" | "fixed_width";
 
+export interface TextShadow {
+  readonly offset_x: number;
+  readonly offset_y: number;
+  readonly blur_radius: number;
+  readonly color: StyleValue<Color>;
+}
+
 export interface TextStyle {
   readonly font_family: string;
   readonly font_size: StyleValue<number>;
@@ -338,6 +345,7 @@ export interface TextStyle {
   readonly text_align: TextAlign;
   readonly text_decoration: TextDecoration;
   readonly text_color: StyleValue<Color>;
+  readonly text_shadow?: TextShadow | null;
 }
 
 // ── Path ──────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import type {
   Stroke,
   Effect,
   BlendMode,
+  TextStyle,
 } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY } from "../graphql/queries";
@@ -921,18 +922,15 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
     // JSON clone: Solid proxy not structuredClone-safe
-    let previousTextStyle: Record<string, unknown>;
+    let clonedTextStyle: TextStyle;
     try {
-      previousTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as Record<
-        string,
-        unknown
-      >;
+      clonedTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as TextStyle;
     } catch (err: unknown) {
       console.error("setTextStyle: JSON clone failed", err);
       return;
     }
-    previousTextStyle[patch.field] = patch.value;
-    const newKind = { ...previousKind, text_style: previousTextStyle };
+    const updatedTextStyle: TextStyle = { ...clonedTextStyle, [patch.field]: patch.value };
+    const newKind = { ...previousKind, text_style: updatedTextStyle };
 
     interceptor.set(uuid, "kind", newKind);
     const path = `kind.text_style.${patch.field}`;

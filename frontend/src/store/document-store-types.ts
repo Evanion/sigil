@@ -15,6 +15,7 @@ import type {
   StyleValue,
   TextAlign,
   TextDecoration,
+  TextShadow,
   Transform,
 } from "../types/document";
 
@@ -33,7 +34,8 @@ export type TextStylePatch =
   | { field: "letter_spacing"; value: StyleValue<number> }
   | { field: "text_align"; value: TextAlign }
   | { field: "text_decoration"; value: TextDecoration }
-  | { field: "text_color"; value: StyleValue<Color> };
+  | { field: "text_color"; value: StyleValue<Color> }
+  | { field: "text_shadow"; value: TextShadow | null };
 
 /**
  * Narrow interface exposing only the methods that canvas tools actually call.
