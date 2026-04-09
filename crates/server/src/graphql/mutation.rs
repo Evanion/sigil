@@ -28,7 +28,7 @@ use agent_designer_core::commands::text_style_commands::{SetTextStyleField, Text
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::node::{
     BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
-    TextDecoration, Transform,
+    TextDecoration, TextShadow, Transform,
 };
 use agent_designer_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
@@ -559,6 +559,37 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::TextColor(text_color),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.text_shadow" => {
+            // null JSON removes the shadow; an object sets it.
+            if !value.is_null() {
+                validate_floats_in_value(&value).map_err(|e| {
+                    async_graphql::Error::new(format!("text_shadow contains invalid floats: {e}"))
+                })?;
+            }
+            let opt_shadow: Option<TextShadow> =
+                if value.is_null() {
+                    None
+                } else {
+                    // TextShadow's custom Deserialize routes through TextShadow::new(),
+                    // so validation happens inside the deserialization step.
+                    Some(serde_json::from_value(value).map_err(|e| {
+                        async_graphql::Error::new(format!("invalid text_shadow: {e}"))
+                    })?)
+                };
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::TextShadow(opt_shadow),
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
@@ -1363,6 +1394,133 @@ mod tests {
         assert!(
             !res.errors.is_empty(),
             "font_size of 0.0 (below MIN_FONT_SIZE) should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_text_shadow_sets_shadow_on_text_node() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        // Shadow JSON: offset_x=2, offset_y=4, blur_radius=8, color=opaque black literal
+        let shadow_json = r#"{\"offset_x\":2.0,\"offset_y\":4.0,\"blur_radius\":8.0,\"color\":{\"type\":\"literal\",\"value\":{\"space\":\"srgb\",\"r\":0.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.text_shadow", value: "{shadow_json}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Verify the shadow was applied to the document.
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+                let shadow = text_style
+                    .text_shadow
+                    .as_ref()
+                    .expect("text_shadow should be Some after applying");
+                assert_eq!(shadow.offset_x(), 2.0);
+                assert_eq!(shadow.offset_y(), 4.0);
+                assert_eq!(shadow.blur_radius(), 8.0);
+            }
+            _ => panic!("expected Text node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_text_shadow_null_removes_shadow() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        // First, set a shadow.
+        let shadow_json = r#"{\"offset_x\":1.0,\"offset_y\":2.0,\"blur_radius\":3.0,\"color\":{\"type\":\"literal\",\"value\":{\"space\":\"srgb\",\"r\":0.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}}"#;
+        let set_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.text_shadow", value: "{shadow_json}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let set_res = schema.execute(&set_query).await;
+        assert!(
+            set_res.errors.is_empty(),
+            "set shadow errors: {:?}",
+            set_res.errors
+        );
+
+        // Now remove the shadow by passing null.
+        let remove_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.text_shadow", value: "null" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let remove_res = schema.execute(&remove_query).await;
+        assert!(
+            remove_res.errors.is_empty(),
+            "remove shadow errors: {:?}",
+            remove_res.errors
+        );
+
+        // Verify shadow is gone.
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+                assert!(
+                    text_style.text_shadow.is_none(),
+                    "text_shadow should be None after null operation"
+                );
+            }
+            _ => panic!("expected Text node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_text_shadow_rejects_negative_blur() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        // blur_radius of -1.0 must be rejected by TextShadow::new() inside deserialization.
+        let bad_shadow_json = r#"{\"offset_x\":0.0,\"offset_y\":0.0,\"blur_radius\":-1.0,\"color\":{\"type\":\"literal\",\"value\":{\"space\":\"srgb\",\"r\":0.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.text_shadow", value: "{bad_shadow_json}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "negative blur_radius in text_shadow should be rejected"
         );
     }
 }
