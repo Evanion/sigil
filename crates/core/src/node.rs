@@ -189,6 +189,7 @@ pub struct TextStyle {
     pub text_align: TextAlign,
     pub text_decoration: TextDecoration,
     pub text_color: StyleValue<Color>,
+    pub text_shadow: Option<TextShadow>,
 }
 
 impl Default for TextStyle {
@@ -210,6 +211,7 @@ impl Default for TextStyle {
                     a: 1.0,
                 },
             },
+            text_shadow: None,
         }
     }
 }
@@ -241,6 +243,132 @@ pub enum TextDecoration {
     None,
     Underline,
     Strikethrough,
+}
+
+/// A CSS `text-shadow` effect: horizontal offset, vertical offset, blur radius, and color.
+///
+/// Fields are private to enforce validation invariants. Use [`TextShadow::new`] to construct.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TextShadow {
+    offset_x: f64,
+    offset_y: f64,
+    blur_radius: f64,
+    color: StyleValue<Color>,
+}
+
+impl TextShadow {
+    /// Creates a new `TextShadow`, validating all fields.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if:
+    /// - `offset_x`, `offset_y`, or `blur_radius` are not finite.
+    /// - `blur_radius` is negative or exceeds `MAX_TEXT_SHADOW_BLUR`.
+    /// - `color` is a literal whose channels are not finite.
+    pub fn new(
+        offset_x: f64,
+        offset_y: f64,
+        blur_radius: f64,
+        color: StyleValue<Color>,
+    ) -> Result<Self, crate::error::CoreError> {
+        use crate::validate::{MAX_TEXT_SHADOW_BLUR, validate_finite};
+
+        validate_finite("text_shadow.offset_x", offset_x)?;
+        validate_finite("text_shadow.offset_y", offset_y)?;
+        validate_finite("text_shadow.blur_radius", blur_radius)?;
+
+        if blur_radius < 0.0 {
+            return Err(crate::error::CoreError::ValidationError(format!(
+                "text_shadow.blur_radius must be >= 0, got {blur_radius}"
+            )));
+        }
+        if blur_radius > MAX_TEXT_SHADOW_BLUR {
+            return Err(crate::error::CoreError::ValidationError(format!(
+                "text_shadow.blur_radius must be <= {MAX_TEXT_SHADOW_BLUR}, got {blur_radius}"
+            )));
+        }
+
+        // Validate color channels if literal.
+        if let StyleValue::Literal { value } = color {
+            match value {
+                Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                    validate_finite("text_shadow.color.r", r)?;
+                    validate_finite("text_shadow.color.g", g)?;
+                    validate_finite("text_shadow.color.b", b)?;
+                    validate_finite("text_shadow.color.a", a)?;
+                }
+                Color::Oklch { l, c, h, a } => {
+                    validate_finite("text_shadow.color.l", l)?;
+                    validate_finite("text_shadow.color.c", c)?;
+                    validate_finite("text_shadow.color.h", h)?;
+                    validate_finite("text_shadow.color.a", a)?;
+                }
+                Color::Oklab { l, a, b, alpha } => {
+                    validate_finite("text_shadow.color.l", l)?;
+                    validate_finite("text_shadow.color.a", a)?;
+                    validate_finite("text_shadow.color.b", b)?;
+                    validate_finite("text_shadow.color.alpha", alpha)?;
+                }
+            }
+        }
+
+        Ok(Self {
+            offset_x,
+            offset_y,
+            blur_radius,
+            color,
+        })
+    }
+
+    /// Returns the horizontal offset in pixels.
+    #[must_use]
+    pub fn offset_x(&self) -> f64 {
+        self.offset_x
+    }
+
+    /// Returns the vertical offset in pixels.
+    #[must_use]
+    pub fn offset_y(&self) -> f64 {
+        self.offset_y
+    }
+
+    /// Returns the blur radius in pixels.
+    #[must_use]
+    pub fn blur_radius(&self) -> f64 {
+        self.blur_radius
+    }
+
+    /// Returns the shadow color.
+    #[must_use]
+    pub fn color(&self) -> &StyleValue<Color> {
+        &self.color
+    }
+}
+
+impl Serialize for TextShadow {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("TextShadow", 4)?;
+        state.serialize_field("offset_x", &self.offset_x)?;
+        state.serialize_field("offset_y", &self.offset_y)?;
+        state.serialize_field("blur_radius", &self.blur_radius)?;
+        state.serialize_field("color", &self.color)?;
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for TextShadow {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct TextShadowRaw {
+            offset_x: f64,
+            offset_y: f64,
+            blur_radius: f64,
+            color: StyleValue<Color>,
+        }
+        let raw = TextShadowRaw::deserialize(deserializer)?;
+        TextShadow::new(raw.offset_x, raw.offset_y, raw.blur_radius, raw.color)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 /// How a text node sizes itself.
@@ -2254,5 +2382,148 @@ mod tests {
                 "font_size {value} at boundary should be valid"
             );
         }
+    }
+
+    // ── TextShadow ───────────────────────────────────────────────
+
+    fn make_black() -> StyleValue<Color> {
+        StyleValue::Literal {
+            value: Color::Srgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        }
+    }
+
+    #[test]
+    fn test_text_shadow_valid_construction() {
+        let shadow = TextShadow::new(2.0, 4.0, 8.0, make_black());
+        assert!(shadow.is_ok());
+        let s = shadow.unwrap();
+        assert_eq!(s.offset_x(), 2.0);
+        assert_eq!(s.offset_y(), 4.0);
+        assert_eq!(s.blur_radius(), 8.0);
+    }
+
+    #[test]
+    fn test_text_shadow_zero_blur_valid() {
+        let shadow = TextShadow::new(0.0, 0.0, 0.0, make_black());
+        assert!(shadow.is_ok());
+    }
+
+    #[test]
+    fn test_text_shadow_nan_offset_x_rejected() {
+        let result = TextShadow::new(f64::NAN, 0.0, 0.0, make_black());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_nan_offset_y_rejected() {
+        let result = TextShadow::new(0.0, f64::NAN, 0.0, make_black());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_nan_blur_rejected() {
+        let result = TextShadow::new(0.0, 0.0, f64::NAN, make_black());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_infinity_rejected() {
+        let result = TextShadow::new(f64::INFINITY, 0.0, 0.0, make_black());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_negative_blur_rejected() {
+        let result = TextShadow::new(0.0, 0.0, -1.0, make_black());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_max_blur_accepted() {
+        use crate::validate::MAX_TEXT_SHADOW_BLUR;
+        let result = TextShadow::new(0.0, 0.0, MAX_TEXT_SHADOW_BLUR, make_black());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_max_text_shadow_blur_enforced() {
+        use crate::validate::MAX_TEXT_SHADOW_BLUR;
+        let over_limit = TextShadow::new(0.0, 0.0, MAX_TEXT_SHADOW_BLUR + 0.001, make_black());
+        assert!(
+            over_limit.is_err(),
+            "blur_radius above MAX_TEXT_SHADOW_BLUR should be rejected"
+        );
+    }
+
+    #[test]
+    fn test_text_shadow_nan_color_channel_rejected() {
+        let nan_color = StyleValue::Literal {
+            value: Color::Srgb {
+                r: f64::NAN,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        };
+        let result = TextShadow::new(0.0, 0.0, 4.0, nan_color);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_token_ref_color_valid() {
+        // Token refs bypass channel validation — they are valid.
+        let token_color: StyleValue<Color> = StyleValue::TokenRef {
+            name: "color.shadow".to_string(),
+        };
+        let result = TextShadow::new(1.0, 2.0, 3.0, token_color);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_text_shadow_serde_roundtrip() {
+        let shadow = TextShadow::new(1.5, -2.5, 6.0, make_black()).unwrap();
+        let json = serde_json::to_string(&shadow).expect("serialize");
+        let deserialized: TextShadow = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(shadow, deserialized);
+    }
+
+    #[test]
+    fn test_text_shadow_deserialize_rejects_nan_blur() {
+        let json = r#"{"offset_x":0.0,"offset_y":0.0,"blur_radius":null,"color":{"type":"literal","value":{"space":"srgb","r":0.0,"g":0.0,"b":0.0,"a":1.0}}}"#;
+        // null is not a valid f64 — serde will reject it before reaching our validation.
+        let result: Result<TextShadow, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_text_shadow_deserialize_rejects_negative_blur() {
+        let json = r#"{"offset_x":0.0,"offset_y":0.0,"blur_radius":-1.0,"color":{"type":"literal","value":{"space":"srgb","r":0.0,"g":0.0,"b":0.0,"a":1.0}}}"#;
+        let result: Result<TextShadow, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "deserializing negative blur_radius should fail"
+        );
+    }
+
+    #[test]
+    fn test_text_shadow_in_text_style_roundtrip() {
+        let shadow = TextShadow::new(1.0, 2.0, 3.0, make_black()).unwrap();
+        let style = TextStyle {
+            text_shadow: Some(shadow),
+            ..TextStyle::default()
+        };
+        let json = serde_json::to_string(&style).expect("serialize");
+        let deserialized: TextStyle = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(style.text_shadow, deserialized.text_shadow);
+    }
+
+    #[test]
+    fn test_text_style_default_has_no_shadow() {
+        assert!(TextStyle::default().text_shadow.is_none());
     }
 }

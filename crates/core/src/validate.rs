@@ -118,6 +118,9 @@ pub const MIN_FONT_SIZE: f64 = 0.1;
 /// Maximum font size in pixels.
 pub const MAX_FONT_SIZE: f64 = 10_000.0;
 
+/// Maximum blur radius for a text shadow (pixels).
+pub const MAX_TEXT_SHADOW_BLUR: f64 = 1000.0;
+
 /// Maximum number of JSON elements (values) to visit during float validation.
 /// Prevents unbounded traversal of adversarially large JSON payloads.
 /// Set high enough to accommodate legitimate max-sized paths
@@ -489,6 +492,25 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
                 validate_finite("text_color.b", b)?;
                 validate_finite("text_color.alpha", alpha)?;
             }
+        }
+    }
+
+    // ── text_shadow (defense-in-depth re-validation) ──────────────
+    if let Some(shadow) = &ts.text_shadow {
+        validate_finite("text_shadow.offset_x", shadow.offset_x())?;
+        validate_finite("text_shadow.offset_y", shadow.offset_y())?;
+        validate_finite("text_shadow.blur_radius", shadow.blur_radius())?;
+        if shadow.blur_radius() < 0.0 {
+            return Err(CoreError::ValidationError(format!(
+                "text_shadow.blur_radius must be >= 0, got {}",
+                shadow.blur_radius()
+            )));
+        }
+        if shadow.blur_radius() > MAX_TEXT_SHADOW_BLUR {
+            return Err(CoreError::ValidationError(format!(
+                "text_shadow.blur_radius must be <= {MAX_TEXT_SHADOW_BLUR}, got {}",
+                shadow.blur_radius()
+            )));
         }
     }
 
@@ -979,6 +1001,34 @@ mod tests {
         assert!(
             MAX_FONT_SIZE > MIN_FONT_SIZE,
             "MAX_FONT_SIZE must be greater than MIN_FONT_SIZE"
+        );
+    }
+
+    // ── MAX_TEXT_SHADOW_BLUR enforcement ─────────────────────────
+
+    #[test]
+    fn test_max_text_shadow_blur_enforced() {
+        use crate::node::{Color, StyleValue, TextShadow};
+
+        let black = StyleValue::Literal {
+            value: Color::Srgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        };
+
+        // At the limit: valid.
+        assert!(
+            TextShadow::new(0.0, 0.0, MAX_TEXT_SHADOW_BLUR, black.clone()).is_ok(),
+            "blur_radius at MAX_TEXT_SHADOW_BLUR should be valid"
+        );
+
+        // One epsilon over the limit: invalid.
+        assert!(
+            TextShadow::new(0.0, 0.0, MAX_TEXT_SHADOW_BLUR + 0.001, black).is_err(),
+            "blur_radius above MAX_TEXT_SHADOW_BLUR should be rejected"
         );
     }
 }
