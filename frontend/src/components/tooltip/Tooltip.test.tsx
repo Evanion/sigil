@@ -77,9 +77,10 @@ describe("Tooltip", () => {
         Focus trigger
       </Tooltip>
     ));
-    const trigger = screen.getByText("Focus trigger").closest("button");
-    expect(trigger).toBeTruthy();
-    fireEvent.focus(trigger);
+    const triggerEl = screen.getByText("Focus trigger").closest("button");
+    expect(triggerEl).toBeTruthy();
+    if (!triggerEl) return;
+    fireEvent.focus(triggerEl);
     await waitFor(() => {
       expect(screen.getByText("Focus tip")).toBeTruthy();
     });
