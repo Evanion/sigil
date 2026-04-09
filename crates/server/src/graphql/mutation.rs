@@ -18,14 +18,18 @@ use async_graphql::{Context, Object, Result};
 use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
 use agent_designer_core::commands::node_commands::{
-    CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible,
+    CreateNode, DeleteNode, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
 use agent_designer_core::commands::style_commands::validate_transform;
 use agent_designer_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
+use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
-use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
+use agent_designer_core::node::{
+    BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
+    TextDecoration, Transform,
+};
 use agent_designer_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
@@ -358,6 +362,188 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                         .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
                     Ok(Box::new(SetCornerRadii { node_id, new_radii }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.content" => {
+            let new_content: String = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid content: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextContent {
+                        node_id,
+                        new_content,
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.font_family" => {
+            let font_family: String = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid font_family: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::FontFamily(font_family),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.font_size" => {
+            validate_floats_in_value(&value).map_err(|e| {
+                async_graphql::Error::new(format!("font_size contains invalid floats: {e}"))
+            })?;
+            let font_size: StyleValue<f64> = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid font_size: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::FontSize(font_size),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.font_weight" => {
+            let font_weight: u16 = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid font_weight: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::FontWeight(font_weight),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.font_style" => {
+            let font_style: FontStyle = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid font_style: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::FontStyle(font_style),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.line_height" => {
+            validate_floats_in_value(&value).map_err(|e| {
+                async_graphql::Error::new(format!("line_height contains invalid floats: {e}"))
+            })?;
+            let line_height: StyleValue<f64> = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid line_height: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::LineHeight(line_height),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.letter_spacing" => {
+            validate_floats_in_value(&value).map_err(|e| {
+                async_graphql::Error::new(format!("letter_spacing contains invalid floats: {e}"))
+            })?;
+            let letter_spacing: StyleValue<f64> = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid letter_spacing: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::LetterSpacing(letter_spacing),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.text_align" => {
+            let text_align: TextAlign = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid text_align: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::TextAlign(text_align),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.text_decoration" => {
+            let text_decoration: TextDecoration = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid text_decoration: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::TextDecoration(text_decoration),
+                    }) as Box<dyn FieldOperation>)
+                }),
+                broadcast,
+            })
+        }
+        "kind.text_style.text_color" => {
+            validate_floats_in_value(&value).map_err(|e| {
+                async_graphql::Error::new(format!("text_color contains invalid floats: {e}"))
+            })?;
+            let text_color: StyleValue<Color> = serde_json::from_value(value)
+                .map_err(|e| async_graphql::Error::new(format!("invalid text_color: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetTextStyleField {
+                        node_id,
+                        field: TextStyleField::TextColor(text_color),
+                    }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
             })
@@ -1018,5 +1204,149 @@ mod tests {
         );
         let res = schema.execute(&query).await;
         assert!(!res.errors.is_empty(), "unknown path should be rejected");
+    }
+
+    /// Helper: creates a Text node directly via the state and returns its UUID string.
+    fn create_test_text_direct(state: &ServerState, content: &str) -> String {
+        use agent_designer_core::commands::node_commands::CreateNode;
+        use agent_designer_core::node::{NodeKind, TextSizing, TextStyle};
+
+        let node_uuid = uuid::Uuid::new_v4();
+        let cmd = CreateNode {
+            uuid: node_uuid,
+            kind: NodeKind::Text {
+                content: content.to_string(),
+                text_style: TextStyle::default(),
+                sizing: TextSizing::AutoWidth,
+            },
+            name: "Text Node".to_string(),
+            page_id: None,
+            initial_transform: None,
+        };
+
+        let mut doc = state.app.document.lock().unwrap();
+        cmd.validate(&doc).expect("create text node validate");
+        cmd.apply(&mut doc).expect("create text node apply");
+        node_uuid.to_string()
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_kind_content_updates_text() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.content", value: "\"World\"" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Verify content was updated in the document
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Text { content, .. } => {
+                assert_eq!(content, "World", "text content should be updated");
+            }
+            _ => panic!("expected Text node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_kind_content_rejects_non_text_node() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_frame_direct(&state, "Frame");
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.content", value: "\"Hello\"" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "kind.content on a non-text node should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_font_size_updates_text_style() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        // font_size as a StyleValue::Literal — serialised as {"type":"literal","value":24.0}
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.font_size", value: "{{\"type\":\"literal\",\"value\":24.0}}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Verify font_size was updated
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+                assert_eq!(
+                    text_style.font_size,
+                    agent_designer_core::node::StyleValue::Literal { value: 24.0 },
+                    "font_size should be updated to 24.0"
+                );
+            }
+            _ => panic!("expected Text node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_field_font_size_rejects_invalid_value() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_text_direct(&state, "Hello");
+
+        // font_size of 0.0 is below MIN_FONT_SIZE (0.1) — must be rejected by core validate()
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind.text_style.font_size", value: "{{\"type\":\"literal\",\"value\":0.0}}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "font_size of 0.0 (below MIN_FONT_SIZE) should be rejected"
+        );
     }
 }
