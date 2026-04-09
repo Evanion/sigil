@@ -42,6 +42,7 @@ pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
         "text" => Ok(NodeKind::Text {
             content: String::new(),
             text_style: agent_designer_core::TextStyle::default(),
+            sizing: agent_designer_core::TextSizing::AutoWidth,
         }),
         "group" => Ok(NodeKind::Group),
         // RF-012: Image nodes require an asset_ref which cannot be provided at

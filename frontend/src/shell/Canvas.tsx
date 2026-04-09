@@ -27,6 +27,8 @@ import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform, type MarqueeRect } from "../tools/select-tool";
 import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
+import { createTextTool } from "../tools/text-tool";
+import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overlay";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
@@ -175,19 +177,154 @@ export const Canvas: Component = () => {
     const rectangleTool = makeShapeTool(rectKind, "Rectangle");
     const ellipseTool = makeShapeTool(ellipseKind, "Ellipse");
 
+    // -- Text overlay state ---------------------------------------------------
+
+    let activeOverlay: TextOverlayHandle | null = null;
+    let editingUuid: string | null = null;
+
+    // RF-010: Store handler references so they can be removed in commitAndCloseOverlay.
+    let blurHandler: (() => void) | null = null;
+    let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+
+    function commitAndCloseOverlay(): void {
+      if (!activeOverlay || !editingUuid) return;
+      const overlay = activeOverlay;
+      const uuid = editingUuid;
+
+      // RF-011: Wrap commit logic in try-finally so cleanup always runs.
+      try {
+        const content = overlay.getContent();
+        if (!content.trim()) {
+          store.deleteNode(uuid);
+        } else {
+          store.setTextContent(uuid, content);
+        }
+      } finally {
+        // RF-010: Remove listeners BEFORE destroy
+        if (blurHandler) overlay.element.removeEventListener("blur", blurHandler);
+        if (keydownHandler) overlay.element.removeEventListener("keydown", keydownHandler);
+        blurHandler = keydownHandler = null;
+
+        overlay.destroy();
+        activeOverlay = null;
+        editingUuid = null;
+
+        // RF-026: Announce text edit completion to screen readers
+        announce("Text saved");
+
+        // RF-001: Switch back to select tool when the overlay closes.
+        // Only switch if we are still in "text" mode to avoid overriding
+        // a tool change the user triggered explicitly.
+        if (store.activeTool() === "text") {
+          store.setActiveTool("select");
+        }
+      }
+    }
+
+    function openTextOverlay(uuid: string): void {
+      if (activeOverlay) commitAndCloseOverlay();
+      const node = store.state.nodes[uuid];
+      if (!node || node.kind.type !== "text") return;
+
+      activeOverlay = createTextOverlay(node, store.viewport(), canvas);
+      editingUuid = uuid;
+
+      // RF-026: Announce text edit mode to screen readers
+      announce("Editing text");
+
+      // RF-010: Store handler references for cleanup in commitAndCloseOverlay.
+      // RF-015: Input handler removed — store.setTextContent() is only called
+      // once in commitAndCloseOverlay() to avoid per-keystroke undo entries.
+      blurHandler = () => {
+        commitAndCloseOverlay();
+      };
+      keydownHandler = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          commitAndCloseOverlay();
+          return;
+        }
+        // RF-016: Intercept Cmd+B/I/U during overlay editing to prevent both
+        // the browser's execCommand and the document-level TypographySection
+        // handler from firing. Apply text style changes directly.
+        const isMeta = e.metaKey || e.ctrlKey;
+        if (isMeta && editingUuid) {
+          if (e.key === "b" || e.key === "B") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentWeight = (node.kind as { text_style: { font_weight: number } })
+                .text_style.font_weight;
+              const newWeight = currentWeight >= 700 ? 400 : 700;
+              store.setTextStyle(editingUuid, { field: "font_weight", value: newWeight });
+            }
+          } else if (e.key === "i" || e.key === "I") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentStyle = (node.kind as { text_style: { font_style: string } }).text_style
+                .font_style;
+              const newStyle = currentStyle === "italic" ? "normal" : "italic";
+              store.setTextStyle(editingUuid, { field: "font_style", value: newStyle });
+            }
+          } else if (e.key === "u" || e.key === "U") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentDec = (node.kind as { text_style: { text_decoration: string } })
+                .text_style.text_decoration;
+              const newDec = currentDec === "underline" ? "none" : "underline";
+              store.setTextStyle(editingUuid, { field: "text_decoration", value: newDec });
+            }
+          }
+        }
+      };
+
+      // RF-015: No input handler — store.setTextContent() is called only on commit.
+      activeOverlay.element.addEventListener("blur", blurHandler);
+      activeOverlay.element.addEventListener("keydown", keydownHandler);
+    }
+
+    // Text tool: onEditRequest opens the inline text editing overlay.
+    // RF-001: No onComplete callback — the tool stays in "text" mode while
+    // the overlay is open. Switching to "select" happens inside
+    // commitAndCloseOverlay() or on Escape.
+    const textTool = createTextTool(storeAdapter, (uuid: string) => {
+      openTextOverlay(uuid);
+    });
+
     const toolImpls = new Map<ToolType, Tool>([
       ["select", selectTool],
       ["frame", frameTool],
       ["rectangle", rectangleTool],
       ["ellipse", ellipseTool],
+      ["text", textTool],
     ]);
 
     const toolManager = createToolManager(toolImpls, "select");
 
-    // Sync tool manager with store's active tool signal
+    // Sync tool manager with store's active tool signal.
+    // RF-001: Do NOT auto-close the text overlay on tool changes. The overlay
+    // manages its own lifecycle (blur, Escape, click outside). Auto-closing
+    // on tool change caused a race: text-tool called onEditRequest then
+    // onComplete (which set tool to "select"), and the effect immediately
+    // destroyed the overlay before the user could type.
     createEffect(() => {
-      toolManager.setActiveTool(store.activeTool());
+      const tool = store.activeTool();
+      toolManager.setActiveTool(tool);
       setCursor(toolManager.getCursor());
+    });
+
+    // Viewport sync: keep the text overlay positioned correctly when
+    // the user pans or zooms while editing text.
+    createEffect(() => {
+      const vp = store.viewport();
+      if (activeOverlay) {
+        activeOverlay.updatePosition(vp);
+      }
     });
 
     // -- Pointer events -------------------------------------------------------
@@ -283,10 +420,37 @@ export const Canvas: Component = () => {
       isPanning = false;
     }
 
+    // Double-click on a text node enters inline editing mode
+    function handleDblClick(e: MouseEvent): void {
+      const rect = canvas.getBoundingClientRect();
+      const vp = store.viewport();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      const [wx, wy] = screenToWorld(vp, sx, sy);
+
+      // RF-019: Find the topmost text node at this world position.
+      // Iterate all matching nodes and use the last one (topmost in z-order).
+      const nodes = store.state.nodes;
+      let topmostUuid: string | null = null;
+      for (const uuid of Object.keys(nodes)) {
+        const node = nodes[uuid];
+        if (!node || node.kind.type !== "text" || !node.visible || node.locked) continue;
+        const t = node.transform;
+        if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) {
+          topmostUuid = uuid;
+        }
+      }
+      if (topmostUuid !== null) {
+        openTextOverlay(topmostUuid);
+        return;
+      }
+    }
+
     canvas.addEventListener("pointerdown", handlePointerDown);
     canvas.addEventListener("pointermove", handlePointerMove);
     canvas.addEventListener("pointerup", handlePointerUp);
     canvas.addEventListener("lostpointercapture", handleLostPointerCapture);
+    canvas.addEventListener("dblclick", handleDblClick);
 
     // -- Viewport: zoom via wheel ---------------------------------------------
 
@@ -352,6 +516,18 @@ export const Canvas: Component = () => {
         const vp = store.viewport();
         const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, -200));
+      },
+      // RF-004: Enter key opens text editing overlay on selected text node
+      Enter: (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        const ids = store.selectedNodeIds();
+        if (ids.length === 1) {
+          const node = store.state.nodes[ids[0]];
+          if (node?.kind.type === "text") {
+            e.preventDefault();
+            openTextOverlay(ids[0]);
+          }
+        }
       },
       Escape: (e: KeyboardEvent) => {
         if (!isTyping()) {
@@ -514,6 +690,10 @@ export const Canvas: Component = () => {
     // -- Cleanup --------------------------------------------------------------
 
     onCleanup(() => {
+      // Close text overlay if still open
+      if (activeOverlay) {
+        commitAndCloseOverlay();
+      }
       observer.disconnect();
       unbindKeys();
       window.removeEventListener("keydown", onKeyDown);
@@ -522,6 +702,7 @@ export const Canvas: Component = () => {
       canvas.removeEventListener("pointermove", handlePointerMove);
       canvas.removeEventListener("pointerup", handlePointerUp);
       canvas.removeEventListener("lostpointercapture", handleLostPointerCapture);
+      canvas.removeEventListener("dblclick", handleDblClick);
       canvas.removeEventListener("wheel", handleWheel);
     });
   });
@@ -529,15 +710,17 @@ export const Canvas: Component = () => {
   // TODO(a11y): Add discrete aria-live announcements for resize start/commit/cancel
 
   return (
-    <canvas
-      ref={(el) => {
-        canvasRef = el;
-      }}
-      class="sigil-canvas-container__canvas"
-      role="application"
-      aria-label={canvasAriaLabel()}
-      tabindex={0}
-      style={{ cursor: cursor() }}
-    />
+    <div class="sigil-canvas-container">
+      <canvas
+        ref={(el) => {
+          canvasRef = el;
+        }}
+        class="sigil-canvas-container__canvas"
+        role="application"
+        aria-label={canvasAriaLabel()}
+        tabindex={0}
+        style={{ cursor: cursor() }}
+      />
+    </div>
   );
 };

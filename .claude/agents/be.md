@@ -114,6 +114,7 @@ This project uses Rust Edition 2024. Be aware of:
 - Every new first-class entity type added to `crates/core/` (pages, layers, tokens, etc.) MUST ship with a complete operation set: at minimum create, rename, delete, and any reorder/reparent operations. An entity without operations is not usable.
 - When deleting implementation code that carries non-trivial logic (computation, transforms, invariant maintenance), enumerate the behavior it carries and verify the replacement covers it. See CLAUDE.md "Behavioral Inventory Before Deleting Implementation Code".
 - When adding validation to one transport (GraphQL or MCP), add the same validation to the other. Asymmetric validation is a security bug.
+- When adding a new `NodeKind` variant, add a corresponding arm to `CreateNode::validate` (and all `match kind` sites in core) in the same commit. Never use wildcard arms in `NodeKind` match expressions.
 - Never split a read-then-write into two separate lock acquisitions (lock/read/drop then lock/write). This is a TOCTOU race. Hold a single write lock (or upgradeable read lock) for the entire read-modify-write sequence.
 - When implementing MCP tools that run over stdio transport, all tracing/logging MUST go to stderr. Any output to stdout corrupts the MCP protocol framing.
 - Never write blanket `unsafe impl Send/Sync` on wrapper types. Wrap the non-Send inner type in a newtype with a SAFETY comment. Add compile-time assertions that verify the invariant.

@@ -324,14 +324,19 @@ export interface GridPlacement {
 // ── Text ──────────────────────────────────────────────────────────────
 
 export type TextAlign = "left" | "center" | "right" | "justify";
+export type FontStyle = "normal" | "italic";
+export type TextDecoration = "none" | "underline" | "strikethrough";
+export type TextSizing = "auto_width" | "fixed_width";
 
 export interface TextStyle {
   readonly font_family: string;
   readonly font_size: StyleValue<number>;
   readonly font_weight: number;
+  readonly font_style: FontStyle;
   readonly line_height: StyleValue<number>;
   readonly letter_spacing: StyleValue<number>;
   readonly text_align: TextAlign;
+  readonly text_decoration: TextDecoration;
   readonly text_color: StyleValue<Color>;
 }
 
@@ -572,6 +577,7 @@ export interface NodeKindText {
   readonly type: "text";
   readonly content: string;
   readonly text_style: TextStyle;
+  readonly sizing: TextSizing;
 }
 
 export interface NodeKindImage {

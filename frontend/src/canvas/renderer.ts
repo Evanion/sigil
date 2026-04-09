@@ -9,13 +9,14 @@
  * RF-006: Accepts ReadonlySet<string> for selectedUuids (caller memoizes).
  */
 
-import type { DocumentNode, Transform } from "../types/document";
+import type { ColorSrgb, DocumentNode, Transform } from "../types/document";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { MarqueeRect } from "../tools/select-tool";
 import type { Viewport } from "./viewport";
 import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
+import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -42,6 +43,30 @@ const PREVIEW_COLOR = "#0d99ff";
 const PREVIEW_DASH = [4, 4];
 
 /**
+ * Convert an sRGB color to a CSS rgba() string.
+ *
+ * All channel values are guarded with Number.isFinite() per CLAUDE.md
+ * "Floating-Point Validation" — NaN or Infinity in CSS rgba() produces a
+ * malformed style string that the browser silently ignores.
+ *
+ * Returns null when any channel is non-finite so callers can fall back.
+ */
+function srgbColorToRgba(c: ColorSrgb): string | null {
+  if (
+    !Number.isFinite(c.r) ||
+    !Number.isFinite(c.g) ||
+    !Number.isFinite(c.b) ||
+    !Number.isFinite(c.a)
+  ) {
+    return null;
+  }
+  const r = Math.round(c.r * 255);
+  const g = Math.round(c.g * 255);
+  const b = Math.round(c.b * 255);
+  return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
+}
+
+/**
  * Resolve the first solid fill color from a node's style, or return the default.
  */
 function resolveFillColor(node: DocumentNode): string {
@@ -51,10 +76,7 @@ function resolveFillColor(node: DocumentNode): string {
       if (colorValue.type === "literal") {
         const c = colorValue.value;
         if (c.space === "srgb") {
-          const r = Math.round(c.r * 255);
-          const g = Math.round(c.g * 255);
-          const b = Math.round(c.b * 255);
-          return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
+          return srgbColorToRgba(c) ?? DEFAULT_FILL;
         }
       }
     }
@@ -99,14 +121,77 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       break;
     }
     case "text": {
-      ctx.fillStyle = resolveFillColor(node);
+      const ts = node.kind.text_style;
+      const fontStr = buildFontString(ts);
+      ctx.font = fontStr;
+
+      // Text color comes from text_style.text_color, not from the node fill.
+      // Only sRGB literals are resolved here; token_refs and non-sRGB spaces
+      // fall back to opaque black matching Figma's default text colour.
+      let textColor = "#000000";
+      if (ts.text_color.type === "literal" && ts.text_color.value.space === "srgb") {
+        textColor = srgbColorToRgba(ts.text_color.value) ?? "#000000";
+      }
+      ctx.fillStyle = textColor;
+      ctx.textBaseline = "alphabetic";
+
+      // Resolve line height as an absolute pixel value.
+      // The spec stores line_height as a multiplier (e.g. 1.5 means 150% of fontSize).
+      // Guard with Number.isFinite per CLAUDE.md Floating-Point Validation.
+      // RF-031: Use shared constant instead of hardcoded 16.
       const fontSize =
-        node.kind.text_style.font_size.type === "literal"
-          ? node.kind.text_style.font_size.value
-          : 14;
-      ctx.font = `${String(fontSize)}px sans-serif`;
-      ctx.textBaseline = "top";
-      ctx.fillText(node.kind.content, x, y, width);
+        ts.font_size.type === "literal" && Number.isFinite(ts.font_size.value)
+          ? ts.font_size.value
+          : DEFAULT_FONT_SIZE_PX;
+      const lineHeightMultiplier =
+        ts.line_height.type === "literal" && Number.isFinite(ts.line_height.value)
+          ? ts.line_height.value
+          : 1.5;
+      const lh = lineHeightMultiplier * fontSize;
+
+      const measurement = measureTextLines(
+        ctx,
+        node.kind.content,
+        fontStr,
+        node.kind.sizing,
+        width,
+        lh,
+      );
+
+      for (const line of measurement.lines) {
+        // Compute horizontal offset from the text_align setting.
+        let lineX = x;
+        if (ts.text_align === "center") {
+          lineX = x + (width - line.width) / 2;
+        } else if (ts.text_align === "right") {
+          lineX = x + width - line.width;
+        }
+        // "justify" is deferred — treated as "left" for now.
+
+        ctx.fillText(line.text, lineX, y + line.y);
+
+        // Text decoration — drawn as a manual line over/through the text.
+        if (ts.text_decoration === "underline") {
+          // RF-012: Use proportional offset instead of hardcoded +2 so
+          // the underline scales correctly with font size.
+          const underlineOffset = fontSize * 0.1;
+          ctx.beginPath();
+          ctx.moveTo(lineX, y + line.y + underlineOffset);
+          ctx.lineTo(lineX + line.width, y + line.y + underlineOffset);
+          ctx.strokeStyle = textColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else if (ts.text_decoration === "strikethrough") {
+          ctx.beginPath();
+          // Place the strikethrough at ~30% above the baseline (ascender midpoint).
+          const mid = y + line.y - fontSize * 0.3;
+          ctx.moveTo(lineX, mid);
+          ctx.lineTo(lineX + line.width, mid);
+          ctx.strokeStyle = textColor;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
       break;
     }
     case "path": {

@@ -97,6 +97,7 @@ The canvas is an imperative rendering island — Solid does not manage it:
 - Tool state machine: vanilla TS, pointer events delegated from a Solid wrapper component
 - Solid manages the canvas element's lifecycle (mount/unmount, resize observer) via a `<CanvasWrapper>` component
 - Data flows: Solid store → canvas renderer (read-only). Canvas events → Solid store (via callbacks).
+- Every imperative canvas class (tools, overlays, renderers) MUST have a `destroy()` method. The Solid component that creates the class instance MUST call `destroy()` in `onCleanup()`.
 
 ### Accessibility Baseline
 
@@ -132,3 +133,4 @@ The canvas is an imperative rendering island — Solid does not manage it:
 4. Read the files you will modify — understand existing code before changing it
 5. Run `pnpm --prefix frontend test` to verify the test suite passes before making changes
 6. For component work: check existing components in `src/components/` for patterns to follow
+7. For any class you write outside Solid's component tree: verify it has a `destroy()` method that cancels all rAF handles, removes all event listeners, and clears all timers. Verify the owning Solid component calls `destroy()` in `onCleanup()`.

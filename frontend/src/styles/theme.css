@@ -72,6 +72,7 @@
   --opacity-dragging: 0.4;
 
   /* Z-index scale */
+  --z-text-overlay: 5;
   --z-drop-indicator: 10;
   --z-dropdown: 50;
   --z-popover: 50;

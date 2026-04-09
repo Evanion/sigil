@@ -1,5 +1,5 @@
 import {
-  For,
+  Index,
   createSignal,
   createEffect,
   onMount,
@@ -7,7 +7,7 @@ import {
   type Component,
   type JSX,
 } from "solid-js";
-import { MousePointer2, Frame, Square, Circle } from "lucide-solid";
+import { MousePointer2, Frame, Square, Circle, Type } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "./AnnounceProvider";
 import { Tooltip } from "../components/tooltip/Tooltip";
@@ -27,6 +27,7 @@ const TOOLS: ToolDef[] = [
   { id: "frame", label: "Frame", shortcut: "F", icon: (p) => <Frame size={p.size} /> },
   { id: "rectangle", label: "Rectangle", shortcut: "R", icon: (p) => <Square size={p.size} /> },
   { id: "ellipse", label: "Ellipse", shortcut: "O", icon: (p) => <Circle size={p.size} /> },
+  { id: "text", label: "Text", shortcut: "T", icon: (p) => <Type size={p.size} /> },
 ];
 
 export const Toolbar: Component = () => {
@@ -88,6 +89,12 @@ export const Toolbar: Component = () => {
           store.setActiveTool("ellipse");
         }
       },
+      t: (e: KeyboardEvent) => {
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("text");
+        }
+      },
     });
 
     onCleanup(unsubscribe);
@@ -120,25 +127,25 @@ export const Toolbar: Component = () => {
       <div class="toolbar__logo" aria-hidden="true">
         SIGIL
       </div>
-      <For each={TOOLS}>
+      {/* RF-029: Use <Index> instead of <For> per CLAUDE.md — preserves DOM elements */}
+      <Index each={TOOLS}>
         {(tool, index) => (
-          <Tooltip content={`${tool.label} (${tool.shortcut})`} placement="right">
-            <button
-              ref={(el) => {
-                buttonRefs[index()] = el;
-              }}
-              class="toolbar__btn"
-              classList={{ "toolbar__btn--active": store.activeTool() === tool.id }}
-              aria-pressed={store.activeTool() === tool.id}
-              aria-label={`${tool.label} (${tool.shortcut})`}
-              tabindex={focusedIndex() === index() ? 0 : -1}
-              onClick={() => store.setActiveTool(tool.id)}
-            >
-              {tool.icon({ size: 16 })}
-            </button>
+          <Tooltip
+            content={`${tool().label} (${tool().shortcut})`}
+            placement="right"
+            ref={(el) => {
+              buttonRefs[index] = el;
+            }}
+            triggerClass={`toolbar__btn${store.activeTool() === tool().id ? " toolbar__btn--active" : ""}`}
+            aria-pressed={store.activeTool() === tool().id}
+            aria-label={`${tool().label} (${tool().shortcut})`}
+            tabIndex={focusedIndex() === index ? 0 : -1}
+            onClick={() => store.setActiveTool(tool().id)}
+          >
+            {tool().icon({ size: 16 })}
           </Tooltip>
         )}
-      </For>
+      </Index>
     </div>
   );
 };

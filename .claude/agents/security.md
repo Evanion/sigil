@@ -40,6 +40,7 @@ For every string field that serves as a name or identifier:
 - Is there a maximum length?
 - Is there a character allowlist or denylist?
 - Are control characters, null bytes, and path separators rejected?
+- For any string field used to produce a CSS property value or Canvas 2D context property: verify a CSS-significant character denylist is applied (single/double quote, semicolon, curly braces, backslash, C0 control characters).
 
 ### Reference and Graph Validation
 For every field that references another entity:

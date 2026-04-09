@@ -12,41 +12,36 @@ afterEach(() => {
   cleanup();
 });
 
-/** Returns the closest ancestor `<span>` wrapping a trigger element. */
-function getTriggerSpan(text: string): HTMLElement {
-  const el = screen.getByText(text).closest("span");
-  if (el === null) {
-    throw new Error(`Could not find <span> ancestor for text: ${text}`);
-  }
-  return el;
-}
-
 describe("Tooltip", () => {
-  it("should render the trigger element", () => {
-    render(() => (
-      <Tooltip content="Helpful tip">
-        <button>Hover me</button>
-      </Tooltip>
-    ));
+  it("should render the trigger element with children", () => {
+    render(() => <Tooltip content="Helpful tip">Hover me</Tooltip>);
     expect(screen.getByText("Hover me")).toBeTruthy();
   });
 
+  it("should render trigger as a button element (Kobalte default)", () => {
+    render(() => <Tooltip content="Button trigger tip">Click me</Tooltip>);
+    const btn = screen.getByText("Click me").closest("button");
+    expect(btn).toBeTruthy();
+    // Must not be wrapped in a <span> — the old as="span" violation
+    let ancestor = btn?.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      expect(ancestor.tagName.toLowerCase()).not.toBe("span");
+      ancestor = ancestor.parentElement;
+    }
+  });
+
   it("should not show tooltip content initially", () => {
-    render(() => (
-      <Tooltip content="Hidden tip">
-        <button>Initial trigger</button>
-      </Tooltip>
-    ));
+    render(() => <Tooltip content="Hidden tip">Initial trigger</Tooltip>);
     expect(screen.queryByText("Hidden tip")).toBeNull();
   });
 
   it("should show tooltip content on pointer enter after delay", async () => {
     render(() => (
       <Tooltip content="Delayed tip" openDelay={0}>
-        <button>Pointer trigger</button>
+        Pointer trigger
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Pointer trigger");
+    const trigger = screen.getByText("Pointer trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -57,10 +52,10 @@ describe("Tooltip", () => {
   it("should close tooltip on pointer leave", async () => {
     render(() => (
       <Tooltip content="Vanishing tip" openDelay={0} closeDelay={0}>
-        <button>Leave trigger</button>
+        Leave trigger
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Leave trigger");
+    const trigger = screen.getByText("Leave trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -79,11 +74,13 @@ describe("Tooltip", () => {
   it("should show tooltip content on focus", async () => {
     render(() => (
       <Tooltip content="Focus tip" openDelay={0}>
-        <button>Focus trigger</button>
+        Focus trigger
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Focus trigger");
-    fireEvent.focus(trigger);
+    const triggerEl = screen.getByText("Focus trigger").closest("button");
+    expect(triggerEl).toBeTruthy();
+    if (!triggerEl) return;
+    fireEvent.focus(triggerEl);
     await waitFor(() => {
       expect(screen.getByText("Focus tip")).toBeTruthy();
     });
@@ -92,10 +89,10 @@ describe("Tooltip", () => {
   it("should apply the sigil-tooltip class to the content element", async () => {
     render(() => (
       <Tooltip content="Styled tip" openDelay={0}>
-        <button>Style trigger</button>
+        Style trigger
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Style trigger");
+    const trigger = screen.getByText("Style trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -107,10 +104,10 @@ describe("Tooltip", () => {
   it("should render an arrow element inside the tooltip", async () => {
     render(() => (
       <Tooltip content="Arrow tip" openDelay={0}>
-        <button>Arrow trigger</button>
+        Arrow trigger
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Arrow trigger");
+    const trigger = screen.getByText("Arrow trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -124,9 +121,20 @@ describe("Tooltip", () => {
   it("should accept placement prop without error", () => {
     render(() => (
       <Tooltip content="Bottom tip" placement="bottom">
-        <button>Placement trigger</button>
+        Placement trigger
       </Tooltip>
     ));
     expect(screen.getByText("Placement trigger")).toBeTruthy();
+  });
+
+  it("should forward aria-label to the trigger button", () => {
+    render(() => (
+      <Tooltip content="Labelled tip" aria-label="Custom label">
+        Icon
+      </Tooltip>
+    ));
+    const btn = screen.getByLabelText("Custom label");
+    expect(btn).toBeTruthy();
+    expect(btn.tagName.toLowerCase()).toBe("button");
   });
 });

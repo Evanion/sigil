@@ -7,7 +7,33 @@
  * a concrete store implementation.
  */
 
-import type { DocumentNode, NodeKind, Transform } from "../types/document";
+import type {
+  Color,
+  DocumentNode,
+  FontStyle,
+  NodeKind,
+  StyleValue,
+  TextAlign,
+  TextDecoration,
+  Transform,
+} from "../types/document";
+
+/**
+ * Discriminated union for type-safe text style updates.
+ *
+ * Replaces the untyped `(field: string, value: unknown)` signature on
+ * `setTextStyle` so that each field's value type is statically checked.
+ */
+export type TextStylePatch =
+  | { field: "font_family"; value: string }
+  | { field: "font_size"; value: StyleValue<number> }
+  | { field: "font_weight"; value: number }
+  | { field: "font_style"; value: FontStyle }
+  | { field: "line_height"; value: StyleValue<number> }
+  | { field: "letter_spacing"; value: StyleValue<number> }
+  | { field: "text_align"; value: TextAlign }
+  | { field: "text_decoration"; value: TextDecoration }
+  | { field: "text_color"; value: StyleValue<Color> };
 
 /**
  * Narrow interface exposing only the methods that canvas tools actually call.

@@ -28,6 +28,7 @@ import {
   createReorderOp,
   createSetFieldOp,
 } from "../operations/operation-helpers";
+import type { TextStylePatch } from "./document-store-types";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ export interface DocumentState {
   nodes: Record<string, MutableDocumentNode>;
 }
 
-export type ToolType = "select" | "frame" | "rectangle" | "ellipse";
+export type ToolType = "select" | "frame" | "rectangle" | "ellipse" | "text";
 
 export interface DocumentStoreAPI {
   // Document state (reactive — read inside components/effects to track)
@@ -94,6 +95,8 @@ export interface DocumentStoreAPI {
   setStrokes(uuid: string, strokes: Stroke[]): void;
   setEffects(uuid: string, effects: Effect[]): void;
   setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
+  setTextContent(uuid: string, content: string): void;
+  setTextStyle(uuid: string, patch: TextStylePatch): void;
   batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
   groupNodes(uuids: string[], name: string): void;
   ungroupNodes(uuids: string[]): void;
@@ -109,6 +112,9 @@ export interface DocumentStoreAPI {
 const PLACEHOLDER_NODE_ID: NodeId = { index: 0, generation: 0 };
 const MAX_NODE_NAME_LENGTH = 1024;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** RF-021: Maximum text content length in characters. */
+const MAX_TEXT_CONTENT_LENGTH = 1_000_000;
 
 // RF-028: deepClone is imported from operations/interceptor as sharedDeepClone.
 // Alias it as deepClone for local use to keep call sites unchanged.
@@ -874,6 +880,72 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
+  function setTextContent(uuid: string, content: string): void {
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "text") return;
+
+    // RF-021: Reject content exceeding maximum length.
+    if (content.length > MAX_TEXT_CONTENT_LENGTH) return;
+
+    // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
+    let previousKind: typeof node.kind;
+    try {
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setTextContent: deepClone failed", err);
+      return;
+    }
+    const newKind = { ...previousKind, content };
+
+    interceptor.set(uuid, "kind", newKind);
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "kind.content",
+        value: JSON.stringify(content),
+      },
+    });
+  }
+
+  function setTextStyle(uuid: string, patch: TextStylePatch): void {
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "text") return;
+
+    // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
+    let previousKind: typeof node.kind;
+    try {
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setTextStyle: deepClone failed", err);
+      return;
+    }
+    // JSON clone: Solid proxy not structuredClone-safe
+    let previousTextStyle: Record<string, unknown>;
+    try {
+      previousTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as Record<
+        string,
+        unknown
+      >;
+    } catch (err: unknown) {
+      console.error("setTextStyle: JSON clone failed", err);
+      return;
+    }
+    previousTextStyle[patch.field] = patch.value;
+    const newKind = { ...previousKind, text_style: previousTextStyle };
+
+    interceptor.set(uuid, "kind", newKind);
+    const path = `kind.text_style.${patch.field}`;
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path,
+        value: JSON.stringify(patch.value),
+      },
+    });
+  }
+
   function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
     // RF-038: Reject non-finite transform values at the store boundary.
     // NaN/Infinity would propagate silently through the optimistic update and
@@ -1253,6 +1325,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setStrokes,
     setEffects,
     setCornerRadii,
+    setTextContent,
+    setTextStyle,
     batchSetTransform,
     groupNodes,
     ungroupNodes,
