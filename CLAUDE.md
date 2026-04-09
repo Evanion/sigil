@@ -283,6 +283,14 @@ Every spec that introduces recursive data structures or recursive algorithms mus
 - What error is returned when the depth limit is exceeded.
 - Whether an iterative alternative was considered and why recursion was chosen.
 
+### Tool Lifecycle Contract (for specs adding canvas tools)
+
+Any spec that introduces a new canvas tool MUST include a section titled **"Tool Lifecycle"** that specifies:
+- Whether the tool completes in a single gesture (instantaneous: click → `onComplete()` → switch to select) or a continuous gesture (multi-phase: click → enter sub-mode → explicit commit/cancel).
+- For continuous-gesture tools: what triggers commit, what triggers cancel, and what happens to the created node on cancel.
+- Whether the tool stays active after one use or returns to select.
+- How the tool interacts with document-level keyboard handlers during its active phase.
+
 ---
 
 ## 11. Defensive Coding Rules
@@ -474,6 +482,8 @@ When deleting a module, trait, struct, or function that carries non-trivial logi
 
 When a validation check exists at one API boundary (GraphQL resolver, MCP tool handler, REST endpoint), the same check MUST exist at every other boundary that accepts the same input type. When adding or modifying a validation rule, search all transport layers for the same input type and update them in the same PR. Asymmetric validation means one transport silently accepts input that another rejects, which is a security inconsistency.
 
+The frontend store layer (functions in `document-store-solid.tsx` that call GraphQL mutations) is also a transport boundary — it must validate inputs against the same constants as the server before making the network call.
+
 ### RAII Guards Do Not Provide Transactional Rollback
 
 Dropping a lock guard (`MutexGuard`, `RwLockWriteGuard`) releases the lock — it does NOT revert mutations made while the lock was held. If a batch of N mutations is applied under a single lock acquisition and mutation K fails, mutations 0 through K-1 remain applied after the guard drops. The lock only serializes access; it provides no undo semantics. When a batch must be atomic (all-or-nothing), the code must implement explicit rollback: track completed mutations, and on failure, reverse them before releasing the lock. This also applies to TypeScript: holding a reference to an object during a sequence of mutations does not provide transactional semantics.
@@ -489,3 +499,28 @@ When a boolean or enum flag is set to temporarily change system behavior (suppre
 ### Continuous-Value Controls Must Coalesce History Entries
 
 Any UI control that fires change events at high frequency during a single user gesture (color picker during drag, slider during drag, canvas transform during drag, numeric scrub) MUST coalesce those events into a single history/undo entry. The pattern: capture the pre-gesture snapshot on gesture start (pointerdown, focus), apply intermediate values to the store without creating history entries, and commit a single history entry on gesture end (pointerup, blur, dialog close). Creating a discrete undo entry per intermediate value floods the undo stack — the user must press Ctrl+Z dozens of times to undo a single drag. This obligation applies to both the client-side history manager and server-side mutations. If the control does not expose gesture start/end events, the implementer must add them or wrap the control to provide them before wiring it to a tracked mutation.
+
+### NodeKind Variants Must Have Complete Validation Coverage
+
+When a new `NodeKind` variant is added to `crates/core/`, the same PR MUST add a corresponding arm to every dispatch site that branches on `NodeKind`. The mandatory sites are:
+1. `CreateNode::validate` — must validate all fields introduced by the variant's associated data.
+2. The workfile deserialization path — must call the same validation.
+3. Any `match kind { ... }` in the core crate.
+
+A `match` that uses a catch-all (`_ =>`) arm for a `NodeKind` dispatch is a bug — it silently ignores new variants. All `NodeKind` matches in `crates/core/` must be exhaustive with no wildcard arms.
+
+### CSS-Rendered String Fields Must Reject CSS-Significant Characters
+
+Any string field in `crates/core/` or the frontend that is used to produce a CSS property value or Canvas 2D context property (e.g., `ctx.font`, `ctx.fillStyle`) MUST be validated to reject CSS-significant characters. Denylist: single quote, double quote, semicolon, curly braces, backslash, and C0 control characters (bytes 0x00–0x1F). Apply in `validate.rs` (Rust) and a shared validation helper (TypeScript). Examples: `font_family`, variable font axis names, CSS custom property names.
+
+### Overlay-Mode Keyboard Handlers Must Use stopPropagation at the Overlay Root
+
+Any component that activates an "overlay edit mode" (text editing, in-place rename, formula input) MUST register a `keydown` handler on the overlay's root element that calls `event.stopPropagation()` for every shortcut it handles locally. Document-level shortcut handlers MUST check `event.defaultPrevented` or rely on propagation being stopped before acting. Do NOT use `document.addEventListener` for shortcuts that should be inactive during overlay modes.
+
+### Imperative Canvas Classes Must Expose a `destroy()` Method
+
+Every class in `frontend/` that lives outside Solid's component tree and registers DOM event listeners, `requestAnimationFrame` loops, or timers MUST expose a `destroy()` method that cancels all rAF handles, removes all event listeners, clears all timers, and sets internal state to a destroyed sentinel. The Solid component that owns the class MUST call `destroy()` in `onCleanup()`.
+
+### Polymorphic Style Setter APIs Must Use Discriminated Unions
+
+Any store function that accepts a style field name and value as separate arguments MUST use a discriminated union type — not `(field: string, value: unknown)`. The discriminated union enforces field-value type relationships at compile time. A `(field: string, value: unknown)` signature is a typed hole.
