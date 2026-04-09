@@ -423,7 +423,13 @@ pub fn set_transform_impl(
         &node_uuid.to_string(),
         "set_field",
         "transform",
-        Some(serde_json::to_value(new_transform).unwrap_or_default()),
+        match serde_json::to_value(new_transform) {
+            Ok(v) => Some(v),
+            Err(e) => {
+                tracing::error!("failed to serialize transform for broadcast: {e}");
+                None
+            }
+        },
     );
     Ok(node_info)
 }

@@ -8,6 +8,7 @@ use agent_designer_core::{
     Color, FieldOperation, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow,
     commands::node_commands::SetTextContent,
     commands::text_style_commands::{SetTextStyleField, TextStyleField},
+    validate_text_content, validate_token_name,
 };
 use agent_designer_state::{AppState, MutationEventKind, OperationPayload};
 use uuid::Uuid;
@@ -36,7 +37,10 @@ fn convert_style_value_f64(
             }
             Ok(StyleValue::Literal { value: *value })
         }
-        StyleValueInput::TokenRef { name } => Ok(StyleValue::TokenRef { name: name.clone() }),
+        StyleValueInput::TokenRef { name } => {
+            validate_token_name(name).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
+            Ok(StyleValue::TokenRef { name: name.clone() })
+        }
     }
 }
 
@@ -113,7 +117,10 @@ fn convert_style_value_color(
             let color = convert_color(value)?;
             Ok(StyleValue::Literal { value: color })
         }
-        StyleValueInput::TokenRef { name } => Ok(StyleValue::TokenRef { name: name.clone() }),
+        StyleValueInput::TokenRef { name } => {
+            validate_token_name(name).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
+            Ok(StyleValue::TokenRef { name: name.clone() })
+        }
     }
 }
 
@@ -178,6 +185,10 @@ pub fn set_text_content_impl(
     uuid_str: &str,
     content: &str,
 ) -> Result<NodeInfo, McpToolError> {
+    // RF-033: Validate content length before acquiring the lock to avoid
+    // holding the lock while doing cheap input validation.
+    validate_text_content(content).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
+
     let node_uuid: Uuid = uuid_str
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
@@ -384,17 +395,10 @@ pub fn set_text_style_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    // Build broadcast operation payloads from the parsed fields.
-    let broadcast_ops: Vec<OperationPayload> = fields
-        .iter()
-        .map(|(_, path, value)| OperationPayload {
-            id: Uuid::new_v4().to_string(),
-            node_uuid: node_uuid.to_string(),
-            op_type: "set_field".to_string(),
-            path: (*path).to_string(),
-            value: Some(value.clone()),
-        })
-        .collect();
+    // RF-010: Build broadcast_ops inside the lock scope, after successful apply,
+    // before the lock drops. This ensures broadcast payloads are only constructed
+    // when the mutation actually succeeded.
+    let broadcast_ops: Vec<OperationPayload>;
 
     {
         let mut doc = acquire_document_lock(state);
@@ -452,6 +456,18 @@ pub fn set_text_style_impl(
             // old_fields[i] is safe — old_fields has the same length as fields.
             applied.push(old_fields[i].clone());
         }
+
+        // Build broadcast payloads after successful apply, still inside the lock.
+        broadcast_ops = fields
+            .iter()
+            .map(|(_, path, value)| OperationPayload {
+                id: Uuid::new_v4().to_string(),
+                node_uuid: node_uuid.to_string(),
+                op_type: "set_field".to_string(),
+                path: (*path).to_string(),
+                value: Some(value.clone()),
+            })
+            .collect();
     }
 
     // Broadcast all operations as a single transaction.
@@ -770,5 +786,97 @@ mod tests {
             ..Default::default()
         };
         assert!(collect_style_fields(&style).is_err());
+    }
+
+    // ── RF-012: TokenRef name validation ────────────────────────────────
+
+    #[test]
+    fn test_convert_style_value_f64_rejects_invalid_token_name() {
+        let input = StyleValueInput::TokenRef {
+            name: "".to_string(),
+        };
+        assert!(convert_style_value_f64("test_field", &input).is_err());
+    }
+
+    #[test]
+    fn test_convert_style_value_color_rejects_invalid_token_name() {
+        let input: StyleValueInput<ColorInput> = StyleValueInput::TokenRef {
+            name: "/invalid".to_string(),
+        };
+        assert!(convert_style_value_color(&input).is_err());
+    }
+
+    // ── RF-027: Integration tests ───────────────────────────────────────
+
+    use crate::tools::nodes::create_node_impl;
+    use crate::tools::pages::create_page_impl;
+
+    fn make_state_with_text_node() -> (agent_designer_state::AppState, String) {
+        let state = agent_designer_state::AppState::new();
+        let page = create_page_impl(&state, "Page 1").expect("create page");
+        let created = create_node_impl(&state, "text", "Test Text", Some(&page.id), None, None)
+            .expect("create text node");
+        (state, created.uuid)
+    }
+
+    #[test]
+    fn test_set_text_content_impl_updates_content() {
+        let (state, uuid) = make_state_with_text_node();
+        let result = set_text_content_impl(&state, &uuid, "Hello, world!");
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        let info = result.unwrap();
+        assert_eq!(info.name, "Test Text");
+
+        // Verify content was actually set by reading from the document.
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        if let agent_designer_core::NodeKind::Text { content, .. } = &node.kind {
+            assert_eq!(content, "Hello, world!");
+        } else {
+            panic!("expected text node");
+        }
+    }
+
+    #[test]
+    fn test_set_text_content_impl_rejects_invalid_uuid() {
+        let state = agent_designer_state::AppState::new();
+        let result = set_text_content_impl(&state, "not-a-uuid", "text");
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
+    }
+
+    #[test]
+    fn test_set_text_style_impl_updates_font_family() {
+        let (state, uuid) = make_state_with_text_node();
+        let style = PartialTextStyle {
+            font_family: Some("Roboto".to_string()),
+            ..Default::default()
+        };
+        let result = set_text_style_impl(&state, &uuid, &style);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        let mutation = result.unwrap();
+        assert!(mutation.success);
+
+        // Verify the font family was actually set.
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        if let agent_designer_core::NodeKind::Text { text_style, .. } = &node.kind {
+            assert_eq!(text_style.font_family, "Roboto");
+        } else {
+            panic!("expected text node");
+        }
+    }
+
+    #[test]
+    fn test_set_text_style_impl_rejects_empty_style() {
+        let (state, uuid) = make_state_with_text_node();
+        let style = PartialTextStyle::default();
+        let result = set_text_style_impl(&state, &uuid, &style);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 }

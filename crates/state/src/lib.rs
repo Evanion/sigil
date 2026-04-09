@@ -169,7 +169,7 @@ pub struct AppState {
     persistence_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Optional broadcast sender for mutation events.
     ///
-    /// When set, `publish_event` sends events to all subscribers (e.g. GraphQL
+    /// When set, `broadcast_internal` sends events to all subscribers (e.g. GraphQL
     /// subscription streams). `None` when broadcasting is not configured
     /// (e.g. in MCP-only or test scenarios without a server).
     event_tx: Option<broadcast::Sender<MutationEvent>>,
@@ -236,15 +236,15 @@ impl AppState {
         self.event_tx.as_ref()
     }
 
-    /// Publishes a mutation event to all subscribers.
+    /// Internal implementation method that broadcasts a mutation event to all subscribers.
     ///
-    /// This is an internal method used by `publish_transaction`. External
-    /// callers should use `publish_transaction` instead.
+    /// This is used by `publish_transaction`. External callers should use
+    /// `publish_transaction` instead.
     ///
     /// If no broadcast channel is configured (in-memory-only mode) or no
     /// subscribers are listening, this is a no-op. Similar fire-and-forget
     /// semantics to `signal_dirty`.
-    fn publish_event(&self, event: MutationEvent) {
+    fn broadcast_internal(&self, event: MutationEvent) {
         if let Some(ref tx) = self.event_tx
             && tx.send(event).is_err()
         {
@@ -271,7 +271,7 @@ impl AppState {
         mut transaction: TransactionPayload,
     ) {
         transaction.seq = self.next_seq();
-        self.publish_event(MutationEvent {
+        self.broadcast_internal(MutationEvent {
             kind,
             uuid,
             data: None,
@@ -363,10 +363,10 @@ mod tests {
     }
 
     #[test]
-    fn test_publish_event_without_channel_is_noop() {
+    fn test_broadcast_internal_without_channel_is_noop() {
         let state = AppState::new();
         // Should not panic — no event channel configured
-        state.publish_event(MutationEvent {
+        state.broadcast_internal(MutationEvent {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("test".to_string()),
             data: None,
@@ -375,13 +375,13 @@ mod tests {
     }
 
     #[test]
-    fn test_publish_event_delivers_to_subscriber() {
+    fn test_broadcast_internal_delivers_to_subscriber() {
         let mut state = AppState::new();
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
         let mut rx = tx.subscribe();
         state.set_event_tx(tx);
 
-        state.publish_event(MutationEvent {
+        state.broadcast_internal(MutationEvent {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
@@ -501,8 +501,8 @@ mod tests {
         let mut rx = tx.subscribe();
         state.set_event_tx(tx);
 
-        // Legacy publish_event without transaction
-        state.publish_event(MutationEvent {
+        // Legacy broadcast_internal without transaction
+        state.broadcast_internal(MutationEvent {
             kind: MutationEventKind::NodeUpdated,
             uuid: None,
             data: Some(serde_json::json!({"action": "update"})),

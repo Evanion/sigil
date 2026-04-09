@@ -22,7 +22,7 @@
  * - Cmd+I toggles font_style normal/italic
  * - Cmd+U toggles text_decoration none/underline
  */
-import { createMemo, createSignal, onCleanup, onMount, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, onCleanup, onMount, Show, type Component } from "solid-js";
 import type {
   Color,
   FontStyle,
@@ -58,12 +58,18 @@ const MAX_FONT_SIZE = 10_000;
 /** Maximum text shadow blur radius in pixels. */
 const MAX_SHADOW_BLUR = 1000;
 
+/** RF-018: Maximum shadow offset value in pixels. */
+const MAX_SHADOW_OFFSET = 1000;
+
+/** RF-018: Minimum shadow offset value in pixels. */
+const MIN_SHADOW_OFFSET = -1000;
+
 /** Default text shadow values when toggling shadow on. */
 const DEFAULT_TEXT_SHADOW: TextShadow = {
   offset_x: 0,
   offset_y: 2,
   blur_radius: 4,
-  color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
+  color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 0.3 } },
 };
 
 // ── Font weight options ──────────────────────────────────────────────
@@ -309,6 +315,7 @@ export const TypographySection: Component = () => {
 
   function handleShadowOffsetXChange(value: number): void {
     if (!Number.isFinite(value)) return;
+    if (value < MIN_SHADOW_OFFSET || value > MAX_SHADOW_OFFSET) return;
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const current = textShadow();
@@ -319,6 +326,7 @@ export const TypographySection: Component = () => {
 
   function handleShadowOffsetYChange(value: number): void {
     if (!Number.isFinite(value)) return;
+    if (value < MIN_SHADOW_OFFSET || value > MAX_SHADOW_OFFSET) return;
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const current = textShadow();
@@ -401,9 +409,9 @@ export const TypographySection: Component = () => {
 
   return (
     <div class="sigil-typography-section" role="region" aria-labelledby="typography-section-title">
-      <span class="sigil-typography-section__title" id="typography-section-title">
+      <h3 class="sigil-typography-section__title" id="typography-section-title">
         Typography
-      </span>
+      </h3>
 
       {/* ── Font family + weight ───────────────────────────────────── */}
       <div class="sigil-typography-section__font-row">
@@ -431,7 +439,7 @@ export const TypographySection: Component = () => {
           aria-label="Font size"
           step={1}
           min={1}
-          max={1000}
+          max={MAX_FONT_SIZE}
           suffix="px"
           disabled={disabled()}
         />
@@ -494,23 +502,25 @@ export const TypographySection: Component = () => {
           }
         }}
       >
-        {TEXT_ALIGN_OPTIONS.map((opt) => (
-          <button
-            class="sigil-typography-section__align-btn"
-            classList={{
-              "sigil-typography-section__align-btn--active": textAlign() === opt.value,
-            }}
-            type="button"
-            role="radio"
-            aria-checked={textAlign() === opt.value}
-            aria-label={opt.label}
-            disabled={disabled()}
-            tabIndex={textAlign() === opt.value ? 0 : -1}
-            onClick={() => handleTextAlignChange(opt.value)}
-          >
-            <opt.icon size={14} />
-          </button>
-        ))}
+        <For each={TEXT_ALIGN_OPTIONS}>
+          {(opt) => (
+            <button
+              class="sigil-typography-section__align-btn"
+              classList={{
+                "sigil-typography-section__align-btn--active": textAlign() === opt.value,
+              }}
+              type="button"
+              role="radio"
+              aria-checked={textAlign() === opt.value}
+              aria-label={opt.label}
+              disabled={disabled()}
+              tabIndex={textAlign() === opt.value ? 0 : -1}
+              onClick={() => handleTextAlignChange(opt.value)}
+            >
+              <opt.icon size={14} />
+            </button>
+          )}
+        </For>
       </div>
 
       {/* ── Text decoration toggles ────────────────────────────────── */}
@@ -535,7 +545,9 @@ export const TypographySection: Component = () => {
 
       {/* ── Text color ─────────────────────────────────────────────── */}
       <div class="sigil-typography-section__color-row">
-        <span class="sigil-typography-section__color-label">Color</span>
+        <span class="sigil-typography-section__color-label" aria-hidden="true">
+          Color
+        </span>
         <ColorSwatch
           color={textColor()}
           onColorChange={handleTextColorChange}
@@ -546,23 +558,29 @@ export const TypographySection: Component = () => {
       {/* ── Text shadow ──────────────────────────────────────────── */}
       <div class="sigil-typography-section__shadow-section" role="group" aria-label="Text shadow">
         <div class="sigil-typography-section__shadow-header">
-          <span class="sigil-typography-section__shadow-label">Shadow</span>
+          <span class="sigil-typography-section__shadow-label" aria-hidden="true">
+            Shadow
+          </span>
           <ToggleButton
             pressed={shadowEnabled()}
             onPressedChange={handleShadowToggle}
             aria-label="Toggle text shadow"
+            aria-expanded={shadowEnabled()}
+            aria-controls="shadow-controls"
             disabled={disabled()}
           >
             {shadowEnabled() ? "On" : "Off"}
           </ToggleButton>
         </div>
         <Show when={shadowEnabled()}>
-          <div class="sigil-typography-section__shadow-controls">
+          <div id="shadow-controls" class="sigil-typography-section__shadow-controls">
             <NumberInput
               value={shadowOffsetX()}
               onValueChange={handleShadowOffsetXChange}
               aria-label="Shadow offset X"
               step={1}
+              min={MIN_SHADOW_OFFSET}
+              max={MAX_SHADOW_OFFSET}
               suffix="px"
               disabled={disabled()}
             />
@@ -571,6 +589,8 @@ export const TypographySection: Component = () => {
               onValueChange={handleShadowOffsetYChange}
               aria-label="Shadow offset Y"
               step={1}
+              min={MIN_SHADOW_OFFSET}
+              max={MAX_SHADOW_OFFSET}
               suffix="px"
               disabled={disabled()}
             />

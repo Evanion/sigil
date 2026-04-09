@@ -10,6 +10,11 @@
   cursor: pointer;
 }
 
+.sigil-popover-trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
 .sigil-popover {
   background: var(--surface-3);
   color: var(--text-1);

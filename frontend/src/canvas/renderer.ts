@@ -162,8 +162,8 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       if (ts.text_shadow) {
         const shadowColor =
           ts.text_shadow.color.type === "literal" && ts.text_shadow.color.value.space === "srgb"
-            ? (srgbColorToRgba(ts.text_shadow.color.value) ?? "rgba(0,0,0,0.5)")
-            : "rgba(0,0,0,0.5)";
+            ? (srgbColorToRgba(ts.text_shadow.color.value) ?? "rgba(0,0,0,0.3)")
+            : "rgba(0,0,0,0.3)";
         if (
           Number.isFinite(ts.text_shadow.offset_x) &&
           Number.isFinite(ts.text_shadow.offset_y) &&
