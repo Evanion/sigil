@@ -277,7 +277,10 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "underline" });
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", {
+      field: "text_decoration",
+      value: "underline",
+    });
   });
 
   it("should toggle text_decoration to none when Underline is clicked while already underlined", () => {
@@ -292,7 +295,10 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "none" });
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", {
+      field: "text_decoration",
+      value: "none",
+    });
   });
 
   // ── Font size ────────────────────────────────────────────────────────
@@ -398,7 +404,10 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.keyDown(document, { key: "u", metaKey: true });
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "underline" });
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", {
+      field: "text_decoration",
+      value: "underline",
+    });
   });
 
   it("should not fire keyboard shortcuts when no text node is selected", () => {

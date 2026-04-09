@@ -254,7 +254,8 @@ export const Canvas: Component = () => {
             e.stopPropagation();
             const node = store.state.nodes[editingUuid];
             if (node && node.kind.type === "text") {
-              const currentWeight = (node.kind as { text_style: { font_weight: number } }).text_style.font_weight;
+              const currentWeight = (node.kind as { text_style: { font_weight: number } })
+                .text_style.font_weight;
               const newWeight = currentWeight >= 700 ? 400 : 700;
               store.setTextStyle(editingUuid, { field: "font_weight", value: newWeight });
             }
@@ -263,7 +264,8 @@ export const Canvas: Component = () => {
             e.stopPropagation();
             const node = store.state.nodes[editingUuid];
             if (node && node.kind.type === "text") {
-              const currentStyle = (node.kind as { text_style: { font_style: string } }).text_style.font_style;
+              const currentStyle = (node.kind as { text_style: { font_style: string } }).text_style
+                .font_style;
               const newStyle = currentStyle === "italic" ? "normal" : "italic";
               store.setTextStyle(editingUuid, { field: "font_style", value: newStyle });
             }
@@ -272,7 +274,8 @@ export const Canvas: Component = () => {
             e.stopPropagation();
             const node = store.state.nodes[editingUuid];
             if (node && node.kind.type === "text") {
-              const currentDec = (node.kind as { text_style: { text_decoration: string } }).text_style.text_decoration;
+              const currentDec = (node.kind as { text_style: { text_decoration: string } })
+                .text_style.text_decoration;
               const newDec = currentDec === "underline" ? "none" : "underline";
               store.setTextStyle(editingUuid, { field: "text_decoration", value: newDec });
             }
@@ -289,12 +292,9 @@ export const Canvas: Component = () => {
     // RF-001: No onComplete callback — the tool stays in "text" mode while
     // the overlay is open. Switching to "select" happens inside
     // commitAndCloseOverlay() or on Escape.
-    const textTool = createTextTool(
-      storeAdapter,
-      (uuid: string) => {
-        openTextOverlay(uuid);
-      },
-    );
+    const textTool = createTextTool(storeAdapter, (uuid: string) => {
+      openTextOverlay(uuid);
+    });
 
     const toolImpls = new Map<ToolType, Tool>([
       ["select", selectTool],

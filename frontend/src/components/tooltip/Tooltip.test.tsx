@@ -14,20 +14,12 @@ afterEach(() => {
 
 describe("Tooltip", () => {
   it("should render the trigger element with children", () => {
-    render(() => (
-      <Tooltip content="Helpful tip">
-        Hover me
-      </Tooltip>
-    ));
+    render(() => <Tooltip content="Helpful tip">Hover me</Tooltip>);
     expect(screen.getByText("Hover me")).toBeTruthy();
   });
 
   it("should render trigger as a button element (Kobalte default)", () => {
-    render(() => (
-      <Tooltip content="Button trigger tip">
-        Click me
-      </Tooltip>
-    ));
+    render(() => <Tooltip content="Button trigger tip">Click me</Tooltip>);
     const btn = screen.getByText("Click me").closest("button");
     expect(btn).toBeTruthy();
     // Must not be wrapped in a <span> — the old as="span" violation
@@ -39,11 +31,7 @@ describe("Tooltip", () => {
   });
 
   it("should not show tooltip content initially", () => {
-    render(() => (
-      <Tooltip content="Hidden tip">
-        Initial trigger
-      </Tooltip>
-    ));
+    render(() => <Tooltip content="Hidden tip">Initial trigger</Tooltip>);
     expect(screen.queryByText("Hidden tip")).toBeNull();
   });
 

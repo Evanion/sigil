@@ -11,9 +11,11 @@ import type { TextStyle } from "../../types/document";
 function createMockCtx(charWidth = 8): CanvasRenderingContext2D {
   return {
     font: "",
-    measureText: vi.fn((text: string): Pick<TextMetrics, "width"> => ({
-      width: text.length * charWidth,
-    })),
+    measureText: vi.fn(
+      (text: string): Pick<TextMetrics, "width"> => ({
+        width: text.length * charWidth,
+      }),
+    ),
   } as unknown as CanvasRenderingContext2D;
 }
 
@@ -126,7 +128,14 @@ describe("measureTextLines", () => {
 
   it("should compute height as lines.length * lineHeight", () => {
     const lineHeight = 24;
-    const result = measureTextLines(ctx, "line1\nline2\nline3", "16px Arial", "auto_width", 0, lineHeight);
+    const result = measureTextLines(
+      ctx,
+      "line1\nline2\nline3",
+      "16px Arial",
+      "auto_width",
+      0,
+      lineHeight,
+    );
     expect(result.height).toBe(3 * lineHeight);
   });
 
@@ -159,12 +168,21 @@ describe("measureTextLines", () => {
 
 describe("buildFontString", () => {
   it("should build a normal weight font string from literal values", () => {
-    const style = makeStyle({ font_weight: 400, font_style: "normal", font_size: { type: "literal", value: 16 }, font_family: "Arial" });
+    const style = makeStyle({
+      font_weight: 400,
+      font_style: "normal",
+      font_size: { type: "literal", value: 16 },
+      font_family: "Arial",
+    });
     expect(buildFontString(style)).toBe("400 16px Arial");
   });
 
   it("should prepend italic when font_style is italic", () => {
-    const style = makeStyle({ font_style: "italic", font_size: { type: "literal", value: 14 }, font_family: "Georgia" });
+    const style = makeStyle({
+      font_style: "italic",
+      font_size: { type: "literal", value: 14 },
+      font_family: "Georgia",
+    });
     expect(buildFontString(style)).toBe("italic 400 14px Georgia");
   });
 
@@ -174,7 +192,11 @@ describe("buildFontString", () => {
   });
 
   it("should handle bold weight", () => {
-    const style = makeStyle({ font_weight: 700, font_size: { type: "literal", value: 18 }, font_family: "Roboto" });
+    const style = makeStyle({
+      font_weight: 700,
+      font_size: { type: "literal", value: 18 },
+      font_family: "Roboto",
+    });
     expect(buildFontString(style)).toBe("700 18px Roboto");
   });
 

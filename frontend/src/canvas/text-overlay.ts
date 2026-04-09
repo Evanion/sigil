@@ -272,11 +272,7 @@ export function createTextOverlay(
     handler: EventListener;
   }> = [];
 
-  function addTrackedListener(
-    target: EventTarget,
-    type: string,
-    handler: EventListener,
-  ): void {
+  function addTrackedListener(target: EventTarget, type: string, handler: EventListener): void {
     target.addEventListener(type, handler);
     listeners.push({ target, type, handler });
   }
@@ -305,14 +301,7 @@ export function createTextOverlay(
         node.transform.height,
         vp,
       );
-      applyPositionStyles(
-        el,
-        rect,
-        fontSize,
-        lineHeight,
-        letterSpacing,
-        safeFinite(vp.zoom, 1),
-      );
+      applyPositionStyles(el, rect, fontSize, lineHeight, letterSpacing, safeFinite(vp.zoom, 1));
     },
 
     getContent(): string {

@@ -290,11 +290,7 @@ export const TypographySection: Component = () => {
   const disabled = () => selectedUuid() === null || textKind() === null;
 
   return (
-    <div
-      class="sigil-typography-section"
-      role="region"
-      aria-labelledby="typography-section-title"
-    >
+    <div class="sigil-typography-section" role="region" aria-labelledby="typography-section-title">
       <span class="sigil-typography-section__title" id="typography-section-title">
         Typography
       </span>
