@@ -131,6 +131,32 @@
   color: var(--text-2);
 }
 
+/* ── Shadow section ──────────────────────────────────────────────────── */
+
+.sigil-typography-section__shadow-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sigil-typography-section__shadow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sigil-typography-section__shadow-label {
+  font-size: var(--font-size-0, 11px);
+  color: var(--text-2);
+}
+
+.sigil-typography-section__shadow-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  align-items: center;
+}
+
 /* ── Reduced motion ──────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {

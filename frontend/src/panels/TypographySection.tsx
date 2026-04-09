@@ -22,7 +22,7 @@
  * - Cmd+I toggles font_style normal/italic
  * - Cmd+U toggles text_decoration none/underline
  */
-import { createMemo, createSignal, onCleanup, onMount, type Component } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount, Show, type Component } from "solid-js";
 import type {
   Color,
   FontStyle,
@@ -30,6 +30,7 @@ import type {
   StyleValue,
   TextAlign,
   TextDecoration,
+  TextShadow,
 } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { TextInput } from "../components/text-input/TextInput";
@@ -52,6 +53,17 @@ import "./TypographySection.css";
 
 /** RF-022: Maximum font size in pixels. Values above this are rejected. */
 const MAX_FONT_SIZE = 10_000;
+
+/** Maximum text shadow blur radius in pixels. */
+const MAX_SHADOW_BLUR = 1000;
+
+/** Default text shadow values when toggling shadow on. */
+const DEFAULT_TEXT_SHADOW: TextShadow = {
+  offset_x: 0,
+  offset_y: 2,
+  blur_radius: 4,
+  color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
+};
 
 // ── Font weight options ──────────────────────────────────────────────
 
@@ -169,6 +181,39 @@ export const TypographySection: Component = () => {
     return sv.value;
   });
 
+  const textShadow = createMemo((): TextShadow | null => {
+    const kind = textKind();
+    if (!kind) return null;
+    return kind.text_style.text_shadow ?? null;
+  });
+
+  const shadowEnabled = createMemo((): boolean => textShadow() !== null);
+
+  const shadowOffsetX = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 0;
+    return Number.isFinite(shadow.offset_x) ? shadow.offset_x : 0;
+  });
+
+  const shadowOffsetY = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 2;
+    return Number.isFinite(shadow.offset_y) ? shadow.offset_y : 2;
+  });
+
+  const shadowBlur = createMemo((): number => {
+    const shadow = textShadow();
+    if (!shadow) return 4;
+    return Number.isFinite(shadow.blur_radius) ? shadow.blur_radius : 4;
+  });
+
+  const shadowColor = createMemo((): Color => {
+    const shadow = textShadow();
+    if (!shadow) return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
+    if (shadow.color.type !== "literal") return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
+    return shadow.color.value;
+  });
+
   // ── Handlers ──────────────────────────────────────────────────────
 
   function handleFontFamilyChange(value: string): void {
@@ -242,6 +287,62 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const sv: StyleValue<Color> = { type: "literal", value: color };
     store.setTextStyle(uuid, { field: "text_color", value: sv });
+  }
+
+  function handleShadowToggle(enabled: boolean): void {
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    if (enabled) {
+      store.setTextStyle(uuid, {
+        field: "text_shadow",
+        value: structuredClone(DEFAULT_TEXT_SHADOW),
+      });
+      announce("Text shadow enabled");
+    } else {
+      store.setTextStyle(uuid, { field: "text_shadow", value: null });
+      announce("Text shadow disabled");
+    }
+  }
+
+  function handleShadowOffsetXChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, offset_x: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowOffsetYChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, offset_y: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowBlurChange(value: number): void {
+    if (!Number.isFinite(value)) return;
+    if (value < 0 || value > MAX_SHADOW_BLUR) return;
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const updated: TextShadow = { ...current, blur_radius: value };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
+  }
+
+  function handleShadowColorChange(color: Color): void {
+    const uuid = selectedUuid();
+    if (!uuid || !textKind()) return;
+    const current = textShadow();
+    if (!current) return;
+    const sv: StyleValue<Color> = { type: "literal", value: color };
+    const updated: TextShadow = { ...current, color: sv };
+    store.setTextStyle(uuid, { field: "text_shadow", value: updated });
   }
 
   // ── Keyboard shortcuts (Cmd+B, Cmd+I, Cmd+U) ─────────────────────
@@ -431,6 +532,56 @@ export const TypographySection: Component = () => {
           onColorChange={handleTextColorChange}
           aria-label="Text color"
         />
+      </div>
+
+      {/* ── Text shadow ──────────────────────────────────────────── */}
+      <div class="sigil-typography-section__shadow-section" role="group" aria-label="Text shadow">
+        <div class="sigil-typography-section__shadow-header">
+          <span class="sigil-typography-section__shadow-label">Shadow</span>
+          <ToggleButton
+            pressed={shadowEnabled()}
+            onPressedChange={handleShadowToggle}
+            aria-label="Toggle text shadow"
+            disabled={disabled()}
+          >
+            {shadowEnabled() ? "On" : "Off"}
+          </ToggleButton>
+        </div>
+        <Show when={shadowEnabled()}>
+          <div class="sigil-typography-section__shadow-controls">
+            <NumberInput
+              value={shadowOffsetX()}
+              onValueChange={handleShadowOffsetXChange}
+              aria-label="Shadow offset X"
+              step={1}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <NumberInput
+              value={shadowOffsetY()}
+              onValueChange={handleShadowOffsetYChange}
+              aria-label="Shadow offset Y"
+              step={1}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <NumberInput
+              value={shadowBlur()}
+              onValueChange={handleShadowBlurChange}
+              aria-label="Shadow blur radius"
+              step={1}
+              min={0}
+              max={1000}
+              suffix="px"
+              disabled={disabled()}
+            />
+            <ColorSwatch
+              color={shadowColor()}
+              onColorChange={handleShadowColorChange}
+              aria-label="Shadow color"
+            />
+          </div>
+        </Show>
       </div>
 
       {/* Live region for discrete status announcements (RF-009) */}
