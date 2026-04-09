@@ -136,8 +136,8 @@ mod tests {
             OperationPayload {
                 id: "op-2".to_string(),
                 node_uuid: "node-b".to_string(),
-                op_type: "delete".to_string(),
-                path: "node".to_string(),
+                op_type: "delete_node".to_string(),
+                path: String::new(),
                 value: None,
             },
         ];

@@ -264,9 +264,13 @@ pub fn create_node_impl(
         state,
         MutationEventKind::NodeCreated,
         &node_uuid.to_string(),
-        "create",
-        "node",
-        None,
+        "create_node",
+        "",
+        Some(serde_json::json!({
+            "uuid": node_uuid.to_string(),
+            "kind": kind_str,
+            "name": name,
+        })),
     );
 
     Ok(CreateNodeResult {
@@ -315,8 +319,8 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
         state,
         MutationEventKind::NodeDeleted,
         &node_uuid.to_string(),
-        "delete",
-        "node",
+        "delete_node",
+        "",
         None,
     );
 
@@ -563,8 +567,11 @@ pub fn reparent_node_impl(
         MutationEventKind::NodeUpdated,
         &node_uuid.to_string(),
         "reparent",
-        "parent",
-        Some(serde_json::json!(new_parent_uuid_str)),
+        "",
+        Some(serde_json::json!({
+            "parentUuid": new_parent_uuid_str,
+            "position": position,
+        })),
     );
     Ok(node_info)
 }
@@ -609,8 +616,10 @@ pub fn reorder_children_impl(
         MutationEventKind::NodeUpdated,
         &node_uuid.to_string(),
         "reorder",
-        "children",
-        Some(serde_json::json!(new_position)),
+        "",
+        Some(serde_json::json!({
+            "newPosition": new_position,
+        })),
     );
     Ok(node_info)
 }
@@ -667,7 +676,7 @@ pub fn set_opacity_impl(
         &node_uuid.to_string(),
         "set_field",
         "style.opacity",
-        Some(serde_json::json!(opacity)),
+        Some(serde_json::json!({"type": "literal", "value": opacity})),
     );
 
     Ok(MutationResult {

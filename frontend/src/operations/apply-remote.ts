@@ -18,6 +18,8 @@ import type {
   Effect,
   BlendMode,
   NodeKind,
+  NodeKindText,
+  NodeKindRectangle,
   StyleValue,
   NodeId,
 } from "../types/document";
@@ -206,7 +208,50 @@ function applyFieldSet(
     case "kind":
       setState("nodes", nodeUuid, "kind", value as NodeKind);
       break;
+    case "kind.content":
+      if (node.kind.type === "text") {
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "text") {
+              (n.kind as NodeKindText).content = value as string;
+            }
+          }),
+        );
+      }
+      break;
+    case "kind.corner_radii":
+      if (node.kind.type === "rectangle") {
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "rectangle") {
+              (n.kind as NodeKindRectangle).corner_radii = value as readonly [
+                number,
+                number,
+                number,
+                number,
+              ];
+            }
+          }),
+        );
+      }
+      break;
     default:
+      // Handle kind.text_style.* sub-field paths
+      if (path.startsWith("kind.text_style.") && node.kind.type === "text") {
+        const subField = path.slice("kind.text_style.".length);
+        setState(
+          produce((s) => {
+            const n = s.nodes[nodeUuid];
+            if (n && n.kind.type === "text") {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic sub-field patching for text_style
+              (n.kind as any).text_style[subField] = value;
+            }
+          }),
+        );
+        break;
+      }
       console.warn(`Unknown field path in remote operation: ${path}`);
   }
 }
