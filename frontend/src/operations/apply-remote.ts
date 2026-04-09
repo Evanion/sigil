@@ -22,6 +22,14 @@ import type {
   NodeId,
 } from "../types/document";
 
+/**
+ * Recursively strips `readonly` from all properties.
+ * Used inside `produce()` callbacks where Solid guarantees mutable access.
+ */
+type DeepMutable<T> = {
+  -readonly [K in keyof T]: T[K] extends object ? DeepMutable<T[K]> : T[K];
+};
+
 // ── Remote payload types ──────────────────────────────────────────────
 
 /**
@@ -212,8 +220,9 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "text") {
-              // produce() provides mutable access — cast to bypass readonly
-              (n.kind as { content: string }).content = value as string;
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              mutableKind.content = value as string;
             }
           }),
         );
@@ -225,9 +234,9 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "rectangle") {
-              // produce() provides mutable access — cast through unknown to bypass readonly
-              (n.kind as unknown as { corner_radii: [number, number, number, number] }).corner_radii =
-                value as [number, number, number, number];
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              mutableKind.corner_radii = value as [number, number, number, number];
             }
           }),
         );
@@ -241,8 +250,9 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "text") {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any -- dynamic sub-field patching for text_style
-              (n.kind as any).text_style[subField] = value;
+              // produce() provides mutable access — DeepMutable strips readonly
+              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
+              (mutableKind.text_style as Record<string, unknown>)[subField] = value;
             }
           }),
         );
