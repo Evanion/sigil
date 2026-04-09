@@ -238,10 +238,13 @@ impl AppState {
 
     /// Publishes a mutation event to all subscribers.
     ///
+    /// This is an internal method used by `publish_transaction`. External
+    /// callers should use `publish_transaction` instead.
+    ///
     /// If no broadcast channel is configured (in-memory-only mode) or no
     /// subscribers are listening, this is a no-op. Similar fire-and-forget
     /// semantics to `signal_dirty`.
-    pub fn publish_event(&self, event: MutationEvent) {
+    fn publish_event(&self, event: MutationEvent) {
         if let Some(ref tx) = self.event_tx
             && tx.send(event).is_err()
         {

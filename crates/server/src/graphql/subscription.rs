@@ -99,12 +99,12 @@ mod tests {
     use agent_designer_state::{OperationPayload, TransactionPayload};
 
     #[tokio::test]
-    async fn test_publish_event_delivers_to_subscriber() {
+    async fn test_broadcast_delivers_to_subscriber() {
         let state = ServerState::new();
         let event_tx = state.app.event_tx().expect("event_tx configured");
         let mut rx = event_tx.subscribe();
 
-        state.app.publish_event(MutationEvent {
+        let _ = event_tx.send(MutationEvent {
             kind: MutationEventKind::NodeCreated,
             uuid: Some("abc-123".to_string()),
             data: None,
@@ -120,10 +120,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_publish_event_without_listeners_does_not_panic() {
+    async fn test_broadcast_without_listeners_does_not_panic() {
         let state = ServerState::new();
-        // No subscribers -- publish_event should not panic.
-        state.app.publish_event(MutationEvent {
+        let event_tx = state.app.event_tx().expect("event_tx configured");
+        // No subscribers -- send should not panic.
+        let _ = event_tx.send(MutationEvent {
             kind: MutationEventKind::NodeDeleted,
             uuid: Some("def-456".to_string()),
             data: None,
@@ -138,7 +139,7 @@ mod tests {
         let mut rx1 = event_tx.subscribe();
         let mut rx2 = event_tx.subscribe();
 
-        state.app.publish_event(MutationEvent {
+        let _ = event_tx.send(MutationEvent {
             kind: MutationEventKind::NodeUpdated,
             uuid: Some("ghi-789".to_string()),
             data: Some(serde_json::json!({"field": "transform"})),
@@ -186,7 +187,7 @@ mod tests {
         ];
 
         for kind in &event_kinds {
-            state.app.publish_event(MutationEvent {
+            let _ = event_tx.send(MutationEvent {
                 kind: *kind,
                 uuid: None,
                 data: None,
@@ -319,8 +320,8 @@ mod tests {
         let event_tx = state.app.event_tx().expect("event_tx configured");
         let mut rx = event_tx.subscribe();
 
-        // Publish a legacy event without a transaction payload
-        state.app.publish_event(MutationEvent {
+        // Send a legacy event without a transaction payload directly on the channel
+        let _ = event_tx.send(MutationEvent {
             kind: MutationEventKind::NodeDeleted,
             uuid: None,
             data: Some(serde_json::json!({"field": "test"})),
