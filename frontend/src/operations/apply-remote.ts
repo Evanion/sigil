@@ -214,7 +214,8 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "text") {
-              (n.kind as NodeKindText).content = value as string;
+              // produce() provides mutable access — cast to bypass readonly
+              (n.kind as { content: string }).content = value as string;
             }
           }),
         );
@@ -226,12 +227,9 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "rectangle") {
-              (n.kind as NodeKindRectangle).corner_radii = value as readonly [
-                number,
-                number,
-                number,
-                number,
-              ];
+              // produce() provides mutable access — cast to bypass readonly
+              (n.kind as { corner_radii: [number, number, number, number] }).corner_radii =
+                value as [number, number, number, number];
             }
           }),
         );
