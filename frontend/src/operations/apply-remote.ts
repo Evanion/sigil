@@ -225,8 +225,8 @@ function applyFieldSet(
           produce((s) => {
             const n = s.nodes[nodeUuid];
             if (n && n.kind.type === "rectangle") {
-              // produce() provides mutable access — cast to bypass readonly
-              (n.kind as { corner_radii: [number, number, number, number] }).corner_radii =
+              // produce() provides mutable access — cast through unknown to bypass readonly
+              (n.kind as unknown as { corner_radii: [number, number, number, number] }).corner_radii =
                 value as [number, number, number, number];
             }
           }),
