@@ -1,9 +1,11 @@
-import { createSignal, For, Show, type Component } from "solid-js";
+import { createMemo, createSignal, For, Show, type Component } from "solid-js";
 import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
 import { AppearancePanel } from "./AppearancePanel";
 import { EffectsPanel } from "./EffectsPanel";
 import { AlignPanel } from "./AlignPanel";
+import { TypographySection } from "./TypographySection";
+import { useDocument } from "../store/document-context";
 import "./DesignPanel.css";
 
 type DesignTab = "layout" | "appearance" | "effects";
@@ -18,7 +20,16 @@ const TABS: readonly DesignTab[] = ["layout", "appearance", "effects"] as const;
  * ArrowLeft/ArrowRight navigate between tabs with wrapping.
  */
 export const DesignPanel: Component = () => {
+  const store = useDocument();
   const [activeTab, setActiveTab] = createSignal<DesignTab>("layout");
+
+  const isTextNodeSelected = createMemo((): boolean => {
+    const uuid = store.selectedNodeId();
+    if (!uuid) return false;
+    const node = store.state.nodes[uuid];
+    if (!node) return false;
+    return (node as { kind: { type: string } }).kind.type === "text";
+  });
 
   function handleKeyDown(e: KeyboardEvent): void {
     const currentIndex = TABS.indexOf(activeTab());
@@ -77,6 +88,9 @@ export const DesignPanel: Component = () => {
       >
         <Show when={activeTab() === "layout"}>
           <AlignPanel />
+          <Show when={isTextNodeSelected()}>
+            <TypographySection />
+          </Show>
           <SchemaPanel schema={designSchema} />
         </Show>
         <Show when={activeTab() === "appearance"}>

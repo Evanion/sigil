@@ -1,0 +1,137 @@
+/* TypographySection — text style controls shown for text nodes. */
+
+.sigil-typography-section {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sigil-typography-section__title {
+  font-size: var(--font-size-00, 10px);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-1, 0.5px);
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+/* ── Font family + weight row ────────────────────────────────────────── */
+
+.sigil-typography-section__font-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sigil-typography-section__font-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.sigil-typography-section__font-row > :nth-child(2) {
+  width: 100px;
+  flex-shrink: 0;
+}
+
+/* ── Size + style row ────────────────────────────────────────────────── */
+
+.sigil-typography-section__size-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sigil-typography-section__size-row > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Line height + letter spacing row ────────────────────────────────── */
+
+.sigil-typography-section__spacing-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sigil-typography-section__spacing-row > * {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Text align segmented control ────────────────────────────────────── */
+
+.sigil-typography-section__align-group {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.sigil-typography-section__align-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  background: var(--surface-3);
+  color: var(--text-2);
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease, border-color 0.1s ease;
+}
+
+.sigil-typography-section__align-btn:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sigil-typography-section__align-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-typography-section__align-btn--active {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border-color: var(--accent);
+}
+
+.sigil-typography-section__align-btn--active:hover {
+  background: var(--accent-hover);
+}
+
+.sigil-typography-section__align-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Decoration toggle row ───────────────────────────────────────────── */
+
+.sigil-typography-section__decoration-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+/* ── Color row ───────────────────────────────────────────────────────── */
+
+.sigil-typography-section__color-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sigil-typography-section__color-label {
+  font-size: var(--font-size-0, 11px);
+  color: var(--text-2);
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-typography-section__align-btn {
+    transition: none;
+  }
+}
