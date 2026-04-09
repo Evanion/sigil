@@ -18,8 +18,6 @@ import type {
   Effect,
   BlendMode,
   NodeKind,
-  NodeKindText,
-  NodeKindRectangle,
   StyleValue,
   NodeId,
 } from "../types/document";
