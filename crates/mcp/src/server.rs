@@ -140,6 +140,20 @@ impl SigilMcpServer {
             .map_err(|e| e.to_mcp_error())
     }
 
+    /// Moves a page to a new position in the page list (zero-based index).
+    #[tool(
+        name = "reorder_page",
+        description = "Move a page to a new position in the page list (zero-based index)"
+    )]
+    fn reorder_page(
+        &self,
+        Parameters(input): Parameters<crate::types::ReorderPageInput>,
+    ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
+        crate::tools::pages::reorder_page_impl(&self.state, &input.page_id, input.new_position)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
     /// Creates a new node on the specified page, optionally under a parent node.
     #[tool(
         name = "create_node",

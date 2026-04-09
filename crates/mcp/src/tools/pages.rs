@@ -6,7 +6,9 @@
 
 use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
-use agent_designer_core::commands::page_commands::{CreatePage, DeletePage, RenamePage};
+use agent_designer_core::commands::page_commands::{
+    CreatePage, DeletePage, RenamePage, ReorderPage,
+};
 use agent_designer_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
@@ -171,6 +173,66 @@ pub fn rename_page_impl(
     })
 }
 
+/// Moves a page to a new position in the document's page list.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidUuid` if `page_uuid_str` is not a valid UUID.
+/// - `McpToolError::PageNotFound` if no page with the given UUID exists.
+/// - `McpToolError::CoreError` if `new_position` is out of range.
+pub fn reorder_page_impl(
+    state: &AppState,
+    page_uuid_str: &str,
+    new_position: u32,
+) -> Result<PageInfo, McpToolError> {
+    let page_uuid: uuid::Uuid = page_uuid_str
+        .parse()
+        .map_err(|_| McpToolError::InvalidUuid(page_uuid_str.to_string()))?;
+    let page_id = PageId::new(page_uuid);
+
+    let root_uuids = {
+        let mut doc = acquire_document_lock(state);
+
+        let page = doc
+            .page(page_id)
+            .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
+        let root_node_ids: Vec<agent_designer_core::NodeId> = page.root_nodes.clone();
+        let page_name = page.name.clone();
+
+        let cmd = ReorderPage {
+            page_id,
+            new_position: new_position as usize,
+        };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
+
+        // Resolve NodeIds to UUIDs after the mutation.
+        let resolved = root_node_ids
+            .iter()
+            .filter_map(|&nid| doc.arena.uuid_of(nid).ok().map(|u| u.to_string()))
+            .collect::<Vec<_>>();
+
+        (resolved, page_name)
+    };
+
+    let (root_node_uuids, name) = root_uuids;
+
+    super::broadcast::broadcast_and_persist(
+        state,
+        MutationEventKind::PageUpdated,
+        page_uuid_str,
+        "reorder_page",
+        "position",
+        Some(serde_json::json!({ "newPosition": new_position })),
+    );
+
+    Ok(PageInfo {
+        id: page_uuid_str.to_string(),
+        name,
+        root_nodes: root_node_uuids,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use agent_designer_state::AppState;
@@ -240,5 +302,48 @@ mod tests {
         // Original name should be preserved.
         let pages = list_pages_impl(&state);
         assert_eq!(pages[0].name, "Home");
+    }
+
+    #[test]
+    fn test_reorder_page_moves_page_to_new_position() {
+        let state = AppState::new();
+        let page_a = create_page_impl(&state, "Page A").unwrap();
+        let page_b = create_page_impl(&state, "Page B").unwrap();
+        let page_c = create_page_impl(&state, "Page C").unwrap();
+
+        // Move "Page A" (currently at index 0) to index 2.
+        let result = reorder_page_impl(&state, &page_a.id, 2);
+        assert!(result.is_ok(), "reorder should succeed");
+
+        let pages = list_pages_impl(&state);
+        assert_eq!(pages.len(), 3);
+        assert_eq!(pages[0].id, page_b.id);
+        assert_eq!(pages[1].id, page_c.id);
+        assert_eq!(pages[2].id, page_a.id);
+    }
+
+    #[test]
+    fn test_reorder_page_invalid_uuid_returns_error() {
+        let state = AppState::new();
+        let result = reorder_page_impl(&state, "not-a-uuid", 0);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
+    }
+
+    #[test]
+    fn test_reorder_page_nonexistent_page_returns_error() {
+        let state = AppState::new();
+        let result = reorder_page_impl(&state, &uuid::Uuid::new_v4().to_string(), 0);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), McpToolError::PageNotFound(_)));
+    }
+
+    #[test]
+    fn test_reorder_page_out_of_range_position_returns_error() {
+        let state = AppState::new();
+        let page = create_page_impl(&state, "Only Page").unwrap();
+        // Position 1 is out of range for a single-page document (valid: 0 only).
+        let result = reorder_page_impl(&state, &page.id, 1);
+        assert!(result.is_err());
     }
 }

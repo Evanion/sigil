@@ -158,6 +158,15 @@ pub struct RenamePageInput {
     pub new_name: String,
 }
 
+/// Input for reordering a page within the document's page list.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ReorderPageInput {
+    /// UUID of the page to move.
+    pub page_id: String,
+    /// New zero-based position in the page list.
+    pub new_position: u32,
+}
+
 /// Input for deleting a node.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteNodeInput {
