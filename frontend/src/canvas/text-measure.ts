@@ -13,7 +13,7 @@
 import type { TextStyle } from "../types/document";
 
 /** Default font size used when the TextStyle font_size is a token_ref. */
-const DEFAULT_FONT_SIZE_PX = 16;
+export const DEFAULT_FONT_SIZE_PX = 16;
 
 /** Fallback line height when an invalid lineHeight is supplied. */
 const FALLBACK_LINE_HEIGHT_PX = 20;

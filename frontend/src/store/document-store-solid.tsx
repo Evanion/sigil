@@ -113,6 +113,9 @@ const PLACEHOLDER_NODE_ID: NodeId = { index: 0, generation: 0 };
 const MAX_NODE_NAME_LENGTH = 1024;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** RF-021: Maximum text content length in characters. */
+const MAX_TEXT_CONTENT_LENGTH = 1_000_000;
+
 // RF-028: deepClone is imported from operations/interceptor as sharedDeepClone.
 // Alias it as deepClone for local use to keep call sites unchanged.
 const deepClone = sharedDeepClone;
@@ -881,8 +884,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const node = state.nodes[uuid];
     if (!node || node.kind.type !== "text") return;
 
-    // Update the kind with new content
-    const previousKind = deepClone(node.kind);
+    // RF-021: Reject content exceeding maximum length.
+    if (content.length > MAX_TEXT_CONTENT_LENGTH) return;
+
+    // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
+    let previousKind: typeof node.kind;
+    try {
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setTextContent: deepClone failed", err);
+      return;
+    }
     const newKind = { ...previousKind, content };
 
     interceptor.set(uuid, "kind", newKind);
@@ -900,13 +912,25 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const node = state.nodes[uuid];
     if (!node || node.kind.type !== "text") return;
 
-    // Update the kind with new text_style field
-    const previousKind = deepClone(node.kind);
+    // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
+    let previousKind: typeof node.kind;
+    try {
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setTextStyle: deepClone failed", err);
+      return;
+    }
     // JSON clone: Solid proxy not structuredClone-safe
-    const previousTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as Record<
-      string,
-      unknown
-    >;
+    let previousTextStyle: Record<string, unknown>;
+    try {
+      previousTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as Record<
+        string,
+        unknown
+      >;
+    } catch (err: unknown) {
+      console.error("setTextStyle: JSON clone failed", err);
+      return;
+    }
     previousTextStyle[patch.field] = patch.value;
     const newKind = { ...previousKind, text_style: previousTextStyle };
 

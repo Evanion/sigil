@@ -1,5 +1,5 @@
 import {
-  For,
+  Index,
   createSignal,
   createEffect,
   onMount,
@@ -127,24 +127,25 @@ export const Toolbar: Component = () => {
       <div class="toolbar__logo" aria-hidden="true">
         SIGIL
       </div>
-      <For each={TOOLS}>
+      {/* RF-029: Use <Index> instead of <For> per CLAUDE.md — preserves DOM elements */}
+      <Index each={TOOLS}>
         {(tool, index) => (
           <Tooltip
-            content={`${tool.label} (${tool.shortcut})`}
+            content={`${tool().label} (${tool().shortcut})`}
             placement="right"
             ref={(el) => {
-              buttonRefs[index()] = el;
+              buttonRefs[index] = el;
             }}
-            triggerClass={`toolbar__btn${store.activeTool() === tool.id ? " toolbar__btn--active" : ""}`}
-            aria-pressed={store.activeTool() === tool.id}
-            aria-label={`${tool.label} (${tool.shortcut})`}
-            tabIndex={focusedIndex() === index() ? 0 : -1}
-            onClick={() => store.setActiveTool(tool.id)}
+            triggerClass={`toolbar__btn${store.activeTool() === tool().id ? " toolbar__btn--active" : ""}`}
+            aria-pressed={store.activeTool() === tool().id}
+            aria-label={`${tool().label} (${tool().shortcut})`}
+            tabIndex={focusedIndex() === index ? 0 : -1}
+            onClick={() => store.setActiveTool(tool().id)}
           >
-            {tool.icon({ size: 16 })}
+            {tool().icon({ size: 16 })}
           </Tooltip>
         )}
-      </For>
+      </Index>
     </div>
   );
 };

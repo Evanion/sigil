@@ -183,7 +183,6 @@ export const Canvas: Component = () => {
     let editingUuid: string | null = null;
 
     // RF-010: Store handler references so they can be removed in commitAndCloseOverlay.
-    let inputHandler: ((e: Event) => void) | null = null;
     let blurHandler: (() => void) | null = null;
     let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
 
@@ -202,14 +201,16 @@ export const Canvas: Component = () => {
         }
       } finally {
         // RF-010: Remove listeners BEFORE destroy
-        if (inputHandler) overlay.element.removeEventListener("input", inputHandler);
         if (blurHandler) overlay.element.removeEventListener("blur", blurHandler);
         if (keydownHandler) overlay.element.removeEventListener("keydown", keydownHandler);
-        inputHandler = blurHandler = keydownHandler = null;
+        blurHandler = keydownHandler = null;
 
         overlay.destroy();
         activeOverlay = null;
         editingUuid = null;
+
+        // RF-026: Announce text edit completion to screen readers
+        announce("Text saved");
 
         // RF-001: Switch back to select tool when the overlay closes.
         // Only switch if we are still in "text" mode to avoid overriding
@@ -228,12 +229,12 @@ export const Canvas: Component = () => {
       activeOverlay = createTextOverlay(node, store.viewport(), canvas);
       editingUuid = uuid;
 
+      // RF-026: Announce text edit mode to screen readers
+      announce("Editing text");
+
       // RF-010: Store handler references for cleanup in commitAndCloseOverlay.
-      inputHandler = () => {
-        if (activeOverlay && editingUuid) {
-          store.setTextContent(editingUuid, activeOverlay.getContent());
-        }
-      };
+      // RF-015: Input handler removed — store.setTextContent() is only called
+      // once in commitAndCloseOverlay() to avoid per-keystroke undo entries.
       blurHandler = () => {
         commitAndCloseOverlay();
       };
@@ -241,10 +242,45 @@ export const Canvas: Component = () => {
         if (e.key === "Escape") {
           e.preventDefault();
           commitAndCloseOverlay();
+          return;
+        }
+        // RF-016: Intercept Cmd+B/I/U during overlay editing to prevent both
+        // the browser's execCommand and the document-level TypographySection
+        // handler from firing. Apply text style changes directly.
+        const isMeta = e.metaKey || e.ctrlKey;
+        if (isMeta && editingUuid) {
+          if (e.key === "b" || e.key === "B") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentWeight = (node.kind as { text_style: { font_weight: number } }).text_style.font_weight;
+              const newWeight = currentWeight >= 700 ? 400 : 700;
+              store.setTextStyle(editingUuid, { field: "font_weight", value: newWeight });
+            }
+          } else if (e.key === "i" || e.key === "I") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentStyle = (node.kind as { text_style: { font_style: string } }).text_style.font_style;
+              const newStyle = currentStyle === "italic" ? "normal" : "italic";
+              store.setTextStyle(editingUuid, { field: "font_style", value: newStyle });
+            }
+          } else if (e.key === "u" || e.key === "U") {
+            e.preventDefault();
+            e.stopPropagation();
+            const node = store.state.nodes[editingUuid];
+            if (node && node.kind.type === "text") {
+              const currentDec = (node.kind as { text_style: { text_decoration: string } }).text_style.text_decoration;
+              const newDec = currentDec === "underline" ? "none" : "underline";
+              store.setTextStyle(editingUuid, { field: "text_decoration", value: newDec });
+            }
+          }
         }
       };
 
-      activeOverlay.element.addEventListener("input", inputHandler);
+      // RF-015: No input handler — store.setTextContent() is called only on commit.
       activeOverlay.element.addEventListener("blur", blurHandler);
       activeOverlay.element.addEventListener("keydown", keydownHandler);
     }
@@ -392,16 +428,21 @@ export const Canvas: Component = () => {
       const sy = e.clientY - rect.top;
       const [wx, wy] = screenToWorld(vp, sx, sy);
 
-      // Find a text node at this world position
+      // RF-019: Find the topmost text node at this world position.
+      // Iterate all matching nodes and use the last one (topmost in z-order).
       const nodes = store.state.nodes;
+      let topmostUuid: string | null = null;
       for (const uuid of Object.keys(nodes)) {
         const node = nodes[uuid];
         if (!node || node.kind.type !== "text" || !node.visible || node.locked) continue;
         const t = node.transform;
         if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) {
-          openTextOverlay(uuid);
-          return;
+          topmostUuid = uuid;
         }
+      }
+      if (topmostUuid !== null) {
+        openTextOverlay(topmostUuid);
+        return;
       }
     }
 

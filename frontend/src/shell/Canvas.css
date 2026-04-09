@@ -16,6 +16,16 @@
   outline-offset: -2px;
 }
 
+/* RF-025: Text overlay focus-visible styling */
+.sigil-text-overlay {
+  outline: none;
+}
+
+.sigil-text-overlay:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 0;
+}
+
 /* RF-019: Reduced motion guard for canvas rendering */
 @media (prefers-reduced-motion: reduce) {
   .sigil-canvas-container__canvas {

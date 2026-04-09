@@ -48,6 +48,11 @@ import {
 } from "lucide-solid";
 import "./TypographySection.css";
 
+// ── Validation constants ─────────────────────────────────────────────
+
+/** RF-022: Maximum font size in pixels. Values above this are rejected. */
+const MAX_FONT_SIZE = 10_000;
+
 // ── Font weight options ──────────────────────────────────────────────
 
 const FONT_WEIGHT_OPTIONS = [
@@ -127,11 +132,12 @@ export const TypographySection: Component = () => {
 
   const lineHeight = createMemo((): number => {
     const kind = textKind();
-    if (!kind) return 1.2;
+    // RF-032: Default 1.5 matches text-tool.ts default line height.
+    if (!kind) return 1.5;
     const sv = kind.text_style.line_height;
-    if (sv.type !== "literal") return 1.2;
+    if (sv.type !== "literal") return 1.5;
     const raw = sv.value;
-    return Number.isFinite(raw) ? raw : 1.2;
+    return Number.isFinite(raw) ? raw : 1.5;
   });
 
   const letterSpacing = createMemo((): number => {
@@ -174,6 +180,8 @@ export const TypographySection: Component = () => {
   function handleFontSizeChange(value: number): void {
     if (!Number.isFinite(value)) return;
     if (value <= 0) return;
+    // RF-022: Reject font sizes above the upper bound.
+    if (value > MAX_FONT_SIZE) return;
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const sv: StyleValue<number> = { type: "literal", value };
@@ -285,7 +293,7 @@ export const TypographySection: Component = () => {
     <div
       class="sigil-typography-section"
       role="region"
-      aria-label="Typography"
+      aria-labelledby="typography-section-title"
     >
       <span class="sigil-typography-section__title" id="typography-section-title">
         Typography
@@ -339,7 +347,7 @@ export const TypographySection: Component = () => {
           aria-label="Line height"
           step={0.1}
           min={0.1}
-          suffix="px"
+          suffix={"\u00D7"}
           disabled={disabled()}
         />
         <NumberInput
@@ -357,6 +365,28 @@ export const TypographySection: Component = () => {
         class="sigil-typography-section__align-group"
         role="radiogroup"
         aria-label="Text alignment"
+        onKeyDown={(e: KeyboardEvent) => {
+          // RF-024: Arrow-key navigation for text alignment radio group.
+          const currentIdx = TEXT_ALIGN_OPTIONS.findIndex((o) => o.value === textAlign());
+          let nextIdx = -1;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+            e.preventDefault();
+            nextIdx = (currentIdx + 1) % TEXT_ALIGN_OPTIONS.length;
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+            e.preventDefault();
+            nextIdx = (currentIdx - 1 + TEXT_ALIGN_OPTIONS.length) % TEXT_ALIGN_OPTIONS.length;
+          }
+          if (nextIdx >= 0) {
+            const next = TEXT_ALIGN_OPTIONS[nextIdx];
+            if (next) {
+              handleTextAlignChange(next.value);
+              // Focus the newly-active radio button (roving tabindex)
+              const group = e.currentTarget as HTMLElement;
+              const buttons = group.querySelectorAll<HTMLButtonElement>("[role='radio']");
+              buttons[nextIdx]?.focus();
+            }
+          }
+        }}
       >
         {TEXT_ALIGN_OPTIONS.map((opt) => (
           <button
@@ -369,6 +399,7 @@ export const TypographySection: Component = () => {
             aria-checked={textAlign() === opt.value}
             aria-label={opt.label}
             disabled={disabled()}
+            tabIndex={textAlign() === opt.value ? 0 : -1}
             onClick={() => handleTextAlignChange(opt.value)}
           >
             <opt.icon size={14} />

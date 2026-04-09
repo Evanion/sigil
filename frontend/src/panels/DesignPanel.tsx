@@ -88,12 +88,13 @@ export const DesignPanel: Component = () => {
       >
         <Show when={activeTab() === "layout"}>
           <AlignPanel />
-          <Show when={isTextNodeSelected()}>
-            <TypographySection />
-          </Show>
           <SchemaPanel schema={designSchema} />
         </Show>
         <Show when={activeTab() === "appearance"}>
+          {/* RF-018: Typography belongs in the Appearance tab alongside fill/stroke/effects */}
+          <Show when={isTextNodeSelected()}>
+            <TypographySection />
+          </Show>
           <AppearancePanel />
         </Show>
         <Show when={activeTab() === "effects"}>

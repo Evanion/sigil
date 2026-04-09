@@ -16,7 +16,7 @@ import type { MarqueeRect } from "../tools/select-tool";
 import type { Viewport } from "./viewport";
 import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
-import { buildFontString, measureTextLines } from "./text-measure";
+import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -138,10 +138,11 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       // Resolve line height as an absolute pixel value.
       // The spec stores line_height as a multiplier (e.g. 1.5 means 150% of fontSize).
       // Guard with Number.isFinite per CLAUDE.md Floating-Point Validation.
+      // RF-031: Use shared constant instead of hardcoded 16.
       const fontSize =
         ts.font_size.type === "literal" && Number.isFinite(ts.font_size.value)
           ? ts.font_size.value
-          : 16;
+          : DEFAULT_FONT_SIZE_PX;
       const lineHeightMultiplier =
         ts.line_height.type === "literal" && Number.isFinite(ts.line_height.value)
           ? ts.line_height.value

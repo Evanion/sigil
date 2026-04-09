@@ -11,13 +11,12 @@
 
 import type { DocumentNode, NodeKindText, Color, StyleValue } from "../types/document";
 import type { Viewport } from "./viewport";
+// RF-031: Import shared constant instead of duplicating.
+import { DEFAULT_FONT_SIZE_PX } from "./text-measure";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
-
-/** Default font size in pixels when the TextStyle font_size is a token_ref. */
-const DEFAULT_FONT_SIZE_PX = 16;
 
 /** Default line height multiplier when not available. */
 const DEFAULT_LINE_HEIGHT = 1.5;
@@ -206,8 +205,9 @@ export function createTextOverlay(
   el.style.margin = "0";
   el.style.padding = "0";
   el.style.border = "none";
-  el.style.outline = "none";
+  // RF-025: Do not suppress outline — use a CSS class for :focus-visible styling.
   el.style.background = "transparent";
+  el.classList.add("sigil-text-overlay");
   el.style.overflow = "visible";
   el.style.whiteSpace = kind.sizing === "fixed_width" ? "pre-wrap" : "pre";
   el.style.wordBreak = kind.sizing === "fixed_width" ? "break-word" : "normal";
