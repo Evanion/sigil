@@ -1,7 +1,5 @@
 import { Tooltip as KobalteTooltip } from "@kobalte/core/tooltip";
-import type { TooltipTriggerRenderProps } from "@kobalte/core/tooltip";
-import { splitProps } from "solid-js";
-import type { JSX } from "solid-js";
+import type { Component, JSX } from "solid-js";
 import "./Tooltip.css";
 
 export type TooltipPlacement = "top" | "bottom" | "left" | "right";
@@ -12,50 +10,48 @@ export interface TooltipProps {
   /** Placement of the tooltip relative to the trigger. Defaults to "top". */
   placement?: TooltipPlacement;
   /**
-   * Render function that receives the Kobalte trigger props and returns the
-   * trigger element. Use the spread pattern to forward all event handlers and
-   * ARIA attributes onto the interactive element:
-   *
-   *   <Tooltip content="Save">
-   *     {(triggerProps) => <button {...triggerProps}>Save</button>}
-   *   </Tooltip>
-   *
-   * This avoids nesting a Kobalte-generated <button> wrapper around the child,
-   * which would produce invalid HTML (nested <button> elements) and violates
-   * CLAUDE.md §5: "Never override Kobalte trigger or interactive primitives
-   * with non-interactive elements."
+   * The trigger element content. Kobalte renders a `<button>` wrapper
+   * automatically — do NOT pass a `<button>` as a child (it would nest).
+   * Pass icon/text content directly.
    */
-  children: (triggerProps: TooltipTriggerRenderProps) => JSX.Element;
+  children: JSX.Element;
   /** Delay in ms before the tooltip opens. Defaults to 300. */
   openDelay?: number;
   /** Delay in ms before the tooltip closes. Defaults to 0. */
   closeDelay?: number;
+  /** Additional CSS class(es) for the trigger button. */
+  triggerClass?: string;
+  /** ARIA label for the trigger button. */
+  "aria-label"?: string;
+  /** ARIA pressed state for toggle buttons. */
+  "aria-pressed"?: boolean;
+  /** Callback when the trigger is clicked. */
+  onClick?: () => void;
+  /** Tab index for the trigger button. */
+  tabIndex?: number;
+  /** Ref callback for the trigger button element. */
+  ref?: (el: HTMLButtonElement) => void;
 }
 
 /**
- * Internal passthrough component used as the `as` target for Kobalte's
- * Tooltip.Trigger. Kobalte's Polymorphic component calls this with the merged
- * trigger render props (event handlers, aria-describedby, ref) plus `children`
- * from the outer Tooltip. We split `children` out and call it as a render
- * function, forwarding the remaining trigger props onto the returned element.
+ * Tooltip wrapper using Kobalte. Renders a `<button>` trigger with tooltip.
+ * Pass icon/text content as children — do not wrap in another `<button>`.
  */
-type TriggerPassthroughProps = TooltipTriggerRenderProps & {
-  children: (triggerProps: TooltipTriggerRenderProps) => JSX.Element;
-};
-
-function TriggerPassthrough(props: TriggerPassthroughProps) {
-  const [local, triggerProps] = splitProps(props, ["children"]);
-  return local.children(triggerProps as TooltipTriggerRenderProps);
-}
-
-export function Tooltip(props: TooltipProps) {
+export const Tooltip: Component<TooltipProps> = (props) => {
   return (
     <KobalteTooltip
       placement={props.placement ?? "top"}
       openDelay={props.openDelay ?? 300}
       closeDelay={props.closeDelay ?? 0}
     >
-      <KobalteTooltip.Trigger as={TriggerPassthrough}>
+      <KobalteTooltip.Trigger
+        class={props.triggerClass}
+        aria-label={props["aria-label"]}
+        aria-pressed={props["aria-pressed"]}
+        onClick={props.onClick}
+        tabIndex={props.tabIndex}
+        ref={props.ref}
+      >
         {props.children}
       </KobalteTooltip.Trigger>
       <KobalteTooltip.Portal>
@@ -66,4 +62,4 @@ export function Tooltip(props: TooltipProps) {
       </KobalteTooltip.Portal>
     </KobalteTooltip>
   );
-}
+};

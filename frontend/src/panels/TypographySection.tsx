@@ -168,7 +168,7 @@ export const TypographySection: Component = () => {
   function handleFontFamilyChange(value: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    store.setTextStyle(uuid, "font_family", value);
+    store.setTextStyle(uuid, { field: "font_family", value });
   }
 
   function handleFontSizeChange(value: number): void {
@@ -177,7 +177,7 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, "font_size", sv);
+    store.setTextStyle(uuid, { field: "font_size", value: sv });
   }
 
   function handleFontWeightChange(value: string): void {
@@ -185,7 +185,7 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const weight = parseInt(value, 10);
     if (!Number.isFinite(weight)) return;
-    store.setTextStyle(uuid, "font_weight", weight);
+    store.setTextStyle(uuid, { field: "font_weight", value: weight });
     announce(`Font weight set to ${value}`);
   }
 
@@ -193,7 +193,7 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const newStyle: FontStyle = pressed ? "italic" : "normal";
-    store.setTextStyle(uuid, "font_style", newStyle);
+    store.setTextStyle(uuid, { field: "font_style", value: newStyle });
     announce(`Font style ${newStyle}`);
   }
 
@@ -202,7 +202,7 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, "line_height", sv);
+    store.setTextStyle(uuid, { field: "line_height", value: sv });
   }
 
   function handleLetterSpacingChange(value: number): void {
@@ -210,13 +210,13 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, "letter_spacing", sv);
+    store.setTextStyle(uuid, { field: "letter_spacing", value: sv });
   }
 
   function handleTextAlignChange(align: TextAlign): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    store.setTextStyle(uuid, "text_align", align);
+    store.setTextStyle(uuid, { field: "text_align", value: align });
     announce(`Text alignment set to ${align}`);
   }
 
@@ -225,7 +225,7 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const current = textDecoration();
     const newDecoration: TextDecoration = current === decoration ? "none" : decoration;
-    store.setTextStyle(uuid, "text_decoration", newDecoration);
+    store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
     announce(`Text decoration ${newDecoration}`);
   }
 
@@ -233,7 +233,7 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     const sv: StyleValue<Color> = { type: "literal", value: color };
-    store.setTextStyle(uuid, "text_color", sv);
+    store.setTextStyle(uuid, { field: "text_color", value: sv });
   }
 
   // ── Keyboard shortcuts (Cmd+B, Cmd+I, Cmd+U) ─────────────────────
@@ -252,19 +252,19 @@ export const TypographySection: Component = () => {
       e.preventDefault();
       const current = fontWeight();
       const newWeight = current >= 700 ? 400 : 700;
-      store.setTextStyle(uuid, "font_weight", newWeight);
+      store.setTextStyle(uuid, { field: "font_weight", value: newWeight });
       announce(`Font weight ${newWeight === 700 ? "bold" : "regular"}`);
     } else if (e.key === "i" || e.key === "I") {
       e.preventDefault();
       const current = fontStyle();
       const newStyle: FontStyle = current === "italic" ? "normal" : "italic";
-      store.setTextStyle(uuid, "font_style", newStyle);
+      store.setTextStyle(uuid, { field: "font_style", value: newStyle });
       announce(`Font style ${newStyle}`);
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
       const current = textDecoration();
       const newDecoration: TextDecoration = current === "underline" ? "none" : "underline";
-      store.setTextStyle(uuid, "text_decoration", newDecoration);
+      store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
       announce(`Text decoration ${newDecoration}`);
     }
   }

@@ -164,6 +164,11 @@ function wrapParagraph(
   const words = paragraph.split(/\s+/);
   const result: Array<{ text: string; width: number }> = [];
 
+  // RF-014: Pre-measure space width once to avoid O(W*L) re-measuring of
+  // the entire candidate string on each word. Instead, accumulate widths
+  // additively: currentWidth + spaceWidth + wordWidth.
+  const spaceWidth = ctx.measureText(" ").width;
+
   let currentLine = "";
   let currentWidth = 0;
 
@@ -180,11 +185,10 @@ function wrapParagraph(
       currentLine = word;
       currentWidth = wordWidth;
     } else {
-      const candidate = currentLine + " " + word;
-      const candidateWidth = ctx.measureText(candidate).width;
+      const candidateWidth = currentWidth + spaceWidth + wordWidth;
 
       if (candidateWidth <= maxWidth) {
-        currentLine = candidate;
+        currentLine = currentLine + " " + word;
         currentWidth = candidateWidth;
       } else {
         // Flush current line and start a new one with this word.

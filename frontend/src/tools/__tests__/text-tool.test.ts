@@ -53,9 +53,8 @@ describe("createTextTool", () => {
   describe("getCursor", () => {
     it("should return text cursor", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       expect(tool.getCursor()).toBe("text");
     });
@@ -64,9 +63,8 @@ describe("createTextTool", () => {
   describe("click creates auto-width text node", () => {
     it("should create an auto-width text node on click without drag", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(50, 100));
       tool.onPointerUp(makeEvent(50, 100));
@@ -88,9 +86,8 @@ describe("createTextTool", () => {
 
     it("should create an auto-width text node on small drag below threshold", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(50, 100));
       tool.onPointerMove(makeEvent(51, 101)); // 1px drag, below MIN_DRAG_DIMENSION
@@ -108,9 +105,8 @@ describe("createTextTool", () => {
   describe("drag creates fixed-width text node", () => {
     it("should create a fixed-width text node when dragging beyond threshold", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(10, 20));
       tool.onPointerMove(makeEvent(210, 50));
@@ -130,9 +126,8 @@ describe("createTextTool", () => {
 
     it("should handle negative drag direction by normalizing coordinates", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(200, 100));
       tool.onPointerMove(makeEvent(50, 50));
@@ -150,9 +145,8 @@ describe("createTextTool", () => {
   describe("default text style", () => {
     it("should use Inter 16px weight 400 as default text style", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(50, 100));
       tool.onPointerUp(makeEvent(50, 100));
@@ -176,14 +170,14 @@ describe("createTextTool", () => {
   describe("preview rect during drag", () => {
     it("should return null preview rect before any interaction", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       expect(tool.getPreviewRect()).toBeNull();
     });
 
     it("should provide preview rect during drag", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       tool.onPointerDown(makeEvent(10, 20));
       tool.onPointerMove(makeEvent(60, 80));
@@ -199,7 +193,7 @@ describe("createTextTool", () => {
 
     it("should clear preview rect after creation", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       tool.onPointerDown(makeEvent(10, 20));
       tool.onPointerMove(makeEvent(60, 80));
@@ -210,23 +204,10 @@ describe("createTextTool", () => {
   });
 
   describe("callbacks", () => {
-    it("should call onComplete after node creation", () => {
-      const store = makeMockStore();
-      const onComplete = vi.fn();
-      const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
-
-      tool.onPointerDown(makeEvent(50, 100));
-      tool.onPointerUp(makeEvent(50, 100));
-
-      expect(onComplete).toHaveBeenCalledTimes(1);
-    });
-
     it("should call onEditRequest with the created node UUID", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerDown(makeEvent(50, 100));
       tool.onPointerUp(makeEvent(50, 100));
@@ -235,24 +216,14 @@ describe("createTextTool", () => {
       expect(onEditRequest).toHaveBeenCalledWith("uuid-1");
     });
 
-    it("should call onEditRequest before onComplete", () => {
-      const store = makeMockStore();
-      const callOrder: string[] = [];
-      const onComplete = vi.fn(() => callOrder.push("complete"));
-      const onEditRequest = vi.fn(() => callOrder.push("edit"));
-      const tool = createTextTool(store, onComplete, onEditRequest);
-
-      tool.onPointerDown(makeEvent(50, 100));
-      tool.onPointerUp(makeEvent(50, 100));
-
-      expect(callOrder).toEqual(["edit", "complete"]);
-    });
+    // RF-001: onComplete was removed. The text tool no longer switches to
+    // "select" immediately -- the overlay manages its own lifecycle.
   });
 
   describe("auto-select after creation", () => {
     it("should select the newly created node", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       tool.onPointerDown(makeEvent(50, 100));
       tool.onPointerUp(makeEvent(50, 100));
@@ -265,7 +236,7 @@ describe("createTextTool", () => {
   describe("name increments", () => {
     it("should increment the name counter for each created text node", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       // First text
       tool.onPointerDown(makeEvent(0, 0));
@@ -284,7 +255,7 @@ describe("createTextTool", () => {
   describe("pointermove without pointerdown", () => {
     it("should not set preview rect when moving without prior pointerdown", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       tool.onPointerMove(makeEvent(50, 50));
 
@@ -295,14 +266,12 @@ describe("createTextTool", () => {
   describe("pointerup without pointerdown", () => {
     it("should not create a node when pointerup fires without prior pointerdown", () => {
       const store = makeMockStore();
-      const onComplete = vi.fn();
       const onEditRequest = vi.fn();
-      const tool = createTextTool(store, onComplete, onEditRequest);
+      const tool = createTextTool(store, onEditRequest);
 
       tool.onPointerUp(makeEvent(50, 50));
 
       expect(store.createNodeCalls).toHaveLength(0);
-      expect(onComplete).not.toHaveBeenCalled();
       expect(onEditRequest).not.toHaveBeenCalled();
     });
   });
@@ -310,7 +279,7 @@ describe("createTextTool", () => {
   describe("click always creates a node (unlike shape tool)", () => {
     it("should create a node even on zero-distance click", () => {
       const store = makeMockStore();
-      const tool = createTextTool(store, vi.fn(), vi.fn());
+      const tool = createTextTool(store, vi.fn());
 
       tool.onPointerDown(makeEvent(50, 50));
       tool.onPointerUp(makeEvent(50, 50));

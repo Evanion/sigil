@@ -28,6 +28,7 @@ import {
   createReorderOp,
   createSetFieldOp,
 } from "../operations/operation-helpers";
+import type { TextStylePatch } from "./document-store-types";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -95,7 +96,7 @@ export interface DocumentStoreAPI {
   setEffects(uuid: string, effects: Effect[]): void;
   setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
   setTextContent(uuid: string, content: string): void;
-  setTextStyle(uuid: string, field: string, value: unknown): void;
+  setTextStyle(uuid: string, patch: TextStylePatch): void;
   batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
   groupNodes(uuids: string[], name: string): void;
   ungroupNodes(uuids: string[]): void;
@@ -895,7 +896,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
-  function setTextStyle(uuid: string, field: string, value: unknown): void {
+  function setTextStyle(uuid: string, patch: TextStylePatch): void {
     const node = state.nodes[uuid];
     if (!node || node.kind.type !== "text") return;
 
@@ -906,17 +907,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       string,
       unknown
     >;
-    previousTextStyle[field] = value;
+    previousTextStyle[patch.field] = patch.value;
     const newKind = { ...previousKind, text_style: previousTextStyle };
 
     interceptor.set(uuid, "kind", newKind);
-    const path = `kind.text_style.${field}`;
+    const path = `kind.text_style.${patch.field}`;
     // RF-026: Queue server op — sent when interceptor commits (coalesced)
     pendingServerOps.push({
       setField: {
         nodeUuid: uuid,
         path,
-        value: JSON.stringify(value),
+        value: JSON.stringify(patch.value),
       },
     });
   }

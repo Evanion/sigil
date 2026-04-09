@@ -249,7 +249,9 @@ export function createTextOverlay(
 
   // Focus the overlay so the user can start typing immediately.
   // Use requestAnimationFrame to ensure the element is in the DOM first.
-  requestAnimationFrame(() => {
+  // RF-028: Store the rAF id so it can be cancelled in destroy().
+  let focusRafId = requestAnimationFrame(() => {
+    focusRafId = 0;
     el.focus();
     // Place cursor at end of content
     const selection = window.getSelection();
@@ -318,6 +320,12 @@ export function createTextOverlay(
     },
 
     destroy(): void {
+      // RF-028: Cancel pending focus rAF if overlay is destroyed before it fires.
+      if (focusRafId !== 0) {
+        cancelAnimationFrame(focusRafId);
+        focusRafId = 0;
+      }
+
       // Remove all tracked event listeners
       for (const { target, type, handler } of listeners) {
         target.removeEventListener(type, handler);

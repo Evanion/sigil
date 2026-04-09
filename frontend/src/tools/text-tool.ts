@@ -61,13 +61,11 @@ function computeRect(startX: number, startY: number, endX: number, endY: number)
  * Create a text tool that supports click-to-create and drag-to-create text nodes.
  *
  * @param store - The tool store used to create nodes.
- * @param onComplete - Called after a node is successfully created (e.g. to switch back to select tool).
  * @param onEditRequest - Called with the UUID of the newly created text node so the canvas can open the text editing overlay.
  * @returns A Tool with an additional `getPreviewRect()` method for rendering the drag preview.
  */
 export function createTextTool(
   store: ToolStore,
-  onComplete: () => void,
   onEditRequest: (uuid: string) => void,
 ): Tool & { getPreviewRect(): PreviewRect | null } {
   let dragging = false;
@@ -142,7 +140,11 @@ export function createTextTool(
       const uuid = store.createNode(createTextKind(sizing), name, transform);
       store.select(uuid);
       onEditRequest(uuid);
-      onComplete();
+      // RF-001: Do NOT call onComplete() here. The text tool must stay active
+      // while the overlay is open. Switching to "select" immediately would
+      // trigger commitAndCloseOverlay(), deleting the empty node before the
+      // user can type. The tool switches to "select" when the overlay is
+      // explicitly closed (blur, Escape, click outside).
     },
 
     getCursor(): string {

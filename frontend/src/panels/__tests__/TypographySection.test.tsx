@@ -226,7 +226,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("radio", { name: "Align center" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "text_align", "center");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_align", value: "center" });
   });
 
   // ── Italic toggle ───────────────────────────────────────────────────
@@ -251,7 +251,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Italic" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "font_style", "italic");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_style", value: "italic" });
   });
 
   // ── Underline / Strikethrough toggles ─────────────────────────────
@@ -277,7 +277,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "text_decoration", "underline");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "underline" });
   });
 
   it("should toggle text_decoration to none when Underline is clicked while already underlined", () => {
@@ -292,7 +292,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "text_decoration", "none");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "none" });
   });
 
   // ── Font size ────────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.keyDown(document, { key: "b", metaKey: true });
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "font_weight", 700);
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_weight", value: 700 });
   });
 
   it("should toggle font_weight from 700 to 400 on Cmd+B", () => {
@@ -368,7 +368,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.keyDown(document, { key: "b", metaKey: true });
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "font_weight", 400);
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_weight", value: 400 });
   });
 
   it("should toggle font_style on Cmd+I when text node selected", () => {
@@ -383,7 +383,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.keyDown(document, { key: "i", metaKey: true });
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "font_style", "italic");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_style", value: "italic" });
   });
 
   it("should toggle text_decoration on Cmd+U when text node selected", () => {
@@ -398,7 +398,7 @@ describe("TypographySection", () => {
       </DocumentProvider>
     ));
     fireEvent.keyDown(document, { key: "u", metaKey: true });
-    expect(setTextStyle).toHaveBeenCalledWith("text-1", "text_decoration", "underline");
+    expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_decoration", value: "underline" });
   });
 
   it("should not fire keyboard shortcuts when no text node is selected", () => {

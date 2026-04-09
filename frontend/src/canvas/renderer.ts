@@ -171,9 +171,12 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
 
         // Text decoration — drawn as a manual line over/through the text.
         if (ts.text_decoration === "underline") {
+          // RF-012: Use proportional offset instead of hardcoded +2 so
+          // the underline scales correctly with font size.
+          const underlineOffset = fontSize * 0.1;
           ctx.beginPath();
-          ctx.moveTo(lineX, y + line.y + 2);
-          ctx.lineTo(lineX + line.width, y + line.y + 2);
+          ctx.moveTo(lineX, y + line.y + underlineOffset);
+          ctx.lineTo(lineX + line.width, y + line.y + underlineOffset);
           ctx.strokeStyle = textColor;
           ctx.lineWidth = 1;
           ctx.stroke();

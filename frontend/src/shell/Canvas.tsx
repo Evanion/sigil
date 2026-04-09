@@ -182,17 +182,42 @@ export const Canvas: Component = () => {
     let activeOverlay: TextOverlayHandle | null = null;
     let editingUuid: string | null = null;
 
+    // RF-010: Store handler references so they can be removed in commitAndCloseOverlay.
+    let inputHandler: ((e: Event) => void) | null = null;
+    let blurHandler: (() => void) | null = null;
+    let keydownHandler: ((e: KeyboardEvent) => void) | null = null;
+
     function commitAndCloseOverlay(): void {
       if (!activeOverlay || !editingUuid) return;
-      const content = activeOverlay.getContent();
-      if (!content.trim()) {
-        store.deleteNode(editingUuid);
-      } else {
-        store.setTextContent(editingUuid, content);
+      const overlay = activeOverlay;
+      const uuid = editingUuid;
+
+      // RF-011: Wrap commit logic in try-finally so cleanup always runs.
+      try {
+        const content = overlay.getContent();
+        if (!content.trim()) {
+          store.deleteNode(uuid);
+        } else {
+          store.setTextContent(uuid, content);
+        }
+      } finally {
+        // RF-010: Remove listeners BEFORE destroy
+        if (inputHandler) overlay.element.removeEventListener("input", inputHandler);
+        if (blurHandler) overlay.element.removeEventListener("blur", blurHandler);
+        if (keydownHandler) overlay.element.removeEventListener("keydown", keydownHandler);
+        inputHandler = blurHandler = keydownHandler = null;
+
+        overlay.destroy();
+        activeOverlay = null;
+        editingUuid = null;
+
+        // RF-001: Switch back to select tool when the overlay closes.
+        // Only switch if we are still in "text" mode to avoid overriding
+        // a tool change the user triggered explicitly.
+        if (store.activeTool() === "text") {
+          store.setActiveTool("select");
+        }
       }
-      activeOverlay.destroy();
-      activeOverlay = null;
-      editingUuid = null;
     }
 
     function openTextOverlay(uuid: string): void {
@@ -203,32 +228,33 @@ export const Canvas: Component = () => {
       activeOverlay = createTextOverlay(node, store.viewport(), canvas);
       editingUuid = uuid;
 
-      // Input handler: sync content to store on each keystroke
-      activeOverlay.element.addEventListener("input", () => {
+      // RF-010: Store handler references for cleanup in commitAndCloseOverlay.
+      inputHandler = () => {
         if (activeOverlay && editingUuid) {
           store.setTextContent(editingUuid, activeOverlay.getContent());
         }
-      });
-
-      // Blur handler: commit on click outside
-      activeOverlay.element.addEventListener("blur", () => {
+      };
+      blurHandler = () => {
         commitAndCloseOverlay();
-      });
-
-      // Escape handler: commit and switch to select tool
-      activeOverlay.element.addEventListener("keydown", (e: KeyboardEvent) => {
+      };
+      keydownHandler = (e: KeyboardEvent) => {
         if (e.key === "Escape") {
           e.preventDefault();
           commitAndCloseOverlay();
-          store.setActiveTool("select");
         }
-      });
+      };
+
+      activeOverlay.element.addEventListener("input", inputHandler);
+      activeOverlay.element.addEventListener("blur", blurHandler);
+      activeOverlay.element.addEventListener("keydown", keydownHandler);
     }
 
     // Text tool: onEditRequest opens the inline text editing overlay.
+    // RF-001: No onComplete callback — the tool stays in "text" mode while
+    // the overlay is open. Switching to "select" happens inside
+    // commitAndCloseOverlay() or on Escape.
     const textTool = createTextTool(
       storeAdapter,
-      () => store.setActiveTool("select"),
       (uuid: string) => {
         openTextOverlay(uuid);
       },
@@ -244,14 +270,14 @@ export const Canvas: Component = () => {
 
     const toolManager = createToolManager(toolImpls, "select");
 
-    // Sync tool manager with store's active tool signal
+    // Sync tool manager with store's active tool signal.
+    // RF-001: Do NOT auto-close the text overlay on tool changes. The overlay
+    // manages its own lifecycle (blur, Escape, click outside). Auto-closing
+    // on tool change caused a race: text-tool called onEditRequest then
+    // onComplete (which set tool to "select"), and the effect immediately
+    // destroyed the overlay before the user could type.
     createEffect(() => {
       const tool = store.activeTool();
-      // Close the text overlay when switching tools — the user expects
-      // tool changes to commit the current edit.
-      if (activeOverlay && tool !== "text") {
-        commitAndCloseOverlay();
-      }
       toolManager.setActiveTool(tool);
       setCursor(toolManager.getCursor());
     });
@@ -449,6 +475,18 @@ export const Canvas: Component = () => {
         const vp = store.viewport();
         const rect = canvas.getBoundingClientRect();
         store.setViewport(zoomAt(vp, rect.width / 2, rect.height / 2, -200));
+      },
+      // RF-004: Enter key opens text editing overlay on selected text node
+      Enter: (e: KeyboardEvent) => {
+        if (isTyping()) return;
+        const ids = store.selectedNodeIds();
+        if (ids.length === 1) {
+          const node = store.state.nodes[ids[0]];
+          if (node?.kind.type === "text") {
+            e.preventDefault();
+            openTextOverlay(ids[0]);
+          }
+        }
       },
       Escape: (e: KeyboardEvent) => {
         if (!isTyping()) {

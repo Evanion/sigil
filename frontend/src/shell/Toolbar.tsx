@@ -129,23 +129,19 @@ export const Toolbar: Component = () => {
       </div>
       <For each={TOOLS}>
         {(tool, index) => (
-          <Tooltip content={`${tool.label} (${tool.shortcut})`} placement="right">
-            {(triggerProps) => (
-              <button
-                {...triggerProps}
-                ref={(el) => {
-                  buttonRefs[index()] = el;
-                }}
-                class="toolbar__btn"
-                classList={{ "toolbar__btn--active": store.activeTool() === tool.id }}
-                aria-pressed={store.activeTool() === tool.id}
-                aria-label={`${tool.label} (${tool.shortcut})`}
-                tabindex={focusedIndex() === index() ? 0 : -1}
-                onClick={() => store.setActiveTool(tool.id)}
-              >
-                {tool.icon({ size: 16 })}
-              </button>
-            )}
+          <Tooltip
+            content={`${tool.label} (${tool.shortcut})`}
+            placement="right"
+            ref={(el) => {
+              buttonRefs[index()] = el;
+            }}
+            triggerClass={`toolbar__btn${store.activeTool() === tool.id ? " toolbar__btn--active" : ""}`}
+            aria-pressed={store.activeTool() === tool.id}
+            aria-label={`${tool.label} (${tool.shortcut})`}
+            tabIndex={focusedIndex() === index() ? 0 : -1}
+            onClick={() => store.setActiveTool(tool.id)}
+          >
+            {tool.icon({ size: 16 })}
           </Tooltip>
         )}
       </For>
