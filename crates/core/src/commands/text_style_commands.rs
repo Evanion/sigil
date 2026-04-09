@@ -4,10 +4,10 @@ use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
-use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration};
+use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow};
 use crate::validate::{
-    MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT, MIN_FONT_SIZE, MIN_FONT_WEIGHT,
-    validate_finite,
+    MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE,
+    MIN_FONT_WEIGHT, validate_finite,
 };
 
 /// Which field of `TextStyle` to update.
@@ -31,6 +31,8 @@ pub enum TextStyleField {
     TextDecoration(TextDecoration),
     /// The foreground text colour.
     TextColor(StyleValue<Color>),
+    /// A CSS `text-shadow` effect. `None` removes any existing shadow; `Some` sets it.
+    TextShadow(Option<TextShadow>),
 }
 
 /// Updates a single field of a text node's `TextStyle`.
@@ -40,6 +42,54 @@ pub struct SetTextStyleField {
     pub node_id: NodeId,
     /// The field to update and its new value.
     pub field: TextStyleField,
+}
+
+/// Defense-in-depth validation for a `TextShadow` value.
+///
+/// `TextShadow::new` already validates these invariants at construction time, but
+/// callers in the server and MCP crates construct `SetTextStyleField` directly via
+/// struct literals, so re-validating here ensures the `FieldOperation` contract is
+/// self-contained.
+fn validate_shadow(shadow: &TextShadow) -> Result<(), CoreError> {
+    validate_finite("text_shadow.offset_x", shadow.offset_x())?;
+    validate_finite("text_shadow.offset_y", shadow.offset_y())?;
+    validate_finite("text_shadow.blur_radius", shadow.blur_radius())?;
+    if shadow.blur_radius() < 0.0 {
+        return Err(CoreError::ValidationError(format!(
+            "text_shadow.blur_radius must be >= 0, got {}",
+            shadow.blur_radius()
+        )));
+    }
+    if shadow.blur_radius() > MAX_TEXT_SHADOW_BLUR {
+        return Err(CoreError::ValidationError(format!(
+            "text_shadow.blur_radius must be <= {MAX_TEXT_SHADOW_BLUR}, got {}",
+            shadow.blur_radius()
+        )));
+    }
+    // Validate color channels if literal (token refs are resolved at render time).
+    if let StyleValue::Literal { value } = shadow.color() {
+        match value {
+            Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                validate_finite("text_shadow.color.r", *r)?;
+                validate_finite("text_shadow.color.g", *g)?;
+                validate_finite("text_shadow.color.b", *b)?;
+                validate_finite("text_shadow.color.a", *a)?;
+            }
+            Color::Oklch { l, c, h, a } => {
+                validate_finite("text_shadow.color.l", *l)?;
+                validate_finite("text_shadow.color.c", *c)?;
+                validate_finite("text_shadow.color.h", *h)?;
+                validate_finite("text_shadow.color.a", *a)?;
+            }
+            Color::Oklab { l, a, b, alpha } => {
+                validate_finite("text_shadow.color.l", *l)?;
+                validate_finite("text_shadow.color.a", *a)?;
+                validate_finite("text_shadow.color.b", *b)?;
+                validate_finite("text_shadow.color.alpha", *alpha)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 impl FieldOperation for SetTextStyleField {
@@ -133,9 +183,10 @@ impl FieldOperation for SetTextStyleField {
                     }
                 }
             }
-            // Enum variants (FontStyle, TextAlign, TextDecoration) are always
-            // structurally valid — no additional checks needed.
-            TextStyleField::FontStyle(_)
+            TextStyleField::TextShadow(Some(shadow)) => validate_shadow(shadow)?,
+            // None removes the shadow; enum variants are always structurally valid.
+            TextStyleField::TextShadow(None)
+            | TextStyleField::FontStyle(_)
             | TextStyleField::TextAlign(_)
             | TextStyleField::TextDecoration(_) => {}
         }
@@ -156,6 +207,7 @@ impl FieldOperation for SetTextStyleField {
                     TextStyleField::TextAlign(v) => text_style.text_align = *v,
                     TextStyleField::TextDecoration(v) => text_style.text_decoration = *v,
                     TextStyleField::TextColor(v) => text_style.text_color = v.clone(),
+                    TextStyleField::TextShadow(v) => text_style.text_shadow.clone_from(v),
                 }
                 Ok(())
             }
@@ -644,6 +696,119 @@ mod tests {
         assert!(
             op.validate(&doc).is_err(),
             "SetTextStyleField must reject missing nodes"
+        );
+    }
+
+    // ── TextShadow ────────────────────────────────────────────────────────────
+
+    fn make_black_color() -> StyleValue<Color> {
+        StyleValue::Literal {
+            value: Color::Srgb {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+        }
+    }
+
+    #[test]
+    fn test_set_text_style_field_text_shadow_validate_and_apply() {
+        use crate::node::TextShadow;
+
+        let (mut doc, node_id) = setup_doc_with_text();
+        let shadow = TextShadow::new(2.0, 4.0, 8.0, make_black_color()).expect("valid shadow");
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::TextShadow(Some(shadow.clone())),
+        };
+
+        op.validate(&doc)
+            .expect("validate should pass for valid shadow");
+        op.apply(&mut doc).expect("apply should succeed");
+
+        let updated = doc.arena.get(node_id).expect("get node");
+        if let NodeKind::Text { text_style, .. } = &updated.kind {
+            assert_eq!(
+                text_style.text_shadow,
+                Some(shadow),
+                "text_shadow should be updated to the provided value"
+            );
+        } else {
+            panic!("expected Text node kind");
+        }
+    }
+
+    #[test]
+    fn test_set_text_style_field_text_shadow_remove() {
+        use crate::node::TextShadow;
+
+        let (mut doc, node_id) = setup_doc_with_text();
+
+        // First apply a shadow so there is something to remove.
+        let shadow = TextShadow::new(1.0, 2.0, 3.0, make_black_color()).expect("valid shadow");
+        let set_op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::TextShadow(Some(shadow)),
+        };
+        set_op.validate(&doc).expect("validate set");
+        set_op.apply(&mut doc).expect("apply set");
+
+        // Verify shadow is present.
+        {
+            let node = doc.arena.get(node_id).expect("get node");
+            if let NodeKind::Text { text_style, .. } = &node.kind {
+                assert!(
+                    text_style.text_shadow.is_some(),
+                    "shadow must be present before removal"
+                );
+            } else {
+                panic!("expected Text node kind");
+            }
+        }
+
+        // Now remove the shadow.
+        let remove_op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::TextShadow(None),
+        };
+        remove_op.validate(&doc).expect("validate remove");
+        remove_op.apply(&mut doc).expect("apply remove");
+
+        let updated = doc.arena.get(node_id).expect("get node after remove");
+        if let NodeKind::Text { text_style, .. } = &updated.kind {
+            assert_eq!(
+                text_style.text_shadow, None,
+                "text_shadow should be None after removal"
+            );
+        } else {
+            panic!("expected Text node kind");
+        }
+    }
+
+    #[test]
+    fn test_set_text_style_field_text_shadow_rejects_nan_offset() {
+        // TextShadow::new validates at construction time — attempting to build
+        // a shadow with NaN offset should fail before we can even create the op.
+        // This test verifies the constructor-level guard catches it.
+        use crate::node::TextShadow;
+        let result = TextShadow::new(f64::NAN, 0.0, 8.0, make_black_color());
+        assert!(
+            result.is_err(),
+            "TextShadow with NaN offset_x must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_set_text_style_field_text_shadow_none_is_always_valid() {
+        let (doc, node_id) = setup_doc_with_text();
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::TextShadow(None),
+        };
+        assert!(
+            op.validate(&doc).is_ok(),
+            "TextShadow(None) must always pass validation"
         );
     }
 
