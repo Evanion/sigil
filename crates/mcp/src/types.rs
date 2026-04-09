@@ -361,6 +361,152 @@ pub struct SetCornerRadiiInput {
     pub radii: Vec<f64>,
 }
 
+// ── Text tool input types ─────────────────────────────────────────────
+
+/// Input for setting the text content of a text node.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetTextContentInput {
+    /// UUID of the text node to modify.
+    pub uuid: String,
+    /// New text content.
+    pub content: String,
+}
+
+/// Input for setting text style properties on a text node.
+///
+/// Only include the fields you want to change — omitted fields are left
+/// unchanged. At least one field must be provided.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct SetTextStyleInput {
+    /// UUID of the text node to modify.
+    pub uuid: String,
+    /// Partial text style — only fields that are `Some` will be applied.
+    pub style: PartialTextStyle,
+}
+
+/// A partial text style object — only fields that are present will be updated.
+///
+/// Float fields are validated at the tool-handler layer — NaN and infinity are
+/// rejected before the values reach the core engine.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct PartialTextStyle {
+    /// Font family name (e.g. "Inter", "Roboto").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    /// Font size in pixels. Can be a literal or a token reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<StyleValueInput<f64>>,
+    /// CSS font weight (1–1000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<u16>,
+    /// Font style: "normal" or "italic".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_style: Option<String>,
+    /// Line height multiplier or absolute pixel value. Can be a literal or a token reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<StyleValueInput<f64>>,
+    /// Letter spacing in pixels. Can be a literal or a token reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<StyleValueInput<f64>>,
+    /// Text alignment: "left", "center", "right", or "justify".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<String>,
+    /// Text decoration: "none", "underline", or "strikethrough".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_decoration: Option<String>,
+    /// Foreground text color. Can be a literal or a token reference.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_color: Option<StyleValueInput<ColorInput>>,
+    /// Text shadow. Pass `null` to remove an existing shadow; pass an object to set one.
+    /// Omit the field entirely to leave the shadow unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_shadow: Option<Option<TextShadowInput>>,
+}
+
+/// A style value that is either a literal or a token reference.
+///
+/// Mirrors the core `StyleValue<T>` enum with `JsonSchema` support.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StyleValueInput<T> {
+    /// A literal value.
+    Literal {
+        /// The value.
+        value: T,
+    },
+    /// A reference to a design token by name.
+    TokenRef {
+        /// Token name.
+        name: String,
+    },
+}
+
+/// Input representation of a color value.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "space", rename_all = "snake_case")]
+pub enum ColorInput {
+    /// sRGB color with RGBA channels in [0.0, 1.0].
+    Srgb {
+        /// Red channel.
+        r: f64,
+        /// Green channel.
+        g: f64,
+        /// Blue channel.
+        b: f64,
+        /// Alpha channel.
+        a: f64,
+    },
+    /// Display P3 color with RGBA channels.
+    #[serde(rename = "display_p3")]
+    DisplayP3 {
+        /// Red channel.
+        r: f64,
+        /// Green channel.
+        g: f64,
+        /// Blue channel.
+        b: f64,
+        /// Alpha channel.
+        a: f64,
+    },
+    /// Oklch color space.
+    Oklch {
+        /// Lightness.
+        l: f64,
+        /// Chroma.
+        c: f64,
+        /// Hue in degrees.
+        h: f64,
+        /// Alpha channel.
+        a: f64,
+    },
+    /// Oklab color space.
+    Oklab {
+        /// Lightness.
+        l: f64,
+        /// a axis.
+        a: f64,
+        /// b axis.
+        b: f64,
+        /// Alpha channel.
+        alpha: f64,
+    },
+}
+
+/// Input for a text shadow effect.
+///
+/// Float fields are validated at the tool-handler layer.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TextShadowInput {
+    /// Horizontal offset in pixels.
+    pub offset_x: f64,
+    /// Vertical offset in pixels.
+    pub offset_y: f64,
+    /// Blur radius in pixels (must be >= 0).
+    pub blur_radius: f64,
+    /// Shadow color. Can be a literal or a token reference.
+    pub color: StyleValueInput<ColorInput>,
+}
+
 // ── Tool output types ─────────────────────────────────────────────────
 
 /// Result of listing pages.

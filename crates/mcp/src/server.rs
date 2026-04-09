@@ -405,6 +405,38 @@ impl SigilMcpServer {
             components: crate::tools::components::list_components_impl(&self.state),
         })
     }
+
+    /// Sets the text content of a text node.
+    #[tool(
+        name = "set_text_content",
+        description = "Set the text content of a text node"
+    )]
+    fn set_text_content(
+        &self,
+        Parameters(input): Parameters<crate::types::SetTextContentInput>,
+    ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
+        crate::tools::text::set_text_content_impl(&self.state, &input.uuid, &input.content)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
+    /// Sets text style properties on a text node. Pass only the fields you want
+    /// to change; omitted fields are left unchanged.
+    #[tool(
+        name = "set_text_style",
+        description = "Set text style properties. Pass only fields to change. Fields: font_family, \
+                        font_size, font_weight, font_style (normal|italic), line_height, \
+                        letter_spacing, text_align (left|center|right|justify), text_decoration \
+                        (none|underline|strikethrough), text_color, text_shadow (null to remove)."
+    )]
+    fn set_text_style(
+        &self,
+        Parameters(input): Parameters<crate::types::SetTextStyleInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::text::set_text_style_impl(&self.state, &input.uuid, &input.style)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
 }
 
 /// Spawns the MCP server on stdio in a background task.
