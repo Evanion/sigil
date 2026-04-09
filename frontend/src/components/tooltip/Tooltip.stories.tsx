@@ -20,7 +20,7 @@ type Story = StoryObj<typeof Tooltip>;
 export const Top: Story = {
   render: () => (
     <Tooltip content="Tooltip on top" placement="top">
-      <button>Hover me (top)</button>
+      {(triggerProps) => <button {...triggerProps}>Hover me (top)</button>}
     </Tooltip>
   ),
 };
@@ -28,7 +28,7 @@ export const Top: Story = {
 export const Bottom: Story = {
   render: () => (
     <Tooltip content="Tooltip on bottom" placement="bottom">
-      <button>Hover me (bottom)</button>
+      {(triggerProps) => <button {...triggerProps}>Hover me (bottom)</button>}
     </Tooltip>
   ),
 };
@@ -36,7 +36,7 @@ export const Bottom: Story = {
 export const Left: Story = {
   render: () => (
     <Tooltip content="Tooltip on the left" placement="left">
-      <button>Hover me (left)</button>
+      {(triggerProps) => <button {...triggerProps}>Hover me (left)</button>}
     </Tooltip>
   ),
 };
@@ -44,7 +44,7 @@ export const Left: Story = {
 export const Right: Story = {
   render: () => (
     <Tooltip content="Tooltip on the right" placement="right">
-      <button>Hover me (right)</button>
+      {(triggerProps) => <button {...triggerProps}>Hover me (right)</button>}
     </Tooltip>
   ),
 };
@@ -53,23 +53,26 @@ export const WithIconButton: Story = {
   name: "With Icon Button",
   render: () => (
     <Tooltip content="Select tool (V)" placement="bottom">
-      <button
-        aria-label="Select tool"
-        style={{
-          width: "32px",
-          height: "32px",
-          display: "inline-flex",
-          "align-items": "center",
-          "justify-content": "center",
-          border: "1px solid var(--border-1)",
-          "border-radius": "var(--button-radius)",
-          background: "var(--surface-3)",
-          color: "var(--text-1)",
-          cursor: "pointer",
-        }}
-      >
-        V
-      </button>
+      {(triggerProps) => (
+        <button
+          {...triggerProps}
+          aria-label="Select tool"
+          style={{
+            width: "32px",
+            height: "32px",
+            display: "inline-flex",
+            "align-items": "center",
+            "justify-content": "center",
+            border: "1px solid var(--border-1)",
+            "border-radius": "var(--button-radius)",
+            background: "var(--surface-3)",
+            color: "var(--text-1)",
+            cursor: "pointer",
+          }}
+        >
+          V
+        </button>
+      )}
     </Tooltip>
   ),
 };
@@ -81,7 +84,7 @@ export const LongContent: Story = {
       content="This is a longer tooltip message that describes a feature or provides extended help text to the user about this particular action."
       placement="top"
     >
-      <button>Hover for details</button>
+      {(triggerProps) => <button {...triggerProps}>Hover for details</button>}
     </Tooltip>
   ),
 };

@@ -12,20 +12,11 @@ afterEach(() => {
   cleanup();
 });
 
-/** Returns the closest ancestor `<span>` wrapping a trigger element. */
-function getTriggerSpan(text: string): HTMLElement {
-  const el = screen.getByText(text).closest("span");
-  if (el === null) {
-    throw new Error(`Could not find <span> ancestor for text: ${text}`);
-  }
-  return el;
-}
-
 describe("Tooltip", () => {
   it("should render the trigger element", () => {
     render(() => (
       <Tooltip content="Helpful tip">
-        <button>Hover me</button>
+        {(triggerProps) => <button {...triggerProps}>Hover me</button>}
       </Tooltip>
     ));
     expect(screen.getByText("Hover me")).toBeTruthy();
@@ -34,7 +25,7 @@ describe("Tooltip", () => {
   it("should not show tooltip content initially", () => {
     render(() => (
       <Tooltip content="Hidden tip">
-        <button>Initial trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Initial trigger</button>}
       </Tooltip>
     ));
     expect(screen.queryByText("Hidden tip")).toBeNull();
@@ -43,10 +34,10 @@ describe("Tooltip", () => {
   it("should show tooltip content on pointer enter after delay", async () => {
     render(() => (
       <Tooltip content="Delayed tip" openDelay={0}>
-        <button>Pointer trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Pointer trigger</button>}
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Pointer trigger");
+    const trigger = screen.getByText("Pointer trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -57,10 +48,10 @@ describe("Tooltip", () => {
   it("should close tooltip on pointer leave", async () => {
     render(() => (
       <Tooltip content="Vanishing tip" openDelay={0} closeDelay={0}>
-        <button>Leave trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Leave trigger</button>}
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Leave trigger");
+    const trigger = screen.getByText("Leave trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -79,10 +70,10 @@ describe("Tooltip", () => {
   it("should show tooltip content on focus", async () => {
     render(() => (
       <Tooltip content="Focus tip" openDelay={0}>
-        <button>Focus trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Focus trigger</button>}
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Focus trigger");
+    const trigger = screen.getByText("Focus trigger");
     fireEvent.focus(trigger);
     await waitFor(() => {
       expect(screen.getByText("Focus tip")).toBeTruthy();
@@ -92,10 +83,10 @@ describe("Tooltip", () => {
   it("should apply the sigil-tooltip class to the content element", async () => {
     render(() => (
       <Tooltip content="Styled tip" openDelay={0}>
-        <button>Style trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Style trigger</button>}
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Style trigger");
+    const trigger = screen.getByText("Style trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -107,10 +98,10 @@ describe("Tooltip", () => {
   it("should render an arrow element inside the tooltip", async () => {
     render(() => (
       <Tooltip content="Arrow tip" openDelay={0}>
-        <button>Arrow trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Arrow trigger</button>}
       </Tooltip>
     ));
-    const trigger = getTriggerSpan("Arrow trigger");
+    const trigger = screen.getByText("Arrow trigger");
     fireEvent.pointerEnter(trigger);
     fireEvent.mouseEnter(trigger);
     await waitFor(() => {
@@ -124,9 +115,27 @@ describe("Tooltip", () => {
   it("should accept placement prop without error", () => {
     render(() => (
       <Tooltip content="Bottom tip" placement="bottom">
-        <button>Placement trigger</button>
+        {(triggerProps) => <button {...triggerProps}>Placement trigger</button>}
       </Tooltip>
     ));
     expect(screen.getByText("Placement trigger")).toBeTruthy();
+  });
+
+  it("should render trigger as a plain button without a non-interactive span wrapper", () => {
+    render(() => (
+      <Tooltip content="No wrapper tip">
+        {(triggerProps) => <button {...triggerProps}>Direct button</button>}
+      </Tooltip>
+    ));
+    const btn = screen.getByText("Direct button").closest("button");
+    expect(btn).toBeTruthy();
+    // The button must not be wrapped in a <span> — the old as="span" violation
+    // placed a non-interactive span between the trigger and the document.
+    // Walk ancestors and assert no span exists before the body.
+    let ancestor = btn?.parentElement;
+    while (ancestor && ancestor !== document.body) {
+      expect(ancestor.tagName.toLowerCase()).not.toBe("span");
+      ancestor = ancestor.parentElement;
+    }
   });
 });
