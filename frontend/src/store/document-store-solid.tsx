@@ -56,7 +56,7 @@ export interface DocumentState {
   nodes: Record<string, MutableDocumentNode>;
 }
 
-export type ToolType = "select" | "frame" | "rectangle" | "ellipse";
+export type ToolType = "select" | "frame" | "rectangle" | "ellipse" | "text";
 
 export interface DocumentStoreAPI {
   // Document state (reactive — read inside components/effects to track)
@@ -94,6 +94,8 @@ export interface DocumentStoreAPI {
   setStrokes(uuid: string, strokes: Stroke[]): void;
   setEffects(uuid: string, effects: Effect[]): void;
   setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
+  setTextContent(uuid: string, content: string): void;
+  setTextStyle(uuid: string, field: string, value: unknown): void;
   batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
   groupNodes(uuids: string[], name: string): void;
   ungroupNodes(uuids: string[]): void;
@@ -874,6 +876,51 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
+  function setTextContent(uuid: string, content: string): void {
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "text") return;
+
+    // Update the kind with new content
+    const previousKind = deepClone(node.kind);
+    const newKind = { ...previousKind, content };
+
+    interceptor.set(uuid, "kind", newKind);
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "kind.content",
+        value: JSON.stringify(content),
+      },
+    });
+  }
+
+  function setTextStyle(uuid: string, field: string, value: unknown): void {
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "text") return;
+
+    // Update the kind with new text_style field
+    const previousKind = deepClone(node.kind);
+    // JSON clone: Solid proxy not structuredClone-safe
+    const previousTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as Record<
+      string,
+      unknown
+    >;
+    previousTextStyle[field] = value;
+    const newKind = { ...previousKind, text_style: previousTextStyle };
+
+    interceptor.set(uuid, "kind", newKind);
+    const path = `kind.text_style.${field}`;
+    // RF-026: Queue server op — sent when interceptor commits (coalesced)
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path,
+        value: JSON.stringify(value),
+      },
+    });
+  }
+
   function batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void {
     // RF-038: Reject non-finite transform values at the store boundary.
     // NaN/Infinity would propagate silently through the optimistic update and
@@ -1253,6 +1300,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setStrokes,
     setEffects,
     setCornerRadii,
+    setTextContent,
+    setTextStyle,
     batchSetTransform,
     groupNodes,
     ungroupNodes,

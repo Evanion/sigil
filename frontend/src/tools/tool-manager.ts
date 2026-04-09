@@ -7,7 +7,7 @@
  */
 
 /** Available tool types in the editor. */
-export type ToolType = "select" | "frame" | "rectangle" | "ellipse";
+export type ToolType = "select" | "frame" | "rectangle" | "ellipse" | "text";
 
 /** Pointer event data passed to tool handlers, in both world and screen coordinates. */
 export interface ToolEvent {

@@ -42,6 +42,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setStrokes: vi.fn(),
     setEffects: vi.fn(),
     setCornerRadii: vi.fn(),
+    setTextContent: vi.fn(),
+    setTextStyle: vi.fn(),
     batchSetTransform: vi.fn(),
     groupNodes: vi.fn(),
     ungroupNodes: vi.fn(),
@@ -68,11 +70,11 @@ describe("Toolbar", () => {
     cleanup();
   });
 
-  it("renders 4 tool buttons", () => {
+  it("renders 5 tool buttons", () => {
     const store = createMockStore();
     renderWithProviders(store);
     const buttons = screen.getAllByRole("button");
-    expect(buttons.length).toBe(4);
+    expect(buttons.length).toBe(5);
   });
 
   it("marks active tool as pressed (aria-pressed)", () => {

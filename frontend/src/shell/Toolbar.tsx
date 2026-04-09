@@ -7,7 +7,7 @@ import {
   type Component,
   type JSX,
 } from "solid-js";
-import { MousePointer2, Frame, Square, Circle } from "lucide-solid";
+import { MousePointer2, Frame, Square, Circle, Type } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "./AnnounceProvider";
 import { Tooltip } from "../components/tooltip/Tooltip";
@@ -27,6 +27,7 @@ const TOOLS: ToolDef[] = [
   { id: "frame", label: "Frame", shortcut: "F", icon: (p) => <Frame size={p.size} /> },
   { id: "rectangle", label: "Rectangle", shortcut: "R", icon: (p) => <Square size={p.size} /> },
   { id: "ellipse", label: "Ellipse", shortcut: "O", icon: (p) => <Circle size={p.size} /> },
+  { id: "text", label: "Text", shortcut: "T", icon: (p) => <Type size={p.size} /> },
 ];
 
 export const Toolbar: Component = () => {
@@ -86,6 +87,12 @@ export const Toolbar: Component = () => {
         if (!isTyping()) {
           e.preventDefault();
           store.setActiveTool("ellipse");
+        }
+      },
+      t: (e: KeyboardEvent) => {
+        if (!isTyping()) {
+          e.preventDefault();
+          store.setActiveTool("text");
         }
       },
     });

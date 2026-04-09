@@ -46,6 +46,8 @@ function createMockStore(
     setStrokes: () => {},
     setEffects: () => {},
     setCornerRadii: () => {},
+    setTextContent: () => {},
+    setTextStyle: () => {},
     batchSetTransform: () => {},
     groupNodes: () => {},
     ungroupNodes: () => {},

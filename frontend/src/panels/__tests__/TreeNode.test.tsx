@@ -86,6 +86,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setStrokes: vi.fn(),
     setEffects: vi.fn(),
     setCornerRadii: vi.fn(),
+    setTextContent: vi.fn(),
+    setTextStyle: vi.fn(),
     batchSetTransform: vi.fn(),
     groupNodes: vi.fn(),
     ungroupNodes: vi.fn(),

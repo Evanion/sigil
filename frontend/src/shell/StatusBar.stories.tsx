@@ -39,6 +39,8 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setStrokes: () => {},
     setEffects: () => {},
     setCornerRadii: () => {},
+    setTextContent: () => {},
+    setTextStyle: () => {},
     batchSetTransform: () => {},
     groupNodes: () => {},
     ungroupNodes: () => {},

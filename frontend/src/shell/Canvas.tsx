@@ -27,6 +27,7 @@ import type { ToolType } from "../store/document-store-solid";
 import { createSelectTool, type PreviewTransform, type MarqueeRect } from "../tools/select-tool";
 import type { SnapGuide } from "../canvas/snap-engine";
 import { createShapeTool, type PreviewRect } from "../tools/shape-tool";
+import { createTextTool } from "../tools/text-tool";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
@@ -175,11 +176,22 @@ export const Canvas: Component = () => {
     const rectangleTool = makeShapeTool(rectKind, "Rectangle");
     const ellipseTool = makeShapeTool(ellipseKind, "Ellipse");
 
+    // Text tool: onEditRequest is a no-op until the text overlay (Task 7) is wired up.
+    // TODO(text-overlay): replace no-op with overlay activation callback.
+    const textTool = createTextTool(
+      storeAdapter,
+      () => store.setActiveTool("select"),
+      (_uuid: string) => {
+        /* text overlay not yet implemented — Task 7 */
+      },
+    );
+
     const toolImpls = new Map<ToolType, Tool>([
       ["select", selectTool],
       ["frame", frameTool],
       ["rectangle", rectangleTool],
       ["ellipse", ellipseTool],
+      ["text", textTool],
     ]);
 
     const toolManager = createToolManager(toolImpls, "select");
