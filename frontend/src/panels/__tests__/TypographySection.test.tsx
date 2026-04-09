@@ -464,7 +464,8 @@ describe("TypographySection", () => {
     );
     expect(shadowCall).toBeTruthy();
     // The value should be a TextShadow object (not null) when toggling on
-    const shadowValue = (shadowCall![1] as { value: unknown }).value;
+    if (!shadowCall) return;
+    const shadowValue = (shadowCall[1] as { value: unknown }).value;
     expect(shadowValue).not.toBeNull();
     expect(shadowValue).toHaveProperty("offset_x");
     expect(shadowValue).toHaveProperty("blur_radius");
