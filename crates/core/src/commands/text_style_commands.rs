@@ -64,6 +64,18 @@ impl FieldOperation for SetTextStyleField {
                         family.len()
                     )));
                 }
+                if let Some(pos) = family.find(|c: char| c.is_control()) {
+                    return Err(CoreError::ValidationError(format!(
+                        "font_family contains control character at byte position {pos}"
+                    )));
+                }
+                if let Some(pos) =
+                    family.find(|c: char| ['\'', '"', ';', '{', '}', '\\'].contains(&c))
+                {
+                    return Err(CoreError::ValidationError(format!(
+                        "font_family contains forbidden character at byte position {pos}"
+                    )));
+                }
             }
             TextStyleField::FontSize(sv) => {
                 if let StyleValue::Literal { value } = sv {
@@ -97,12 +109,35 @@ impl FieldOperation for SetTextStyleField {
                     validate_finite("letter_spacing", *value)?;
                 }
             }
-            // Enum variants (FontStyle, TextAlign, TextDecoration, TextColor) are always
+            TextStyleField::TextColor(sv) => {
+                if let StyleValue::Literal { value } = sv {
+                    match value {
+                        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                            validate_finite("text_color.r", *r)?;
+                            validate_finite("text_color.g", *g)?;
+                            validate_finite("text_color.b", *b)?;
+                            validate_finite("text_color.a", *a)?;
+                        }
+                        Color::Oklch { l, c, h, a } => {
+                            validate_finite("text_color.l", *l)?;
+                            validate_finite("text_color.c", *c)?;
+                            validate_finite("text_color.h", *h)?;
+                            validate_finite("text_color.a", *a)?;
+                        }
+                        Color::Oklab { l, a, b, alpha } => {
+                            validate_finite("text_color.l", *l)?;
+                            validate_finite("text_color.a", *a)?;
+                            validate_finite("text_color.b", *b)?;
+                            validate_finite("text_color.alpha", *alpha)?;
+                        }
+                    }
+                }
+            }
+            // Enum variants (FontStyle, TextAlign, TextDecoration) are always
             // structurally valid — no additional checks needed.
             TextStyleField::FontStyle(_)
             | TextStyleField::TextAlign(_)
-            | TextStyleField::TextDecoration(_)
-            | TextStyleField::TextColor(_) => {}
+            | TextStyleField::TextDecoration(_) => {}
         }
         Ok(())
     }
@@ -629,5 +664,130 @@ mod tests {
         };
         op.validate(&doc).expect("token refs must pass validation");
         op.apply(&mut doc).expect("apply");
+    }
+
+    // ── Constant enforcement tests ────────────────────────────────────────────
+
+    #[test]
+    fn test_min_font_size_enforced() {
+        let (doc, node_id) = setup_doc_with_text();
+        // Just below MIN_FONT_SIZE
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontSize(StyleValue::Literal {
+                value: MIN_FONT_SIZE - 0.01,
+            }),
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "font_size below MIN_FONT_SIZE must be rejected"
+        );
+
+        // At MIN_FONT_SIZE — should pass
+        let op_at = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontSize(StyleValue::Literal {
+                value: MIN_FONT_SIZE,
+            }),
+        };
+        assert!(
+            op_at.validate(&doc).is_ok(),
+            "font_size at MIN_FONT_SIZE must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_max_font_size_enforced() {
+        let (doc, node_id) = setup_doc_with_text();
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontSize(StyleValue::Literal {
+                value: MAX_FONT_SIZE + 1.0,
+            }),
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "font_size above MAX_FONT_SIZE must be rejected"
+        );
+
+        // At MAX_FONT_SIZE — should pass
+        let op_at = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontSize(StyleValue::Literal {
+                value: MAX_FONT_SIZE,
+            }),
+        };
+        assert!(
+            op_at.validate(&doc).is_ok(),
+            "font_size at MAX_FONT_SIZE must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_min_font_weight_enforced() {
+        let (doc, node_id) = setup_doc_with_text();
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontWeight(MIN_FONT_WEIGHT.saturating_sub(1)),
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "font_weight below MIN_FONT_WEIGHT must be rejected"
+        );
+
+        let op_at = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontWeight(MIN_FONT_WEIGHT),
+        };
+        assert!(
+            op_at.validate(&doc).is_ok(),
+            "font_weight at MIN_FONT_WEIGHT must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_max_font_weight_enforced() {
+        let (doc, node_id) = setup_doc_with_text();
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontWeight(MAX_FONT_WEIGHT + 1),
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "font_weight above MAX_FONT_WEIGHT must be rejected"
+        );
+
+        let op_at = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontWeight(MAX_FONT_WEIGHT),
+        };
+        assert!(
+            op_at.validate(&doc).is_ok(),
+            "font_weight at MAX_FONT_WEIGHT must be accepted"
+        );
+    }
+
+    #[test]
+    fn test_max_font_family_len_enforced() {
+        let (doc, node_id) = setup_doc_with_text();
+        let long_name = "x".repeat(MAX_FONT_FAMILY_LEN + 1);
+        let op = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontFamily(long_name),
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "font_family exceeding MAX_FONT_FAMILY_LEN must be rejected"
+        );
+
+        let at_limit = "x".repeat(MAX_FONT_FAMILY_LEN);
+        let op_at = SetTextStyleField {
+            node_id,
+            field: TextStyleField::FontFamily(at_limit),
+        };
+        assert!(
+            op_at.validate(&doc).is_ok(),
+            "font_family at MAX_FONT_FAMILY_LEN must be accepted"
+        );
     }
 }

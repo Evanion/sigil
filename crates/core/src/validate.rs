@@ -390,6 +390,111 @@ pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreErr
     Ok(())
 }
 
+/// Characters forbidden in font family names (CSS-significant or injection-prone).
+const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\'];
+
+/// Validates a `TextStyle` struct.
+///
+/// Checks:
+/// - `font_family`: non-empty, length <= `MAX_FONT_FAMILY_LEN`, no control chars,
+///   no CSS-significant chars (`'`, `"`, `;`, `{`, `}`, `\`).
+/// - `font_size` (if literal): finite, in `[MIN_FONT_SIZE, MAX_FONT_SIZE]`.
+/// - `font_weight`: in `[MIN_FONT_WEIGHT, MAX_FONT_WEIGHT]`.
+/// - `line_height` (if literal): finite, > 0.
+/// - `letter_spacing` (if literal): finite.
+/// - `text_color` (if literal): all f64 channels are finite.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any field fails validation.
+pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError> {
+    use crate::node::{Color, StyleValue};
+
+    // ── font_family ──────────────────────────────────────────────
+    if ts.font_family.is_empty() {
+        return Err(CoreError::ValidationError(
+            "font_family must not be empty".to_string(),
+        ));
+    }
+    if ts.font_family.len() > MAX_FONT_FAMILY_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+            ts.font_family.len()
+        )));
+    }
+    if let Some(pos) = ts.font_family.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains control character at byte position {pos}"
+        )));
+    }
+    if let Some(pos) = ts
+        .font_family
+        .find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c))
+    {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains forbidden character at byte position {pos}"
+        )));
+    }
+
+    // ── font_size ────────────────────────────────────────────────
+    if let StyleValue::Literal { value } = ts.font_size {
+        validate_finite("font_size", value)?;
+        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value) {
+            return Err(CoreError::ValidationError(format!(
+                "font_size must be in {MIN_FONT_SIZE}..={MAX_FONT_SIZE}, got {value}"
+            )));
+        }
+    }
+
+    // ── font_weight ──────────────────────────────────────────────
+    if ts.font_weight < MIN_FONT_WEIGHT || ts.font_weight > MAX_FONT_WEIGHT {
+        return Err(CoreError::ValidationError(format!(
+            "font_weight must be in {}..={}, got {}",
+            MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, ts.font_weight
+        )));
+    }
+
+    // ── line_height ──────────────────────────────────────────────
+    if let StyleValue::Literal { value } = ts.line_height {
+        validate_finite("line_height", value)?;
+        if value <= 0.0 {
+            return Err(CoreError::ValidationError(format!(
+                "line_height must be > 0, got {value}"
+            )));
+        }
+    }
+
+    // ── letter_spacing ───────────────────────────────────────────
+    if let StyleValue::Literal { value } = ts.letter_spacing {
+        validate_finite("letter_spacing", value)?;
+    }
+
+    // ── text_color ───────────────────────────────────────────────
+    if let StyleValue::Literal { value } = ts.text_color {
+        match value {
+            Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                validate_finite("text_color.r", r)?;
+                validate_finite("text_color.g", g)?;
+                validate_finite("text_color.b", b)?;
+                validate_finite("text_color.a", a)?;
+            }
+            Color::Oklch { l, c, h, a } => {
+                validate_finite("text_color.l", l)?;
+                validate_finite("text_color.c", c)?;
+                validate_finite("text_color.h", h)?;
+                validate_finite("text_color.a", a)?;
+            }
+            Color::Oklab { l, a, b, alpha } => {
+                validate_finite("text_color.l", l)?;
+                validate_finite("text_color.a", a)?;
+                validate_finite("text_color.b", b)?;
+                validate_finite("text_color.alpha", alpha)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -858,7 +963,7 @@ mod tests {
     }
 
     // ── MIN_FONT_SIZE / MAX_FONT_SIZE constant definitions ────────────
-    // Enforcement is tested in node.rs via Node::new validation.
+    // Enforcement is tested via SetTextStyleField::validate in text_style_commands.rs.
     // These tests verify the constant values are within sensible ranges.
 
     #[test]

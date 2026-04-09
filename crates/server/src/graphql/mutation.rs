@@ -367,6 +367,13 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             })
         }
         "kind.content" => {
+            if let Some(s) = value.as_str()
+                && s.len() > agent_designer_core::validate::MAX_TEXT_CONTENT_LEN
+            {
+                return Err(async_graphql::Error::new(
+                    "text content exceeds maximum length",
+                ));
+            }
             let new_content: String = serde_json::from_value(value)
                 .map_err(|e| async_graphql::Error::new(format!("invalid content: {e}")))?;
             Ok(ParsedOp {
@@ -386,6 +393,15 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
         "kind.text_style.font_family" => {
             let font_family: String = serde_json::from_value(value)
                 .map_err(|e| async_graphql::Error::new(format!("invalid font_family: {e}")))?;
+            if font_family.is_empty() {
+                return Err(async_graphql::Error::new("font_family must not be empty"));
+            }
+            if font_family.len() > agent_designer_core::validate::MAX_FONT_FAMILY_LEN {
+                return Err(async_graphql::Error::new(format!(
+                    "font_family exceeds max length of {}",
+                    agent_designer_core::validate::MAX_FONT_FAMILY_LEN
+                )));
+            }
             Ok(ParsedOp {
                 builder: Box::new(move |doc| {
                     let node_id = doc

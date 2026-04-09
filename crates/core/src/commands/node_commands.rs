@@ -46,6 +46,14 @@ impl FieldOperation for CreateNode {
                 validate_finite("arc_start", *arc_start)?;
                 validate_finite("arc_end", *arc_end)?;
             }
+            NodeKind::Text {
+                content,
+                text_style,
+                ..
+            } => {
+                crate::validate::validate_text_content(content)?;
+                crate::validate::validate_text_style(text_style)?;
+            }
             _ => {}
         }
         if let Some(ref t) = self.initial_transform {

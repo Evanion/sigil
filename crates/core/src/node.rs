@@ -692,10 +692,7 @@ impl<'de> Deserialize<'de> for Node {
 /// # Errors
 /// Returns `CoreError::ValidationError` if any kind-specific validation fails.
 pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::CoreError> {
-    use crate::validate::{
-        MAX_FONT_FAMILY_LEN, MAX_FONT_WEIGHT, MIN_FONT_WEIGHT, validate_finite,
-        validate_text_content,
-    };
+    use crate::validate::{validate_finite, validate_text_content, validate_text_style};
 
     match kind {
         NodeKind::Image { asset_ref } => {
@@ -707,20 +704,7 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
             ..
         } => {
             validate_text_content(content)?;
-            if text_style.font_family.len() > MAX_FONT_FAMILY_LEN {
-                return Err(crate::error::CoreError::ValidationError(format!(
-                    "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-                    text_style.font_family.len()
-                )));
-            }
-            if text_style.font_weight < MIN_FONT_WEIGHT || text_style.font_weight > MAX_FONT_WEIGHT
-            {
-                return Err(crate::error::CoreError::ValidationError(format!(
-                    "font_weight must be in {}..={}, got {}",
-                    MIN_FONT_WEIGHT, MAX_FONT_WEIGHT, text_style.font_weight
-                )));
-            }
-            validate_font_size(text_style)?;
+            validate_text_style(text_style)?;
         }
         NodeKind::Rectangle { corner_radii } => {
             for (i, r) in corner_radii.iter().enumerate() {
@@ -820,24 +804,6 @@ fn validate_grid_layout(grid: &GridLayout) -> Result<(), crate::error::CoreError
     }
     for track in &grid.rows {
         validate_grid_track(track)?;
-    }
-    Ok(())
-}
-
-/// Validates the `font_size` field of a `TextStyle`.
-///
-/// Font size must be finite and within `[MIN_FONT_SIZE, MAX_FONT_SIZE]`.
-/// Only `StyleValue::Literal` values are validated; token references are
-/// resolved at render time and cannot be checked here.
-fn validate_font_size(text_style: &TextStyle) -> Result<(), crate::error::CoreError> {
-    use crate::validate::{MAX_FONT_SIZE, MIN_FONT_SIZE, validate_finite};
-    if let StyleValue::Literal { value } = text_style.font_size {
-        validate_finite("font_size", value)?;
-        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value) {
-            return Err(crate::error::CoreError::ValidationError(format!(
-                "font_size must be in {MIN_FONT_SIZE}..={MAX_FONT_SIZE}, got {value}"
-            )));
-        }
     }
     Ok(())
 }
