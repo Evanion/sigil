@@ -118,6 +118,7 @@ This project uses Rust Edition 2024. Be aware of:
 - Never split a read-then-write into two separate lock acquisitions (lock/read/drop then lock/write). This is a TOCTOU race. Hold a single write lock (or upgradeable read lock) for the entire read-modify-write sequence.
 - When implementing MCP tools that run over stdio transport, all tracing/logging MUST go to stderr. Any output to stdout corrupts the MCP protocol framing.
 - Never write blanket `unsafe impl Send/Sync` on wrapper types. Wrap the non-Send inner type in a newtype with a SAFETY comment. Add compile-time assertions that verify the invariant.
+- In MCP tool handlers that loop over multiple fields, capture ALL pre-mutation snapshots for rollback in a SINGLE PASS before the apply loop begins. Never call `capture_old_field` inside the apply loop — if capture fails after some fields are applied, there is no rollback data for the completed mutations.
 
 ## Before You Start
 

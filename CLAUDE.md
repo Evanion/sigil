@@ -155,6 +155,16 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - All state-mutating MCP tool calls MUST trigger both persistence (signal_dirty) AND real-time broadcast to all connected clients. Calling only signal_dirty without broadcasting leaves human clients and other agents desynchronized — they will not see the MCP agent's changes until the next reconnect or poll. The broadcast obligation for MCP is identical to the obligation for server-originated mutations in the Broadcast Semantics section above.
 - When running over stdio transport, all diagnostic output MUST go to stderr, never stdout. Writing tracing or log output to stdout corrupts the protocol framing — the MCP client interprets any stdout bytes as protocol messages. Configure the `tracing` subscriber to write exclusively to stderr when the transport is stdio. The transport mode must be detectable at startup (e.g., via a `--stdio` flag or env var) to apply the correct subscriber configuration.
 
+#### MCP Broadcast Payload Shape Contract
+
+Before implementing any MCP tool that broadcasts, the implementer MUST read `frontend/src/operations/apply-remote.ts` and verify that the broadcast payload matches what the frontend dispatcher expects. The fields `op_type`, `path`, and `value` are not free-form — they are consumed by a dispatcher that switches on exact string values. Mismatched values cause the operation to be silently ignored by all connected clients.
+
+Rules:
+- `op_type` must exactly match the string the frontend `applyRemoteOperation` dispatcher switches on (e.g., `"create_node"`, `"delete_node"` — not shortened aliases).
+- `value` shape must match what the frontend handler for that `op_type` destructures (e.g., `reparent` expects `{parentUuid, position}` — not a bare string).
+- When adding a new operation type to an MCP tool, add the corresponding handler in `applyRemoteOperation` in the same PR. A broadcast without a handler is a no-op.
+- When changing the frontend handler for an operation type, search all MCP tools for broadcasts of that `op_type` and update them in the same PR.
+
 ---
 
 ## 5. Code Style
@@ -167,7 +177,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Core crate: no `unwrap()` or `expect()` — return `Result` types.
 - Always run `cargo fmt` after any code change before committing. Formatting is checked in CI; unformatted code will fail the pipeline.
 - Avoid Rust reserved keywords as identifiers — check against both current and future editions (e.g., `gen` is reserved in Edition 2024). Use `generation`, `gen_value`, or similar alternatives.
-- Define all validation limit constants (`MAX_*`, `LIMIT_*`, `MIN_*`) in `validate.rs`, not scattered across type definition files. Co-locating limits makes audit and enforcement traceable.
+- Define all validation artifacts in `validate.rs`: numeric limit constants (`MAX_*`, `LIMIT_*`, `MIN_*`), character denylists (e.g., `FONT_FAMILY_FORBIDDEN_CHARS`), character allowlists, and any other validation predicate or set used in more than one location. Do not inline these in type definition files or command modules — inline copies diverge silently.
 - Every `unsafe impl Send` or `unsafe impl Sync` must include a `// SAFETY:` comment explaining why the implementation is sound, naming the specific invariant. Apply unsafe impls to the narrowest possible type (a newtype wrapper, not the enclosing struct). Blanket unsafe Send/Sync on types containing non-Send/Sync fields is a bug.
 
 ### TypeScript
@@ -303,6 +313,7 @@ Every validation constant (e.g., `MAX_FILE_SIZE`, `MAX_NESTING_DEPTH`, `MAX_NAME
 1. Add the enforcement check at every relevant boundary (constructor, deserialization, insertion).
 2. Add a test that verifies the limit is enforced (attempts to exceed it and expects an error).
 3. If a constant exists but is not enforced, treat it as a bug.
+4. Every numeric input control in the frontend (`NumberInput`, `Slider`) MUST have a named constant for its `min` and `max` bounds. Passing a hardcoded literal as the `max` prop, or omitting bounds on a domain-bounded value (pixel offset, opacity, angle), is a bug. The constant must match the corresponding Rust validation value.
 
 ### Recursive Functions Require Depth Guards
 
@@ -337,9 +348,11 @@ When an item is removed from a collection (popped from a stack, removed from a v
 
 When a mutation function loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This applies to loops within any single mutation function — whether a `FieldOperation`'s `apply()`, a GraphQL resolver, or an MCP tool handler. A loop that modifies 5 of 10 items and then returns an error has corrupted the document.
 
-### No Silent Error Suppression in Rollback Paths
+### No Silent Error Suppression
 
 Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppressed errors in rollback can leave the document in a corrupted state with no diagnostic trail. Instead: collect errors into a `Vec<Error>` and return a compound error (e.g., `RollbackFailed { original_error, rollback_errors }`). The only acceptable use of `let _ =` is for non-fallible return values.
+
+The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` on a `Result` where the error represents a real failure (e.g., serialization failure). Prefer `match` with an explicit log branch. "Silent" also includes mapping a specific error to a generic variant — if a rollback error is mapped to `InvalidInput`, the diagnostic trail is corrupted. Create a typed variant (e.g., `RollbackFailed`) instead.
 
 ### Ordered Collection Mutations Must Preserve Position
 
@@ -513,6 +526,8 @@ A `match` that uses a catch-all (`_ =>`) arm for a `NodeKind` dispatch is a bug 
 
 Any string field in `crates/core/` or the frontend that is used to produce a CSS property value or Canvas 2D context property (e.g., `ctx.font`, `ctx.fillStyle`) MUST be validated to reject CSS-significant characters. Denylist: single quote, double quote, semicolon, curly braces, backslash, and C0 control characters (bytes 0x00–0x1F). Apply in `validate.rs` (Rust) and a shared validation helper (TypeScript). Examples: `font_family`, variable font axis names, CSS custom property names.
 
+This validation obligation applies at two boundaries, both mandatory: (1) input arrival — validate at the API/deserialization boundary before storing; (2) output use — any function that constructs a Canvas 2D context property (`ctx.font`, `ctx.fillStyle`) or a CSS property string by interpolating a user-controlled field MUST call the CSS character validation helper immediately before interpolation, even if the value was already validated at input. Defense in depth: values may travel through code paths that bypass input validation.
+
 ### Overlay-Mode Keyboard Handlers Must Use stopPropagation at the Overlay Root
 
 Any component that activates an "overlay edit mode" (text editing, in-place rename, formula input) MUST register a `keydown` handler on the overlay's root element that calls `event.stopPropagation()` for every shortcut it handles locally. Document-level shortcut handlers MUST check `event.defaultPrevented` or rely on propagation being stopped before acting. Do NOT use `document.addEventListener` for shortcuts that should be inactive during overlay modes.
@@ -524,3 +539,7 @@ Every class in `frontend/` that lives outside Solid's component tree and registe
 ### Polymorphic Style Setter APIs Must Use Discriminated Unions
 
 Any store function that accepts a style field name and value as separate arguments MUST use a discriminated union type — not `(field: string, value: unknown)`. The discriminated union enforces field-value type relationships at compile time. A `(field: string, value: unknown)` signature is a typed hole.
+
+### Side-Effect Artifacts Must Be Constructed After Precondition Verification
+
+When implementing a mutation that requires lock acquisition and entity existence verification, all side-effect artifacts (broadcast payloads, response objects, audit log entries) MUST be constructed AFTER the lock is acquired and AFTER preconditions (entity exists, fields valid) are confirmed. Pre-building these artifacts before verification wastes allocation on error paths and risks constructing a payload from stale pre-lock state. Pattern: acquire lock, verify preconditions, apply mutation, construct broadcast payload from verified post-mutation state, release lock, send broadcast.
