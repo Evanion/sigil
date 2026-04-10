@@ -31,6 +31,7 @@ import { createTextTool } from "../tools/text-tool";
 import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overlay";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
+import { buildRenderOrder } from "../canvas/render-order";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
 // the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
@@ -145,6 +146,15 @@ export const Canvas: Component = () => {
   // a new Set per frame. Passed to renderCanvas as ReadonlySet<string>.
   const selectedIdsSet = createMemo((): ReadonlySet<string> => {
     return new Set(store.selectedNodeIds());
+  });
+
+  // RF-004: Memoize render order so DFS traversal only runs when the node
+  // graph changes, not on every pointer event (preview, marquee, guides).
+  const renderOrder = createMemo((): DocumentNode[] => {
+    const nodesObj = store.state.nodes;
+    // Object.keys() creates a reactive dependency on key additions/deletions.
+    const keys = Object.keys(nodesObj);
+    return buildRenderOrder(nodesObj, keys);
   });
 
   onMount(() => {
@@ -428,16 +438,17 @@ export const Canvas: Component = () => {
       const sy = e.clientY - rect.top;
       const [wx, wy] = screenToWorld(vp, sx, sy);
 
-      // RF-019: Find the topmost text node at this world position.
-      // Iterate all matching nodes and use the last one (topmost in z-order).
-      const nodes = store.state.nodes;
+      // RF-005: Find the topmost text node at this world position.
+      // Use render order in reverse — last in render order = topmost on canvas.
+      const ordered = renderOrder();
       let topmostUuid: string | null = null;
-      for (const uuid of Object.keys(nodes)) {
-        const node = nodes[uuid];
+      for (let i = ordered.length - 1; i >= 0; i--) {
+        const node = ordered[i];
         if (!node || node.kind.type !== "text" || !node.visible || node.locked) continue;
         const t = node.transform;
         if (wx >= t.x && wx <= t.x + t.width && wy >= t.y && wy <= t.y + t.height) {
-          topmostUuid = uuid;
+          topmostUuid = node.uuid;
+          break;
         }
       }
       if (topmostUuid !== null) {
@@ -658,7 +669,6 @@ export const Canvas: Component = () => {
 
     createEffect(() => {
       // Read every signal that affects rendering so Solid tracks them.
-      const nodesObj = store.state.nodes;
       const vp = store.viewport();
       const previews = previewTransforms();
       const prevRect = previewRect();
@@ -671,12 +681,8 @@ export const Canvas: Component = () => {
       // RF-006: Read memoized Set (created once per selection change, not per frame).
       const selSet = selectedIdsSet();
 
-      // Convert nodes Record to array for the renderer.
-      // IMPORTANT: Object.keys() must be called to create a reactive dependency
-      // on key additions/deletions in Solid's store. Object.values() alone does
-      // not track new keys being added (e.g., optimistic node creation).
-      const keys = Object.keys(nodesObj);
-      const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
+      // RF-004: Use memoized render order — only recomputed when node graph changes.
+      const nodesArray = renderOrder();
 
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
