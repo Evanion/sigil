@@ -1,0 +1,33 @@
+{
+  "toolbar": {
+    "label": "Herramientas de diseño"
+  },
+  "select": {
+    "label": "Seleccionar",
+    "shortcut": "V"
+  },
+  "frame": {
+    "label": "Marco",
+    "shortcut": "F"
+  },
+  "rectangle": {
+    "label": "Rectángulo",
+    "shortcut": "R"
+  },
+  "ellipse": {
+    "label": "Elipse",
+    "shortcut": "O"
+  },
+  "text": {
+    "label": "Texto",
+    "shortcut": "T"
+  },
+  "pen": {
+    "label": "Pluma",
+    "shortcut": "P"
+  },
+  "hand": {
+    "label": "Mano",
+    "shortcut": "H"
+  }
+}

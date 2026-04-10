@@ -1,5 +1,7 @@
 import { createSignal, type Component } from "solid-js";
+import { TransProvider, useTransContext } from "@mbarzda/solid-i18next";
 import { DragDropProvider } from "dnd-kit-solid";
+import { i18nInstance } from "./i18n";
 import { DocumentProvider } from "./store/document-context";
 import { createDocumentStoreSolid } from "./store/document-store-solid";
 import { Toolbar } from "./shell/Toolbar";
@@ -10,7 +12,11 @@ import { TabRegion } from "./panels/TabRegion";
 import { registerDefaultPanels } from "./panels/register-panels";
 import "./App.css";
 
-const App: Component = () => {
+/**
+ * Inner shell component — rendered inside TransProvider so useTransContext is available.
+ */
+const AppShell: Component = () => {
+  const [t] = useTransContext();
   const store = createDocumentStoreSolid();
   registerDefaultPanels(store);
   const [announcement, setAnnouncement] = createSignal("");
@@ -32,14 +38,22 @@ const App: Component = () => {
             <div class="app-shell__toolbar">
               <Toolbar />
             </div>
-            <div class="app-shell__left" role="complementary" aria-label="Left panel">
+            <div
+              class="app-shell__left"
+              role="complementary"
+              aria-label={t("panels:regions.leftPanel")}
+            >
               <TabRegion region="left" />
             </div>
             {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
             <div class="app-shell__canvas" role="main">
               <Canvas />
             </div>
-            <div class="app-shell__right" role="complementary" aria-label="Right panel">
+            <div
+              class="app-shell__right"
+              role="complementary"
+              aria-label={t("panels:regions.rightPanel")}
+            >
               <TabRegion region="right" />
             </div>
             {/* RF-018: Wrap StatusBar in grid-placed div */}
@@ -54,6 +68,14 @@ const App: Component = () => {
         </DragDropProvider>
       </AnnounceProvider>
     </DocumentProvider>
+  );
+};
+
+const App: Component = () => {
+  return (
+    <TransProvider instance={i18nInstance}>
+      <AppShell />
+    </TransProvider>
   );
 };
 

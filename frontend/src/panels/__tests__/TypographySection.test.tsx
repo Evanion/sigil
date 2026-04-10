@@ -1,9 +1,18 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { TypographySection } from "../TypographySection";
 import { DocumentProvider } from "../../store/document-context";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 // ── Mock store factory ─────────────────────────────────────────────────
 
@@ -172,9 +181,11 @@ describe("TypographySection", () => {
   it("should render the section with sigil-typography-section class", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(document.querySelector(".sigil-typography-section")).toBeTruthy();
   });
@@ -182,9 +193,11 @@ describe("TypographySection", () => {
   it("should render the Typography title", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("Typography")).toBeTruthy();
   });
@@ -192,9 +205,11 @@ describe("TypographySection", () => {
   it("should have an ARIA region role with Typography label", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("region", { name: "Typography" })).toBeTruthy();
   });
@@ -204,9 +219,11 @@ describe("TypographySection", () => {
   it("should render text alignment radio buttons", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("radio", { name: "Align left" })).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Align center" })).toBeTruthy();
@@ -219,9 +236,11 @@ describe("TypographySection", () => {
       "text-1": makeTextNode({ text_align: "center" }),
     });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const centerBtn = screen.getByRole("radio", { name: "Align center" });
     expect(centerBtn.getAttribute("aria-checked")).toBe("true");
@@ -234,9 +253,11 @@ describe("TypographySection", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("radio", { name: "Align center" }));
     expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "text_align", value: "center" });
@@ -247,9 +268,11 @@ describe("TypographySection", () => {
   it("should render an Italic toggle button", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("button", { name: "Italic" })).toBeTruthy();
   });
@@ -259,9 +282,11 @@ describe("TypographySection", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Italic" }));
     expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_style", value: "italic" });
@@ -272,9 +297,11 @@ describe("TypographySection", () => {
   it("should render Underline and Strikethrough toggle buttons", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("button", { name: "Underline" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Strikethrough" })).toBeTruthy();
@@ -285,9 +312,11 @@ describe("TypographySection", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
     expect(setTextStyle).toHaveBeenCalledWith("text-1", {
@@ -303,9 +332,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Underline" }));
     expect(setTextStyle).toHaveBeenCalledWith("text-1", {
@@ -321,9 +352,11 @@ describe("TypographySection", () => {
       "text-1": makeTextNode({ font_size: 24 }),
     });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // NumberInput renders the value in an input element
     const inputs = document.querySelectorAll("input");
@@ -338,9 +371,11 @@ describe("TypographySection", () => {
   it("should render a text color label and swatch", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("Color")).toBeTruthy();
   });
@@ -350,9 +385,11 @@ describe("TypographySection", () => {
   it("should have a visually-hidden live region for screen reader announcements", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const liveRegion = screen.getByRole("status");
     expect(liveRegion).toBeTruthy();
@@ -367,9 +404,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.keyDown(document, { key: "b", metaKey: true });
     expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_weight", value: 700 });
@@ -382,9 +421,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.keyDown(document, { key: "b", metaKey: true });
     expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_weight", value: 400 });
@@ -397,9 +438,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.keyDown(document, { key: "i", metaKey: true });
     expect(setTextStyle).toHaveBeenCalledWith("text-1", { field: "font_style", value: "italic" });
@@ -412,9 +455,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.keyDown(document, { key: "u", metaKey: true });
     expect(setTextStyle).toHaveBeenCalledWith("text-1", {
@@ -428,9 +473,11 @@ describe("TypographySection", () => {
     const store = createMockStore("frame-1", { "frame-1": makeFrameNode() });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.keyDown(document, { key: "b", metaKey: true });
     expect(setTextStyle).not.toHaveBeenCalled();
@@ -441,9 +488,11 @@ describe("TypographySection", () => {
   it("should render text alignment in a radiogroup with proper aria-label", () => {
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("radiogroup", { name: "Text alignment" })).toBeTruthy();
   });
@@ -457,9 +506,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // The toggle button is labeled "Toggle text shadow"
     const toggleBtn = screen.getByRole("button", { name: "Toggle text shadow" });
@@ -490,9 +541,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const toggleBtn = screen.getByRole("button", { name: "Toggle text shadow" });
     fireEvent.click(toggleBtn);
@@ -513,9 +566,11 @@ describe("TypographySection", () => {
       "text-1": makeTextNode({ text_shadow: shadow }),
     });
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // Shadow controls should be visible
     const shadowGroup = screen.getByRole("group", { name: "Text shadow" });
@@ -539,9 +594,11 @@ describe("TypographySection", () => {
     });
     store.setTextStyle = setTextStyle;
     render(() => (
-      <DocumentProvider store={store}>
-        <TypographySection />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // The blur input is the "Shadow blur radius" NumberInput.
     // Simulate clicking increment many times would eventually hit the max,

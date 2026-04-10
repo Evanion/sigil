@@ -1,10 +1,19 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { StatusBar } from "../StatusBar";
 import { DocumentProvider } from "../../store/document-context";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI } from "../../store/document-store-solid";
 import type { ToolType } from "../../store/document-store-solid";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAPI {
   const [activeTool] = createSignal<ToolType>("select");
@@ -68,9 +77,11 @@ describe("StatusBar", () => {
   it("shows connected status text", () => {
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <StatusBar />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <StatusBar />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("Connected")).toBeTruthy();
   });
@@ -78,9 +89,11 @@ describe("StatusBar", () => {
   it("shows document info (name, node count, page count)", () => {
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <StatusBar />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <StatusBar />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("Test Doc")).toBeTruthy();
     expect(screen.getByText("5 nodes")).toBeTruthy();
@@ -90,21 +103,28 @@ describe("StatusBar", () => {
   it("shows zoom percentage", () => {
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <StatusBar />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <StatusBar />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("100%")).toBeTruthy();
   });
 
-  it("has status role without aria-live (RF-008: prevents announcement flooding)", () => {
+  it("has a scoped status region containing only connection text (RF-002)", () => {
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <StatusBar />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <StatusBar />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const status = screen.getByRole("status");
-    expect(status.getAttribute("aria-live")).toBeNull();
+    // The aria-live region should only contain the connection status text,
+    // not counts or zoom values that update frequently.
+    expect(status.textContent).toBe("Connected to server");
+    expect(status.getAttribute("aria-live")).toBe("polite");
   });
 });

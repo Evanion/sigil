@@ -1,0 +1,72 @@
+{
+  "canvas": {
+    "label": "Canevas de conception",
+    "selected": "{{name}} sélectionné",
+    "multiSelected": "{{count}} objets sélectionnés"
+  },
+  "layers": {
+    "tree": "Arborescence des calques",
+    "hierarchy": "Hiérarchie des calques",
+    "lock": "Verrouiller",
+    "unlock": "Déverrouiller",
+    "hide": "Masquer",
+    "show": "Afficher",
+    "expand": "Développer",
+    "collapse": "Réduire",
+    "grabbed": "{{name}} saisi",
+    "over": "Au-dessus de {{name}}, {{position}}",
+    "dropCancelled": "Dépôt annulé",
+    "cannotDropIntoSelf": "Impossible de déposer un calque dans lui-même",
+    "movedInside": "{{name}} déplacé dans {{container}}",
+    "reordered": "{{name}} réordonné",
+    "movedTo": "{{name}} déplacé vers {{parent}}",
+    "cannotMoveToRoot": "Impossible de déplacer au niveau racine",
+    "selected": "{{name}} sélectionné",
+    "deleted": "{{name}} supprimé",
+    "unlocked": "{{name}} déverrouillé",
+    "locked": "{{name}} verrouillé",
+    "hidden": "{{name}} masqué",
+    "shown": "{{name}} affiché",
+    "movedUp": "{{name}} déplacé vers le haut",
+    "movedDown": "{{name}} déplacé vers le bas",
+    "movedOut": "{{name}} déplacé à l'extérieur",
+    "nestedInside": "{{name}} imbriqué dans {{parent}}",
+    "rename": "Renommer {{name}}",
+    "dnd": {
+      "positionBefore": "avant",
+      "positionAfter": "après",
+      "positionInside": "à l'intérieur"
+    }
+  },
+  "selection": {
+    "cleared": "Sélection effacée"
+  },
+  "tool": {
+    "active": "Outil {{tool}} actif"
+  },
+  "page": {
+    "created": "{{name}} créée",
+    "selected": "{{name}} sélectionnée",
+    "renamed": "Page renommée en {{newName}}",
+    "deleted": "{{name}} supprimée",
+    "movedUp": "{{name}} déplacée vers le haut",
+    "movedDown": "{{name}} déplacée vers le bas",
+    "movedToPosition": "{{name}} déplacée à la position {{position}}",
+    "grabbed": "{{name}} saisie",
+    "dropped": "{{name}} déposée"
+  },
+  "typography": {
+    "fontWeightSet": "Graisse définie à {{weight}}",
+    "fontStyle": "Style de police défini à {{style}}",
+    "textAlign": "Alignement du texte défini à {{alignment}}",
+    "textDecoration": "Décoration du texte définie à {{decoration}}",
+    "shadowEnabled": "Ombre du texte activée",
+    "shadowDisabled": "Ombre du texte désactivée"
+  },
+  "status": {
+    "connected": "Connecté au serveur",
+    "disconnected": "Déconnecté du serveur",
+    "nodes": "{{count}} noeuds",
+    "pages": "{{count}} pages"
+  }
+}

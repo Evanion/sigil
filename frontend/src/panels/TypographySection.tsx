@@ -22,7 +22,16 @@
  * - Cmd+I toggles font_style normal/italic
  * - Cmd+U toggles text_decoration none/underline
  */
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type Component } from "solid-js";
+import {
+  createMemo,
+  createSignal,
+  Index,
+  onCleanup,
+  onMount,
+  Show,
+  type Component,
+} from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type {
   Color,
   FontStyle,
@@ -72,33 +81,31 @@ const DEFAULT_TEXT_SHADOW: TextShadow = {
   color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 0.3 } },
 };
 
-// ── Font weight options ──────────────────────────────────────────────
+// ── Font weight option values (labels resolved via i18n at render time) ──
 
-const FONT_WEIGHT_OPTIONS = [
-  { value: "100", label: "Thin (100)" },
-  { value: "200", label: "Extra Light (200)" },
-  { value: "300", label: "Light (300)" },
-  { value: "400", label: "Regular (400)" },
-  { value: "500", label: "Medium (500)" },
-  { value: "600", label: "Semi Bold (600)" },
-  { value: "700", label: "Bold (700)" },
-  { value: "800", label: "Extra Bold (800)" },
-  { value: "900", label: "Black (900)" },
-] as const;
+const FONT_WEIGHT_VALUES = ["100", "200", "300", "400", "500", "600", "700", "800", "900"] as const;
 
 // ── Text align options ───────────────────────────────────────────────
 
-const TEXT_ALIGN_OPTIONS: readonly { value: TextAlign; label: string; icon: typeof AlignLeft }[] = [
-  { value: "left", label: "Align left", icon: AlignLeft },
-  { value: "center", label: "Align center", icon: AlignCenter },
-  { value: "right", label: "Align right", icon: AlignRight },
-  { value: "justify", label: "Justify", icon: AlignJustify },
+interface TextAlignOption {
+  readonly value: TextAlign;
+  /** i18n key for the label, resolved at render time. */
+  readonly labelKey: string;
+  readonly icon: typeof AlignLeft;
+}
+
+const TEXT_ALIGN_OPTIONS: readonly TextAlignOption[] = [
+  { value: "left", labelKey: "panels:typography.alignLeft", icon: AlignLeft },
+  { value: "center", labelKey: "panels:typography.alignCenter", icon: AlignCenter },
+  { value: "right", labelKey: "panels:typography.alignRight", icon: AlignRight },
+  { value: "justify", labelKey: "panels:typography.justify", icon: AlignJustify },
 ] as const;
 
 // ── TypographySection ────────────────────────────────────────────────
 
 export const TypographySection: Component = () => {
   const store = useDocument();
+  const [t] = useTransContext();
 
   // ── Live region for discrete status announcements ──────────────────
   const [announcement, setAnnouncement] = createSignal("");
@@ -221,6 +228,13 @@ export const TypographySection: Component = () => {
     return shadow.color.value;
   });
 
+  // ── Font weight options with i18n labels ────────────────────────────
+  const fontWeightOptions = () =>
+    FONT_WEIGHT_VALUES.map((value) => ({
+      value,
+      label: `${t(`panels:fontWeight.${value}`)} (${value})`,
+    }));
+
   // ── Handlers ──────────────────────────────────────────────────────
 
   function handleFontFamilyChange(value: string): void {
@@ -248,7 +262,7 @@ export const TypographySection: Component = () => {
     const weight = parseInt(value, 10);
     if (!Number.isFinite(weight)) return;
     store.setTextStyle(uuid, { field: "font_weight", value: weight });
-    announce(`Font weight set to ${value}`);
+    announce(t("a11y:typography.fontWeightSet", { weight: value }));
   }
 
   function handleFontStyleToggle(pressed: boolean): void {
@@ -256,7 +270,7 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const newStyle: FontStyle = pressed ? "italic" : "normal";
     store.setTextStyle(uuid, { field: "font_style", value: newStyle });
-    announce(`Font style ${newStyle}`);
+    announce(t("a11y:typography.fontStyle", { style: newStyle }));
   }
 
   function handleLineHeightChange(value: number): void {
@@ -279,7 +293,7 @@ export const TypographySection: Component = () => {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
     store.setTextStyle(uuid, { field: "text_align", value: align });
-    announce(`Text alignment set to ${align}`);
+    announce(t("a11y:typography.textAlign", { alignment: align }));
   }
 
   function handleTextDecorationToggle(decoration: TextDecoration): void {
@@ -288,7 +302,7 @@ export const TypographySection: Component = () => {
     const current = textDecoration();
     const newDecoration: TextDecoration = current === decoration ? "none" : decoration;
     store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
-    announce(`Text decoration ${newDecoration}`);
+    announce(t("a11y:typography.textDecoration", { decoration: newDecoration }));
   }
 
   function handleTextColorChange(color: Color): void {
@@ -306,10 +320,10 @@ export const TypographySection: Component = () => {
         field: "text_shadow",
         value: structuredClone(DEFAULT_TEXT_SHADOW),
       });
-      announce("Text shadow enabled");
+      announce(t("a11y:typography.shadowEnabled"));
     } else {
       store.setTextStyle(uuid, { field: "text_shadow", value: null });
-      announce("Text shadow disabled");
+      announce(t("a11y:typography.shadowDisabled"));
     }
   }
 
@@ -377,21 +391,21 @@ export const TypographySection: Component = () => {
       const current = fontWeight();
       const newWeight = current >= 700 ? 400 : 700;
       store.setTextStyle(uuid, { field: "font_weight", value: newWeight });
-      announce(`Font weight ${newWeight === 700 ? "bold" : "regular"}`);
+      announce(t("a11y:typography.fontWeightSet", { weight: String(newWeight) }));
     } else if (e.key === "i" || e.key === "I") {
       e.preventDefault();
       e.stopPropagation();
       const current = fontStyle();
       const newStyle: FontStyle = current === "italic" ? "normal" : "italic";
       store.setTextStyle(uuid, { field: "font_style", value: newStyle });
-      announce(`Font style ${newStyle}`);
+      announce(t("a11y:typography.fontStyle", { style: newStyle }));
     } else if (e.key === "u" || e.key === "U") {
       e.preventDefault();
       e.stopPropagation();
       const current = textDecoration();
       const newDecoration: TextDecoration = current === "underline" ? "none" : "underline";
       store.setTextStyle(uuid, { field: "text_decoration", value: newDecoration });
-      announce(`Text decoration ${newDecoration}`);
+      announce(t("a11y:typography.textDecoration", { decoration: newDecoration }));
     }
   }
 
@@ -410,7 +424,7 @@ export const TypographySection: Component = () => {
   return (
     <div class="sigil-typography-section" role="region" aria-labelledby="typography-section-title">
       <h3 class="sigil-typography-section__title" id="typography-section-title">
-        Typography
+        {t("panels:typography.title")}
       </h3>
 
       {/* ── Font family + weight ───────────────────────────────────── */}
@@ -418,15 +432,15 @@ export const TypographySection: Component = () => {
         <TextInput
           value={fontFamily()}
           onValueChange={handleFontFamilyChange}
-          aria-label="Font family"
-          placeholder="Font family"
+          aria-label={t("panels:typography.fontFamily")}
+          placeholder={t("panels:typography.fontFamily")}
           disabled={disabled()}
         />
         <Select
-          options={FONT_WEIGHT_OPTIONS}
+          options={fontWeightOptions()}
           value={String(fontWeight())}
           onValueChange={handleFontWeightChange}
-          aria-label="Font weight"
+          aria-label={t("panels:typography.fontWeight")}
           disabled={disabled()}
         />
       </div>
@@ -436,7 +450,7 @@ export const TypographySection: Component = () => {
         <NumberInput
           value={fontSize()}
           onValueChange={handleFontSizeChange}
-          aria-label="Font size"
+          aria-label={t("panels:typography.fontSize")}
           step={1}
           min={1}
           max={MAX_FONT_SIZE}
@@ -446,7 +460,7 @@ export const TypographySection: Component = () => {
         <ToggleButton
           pressed={fontStyle() === "italic"}
           onPressedChange={handleFontStyleToggle}
-          aria-label="Italic"
+          aria-label={t("panels:typography.italic")}
           disabled={disabled()}
         >
           <Italic size={14} />
@@ -458,7 +472,7 @@ export const TypographySection: Component = () => {
         <NumberInput
           value={lineHeight()}
           onValueChange={handleLineHeightChange}
-          aria-label="Line height"
+          aria-label={t("panels:typography.lineHeight")}
           step={0.1}
           min={0.1}
           suffix={"\u00D7"}
@@ -467,7 +481,7 @@ export const TypographySection: Component = () => {
         <NumberInput
           value={letterSpacing()}
           onValueChange={handleLetterSpacingChange}
-          aria-label="Letter spacing"
+          aria-label={t("panels:typography.letterSpacing")}
           step={0.1}
           suffix="px"
           disabled={disabled()}
@@ -478,7 +492,7 @@ export const TypographySection: Component = () => {
       <div
         class="sigil-typography-section__align-group"
         role="radiogroup"
-        aria-label="Text alignment"
+        aria-label={t("panels:typography.textAlignment")}
         onKeyDown={(e: KeyboardEvent) => {
           // RF-024: Arrow-key navigation for text alignment radio group.
           const currentIdx = TEXT_ALIGN_OPTIONS.findIndex((o) => o.value === textAlign());
@@ -502,25 +516,28 @@ export const TypographySection: Component = () => {
           }
         }}
       >
-        <For each={TEXT_ALIGN_OPTIONS}>
+        <Index each={TEXT_ALIGN_OPTIONS}>
           {(opt) => (
             <button
               class="sigil-typography-section__align-btn"
               classList={{
-                "sigil-typography-section__align-btn--active": textAlign() === opt.value,
+                "sigil-typography-section__align-btn--active": textAlign() === opt().value,
               }}
               type="button"
               role="radio"
-              aria-checked={textAlign() === opt.value}
-              aria-label={opt.label}
+              aria-checked={textAlign() === opt().value}
+              aria-label={t(opt().labelKey)}
               disabled={disabled()}
-              tabIndex={textAlign() === opt.value ? 0 : -1}
-              onClick={() => handleTextAlignChange(opt.value)}
+              tabIndex={textAlign() === opt().value ? 0 : -1}
+              onClick={() => handleTextAlignChange(opt().value)}
             >
-              <opt.icon size={14} />
+              {(() => {
+                const Icon = opt().icon;
+                return <Icon size={14} />;
+              })()}
             </button>
           )}
-        </For>
+        </Index>
       </div>
 
       {/* ── Text decoration toggles ────────────────────────────────── */}
@@ -528,7 +545,7 @@ export const TypographySection: Component = () => {
         <ToggleButton
           pressed={textDecoration() === "underline"}
           onPressedChange={() => handleTextDecorationToggle("underline")}
-          aria-label="Underline"
+          aria-label={t("panels:typography.underline")}
           disabled={disabled()}
         >
           <Underline size={14} />
@@ -536,7 +553,7 @@ export const TypographySection: Component = () => {
         <ToggleButton
           pressed={textDecoration() === "strikethrough"}
           onPressedChange={() => handleTextDecorationToggle("strikethrough")}
-          aria-label="Strikethrough"
+          aria-label={t("panels:typography.strikethrough")}
           disabled={disabled()}
         >
           <Strikethrough size={14} />
@@ -546,30 +563,34 @@ export const TypographySection: Component = () => {
       {/* ── Text color ─────────────────────────────────────────────── */}
       <div class="sigil-typography-section__color-row">
         <span class="sigil-typography-section__color-label" aria-hidden="true">
-          Color
+          {t("panels:typography.color")}
         </span>
         <ColorSwatch
           color={textColor()}
           onColorChange={handleTextColorChange}
-          aria-label="Text color"
+          aria-label={t("panels:typography.textColor")}
         />
       </div>
 
       {/* ── Text shadow ──────────────────────────────────────────── */}
-      <div class="sigil-typography-section__shadow-section" role="group" aria-label="Text shadow">
+      <div
+        class="sigil-typography-section__shadow-section"
+        role="group"
+        aria-label={t("panels:typography.shadowGroup")}
+      >
         <div class="sigil-typography-section__shadow-header">
           <span class="sigil-typography-section__shadow-label" aria-hidden="true">
-            Shadow
+            {t("panels:typography.shadow")}
           </span>
           <ToggleButton
             pressed={shadowEnabled()}
             onPressedChange={handleShadowToggle}
-            aria-label="Toggle text shadow"
+            aria-label={t("panels:typography.shadowToggle")}
             aria-expanded={shadowEnabled()}
             aria-controls="shadow-controls"
             disabled={disabled()}
           >
-            {shadowEnabled() ? "On" : "Off"}
+            {shadowEnabled() ? t("panels:typography.shadowOn") : t("panels:typography.shadowOff")}
           </ToggleButton>
         </div>
         <Show when={shadowEnabled()}>
@@ -577,7 +598,7 @@ export const TypographySection: Component = () => {
             <NumberInput
               value={shadowOffsetX()}
               onValueChange={handleShadowOffsetXChange}
-              aria-label="Shadow offset X"
+              aria-label={t("panels:typography.shadowOffsetX")}
               step={1}
               min={MIN_SHADOW_OFFSET}
               max={MAX_SHADOW_OFFSET}
@@ -587,7 +608,7 @@ export const TypographySection: Component = () => {
             <NumberInput
               value={shadowOffsetY()}
               onValueChange={handleShadowOffsetYChange}
-              aria-label="Shadow offset Y"
+              aria-label={t("panels:typography.shadowOffsetY")}
               step={1}
               min={MIN_SHADOW_OFFSET}
               max={MAX_SHADOW_OFFSET}
@@ -597,17 +618,17 @@ export const TypographySection: Component = () => {
             <NumberInput
               value={shadowBlur()}
               onValueChange={handleShadowBlurChange}
-              aria-label="Shadow blur radius"
+              aria-label={t("panels:typography.shadowBlur")}
               step={1}
               min={0}
-              max={1000}
+              max={MAX_SHADOW_BLUR}
               suffix="px"
               disabled={disabled()}
             />
             <ColorSwatch
               color={shadowColor()}
               onColorChange={handleShadowColorChange}
-              aria-label="Shadow color"
+              aria-label={t("panels:typography.shadowColor")}
             />
           </div>
         </Show>

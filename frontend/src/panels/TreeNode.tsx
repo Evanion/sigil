@@ -1,4 +1,5 @@
 import { createSignal, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { useDraggable, useDroppable } from "dnd-kit-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
@@ -48,6 +49,7 @@ function kindIcon(kind: string): string {
 export const TreeNode: Component<TreeNodeProps> = (props) => {
   const store = useDocument();
   const announce = useAnnounce();
+  const [t] = useTransContext();
   const [isRenaming, setIsRenaming] = createSignal(false);
   let inputRef: HTMLInputElement | undefined;
 
@@ -80,7 +82,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
   function handleClick() {
     store.setSelectedNodeId(props.node.uuid);
     props.onFocusNode?.(props.node.uuid);
-    announce(`${props.node.name} selected`);
+    announce(t("a11y:layers.selected", { name: props.node.name }));
   }
 
   function handleDoubleClick() {
@@ -150,7 +152,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       <Show when={props.hasChildren}>
         <button
           class="sigil-tree-node__expand"
-          aria-label={props.isExpanded ? "Collapse" : "Expand"}
+          aria-label={props.isExpanded ? t("a11y:layers.collapse") : t("a11y:layers.expand")}
           onClick={(e) => {
             e.stopPropagation();
             props.onToggleExpand(props.node.uuid);
@@ -177,7 +179,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
               inputRef = el;
             }}
             class="sigil-tree-node__name-input"
-            aria-label={`Rename ${props.node.name}`}
+            aria-label={t("a11y:layers.rename", { name: props.node.name })}
             value={props.node.name}
             maxLength={1024}
             onBlur={handleRenameSubmit}
@@ -195,7 +197,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       <button
         class="sigil-tree-node__toggle"
         classList={{ "sigil-tree-node__toggle--active": props.node.locked }}
-        aria-label={props.node.locked ? "Unlock" : "Lock"}
+        aria-label={props.node.locked ? t("a11y:layers.unlock") : t("a11y:layers.lock")}
         tabindex={-1}
         onClick={handleLockToggle}
       >
@@ -206,7 +208,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
       <button
         class="sigil-tree-node__toggle"
         classList={{ "sigil-tree-node__toggle--active": !props.node.visible }}
-        aria-label={props.node.visible ? "Hide" : "Show"}
+        aria-label={props.node.visible ? t("a11y:layers.hide") : t("a11y:layers.show")}
         tabindex={-1}
         onClick={handleVisibilityToggle}
       >

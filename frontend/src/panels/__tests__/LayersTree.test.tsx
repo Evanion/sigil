@@ -3,14 +3,23 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { LayersTree } from "../LayersTree";
 import { DocumentProvider } from "../../store/document-context";
 import { AnnounceProvider } from "../../shell/AnnounceProvider";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, DocumentState, ToolType } from "../../store/document-store-solid";
 import type { DocumentNode } from "../../types/document";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 // ── Mock dnd-kit-solid ───────────────────────────────────────────────────────
 // LayersTree uses useDragDropMonitor (and renders TreeNode which uses
@@ -148,11 +157,13 @@ function renderLayersTree(store: DocumentStoreAPI) {
     announce,
     store,
     ...render(() => (
-      <DocumentProvider store={store}>
-        <AnnounceProvider announce={announce}>
-          <LayersTree />
-        </AnnounceProvider>
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AnnounceProvider announce={announce}>
+            <LayersTree />
+          </AnnounceProvider>
+        </DocumentProvider>
+      </TransProvider>
     )),
   };
 }
