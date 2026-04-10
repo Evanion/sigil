@@ -42,6 +42,71 @@ import "./Canvas.css";
 const WHEEL_ZOOM_SENSITIVITY = 1;
 
 /**
+ * Maximum depth for render-order tree traversal to prevent runaway
+ * recursion if the data contains cycles (CLAUDE.md §11).
+ */
+const MAX_RENDER_DEPTH = 64;
+
+/**
+ * Build a flat array of nodes in depth-first tree order for correct
+ * z-order rendering. Canvas 2D uses the painter's algorithm: nodes
+ * drawn first appear behind nodes drawn later.
+ *
+ * Tree order: parent → children (parent renders behind children).
+ * Sibling order: first child in tree renders first (behind last child).
+ * This matches Figma/Penpot: bottom of layer list = topmost on canvas.
+ */
+function buildRenderOrder(
+  nodes: Record<string, DocumentNode & { parentUuid?: string | null; childrenUuids?: string[] }>,
+  keys: string[],
+): DocumentNode[] {
+  // Find root nodes: nodes without a parentUuid or whose parent is not in the store.
+  const rootUuids: string[] = [];
+  for (const uuid of keys) {
+    const node = nodes[uuid];
+    if (!node) continue;
+    const parentUuid = node.parentUuid;
+    if (parentUuid === null || parentUuid === undefined || !(parentUuid in nodes)) {
+      rootUuids.push(uuid);
+    }
+  }
+
+  const result: DocumentNode[] = [];
+
+  // Walk tree using explicit stack (DFS). Push children in reverse so
+  // first child is popped and drawn first (behind later siblings).
+  const stack: Array<[string, number]> = [];
+  for (let i = rootUuids.length - 1; i >= 0; i--) {
+    stack.push([rootUuids[i], 0]);
+  }
+
+  while (stack.length > 0) {
+    const entry = stack.pop();
+    if (!entry) break;
+    const [uuid, depth] = entry;
+
+    if (depth >= MAX_RENDER_DEPTH) continue;
+
+    const node = nodes[uuid];
+    if (!node) continue;
+
+    result.push(node);
+
+    const childUuids = node.childrenUuids;
+    if (childUuids && childUuids.length > 0) {
+      for (let i = childUuids.length - 1; i >= 0; i--) {
+        const childUuid = childUuids[i];
+        if (childUuid in nodes) {
+          stack.push([childUuid, depth + 1]);
+        }
+      }
+    }
+  }
+
+  return result;
+}
+
+/**
  * Build a store adapter that satisfies the `ToolStore` interface.
  *
  * The `getAllNodes` method receives a pre-built memoized Map so it
@@ -671,12 +736,16 @@ export const Canvas: Component = () => {
       // RF-006: Read memoized Set (created once per selection change, not per frame).
       const selSet = selectedIdsSet();
 
-      // Convert nodes Record to array for the renderer.
+      // Build nodes array in depth-first tree order for correct z-order rendering.
+      // Canvas 2D uses painter's algorithm: nodes drawn first appear behind nodes
+      // drawn later. Tree order = parent before children, first sibling before last.
+      // This means: parent renders behind children, first child in tree renders
+      // behind last child — matching Figma/Penpot z-order conventions.
+      //
       // IMPORTANT: Object.keys() must be called to create a reactive dependency
-      // on key additions/deletions in Solid's store. Object.values() alone does
-      // not track new keys being added (e.g., optimistic node creation).
+      // on key additions/deletions in Solid's store.
       const keys = Object.keys(nodesObj);
-      const nodesArray = keys.map((k) => nodesObj[k]).filter((n) => n != null) as DocumentNode[];
+      const nodesArray = buildRenderOrder(nodesObj, keys);
 
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
