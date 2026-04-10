@@ -7,6 +7,7 @@ import {
   type Component,
   type JSX,
 } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { MousePointer2, Frame, Square, Circle, Type } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "./AnnounceProvider";
@@ -17,22 +18,44 @@ import "./Toolbar.css";
 
 interface ToolDef {
   id: ToolType;
-  label: string;
+  /** Translation key used to resolve the label via t() at render time. */
+  labelKey: string;
   shortcut: string;
   icon: (props: { size?: number }) => JSX.Element;
 }
 
 const TOOLS: ToolDef[] = [
-  { id: "select", label: "Select", shortcut: "V", icon: (p) => <MousePointer2 size={p.size} /> },
-  { id: "frame", label: "Frame", shortcut: "F", icon: (p) => <Frame size={p.size} /> },
-  { id: "rectangle", label: "Rectangle", shortcut: "R", icon: (p) => <Square size={p.size} /> },
-  { id: "ellipse", label: "Ellipse", shortcut: "O", icon: (p) => <Circle size={p.size} /> },
-  { id: "text", label: "Text", shortcut: "T", icon: (p) => <Type size={p.size} /> },
+  {
+    id: "select",
+    labelKey: "tools:select.label",
+    shortcut: "V",
+    icon: (p) => <MousePointer2 size={p.size} />,
+  },
+  {
+    id: "frame",
+    labelKey: "tools:frame.label",
+    shortcut: "F",
+    icon: (p) => <Frame size={p.size} />,
+  },
+  {
+    id: "rectangle",
+    labelKey: "tools:rectangle.label",
+    shortcut: "R",
+    icon: (p) => <Square size={p.size} />,
+  },
+  {
+    id: "ellipse",
+    labelKey: "tools:ellipse.label",
+    shortcut: "O",
+    icon: (p) => <Circle size={p.size} />,
+  },
+  { id: "text", labelKey: "tools:text.label", shortcut: "T", icon: (p) => <Type size={p.size} /> },
 ];
 
 export const Toolbar: Component = () => {
   const store = useDocument();
   const announce = useAnnounce();
+  const [t] = useTransContext();
 
   const buttonRefs: HTMLButtonElement[] = [];
 
@@ -41,15 +64,15 @@ export const Toolbar: Component = () => {
 
   // Keep focusedIndex in sync with activeTool
   createEffect(() => {
-    const idx = TOOLS.findIndex((t) => t.id === store.activeTool());
+    const idx = TOOLS.findIndex((tool) => tool.id === store.activeTool());
     if (idx >= 0) setFocusedIndex(idx);
   });
 
   // Announce active tool changes to screen readers
   createEffect(() => {
-    const tool = TOOLS.find((t) => t.id === store.activeTool());
+    const tool = TOOLS.find((tool) => tool.id === store.activeTool());
     if (tool) {
-      announce(`${tool.label} tool active`);
+      announce(t("a11y:tool.active", { tool: t(tool.labelKey) }));
     }
   });
 
@@ -120,7 +143,7 @@ export const Toolbar: Component = () => {
     <div
       class="toolbar"
       role="toolbar"
-      aria-label="Design tools"
+      aria-label={t("tools:toolbar.label")}
       aria-orientation="vertical"
       onKeyDown={handleToolbarKeydown}
     >
@@ -129,22 +152,25 @@ export const Toolbar: Component = () => {
       </div>
       {/* RF-029: Use <Index> instead of <For> per CLAUDE.md — preserves DOM elements */}
       <Index each={TOOLS}>
-        {(tool, index) => (
-          <Tooltip
-            content={`${tool().label} (${tool().shortcut})`}
-            placement="right"
-            ref={(el) => {
-              buttonRefs[index] = el;
-            }}
-            triggerClass={`toolbar__btn${store.activeTool() === tool().id ? " toolbar__btn--active" : ""}`}
-            aria-pressed={store.activeTool() === tool().id}
-            aria-label={`${tool().label} (${tool().shortcut})`}
-            tabIndex={focusedIndex() === index ? 0 : -1}
-            onClick={() => store.setActiveTool(tool().id)}
-          >
-            {tool().icon({ size: 16 })}
-          </Tooltip>
-        )}
+        {(tool, index) => {
+          const label = () => `${t(tool().labelKey)} (${tool().shortcut})`;
+          return (
+            <Tooltip
+              content={label()}
+              placement="right"
+              ref={(el) => {
+                buttonRefs[index] = el;
+              }}
+              triggerClass={`toolbar__btn${store.activeTool() === tool().id ? " toolbar__btn--active" : ""}`}
+              aria-pressed={store.activeTool() === tool().id}
+              aria-label={label()}
+              tabIndex={focusedIndex() === index ? 0 : -1}
+              onClick={() => store.setActiveTool(tool().id)}
+            >
+              {tool().icon({ size: 16 })}
+            </Tooltip>
+          );
+        }}
       </Index>
     </div>
   );

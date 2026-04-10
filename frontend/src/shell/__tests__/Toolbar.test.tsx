@@ -1,11 +1,20 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { Toolbar } from "../Toolbar";
 import { AnnounceProvider } from "../AnnounceProvider";
 import { DocumentProvider } from "../../store/document-context";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI } from "../../store/document-store-solid";
 import type { ToolType } from "../../store/document-store-solid";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAPI {
   const [activeTool, setActiveTool] = createSignal<ToolType>("select");
@@ -63,11 +72,13 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
 /** Wraps component under test with required providers. */
 function renderWithProviders(store: DocumentStoreAPI) {
   return render(() => (
-    <DocumentProvider store={store}>
-      <AnnounceProvider announce={vi.fn()}>
-        <Toolbar />
-      </AnnounceProvider>
-    </DocumentProvider>
+    <TransProvider instance={i18nInstance}>
+      <DocumentProvider store={store}>
+        <AnnounceProvider announce={vi.fn()}>
+          <Toolbar />
+        </AnnounceProvider>
+      </DocumentProvider>
+    </TransProvider>
   ));
 }
 

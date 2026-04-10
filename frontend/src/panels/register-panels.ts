@@ -10,7 +10,7 @@ import type { DocumentStoreAPI } from "../store/document-store-solid";
 export function registerDefaultPanels(store: DocumentStoreAPI): void {
   registerPanel({
     id: "layers",
-    label: "Layers",
+    label: "panels:tabs.layers",
     region: "left",
     order: 0,
     component: LayersPanel,
@@ -19,7 +19,7 @@ export function registerDefaultPanels(store: DocumentStoreAPI): void {
 
   registerPanel({
     id: "pages",
-    label: "Pages",
+    label: "panels:tabs.pages",
     region: "left",
     order: 1,
     component: PagesPanel,
@@ -27,7 +27,7 @@ export function registerDefaultPanels(store: DocumentStoreAPI): void {
 
   registerPanel({
     id: "design",
-    label: "Design",
+    label: "panels:tabs.design",
     region: "right",
     order: 0,
     component: DesignPanel,
@@ -36,7 +36,7 @@ export function registerDefaultPanels(store: DocumentStoreAPI): void {
 
   registerPanel({
     id: "inspect",
-    label: "Inspect",
+    label: "panels:tabs.inspect",
     region: "right",
     order: 1,
     component: InspectPanel,
@@ -44,7 +44,7 @@ export function registerDefaultPanels(store: DocumentStoreAPI): void {
 
   registerPanel({
     id: "component",
-    label: "Component",
+    label: "panels:tabs.component",
     region: "right",
     order: 2,
     component: ComponentPanel,

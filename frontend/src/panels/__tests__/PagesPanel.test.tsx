@@ -3,14 +3,23 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { PagesPanel } from "../PagesPanel";
 import { DocumentProvider } from "../../store/document-context";
 import { AnnounceProvider } from "../../shell/AnnounceProvider";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { Page } from "../../types/document";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 // ── Mock dnd-kit-solid ───────────────────────────────────────────────────────
 // PagesPanel uses useDragDropMonitor; PageListItem uses useDraggable / useDroppable.
@@ -107,11 +116,13 @@ function renderPanel(store: DocumentStoreAPI) {
   return {
     announce,
     ...render(() => (
-      <AnnounceProvider announce={announce}>
-        <DocumentProvider store={store}>
-          <PagesPanel />
-        </DocumentProvider>
-      </AnnounceProvider>
+      <TransProvider instance={i18nInstance}>
+        <AnnounceProvider announce={announce}>
+          <DocumentProvider store={store}>
+            <PagesPanel />
+          </DocumentProvider>
+        </AnnounceProvider>
+      </TransProvider>
     )),
   };
 }

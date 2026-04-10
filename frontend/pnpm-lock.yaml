@@ -11,6 +11,9 @@ importers:
       '@kobalte/core':
         specifier: ^0.13.11
         version: 0.13.11(solid-js@1.9.12)
+      '@mbarzda/solid-i18next':
+        specifier: ^1.4.1
+        version: 1.4.1(i18next@26.0.4(typescript@6.0.2))(solid-js@1.9.12)
       '@urql/solid':
         specifier: ^1.0.1
         version: 1.0.1(@urql/core@6.0.1(graphql@16.13.2))(solid-js@1.9.12)
@@ -23,6 +26,9 @@ importers:
       graphql-ws:
         specifier: ^6.0.8
         version: 6.0.8(graphql@16.13.2)(ws@8.20.0)
+      i18next:
+        specifier: ^26.0.4
+        version: 26.0.4(typescript@6.0.2)
       lucide-solid:
         specifier: ^1.7.0
         version: 1.7.0(solid-js@1.9.12)
@@ -538,6 +544,16 @@ packages:
     resolution: {integrity: sha512-eeU60A3kprIiBDAfv9gUJX1tXGLuZiKMajUfSQURAF2pk4ZoMYiqIzmrMBvzcxP39xnYttgTyQEVLwiTZnrV4w==}
     peerDependencies:
       solid-js: ^1.8.8
+
+  '@mbarzda/solid-i18next@1.4.1':
+    resolution: {integrity: sha512-QC/mrD9aMibcjuSNpdr9uky+JNupVedOB2CLNYJrFrZCMyY8+HXK3q1Lda+P2WoNBWToS+6BCwbB1D9sKBCXSQ==}
+    peerDependencies:
+      html-parse-string: <=1.x
+      i18next: '>=23.x'
+      solid-js: '>=1.8.x'
+    peerDependenciesMeta:
+      html-parse-string:
+        optional: true
 
   '@napi-rs/wasm-runtime@1.1.2':
     resolution: {integrity: sha512-sNXv5oLJ7ob93xkZ1XnxisYhGYXfaG9f65/ZgYuAu3qt7b3NadcOEhLvx28hv31PgX8SZJRYrAIPQilQmFpLVw==}
@@ -1244,6 +1260,14 @@ packages:
 
   html-entities@2.3.3:
     resolution: {integrity: sha512-DV5Ln36z34NNTDgnz0EWGBLZENelNAtkiFA4kyNOG2tDI6Mz1uSWiq1wAKdyjnJwyDiDO7Fa2SO1CTxPXL8VxA==}
+
+  i18next@26.0.4:
+    resolution: {integrity: sha512-gXF7U9bfioXPLv7mw8Qt2nfO7vij5MyINvPgVv99pX3fL1Y01pw2mKBFrlYpRxRCl2wz3ISenj6VsMJT2isfuA==}
+    peerDependencies:
+      typescript: ^5 || ^6
+    peerDependenciesMeta:
+      typescript:
+        optional: true
 
   ignore@5.3.2:
     resolution: {integrity: sha512-hsBTNUqQTDwkWtcdYI2i06Y/nUBEsNEDJKjWdigLvegy8kDuJAS8uRlpkkcQpyEXL0Z/pjDy5HBmMjRCJ2gq+g==}
@@ -2353,6 +2377,11 @@ snapshots:
       '@solid-primitives/utils': 6.4.0(solid-js@1.9.12)
       solid-js: 1.9.12
 
+  '@mbarzda/solid-i18next@1.4.1(i18next@26.0.4(typescript@6.0.2))(solid-js@1.9.12)':
+    dependencies:
+      i18next: 26.0.4(typescript@6.0.2)
+      solid-js: 1.9.12
+
   '@napi-rs/wasm-runtime@1.1.2(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)':
     dependencies:
       '@emnapi/core': 1.9.1
@@ -3074,6 +3103,12 @@ snapshots:
       - '@noble/hashes'
 
   html-entities@2.3.3: {}
+
+  i18next@26.0.4(typescript@6.0.2):
+    dependencies:
+      '@babel/runtime': 7.29.2
+    optionalDependencies:
+      typescript: 6.0.2
 
   ignore@5.3.2: {}
 

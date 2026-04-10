@@ -1,9 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, beforeAll, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { TabRegion } from "../TabRegion";
 import { panels, registerPanel } from "../registry";
 import { AnnounceProvider } from "../../shell/AnnounceProvider";
+import { createTestI18n } from "../../test-utils/i18n";
 import { type Component } from "solid-js";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 const PanelA: Component = () => <div>Panel A content</div>;
 const PanelB: Component = () => <div>Panel B content</div>;
@@ -12,9 +21,11 @@ const PanelC: Component = () => <div>Panel C content</div>;
 function renderWithAnnounce(region: "left" | "right", announceFn?: (msg: string) => void) {
   const announce = announceFn ?? vi.fn();
   return render(() => (
-    <AnnounceProvider announce={announce}>
-      <TabRegion region={region} />
-    </AnnounceProvider>
+    <TransProvider instance={i18nInstance}>
+      <AnnounceProvider announce={announce}>
+        <TabRegion region={region} />
+      </AnnounceProvider>
+    </TransProvider>
   ));
 }
 

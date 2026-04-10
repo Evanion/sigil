@@ -3,14 +3,23 @@
  *
  * @vitest-environment jsdom
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { TreeNode } from "../TreeNode";
 import { DocumentProvider } from "../../store/document-context";
 import { AnnounceProvider } from "../../shell/AnnounceProvider";
+import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { DocumentNode } from "../../types/document";
+
+let i18nInstance: i18n;
+
+beforeAll(async () => {
+  i18nInstance = await createTestI18n();
+});
 
 // ── Mock dnd-kit-solid ───────────────────────────────────────────────────────
 // TreeNode uses useDraggable and useDroppable from dnd-kit-solid.
@@ -157,17 +166,19 @@ function renderTreeNode({
     announce,
     store,
     ...render(() => (
-      <DocumentProvider store={store}>
-        <AnnounceProvider announce={announce}>
-          <TreeNode
-            node={node}
-            depth={depth}
-            isExpanded={isExpanded}
-            onToggleExpand={onToggleExpand}
-            hasChildren={hasChildren}
-          />
-        </AnnounceProvider>
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AnnounceProvider announce={announce}>
+            <TreeNode
+              node={node}
+              depth={depth}
+              isExpanded={isExpanded}
+              onToggleExpand={onToggleExpand}
+              hasChildren={hasChildren}
+            />
+          </AnnounceProvider>
+        </DocumentProvider>
+      </TransProvider>
     )),
   };
 }
@@ -328,17 +339,19 @@ describe("TreeNode", () => {
     const announce = vi.fn();
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <AnnounceProvider announce={announce}>
-          <TreeNode
-            node={node}
-            depth={0}
-            isExpanded={false}
-            onToggleExpand={onToggleExpand}
-            hasChildren={true}
-          />
-        </AnnounceProvider>
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AnnounceProvider announce={announce}>
+            <TreeNode
+              node={node}
+              depth={0}
+              isExpanded={false}
+              onToggleExpand={onToggleExpand}
+              hasChildren={true}
+            />
+          </AnnounceProvider>
+        </DocumentProvider>
+      </TransProvider>
     ));
 
     const expandBtn = screen.getByLabelText("Expand");
@@ -352,17 +365,19 @@ describe("TreeNode", () => {
     const store = createMockStore();
 
     render(() => (
-      <DocumentProvider store={store}>
-        <AnnounceProvider announce={announce}>
-          <TreeNode
-            node={node}
-            depth={0}
-            isExpanded={false}
-            onToggleExpand={vi.fn()}
-            hasChildren={false}
-          />
-        </AnnounceProvider>
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AnnounceProvider announce={announce}>
+            <TreeNode
+              node={node}
+              depth={0}
+              isExpanded={false}
+              onToggleExpand={vi.fn()}
+              hasChildren={false}
+            />
+          </AnnounceProvider>
+        </DocumentProvider>
+      </TransProvider>
     ));
 
     fireEvent.click(screen.getByRole("treeitem"));

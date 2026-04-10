@@ -11,6 +11,7 @@
  */
 
 import { createSignal, createEffect, onCleanup, Index, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { useDragDropMonitor } from "dnd-kit-solid";
 import { Plus } from "lucide-solid";
 import { useDocument } from "../store/document-context";
@@ -27,6 +28,7 @@ const THUMBNAIL_DEBOUNCE_MS = 300;
 export const PagesPanel: Component = () => {
   const store = useDocument();
   const announce = useAnnounce();
+  const [t] = useTransContext();
   const [focusedPageId, setFocusedPageId] = createSignal<string | null>(null);
   const [thumbnails, setThumbnails] = createSignal<Record<string, HTMLCanvasElement>>({});
   /** RF-007: Page ID that should enter rename mode (replaces synthetic dblclick). */
@@ -133,7 +135,7 @@ export const PagesPanel: Component = () => {
       if (data?.type !== "page") return;
       const page = store.state.pages.find((p) => p.id === data.pageId);
       if (page) {
-        announce(`Grabbed ${page.name}`);
+        announce(t("a11y:page.grabbed", { name: page.name }));
       }
     },
 
@@ -195,7 +197,12 @@ export const PagesPanel: Component = () => {
         store.reorderPages(sourceData.pageId, adjustedTarget);
         const page = pages.find((p) => p.id === sourceData.pageId);
         if (page) {
-          announce(`${page.name} moved to position ${adjustedTarget + 1}`);
+          announce(
+            t("a11y:page.movedToPosition", {
+              name: page.name,
+              position: String(adjustedTarget + 1),
+            }),
+          );
         }
       }
     },
@@ -219,7 +226,7 @@ export const PagesPanel: Component = () => {
     }
     const name = `Page ${maxNumber + 1}`;
     store.createPage(name);
-    announce(`Created ${name}`);
+    announce(t("a11y:page.created", { name }));
   }
 
   function handleSelectPage(pageId: string): void {
@@ -227,19 +234,19 @@ export const PagesPanel: Component = () => {
     setFocusedPageId(pageId);
     const page = store.state.pages.find((p) => p.id === pageId);
     if (page) {
-      announce(`${page.name} selected`);
+      announce(t("a11y:page.selected", { name: page.name }));
     }
   }
 
   function handleRenamePage(pageId: string, newName: string): void {
     store.renamePage(pageId, newName);
-    announce(`Renamed to ${newName}`);
+    announce(t("a11y:page.renamed", { name: newName }));
   }
 
   function handleDeletePage(pageId: string): void {
     const pages = store.state.pages;
     if (pages.length <= 1) {
-      announce("Cannot delete the last page");
+      announce(t("panels:pages.cannotDeleteLast"));
       return;
     }
     const page = pages.find((p) => p.id === pageId);
@@ -257,7 +264,7 @@ export const PagesPanel: Component = () => {
     }
 
     store.deletePage(pageId);
-    announce(`${pageName} deleted`);
+    announce(t("a11y:page.deleted", { name: pageName }));
     if (nextFocusId) {
       setFocusedPageId(nextFocusId);
     }
@@ -281,7 +288,7 @@ export const PagesPanel: Component = () => {
           const page = pages[currentIndex];
           if (page) {
             store.reorderPages(page.id, currentIndex + 1);
-            announce(`${page.name} moved down`);
+            announce(t("a11y:page.movedDown", { name: page.name }));
           }
           break;
         }
@@ -304,7 +311,7 @@ export const PagesPanel: Component = () => {
           const page = pages[currentIndex];
           if (page) {
             store.reorderPages(page.id, currentIndex - 1);
-            announce(`${page.name} moved up`);
+            announce(t("a11y:page.movedUp", { name: page.name }));
           }
           break;
         }
@@ -375,12 +382,12 @@ export const PagesPanel: Component = () => {
   }
 
   return (
-    <div class="sigil-pages-panel" role="region" aria-label="Pages">
+    <div class="sigil-pages-panel" role="region" aria-label={t("panels:pages.title")}>
       <div class="sigil-pages-panel__header">
-        <h3 class="sigil-pages-panel__title">Pages</h3>
+        <h3 class="sigil-pages-panel__title">{t("panels:pages.title")}</h3>
         <button
           class="sigil-pages-panel__add-button"
-          aria-label="Add page"
+          aria-label={t("panels:pages.addPage")}
           onClick={handleCreatePage}
         >
           <Plus size={16} />
@@ -392,7 +399,7 @@ export const PagesPanel: Component = () => {
         }}
         class="sigil-pages-panel__list"
         role="listbox"
-        aria-label="Page list"
+        aria-label={t("panels:pages.pageList")}
         onKeyDown={handleKeyDown}
         style={{ position: "relative" }}
       >
@@ -422,7 +429,7 @@ export const PagesPanel: Component = () => {
         </Show>
         <Show when={store.state.pages.length === 0}>
           <div class="sigil-pages-panel__empty" role="status">
-            No pages
+            {t("panels:pages.noPages")}
           </div>
         </Show>
       </div>

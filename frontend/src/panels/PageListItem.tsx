@@ -6,6 +6,7 @@
  */
 
 import { createSignal, createEffect, onMount, Show, splitProps, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { useDraggable, useDroppable } from "dnd-kit-solid";
 import { GripVertical } from "lucide-solid";
 import type { Page } from "../types/document";
@@ -42,6 +43,7 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
     "onRenameStarted",
   ]);
 
+  const [t] = useTransContext();
   const [isRenaming, setIsRenaming] = createSignal(false);
   let inputRef: HTMLInputElement | undefined;
   let thumbnailRef: HTMLDivElement | undefined;
@@ -164,7 +166,7 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
       <button
         ref={(el) => dragRef(el)}
         class="sigil-page-list-item__handle"
-        aria-label={`Drag ${props.page.name}`}
+        aria-label={t("panels:pages.dragPage", { name: props.page.name })}
         tabindex={-1}
       >
         <GripVertical size={14} />
@@ -189,7 +191,7 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
               inputRef = el;
             }}
             class="sigil-page-list-item__name-input"
-            aria-label={`Rename ${props.page.name}`}
+            aria-label={t("panels:pages.renamePage", { name: props.page.name })}
             value={props.page.name}
             maxLength={MAX_PAGE_NAME_LENGTH}
             onBlur={commitRename}

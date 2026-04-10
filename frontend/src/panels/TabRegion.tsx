@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { Dynamic } from "solid-js/web";
 import { useAnnounce } from "../shell/AnnounceProvider";
 import { panels, type PanelRegistration } from "./registry";
@@ -10,6 +11,7 @@ interface TabRegionProps {
 
 export const TabRegion: Component<TabRegionProps> = (props) => {
   const announce = useAnnounce();
+  const [t] = useTransContext();
 
   const visiblePanels = createMemo(() =>
     panels
@@ -35,6 +37,11 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
     visiblePanels().find((p: PanelRegistration) => p.id === activeTab()),
   );
 
+  /** Resolve label: if the panel label is an i18n key, translate it; otherwise use as-is. */
+  function resolveLabel(panel: PanelRegistration): string {
+    return t(panel.label);
+  }
+
   // Keyboard navigation between tabs
   function handleTabKeyDown(e: KeyboardEvent) {
     const visible = visiblePanels();
@@ -59,7 +66,7 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
       const next = visible[nextIndex];
       if (next) {
         setUserTab(next.id);
-        announce(`${next.label} panel`);
+        announce(t("common:panelLabel", { name: resolveLabel(next) }));
         // Focus the tab button
         const tabBar = e.currentTarget as HTMLElement;
         const buttons = tabBar.querySelectorAll<HTMLButtonElement>("[role='tab']");
@@ -73,7 +80,11 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
       <div
         class="sigil-tab-region__bar"
         role="tablist"
-        aria-label={props.region === "left" ? "Left panel tabs" : "Right panel tabs"}
+        aria-label={
+          props.region === "left"
+            ? t("panels:regions.leftPanelTabs")
+            : t("panels:regions.rightPanelTabs")
+        }
         onKeyDown={handleTabKeyDown}
       >
         <For each={visiblePanels()}>
@@ -87,10 +98,10 @@ export const TabRegion: Component<TabRegionProps> = (props) => {
               tabindex={activeTab() === panel.id ? 0 : -1}
               onClick={() => {
                 setUserTab(panel.id);
-                announce(`${panel.label} panel`);
+                announce(t("common:panelLabel", { name: resolveLabel(panel) }));
               }}
             >
-              {panel.label}
+              {resolveLabel(panel)}
             </button>
           )}
         </For>

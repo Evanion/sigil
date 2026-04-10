@@ -41,10 +41,12 @@
   },
   "dependencies": {
     "@kobalte/core": "^0.13.11",
+    "@mbarzda/solid-i18next": "^1.4.1",
     "@urql/solid": "^1.0.1",
     "dnd-kit-solid": "0.1.0",
     "graphql": "^16.13.2",
     "graphql-ws": "^6.0.8",
+    "i18next": "^26.0.4",
     "lucide-solid": "^1.7.0",
     "open-props": "^1.7.23",
     "solid-js": "^1.9.12",

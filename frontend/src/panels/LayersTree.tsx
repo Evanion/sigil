@@ -1,4 +1,5 @@
 import { createSignal, createMemo, createEffect, For, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { useDragDropMonitor } from "dnd-kit-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
@@ -207,6 +208,7 @@ function resolveDropPosition(
 export const LayersTree: Component = () => {
   const store = useDocument();
   const announce = useAnnounce();
+  const [t] = useTransContext();
   const [expandedNodes, setExpandedNodes] = createSignal<ReadonlySet<string>>(new Set<string>());
   const [dropTarget, setDropTarget] = createSignal<TreeDropTarget | null>(null);
   const [focusedUuid, setFocusedUuid] = createSignal<string | null>(null);
@@ -293,7 +295,7 @@ export const LayersTree: Component = () => {
       if (data?.type !== "layer") return;
       const node = store.state.nodes[data.uuid];
       if (node) {
-        announce(`Grabbed ${node.name}`);
+        announce(t("a11y:layers.grabbed", { name: node.name }));
       }
     },
 
@@ -376,7 +378,7 @@ export const LayersTree: Component = () => {
       ) {
         lastAnnounced = { uuid: computed.targetUuid, position: computed.position };
         const targetNodeName = targetNode.name;
-        announce(`Over ${targetNodeName}, ${computed.position}`);
+        announce(t("a11y:layers.over", { name: targetNodeName, position: computed.position }));
       }
     },
 
@@ -391,7 +393,7 @@ export const LayersTree: Component = () => {
       if (sourceData?.type !== "layer") return;
 
       if (!currentDrop) {
-        announce("Drop cancelled");
+        announce(t("a11y:layers.dropCancelled"));
         return;
       }
 
@@ -402,7 +404,7 @@ export const LayersTree: Component = () => {
       // Find target index in flat list.
       const targetIndex = list.findIndex((e) => e.uuid === currentDrop.targetUuid);
       if (targetIndex === -1) {
-        announce("Drop cancelled");
+        announce(t("a11y:layers.dropCancelled"));
         return;
       }
 
@@ -415,7 +417,7 @@ export const LayersTree: Component = () => {
         (parentUuid !== null &&
           (parentUuid === draggedUuid || isAncestor(nodes, parentUuid, draggedUuid)))
       ) {
-        announce("Cannot drop a layer into itself");
+        announce(t("a11y:layers.cannotDropIntoSelf"));
         return;
       }
       const draggedNode = nodes[draggedUuid];
@@ -425,7 +427,12 @@ export const LayersTree: Component = () => {
         const targetNode = nodes[currentDrop.targetUuid];
         const childCount = targetNode?.childrenUuids.length ?? 0;
         store.reparentNode(draggedUuid, currentDrop.targetUuid, childCount);
-        announce(`${draggedNode?.name ?? "Layer"} moved inside ${targetNode?.name ?? "container"}`);
+        announce(
+          t("a11y:layers.movedInside", {
+            name: draggedNode?.name ?? "Layer",
+            container: targetNode?.name ?? "container",
+          }),
+        );
         return;
       }
 
@@ -436,18 +443,23 @@ export const LayersTree: Component = () => {
         // Same parent — reorder.
         const position = resolveDropPosition(nodes, currentDrop, parentUuid, draggedUuid);
         store.reorderChildren(draggedUuid, position);
-        announce(`${draggedNode?.name ?? "Layer"} reordered`);
+        announce(t("a11y:layers.reordered", { name: draggedNode?.name ?? "Layer" }));
       } else if (parentUuid !== null) {
         // Different parent — reparent.
         const position = resolveDropPosition(nodes, currentDrop, parentUuid, draggedUuid);
         store.reparentNode(draggedUuid, parentUuid, position);
         const parentNode = nodes[parentUuid];
-        announce(`${draggedNode?.name ?? "Layer"} moved to ${parentNode?.name ?? "parent"}`);
+        announce(
+          t("a11y:layers.movedTo", {
+            name: draggedNode?.name ?? "Layer",
+            parent: parentNode?.name ?? "parent",
+          }),
+        );
       } else {
         // Moving to root level — reparent with root (no parent).
         // For now we cannot reparent to root via the current API,
         // so we just announce the failure.
-        announce("Cannot move to root level");
+        announce(t("a11y:layers.cannotMoveToRoot"));
       }
     },
   });
@@ -540,7 +552,7 @@ export const LayersTree: Component = () => {
           store.setSelectedNodeId(currentFocused);
           const node = store.state.nodes[currentFocused];
           if (node) {
-            announce(`${node.name} selected`);
+            announce(t("a11y:layers.selected", { name: node.name }));
           }
         }
         break;
@@ -573,7 +585,7 @@ export const LayersTree: Component = () => {
               }
             }
             store.deleteNode(currentFocused);
-            announce(`${node.name} deleted`);
+            announce(t("a11y:layers.deleted", { name: node.name }));
             setFocusedUuid(nextFocus);
           }
         }
@@ -589,13 +601,17 @@ export const LayersTree: Component = () => {
               e.preventDefault();
               store.setLocked(currentFocused, !focusedNode.locked);
               announce(
-                focusedNode.locked ? `${focusedNode.name} unlocked` : `${focusedNode.name} locked`,
+                focusedNode.locked
+                  ? t("a11y:layers.unlocked", { name: focusedNode.name })
+                  : t("a11y:layers.locked", { name: focusedNode.name }),
               );
             } else if (e.key === "h" || e.key === "H") {
               e.preventDefault();
               store.setVisible(currentFocused, !focusedNode.visible);
               announce(
-                focusedNode.visible ? `${focusedNode.name} hidden` : `${focusedNode.name} shown`,
+                focusedNode.visible
+                  ? t("a11y:layers.hidden", { name: focusedNode.name })
+                  : t("a11y:layers.shown", { name: focusedNode.name }),
               );
             }
           }
@@ -614,7 +630,7 @@ export const LayersTree: Component = () => {
             const idx = parentNode.childrenUuids.indexOf(currentFocused);
             if (idx > 0) {
               store.reorderChildren(currentFocused, idx - 1);
-              announce(`${moveNode.name} moved up`);
+              announce(t("a11y:layers.movedUp", { name: moveNode.name }));
             }
           } else if (e.key === "ArrowDown" && moveNode.parentUuid) {
             // Move down within parent's children
@@ -624,7 +640,7 @@ export const LayersTree: Component = () => {
             const idx = parentNode.childrenUuids.indexOf(currentFocused);
             if (idx < parentNode.childrenUuids.length - 1) {
               store.reorderChildren(currentFocused, idx + 1);
-              announce(`${moveNode.name} moved down`);
+              announce(t("a11y:layers.movedDown", { name: moveNode.name }));
             }
           } else if (e.key === "ArrowLeft" && moveNode.parentUuid) {
             // Move out: reparent to grandparent (un-nest)
@@ -635,7 +651,7 @@ export const LayersTree: Component = () => {
             if (!grandParent) break;
             const parentIdx = grandParent.childrenUuids.indexOf(moveNode.parentUuid);
             store.reparentNode(currentFocused, parentNode.parentUuid, parentIdx + 1);
-            announce(`${moveNode.name} moved out`);
+            announce(t("a11y:layers.movedOut", { name: moveNode.name }));
           } else if (e.key === "ArrowRight") {
             // Move in: reparent under previous sibling (nest)
             e.preventDefault();
@@ -658,7 +674,9 @@ export const LayersTree: Component = () => {
                   next.add(prevSiblingUuid);
                   return next;
                 });
-                announce(`${moveNode.name} nested inside ${prevSibling.name}`);
+                announce(
+                  t("a11y:layers.nestedInside", { name: moveNode.name, parent: prevSibling.name }),
+                );
               }
             }
           }
@@ -705,7 +723,7 @@ export const LayersTree: Component = () => {
       }}
       class="sigil-layers-tree"
       role="tree"
-      aria-label="Layer hierarchy"
+      aria-label={t("a11y:layers.hierarchy")}
       onKeyDown={handleKeyDown}
       style={{ position: "relative" }}
     >

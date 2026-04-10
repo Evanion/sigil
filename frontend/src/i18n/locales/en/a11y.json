@@ -1,0 +1,68 @@
+{
+  "canvas": {
+    "label": "Design canvas",
+    "selected": "{{name}} selected",
+    "multiSelected": "{{count}} objects selected"
+  },
+  "layers": {
+    "tree": "Layers tree",
+    "hierarchy": "Layer hierarchy",
+    "lock": "Lock",
+    "unlock": "Unlock",
+    "hide": "Hide",
+    "show": "Show",
+    "expand": "Expand",
+    "collapse": "Collapse",
+    "grabbed": "Grabbed {{name}}",
+    "over": "Over {{name}}, {{position}}",
+    "dropCancelled": "Drop cancelled",
+    "cannotDropIntoSelf": "Cannot drop a layer into itself",
+    "movedInside": "{{name}} moved inside {{container}}",
+    "reordered": "{{name}} reordered",
+    "movedTo": "{{name}} moved to {{parent}}",
+    "cannotMoveToRoot": "Cannot move to root level",
+    "selected": "{{name}} selected",
+    "deleted": "{{name}} deleted",
+    "unlocked": "{{name}} unlocked",
+    "locked": "{{name}} locked",
+    "hidden": "{{name}} hidden",
+    "shown": "{{name}} shown",
+    "movedUp": "{{name}} moved up",
+    "movedDown": "{{name}} moved down",
+    "movedOut": "{{name}} moved out",
+    "nestedInside": "{{name}} nested inside {{parent}}",
+    "rename": "Rename {{name}}"
+  },
+  "selection": {
+    "cleared": "Selection cleared"
+  },
+  "tool": {
+    "active": "{{tool}} tool active"
+  },
+  "page": {
+    "created": "Created {{name}}",
+    "selected": "Selected {{name}}",
+    "renamed": "Renamed page to {{name}}",
+    "deleted": "Deleted {{name}}",
+    "movedUp": "Moved {{name}} up",
+    "movedDown": "Moved {{name}} down",
+    "movedToPosition": "{{name}} moved to position {{position}}",
+    "grabbed": "Grabbed {{name}}",
+    "dropped": "Dropped {{name}}"
+  },
+  "typography": {
+    "fontWeightSet": "Font weight set to {{weight}}",
+    "fontStyle": "Font style set to {{style}}",
+    "textAlign": "Text alignment set to {{alignment}}",
+    "textDecoration": "Text decoration set to {{decoration}}",
+    "shadowEnabled": "Text shadow enabled",
+    "shadowDisabled": "Text shadow disabled",
+    "bold": "Bold {{state}}"
+  },
+  "status": {
+    "connected": "Connected to server",
+    "disconnected": "Disconnected from server",
+    "nodes": "{{count}} nodes",
+    "pages": "{{count}} pages"
+  }
+}
