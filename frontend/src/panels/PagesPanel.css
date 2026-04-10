@@ -1,0 +1,91 @@
+.sigil-pages-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sigil-pages-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--size-2) var(--size-2);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.sigil-pages-panel__title {
+  margin: 0;
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sigil-pages-panel__add-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--button-radius);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+
+.sigil-pages-panel__add-button:hover {
+  background: var(--surface-3);
+  color: var(--text-1);
+}
+
+.sigil-pages-panel__add-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-pages-panel__list {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.sigil-pages-panel__empty {
+  padding: var(--size-4);
+  text-align: center;
+  color: var(--text-3);
+  font-size: var(--font-size-0);
+}
+
+/* Drop indicator line for DnD reorder */
+.sigil-pages-panel__drop-indicator {
+  position: absolute;
+  left: var(--size-2);
+  right: var(--size-2);
+  height: 2px;
+  background: var(--accent);
+  pointer-events: none;
+  z-index: var(--z-drop-indicator);
+}
+
+.sigil-pages-panel__drop-indicator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-pages-panel__add-button {
+    transition: none;
+  }
+}

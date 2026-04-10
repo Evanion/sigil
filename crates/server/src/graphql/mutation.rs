@@ -20,6 +20,9 @@ use agent_designer_core::PageId;
 use agent_designer_core::commands::node_commands::{
     CreateNode, DeleteNode, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
+use agent_designer_core::commands::page_commands::{
+    CreatePage, DeletePage, RenamePage, ReorderPage,
+};
 use agent_designer_core::commands::style_commands::validate_transform;
 use agent_designer_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
@@ -39,8 +42,8 @@ use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPaylo
 use crate::state::ServerState;
 
 use super::types::{
-    ApplyOperationsResult, CreateNodeInput, DeleteNodeInput, OperationInput, ReorderInput,
-    ReparentInput, SetFieldInput,
+    ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput, DeletePageInput,
+    OperationInput, RenamePageInput, ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput,
 };
 
 pub struct MutationRoot;
@@ -97,6 +100,10 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
         OperationInput::DeleteNode(dn) => parse_delete_node(dn),
         OperationInput::Reparent(rp) => parse_reparent(rp),
         OperationInput::Reorder(ro) => parse_reorder(ro),
+        OperationInput::CreatePage(cp) => parse_create_page(cp),
+        OperationInput::DeletePage(dp) => parse_delete_page(dp),
+        OperationInput::RenamePage(rp) => parse_rename_page(rp),
+        OperationInput::ReorderPage(ro) => parse_reorder_page(ro),
     }
 }
 
@@ -804,6 +811,119 @@ fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
     })
 }
 
+/// Parses a `CreatePage` input.
+fn parse_create_page(input: &CreatePageInput) -> Result<ParsedOp> {
+    // RF-030: parse UUID once outside the builder closure
+    let page_uuid: uuid::Uuid = input
+        .page_uuid
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid page UUID"))?;
+    let page_id = PageId::new(page_uuid);
+    let name = input.name.clone();
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: page_uuid.to_string(),
+        op_type: "create_page".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({ "id": page_uuid.to_string(), "name": &name })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(CreatePage { page_id, name }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
+/// Parses a `DeletePage` input.
+fn parse_delete_page(input: &DeletePageInput) -> Result<ParsedOp> {
+    // RF-030: parse UUID once outside the builder closure
+    let page_uuid: uuid::Uuid = input
+        .page_id
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid page UUID"))?;
+    let page_id = PageId::new(page_uuid);
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: page_uuid.to_string(),
+        op_type: "delete_page".to_string(),
+        path: String::new(),
+        value: None,
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(DeletePage { page_id }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
+/// Parses a `RenamePage` input.
+fn parse_rename_page(input: &RenamePageInput) -> Result<ParsedOp> {
+    // RF-030: parse UUID once outside the builder closure
+    let page_uuid: uuid::Uuid = input
+        .page_id
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid page UUID"))?;
+    let page_id = PageId::new(page_uuid);
+    let new_name = input.new_name.clone();
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: page_uuid.to_string(),
+        op_type: "rename_page".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({ "name": &new_name })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(RenamePage { page_id, new_name }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
+/// Parses a `ReorderPage` input.
+fn parse_reorder_page(input: &ReorderPageInput) -> Result<ParsedOp> {
+    // RF-030: parse UUID once outside the builder closure
+    let page_uuid: uuid::Uuid = input
+        .page_id
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid page UUID"))?;
+    let page_id = PageId::new(page_uuid);
+
+    if input.new_position < 0 {
+        return Err(async_graphql::Error::new(
+            "new_position must be non-negative",
+        ));
+    }
+    #[allow(clippy::cast_sign_loss)]
+    let new_position = input.new_position as usize;
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: page_uuid.to_string(),
+        op_type: "reorder_page".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({ "newPosition": input.new_position })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(ReorderPage {
+                page_id,
+                new_position,
+            }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
 #[Object]
 #[allow(clippy::unused_async)]
 impl MutationRoot {
@@ -848,6 +968,11 @@ impl MutationRoot {
             OperationInput::SetField(_)
             | OperationInput::Reparent(_)
             | OperationInput::Reorder(_) => MutationEventKind::NodeUpdated,
+            OperationInput::CreatePage(_) => MutationEventKind::PageCreated,
+            OperationInput::DeletePage(_) => MutationEventKind::PageDeleted,
+            OperationInput::RenamePage(_) | OperationInput::ReorderPage(_) => {
+                MutationEventKind::PageUpdated
+            }
         };
 
         // First pass: parse all inputs (no lock needed).
@@ -1521,6 +1646,289 @@ mod tests {
         assert!(
             !res.errors.is_empty(),
             "negative blur_radius in text_shadow should be rejected"
+        );
+    }
+
+    // ── Page operation tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_apply_operations_create_page_adds_page_to_document() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ createPage: {{ pageUuid: "{page_uuid}", name: "Landing" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let doc = state.app.document.lock().unwrap();
+        assert_eq!(doc.pages.len(), 1, "document should have one page");
+        assert_eq!(doc.pages[0].name, "Landing");
+        assert_eq!(doc.pages[0].id.uuid().to_string(), page_uuid);
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_create_page_rejects_empty_name() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ createPage: {{ pageUuid: "{page_uuid}", name: "" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(!res.errors.is_empty(), "empty page name should be rejected");
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_rename_page_updates_name() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        // Create the page first
+        let create_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ createPage: {{ pageUuid: "{page_uuid}", name: "Old Name" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let create_res = schema.execute(&create_query).await;
+        assert!(
+            create_res.errors.is_empty(),
+            "errors: {:?}",
+            create_res.errors
+        );
+
+        // Rename the page
+        let rename_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ renamePage: {{ pageId: "{page_uuid}", newName: "New Name" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let rename_res = schema.execute(&rename_query).await;
+        assert!(
+            rename_res.errors.is_empty(),
+            "errors: {:?}",
+            rename_res.errors
+        );
+
+        let doc = state.app.document.lock().unwrap();
+        assert_eq!(doc.pages[0].name, "New Name");
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_reorder_page_moves_page_to_new_position() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_a_uuid = uuid::Uuid::new_v4().to_string();
+        let page_b_uuid = uuid::Uuid::new_v4().to_string();
+        let page_c_uuid = uuid::Uuid::new_v4().to_string();
+
+        // Create three pages
+        for (uuid, name) in [
+            (&page_a_uuid, "Page A"),
+            (&page_b_uuid, "Page B"),
+            (&page_c_uuid, "Page C"),
+        ] {
+            let q = format!(
+                r#"mutation {{
+                    applyOperations(
+                        operations: [{{ createPage: {{ pageUuid: "{uuid}", name: "{name}" }} }}],
+                        userId: "test-user"
+                    ) {{
+                        seq
+                    }}
+                }}"#
+            );
+            let r = schema.execute(&q).await;
+            assert!(r.errors.is_empty(), "create page errors: {:?}", r.errors);
+        }
+
+        // Move Page C (index 2) to position 0
+        let reorder_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ reorderPage: {{ pageId: "{page_c_uuid}", newPosition: 0 }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let reorder_res = schema.execute(&reorder_query).await;
+        assert!(
+            reorder_res.errors.is_empty(),
+            "errors: {:?}",
+            reorder_res.errors
+        );
+
+        let doc = state.app.document.lock().unwrap();
+        assert_eq!(doc.pages[0].id.uuid().to_string(), page_c_uuid);
+        assert_eq!(doc.pages[1].id.uuid().to_string(), page_a_uuid);
+        assert_eq!(doc.pages[2].id.uuid().to_string(), page_b_uuid);
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_delete_page_removes_page_from_document() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        let keeper_uuid = uuid::Uuid::new_v4().to_string();
+
+        // Create two pages so we can delete one (last-page guard).
+        let create_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [
+                        {{ createPage: {{ pageUuid: "{keeper_uuid}", name: "Keeper" }} }},
+                        {{ createPage: {{ pageUuid: "{page_uuid}", name: "To Delete" }} }}
+                    ],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let create_res = schema.execute(&create_query).await;
+        assert!(
+            create_res.errors.is_empty(),
+            "errors: {:?}",
+            create_res.errors
+        );
+        assert_eq!(state.app.document.lock().unwrap().pages.len(), 2);
+
+        // Delete the page
+        let delete_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ deletePage: {{ pageId: "{page_uuid}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let delete_res = schema.execute(&delete_query).await;
+        assert!(
+            delete_res.errors.is_empty(),
+            "errors: {:?}",
+            delete_res.errors
+        );
+
+        let doc = state.app.document.lock().unwrap();
+        assert_eq!(
+            doc.pages.len(),
+            1,
+            "document should have one page after delete"
+        );
+        assert_eq!(doc.pages[0].name, "Keeper");
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_delete_page_rejects_nonexistent_page() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let bad_uuid = uuid::Uuid::new_v4().to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ deletePage: {{ pageId: "{bad_uuid}" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "deleting nonexistent page should fail"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_reorder_page_rejects_out_of_range_position() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let page_uuid = uuid::Uuid::new_v4().to_string();
+        // Create one page
+        let create_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ createPage: {{ pageUuid: "{page_uuid}", name: "Solo" }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        schema.execute(&create_query).await;
+
+        // Position 5 is out of range for a 1-page document (valid: 0..0)
+        let reorder_query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ reorderPage: {{ pageId: "{page_uuid}", newPosition: 5 }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&reorder_query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "out-of-range position should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_create_page_rejects_invalid_uuid() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let query = r#"mutation {
+            applyOperations(
+                operations: [{ createPage: { pageUuid: "not-a-uuid", name: "Page" } }],
+                userId: "test-user"
+            ) {
+                seq
+            }
+        }"#;
+        let res = schema.execute(query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "invalid page UUID should be rejected"
         );
     }
 }

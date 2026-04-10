@@ -8,7 +8,16 @@
  */
 
 /** Discriminant for the kind of mutation an operation represents. */
-export type OperationType = "set_field" | "create_node" | "delete_node" | "reparent" | "reorder";
+export type OperationType =
+  | "set_field"
+  | "create_node"
+  | "delete_node"
+  | "reparent"
+  | "reorder"
+  | "create_page"
+  | "delete_page"
+  | "rename_page"
+  | "reorder_page";
 
 /**
  * A single field-level mutation.
@@ -97,6 +106,41 @@ export interface ReorderValue {
  * RF-002: Uses the same `position` field as ReorderValue for symmetry.
  */
 export interface ReorderPreviousValue {
+  readonly position: number;
+}
+
+/**
+ * Create page operation value payload.
+ * Stored in Operation.value for type="create_page".
+ */
+export interface CreatePageValue {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * Delete page operation value payload.
+ * Stored in Operation.previousValue for type="delete_page" (snapshot for undo).
+ */
+export interface DeletePageSnapshot {
+  readonly id: string;
+  readonly name: string;
+  readonly position: number;
+}
+
+/**
+ * Rename page operation value payload.
+ * Stored in Operation.value for type="rename_page".
+ */
+export interface RenamePageValue {
+  readonly name: string;
+}
+
+/**
+ * Reorder page operation value payload.
+ * Stored in Operation.value for type="reorder_page".
+ */
+export interface ReorderPageValue {
   readonly position: number;
 }
 

@@ -18,6 +18,7 @@ You are a fast compliance checker. Your job is to verify that code changes compl
 Scan the diff against ALL sections of CLAUDE.md:
 
 - **Section 1 (Constitution)**: Code quality principles, testing standards, UX consistency, performance requirements
+- **Section 1 (Undo/redo)**: For every new mutation function in the frontend store layer, verify it records a history entry via the HistoryManager. A store mutation that creates, renames, deletes, or reorders a user-visible entity without a history entry violates "Every user-facing operation must support undo/redo."
 - **Section 4 (Crate Responsibilities)**: Core has zero I/O, server doesn't bypass core, etc.
 - **Section 5 (Code Style)**: Edition, clippy, thiserror vs anyhow, no unwrap in core
 - **Section 6 (Commit Messages)**: Format compliance

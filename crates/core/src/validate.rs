@@ -61,6 +61,9 @@ pub const MAX_PAGE_NAME_LEN: usize = 256;
 /// Maximum pages per document.
 pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 
+/// Minimum pages per document — a document must always have at least one page.
+pub const MIN_PAGES_PER_DOCUMENT: usize = 1;
+
 /// Maximum number of tokens per document.
 pub const MAX_TOKENS_PER_CONTEXT: usize = 50_000;
 

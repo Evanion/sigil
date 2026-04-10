@@ -20,6 +20,21 @@ import type {
 } from "../types/document";
 
 /**
+ * Narrow interface exposing page mutation methods.
+ *
+ * Components that only need page operations (e.g., PagesPanel) can depend
+ * on this subset instead of the full DocumentStoreAPI.
+ */
+export interface PageStoreAPI {
+  createPage(name: string): void;
+  deletePage(pageId: string): void;
+  renamePage(pageId: string, newName: string): void;
+  reorderPages(pageId: string, newPosition: number): void;
+  setActivePage(pageId: string): void;
+  activePageId(): string | null;
+}
+
+/**
  * Discriminated union for type-safe text style updates.
  *
  * Replaces the untyped `(field: string, value: unknown)` signature on

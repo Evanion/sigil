@@ -21,6 +21,48 @@ pub enum OperationInput {
     Reparent(ReparentInput),
     /// Reorder a node within its parent's children list.
     Reorder(ReorderInput),
+    /// Create a new page in the document.
+    CreatePage(CreatePageInput),
+    /// Delete a page from the document.
+    DeletePage(DeletePageInput),
+    /// Rename a page.
+    RenamePage(RenamePageInput),
+    /// Reorder a page within the document's page list.
+    ReorderPage(ReorderPageInput),
+}
+
+/// Input for creating a new page.
+#[derive(InputObject)]
+pub struct CreatePageInput {
+    /// Pre-generated UUID for the new page.
+    pub page_uuid: String,
+    /// Display name for the new page.
+    pub name: String,
+}
+
+/// Input for deleting a page.
+#[derive(InputObject)]
+pub struct DeletePageInput {
+    /// UUID of the page to delete.
+    pub page_id: String,
+}
+
+/// Input for renaming a page.
+#[derive(InputObject)]
+pub struct RenamePageInput {
+    /// UUID of the page to rename.
+    pub page_id: String,
+    /// New display name for the page.
+    pub new_name: String,
+}
+
+/// Input for reordering a page within the document's page list.
+#[derive(InputObject)]
+pub struct ReorderPageInput {
+    /// UUID of the page to move.
+    pub page_id: String,
+    /// Target zero-based index the page should occupy after the operation.
+    pub new_position: i32,
 }
 
 /// Input for setting a field on an existing node.

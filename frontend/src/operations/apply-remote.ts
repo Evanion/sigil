@@ -79,9 +79,16 @@ export interface StoreDocumentNode {
   childrenUuids: string[];
 }
 
+/** Mutable version of Page for use inside the Solid store. */
+export interface MutablePage {
+  id: string;
+  name: string;
+  root_nodes: Array<{ index: number; generation: number }>;
+}
+
 export interface StoreState {
   nodes: Record<string, StoreDocumentNode>;
-  pages: unknown[];
+  pages: MutablePage[];
 }
 
 // ── Placeholder for new nodes ─────────────────────────────────────────
@@ -159,6 +166,18 @@ function applyRemoteOperation(
       break;
     case "reorder":
       applyReorder(op.nodeUuid, op.value, setState, getNode);
+      break;
+    case "create_page":
+      applyCreatePage(op.value, setState);
+      break;
+    case "delete_page":
+      applyDeletePage(op.nodeUuid, setState);
+      break;
+    case "rename_page":
+      applyRenamePage(op.nodeUuid, op.value, setState);
+      break;
+    case "reorder_page":
+      applyReorderPage(op.nodeUuid, op.value, setState);
       break;
     default:
       console.warn(`Unknown remote operation type: ${op.type}`);
@@ -473,4 +492,144 @@ function applyReorder(
   const newChildren = parent.childrenUuids.filter((id) => id !== nodeUuid);
   newChildren.splice(reorderPosition, 0, nodeUuid);
   setState("nodes", parentUuid, "childrenUuids", newChildren);
+}
+
+// ── Internal: create_page ─────────────────────────────────────────────
+
+function applyCreatePage(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote create_page: missing or invalid payload");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const id = raw["id"] ?? raw["pageId"] ?? raw["pageUuid"];
+  if (!id || typeof id !== "string") {
+    console.warn("Remote create_page: missing or non-string page id");
+    return;
+  }
+
+  const name = typeof raw["name"] === "string" ? raw["name"] : "Untitled";
+  const rawRootNodes = raw["root_nodes"];
+  const rootNodes = Array.isArray(rawRootNodes)
+    ? (rawRootNodes as unknown[]).filter(
+        (n): n is { index: number; generation: number } => typeof n === "object" && n !== null,
+      )
+    : [];
+
+  const newPage: MutablePage = {
+    id,
+    name,
+    root_nodes: rootNodes,
+  };
+
+  setState(
+    produce((s) => {
+      // Guard against duplicates.
+      if (!s.pages.some((p) => p.id === id)) {
+        s.pages.push(newPage);
+      }
+    }),
+  );
+}
+
+// ── Internal: delete_page ─────────────────────────────────────────────
+
+function applyDeletePage(pageId: string, setState: SetStoreFunction<StoreState>): void {
+  if (!pageId) {
+    console.warn("Remote delete_page: missing pageId");
+    return;
+  }
+
+  setState(
+    produce((s) => {
+      const idx = s.pages.findIndex((p) => p.id === pageId);
+      if (idx !== -1) {
+        s.pages.splice(idx, 1);
+      }
+    }),
+  );
+}
+
+// ── Internal: rename_page ─────────────────────────────────────────────
+
+function applyRenamePage(
+  pageId: string,
+  value: unknown,
+  setState: SetStoreFunction<StoreState>,
+): void {
+  if (!pageId) {
+    console.warn("Remote rename_page: missing pageId");
+    return;
+  }
+
+  let newName: string | null = null;
+
+  if (typeof value === "string") {
+    newName = value;
+  } else if (value && typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    newName =
+      typeof raw["newName"] === "string"
+        ? raw["newName"]
+        : typeof raw["name"] === "string"
+          ? raw["name"]
+          : null;
+  }
+
+  if (!newName) {
+    console.warn("Remote rename_page: missing name in payload");
+    return;
+  }
+
+  const resolvedName = newName;
+  setState(
+    produce((s) => {
+      const page = s.pages.find((p) => p.id === pageId);
+      if (page) {
+        page.name = resolvedName;
+      }
+    }),
+  );
+}
+
+// ── Internal: reorder_page ────────────────────────────────────────────
+
+function applyReorderPage(
+  pageId: string,
+  value: unknown,
+  setState: SetStoreFunction<StoreState>,
+): void {
+  if (!pageId) {
+    console.warn("Remote reorder_page: missing pageId");
+    return;
+  }
+
+  if (!value || typeof value !== "object") {
+    console.warn("Remote reorder_page: missing or invalid payload");
+    return;
+  }
+
+  // RF-019: Only accept `newPosition` — the server always sends this field name.
+  // The dead `position` key was never sent by the server and created confusion.
+  const payload = value as { newPosition?: number };
+  const position = payload.newPosition;
+  if (typeof position !== "number" || !Number.isFinite(position)) {
+    console.warn("Remote reorder_page: missing or non-finite newPosition");
+    return;
+  }
+
+  setState(
+    produce((s) => {
+      const currentIdx = s.pages.findIndex((p) => p.id === pageId);
+      if (currentIdx === -1) {
+        console.warn(`Remote reorder_page: page ${pageId} not found`);
+        return;
+      }
+      const [page] = s.pages.splice(currentIdx, 1);
+      if (page) {
+        s.pages.splice(position, 0, page);
+      }
+    }),
+  );
 }

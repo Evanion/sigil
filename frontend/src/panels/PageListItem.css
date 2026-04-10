@@ -1,0 +1,113 @@
+.sigil-page-list-item {
+  display: flex;
+  align-items: center;
+  height: 56px;
+  gap: var(--size-1);
+  padding: 0 var(--size-2);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-1);
+  transition: background-color 120ms;
+}
+
+.sigil-page-list-item:hover {
+  background: var(--surface-3);
+}
+
+.sigil-page-list-item--active {
+  background: var(--surface-4);
+}
+
+.sigil-page-list-item--active:hover {
+  background: var(--surface-4);
+}
+
+/* Keyboard focus ring (distinct from active highlight) */
+.sigil-page-list-item--focused {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.sigil-page-list-item:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+/* Drag handle — uses <button> for a11y (RF-002) */
+.sigil-page-list-item__handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: grab;
+}
+
+/* Dragging state: reduce opacity to indicate the dragged item */
+.sigil-page-list-item--dragging {
+  opacity: var(--dragging-opacity, 0.4);
+}
+
+/* Drop target state: highlight when another item is being dragged over */
+.sigil-page-list-item--drop-target {
+  background: var(--surface-3);
+}
+
+/* Thumbnail container */
+.sigil-page-list-item__thumbnail {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-2, 4px);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.sigil-page-list-item__thumbnail canvas {
+  display: block;
+}
+
+/* Page name */
+.sigil-page-list-item__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-0);
+  line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Inline rename input */
+.sigil-page-list-item__name-input {
+  flex: 1;
+  min-width: 40px;
+  height: 24px;
+  padding: 0 var(--size-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--input-radius);
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  outline: none;
+}
+
+.sigil-page-list-item__name-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-page-list-item {
+    transition: none;
+  }
+}
