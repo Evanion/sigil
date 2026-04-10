@@ -25,6 +25,7 @@ These principles are the governing rules of this project. They explain the _why_
 - If you can't write a test for it, the interface needs redesign.
 - Every `FieldOperation` added to `crates/core/` MUST have at least one test that exercises the full `validate` → `apply` cycle. The test must verify: (1) `validate` passes on valid input, (2) `apply` changes the document state as expected, (3) `validate` rejects invalid input (missing node, invalid values). Test naming convention: `test_<operation_name>_validate_and_apply`. Undo/redo is handled client-side (Spec 15) — the core crate provides forward-only operations.
 - Every new first-class entity type introduced to `crates/core/` (pages, components, layers, tokens, etc.) MUST ship with a complete command set covering at minimum: create, rename, delete, and any reorder or reparent operations the entity supports. A PR that adds an entity type without commands for it is incomplete — the entity is not usable by agents or clients without them.
+- Every new first-class entity type that is user-mutatable from the frontend MUST have all of its mutations wired to the client-side HistoryManager in the same PR. A PR that adds entity commands in the core crate but does not register them with the HistoryManager has delivered mutations that cannot be undone — this is incomplete regardless of backend completeness.
 
 ### User Experience Consistency
 
@@ -164,6 +165,7 @@ Rules:
 - `value` shape must match what the frontend handler for that `op_type` destructures (e.g., `reparent` expects `{parentUuid, position}` — not a bare string).
 - When adding a new operation type to an MCP tool, add the corresponding handler in `applyRemoteOperation` in the same PR. A broadcast without a handler is a no-op.
 - When changing the frontend handler for an operation type, search all MCP tools for broadcasts of that `op_type` and update them in the same PR.
+- Entity-creation broadcasts (`create_node`, `create_page`, `create_component`, etc.) MUST include the entity's stable UUID in the `value` payload under the key `"id"`. The frontend handler cannot create the entity in the local store without its identity — a payload missing `"id"` produces a silent discard. This applies to both MCP and GraphQL broadcast paths.
 
 ---
 
@@ -400,7 +402,7 @@ A `FieldOperation` struct's `apply()` method must be callable immediately after 
 
 ### Constant Enforcement Tests
 
-Every `MAX_*` or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test.
+Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit.
 
 ### Arena-Local IDs Must Not Be Serialized
 
@@ -543,3 +545,7 @@ Any store function that accepts a style field name and value as separate argumen
 ### Side-Effect Artifacts Must Be Constructed After Precondition Verification
 
 When implementing a mutation that requires lock acquisition and entity existence verification, all side-effect artifacts (broadcast payloads, response objects, audit log entries) MUST be constructed AFTER the lock is acquired and AFTER preconditions (entity exists, fields valid) are confirmed. Pre-building these artifacts before verification wastes allocation on error paths and risks constructing a payload from stale pre-lock state. Pattern: acquire lock, verify preconditions, apply mutation, construct broadcast payload from verified post-mutation state, release lock, send broadcast.
+
+### Delete Operations Must Enforce Collection-Level Invariants
+
+Any `FieldOperation` that removes an entity from a bounded collection MUST validate both (1) that the entity exists, AND (2) that removing it will not violate a minimum-cardinality invariant. If a document must always contain at least one page, `DeletePage::validate` must check `page_count > MIN_PAGES_PER_DOCUMENT`. The minimum MUST be defined as a `MIN_*` constant in `validate.rs`. Do not rely on the frontend to enforce this — frontend guards are bypassable via GraphQL and MCP.

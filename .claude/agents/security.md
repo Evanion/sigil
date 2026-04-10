@@ -85,7 +85,7 @@ For every deserialization entry point:
 - For every MCP tool that runs over stdio transport, verify that tracing/logging is directed to stderr, not stdout. stdout writes corrupt the protocol framing — report as High.
 - For every `f32`/`f64` field in a deserialized type, verify NaN/infinity rejection exists at the deserialization boundary.
 - For every `#[derive(Deserialize)]` in `crates/core/`, verify the type has no validating constructor. If it does, the derive must be replaced with a custom impl.
-- For every `MAX_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.
+- For every `MAX_*`/`MIN_*`/`LIMIT_*` constant, verify a corresponding enforcement test exists.
 - For every custom `Deserialize` that collects into a map, verify duplicate keys are rejected (serde default is silent last-writer-wins).
 - For every boolean or enum flag that temporarily changes system behavior (e.g., `isUndoing`, `isBroadcasting`, `suppressHistory`), verify the flag is reset in a `finally` block or via an RAII guard. A flag set without `try-finally` is a permanent system breakage vector if the guarded operation throws.
 
