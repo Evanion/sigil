@@ -510,6 +510,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_max_pages_per_document_enforced() {
+        use crate::validate::MAX_PAGES_PER_DOCUMENT;
+
+        let mut doc = Document::new("Test".to_string());
+        for i in 0..MAX_PAGES_PER_DOCUMENT {
+            let uuid = Uuid::from_u128(i as u128);
+            let page = Page::new(PageId::new(uuid), format!("Page {i}")).expect("create page");
+            doc.add_page(page).expect("add page");
+        }
+        assert_eq!(doc.pages.len(), MAX_PAGES_PER_DOCUMENT);
+
+        // One more should fail.
+        let overflow = Page::new(
+            PageId::new(Uuid::from_u128(999_999)),
+            "Overflow".to_string(),
+        )
+        .expect("create overflow page");
+        let result = doc.add_page(overflow);
+        assert!(result.is_err());
+        assert!(matches!(&result, Err(CoreError::ValidationError(msg)) if msg.contains("maximum")));
+    }
+
     // ── RF-006: add_component ─────────────────────────────────────────
 
     #[test]

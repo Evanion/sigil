@@ -826,7 +826,7 @@ fn parse_create_page(input: &CreatePageInput) -> Result<ParsedOp> {
         node_uuid: page_uuid.to_string(),
         op_type: "create_page".to_string(),
         path: String::new(),
-        value: Some(serde_json::json!({ "name": &name })),
+        value: Some(serde_json::json!({ "id": page_uuid.to_string(), "name": &name })),
     };
 
     Ok(ParsedOp {
@@ -1801,12 +1801,16 @@ mod tests {
         let schema = test_schema(state.clone());
 
         let page_uuid = uuid::Uuid::new_v4().to_string();
+        let keeper_uuid = uuid::Uuid::new_v4().to_string();
 
-        // Create the page first
+        // Create two pages so we can delete one (last-page guard).
         let create_query = format!(
             r#"mutation {{
                 applyOperations(
-                    operations: [{{ createPage: {{ pageUuid: "{page_uuid}", name: "To Delete" }} }}],
+                    operations: [
+                        {{ createPage: {{ pageUuid: "{keeper_uuid}", name: "Keeper" }} }},
+                        {{ createPage: {{ pageUuid: "{page_uuid}", name: "To Delete" }} }}
+                    ],
                     userId: "test-user"
                 ) {{
                     seq
@@ -1819,7 +1823,7 @@ mod tests {
             "errors: {:?}",
             create_res.errors
         );
-        assert_eq!(state.app.document.lock().unwrap().pages.len(), 1);
+        assert_eq!(state.app.document.lock().unwrap().pages.len(), 2);
 
         // Delete the page
         let delete_query = format!(
@@ -1840,10 +1844,12 @@ mod tests {
         );
 
         let doc = state.app.document.lock().unwrap();
-        assert!(
-            doc.pages.is_empty(),
-            "document should have no pages after delete"
+        assert_eq!(
+            doc.pages.len(),
+            1,
+            "document should have one page after delete"
         );
+        assert_eq!(doc.pages[0].name, "Keeper");
     }
 
     #[tokio::test]

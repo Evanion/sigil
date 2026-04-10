@@ -62,9 +62,9 @@ pub fn create_page_impl(state: &AppState, name: &str) -> Result<PageInfo, McpToo
         state,
         MutationEventKind::PageCreated,
         &page_uuid.to_string(),
-        "create",
+        "create_page",
         "page",
-        Some(serde_json::json!({"name": name})),
+        Some(serde_json::json!({"id": page_uuid.to_string(), "name": name})),
     );
 
     Ok(PageInfo {
@@ -107,7 +107,7 @@ pub fn delete_page_impl(
         state,
         MutationEventKind::PageDeleted,
         page_uuid_str,
-        "delete",
+        "delete_page",
         "page",
         None,
     );
@@ -161,9 +161,9 @@ pub fn rename_page_impl(
         state,
         MutationEventKind::PageUpdated,
         page_uuid_str,
-        "set_field",
+        "rename_page",
         "name",
-        Some(serde_json::json!(new_name)),
+        Some(serde_json::json!({"name": new_name})),
     );
 
     Ok(PageInfo {
@@ -267,10 +267,13 @@ mod tests {
     #[test]
     fn test_delete_page_removes_page() {
         let state = AppState::new();
+        let _keeper = create_page_impl(&state, "Keeper").unwrap();
         let page = create_page_impl(&state, "Temp").unwrap();
         let result = delete_page_impl(&state, &page.id);
         assert!(result.is_ok());
-        assert!(list_pages_impl(&state).is_empty());
+        let pages = list_pages_impl(&state);
+        assert_eq!(pages.len(), 1);
+        assert_eq!(pages[0].name, "Keeper");
     }
 
     #[test]

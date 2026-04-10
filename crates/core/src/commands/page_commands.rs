@@ -6,7 +6,7 @@ use crate::command::FieldOperation;
 use crate::document::{Document, Page};
 use crate::error::CoreError;
 use crate::id::PageId;
-use crate::validate::validate_page_name;
+use crate::validate::{MIN_PAGES_PER_DOCUMENT, validate_page_name};
 
 /// Creates a new page and adds it to the document.
 #[derive(Debug)]
@@ -41,10 +41,20 @@ pub struct DeletePage {
 impl FieldOperation for DeletePage {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         doc.page(self.page_id)?;
+        if doc.pages.len() <= MIN_PAGES_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(
+                "cannot delete the last page".into(),
+            ));
+        }
         Ok(())
     }
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
+        if doc.pages.len() <= MIN_PAGES_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(
+                "cannot delete the last page".into(),
+            ));
+        }
         let pos = doc
             .pages
             .iter()
@@ -67,11 +77,11 @@ pub struct ReorderPage {
 impl FieldOperation for ReorderPage {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         doc.page(self.page_id)?;
+        let max_index = doc.pages.len().saturating_sub(1);
         if self.new_position >= doc.pages.len() {
             return Err(CoreError::ValidationError(format!(
-                "new_position {} out of range (0..{})",
+                "new_position {} out of range (0..={max_index})",
                 self.new_position,
-                doc.pages.len()
             )));
         }
         Ok(())
@@ -83,11 +93,11 @@ impl FieldOperation for ReorderPage {
             .iter()
             .position(|p| p.id == self.page_id)
             .ok_or(CoreError::PageNotFound(self.page_id))?;
+        let max_index = doc.pages.len().saturating_sub(1);
         if self.new_position >= doc.pages.len() {
             return Err(CoreError::ValidationError(format!(
-                "new_position {} out of range (0..{})",
+                "new_position {} out of range (0..={max_index})",
                 self.new_position,
-                doc.pages.len()
             )));
         }
         let page = doc.pages.remove(old_pos);
@@ -185,27 +195,90 @@ mod tests {
     fn test_delete_page_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
         let page_id = PageId::new(make_uuid(1));
+        let page_id_2 = PageId::new(make_uuid(2));
 
-        let create_op = CreatePage {
+        CreatePage {
             page_id,
             name: "Home".to_string(),
-        };
-        create_op.apply(&mut doc).expect("create page");
-        assert_eq!(doc.pages.len(), 1);
+        }
+        .apply(&mut doc)
+        .expect("create page 1");
+        CreatePage {
+            page_id: page_id_2,
+            name: "About".to_string(),
+        }
+        .apply(&mut doc)
+        .expect("create page 2");
+        assert_eq!(doc.pages.len(), 2);
 
         let delete_op = DeletePage { page_id };
         delete_op.validate(&doc).expect("validate");
         delete_op.apply(&mut doc).expect("apply");
-        assert!(doc.pages.is_empty());
+        assert_eq!(doc.pages.len(), 1);
+        assert_eq!(doc.pages[0].id, page_id_2);
     }
 
     #[test]
     fn test_delete_page_not_found() {
-        let doc = Document::new("Test".to_string());
+        let mut doc = Document::new("Test".to_string());
+        // Need at least one page so the "last page" guard doesn't fire first.
+        CreatePage {
+            page_id: PageId::new(make_uuid(1)),
+            name: "Home".to_string(),
+        }
+        .apply(&mut doc)
+        .expect("create page");
+        CreatePage {
+            page_id: PageId::new(make_uuid(2)),
+            name: "About".to_string(),
+        }
+        .apply(&mut doc)
+        .expect("create page 2");
+
         let op = DeletePage {
             page_id: PageId::new(make_uuid(99)),
         };
         assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_delete_last_page_is_rejected() {
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(1));
+        CreatePage {
+            page_id,
+            name: "Only Page".to_string(),
+        }
+        .apply(&mut doc)
+        .expect("create page");
+        assert_eq!(doc.pages.len(), 1);
+
+        let delete_op = DeletePage { page_id };
+        let result = delete_op.validate(&doc);
+        assert!(result.is_err());
+        assert!(
+            matches!(&result, Err(CoreError::ValidationError(msg)) if msg.contains("last page"))
+        );
+    }
+
+    #[test]
+    fn test_min_pages_per_document_enforced() {
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(1));
+        CreatePage {
+            page_id,
+            name: "Only".to_string(),
+        }
+        .apply(&mut doc)
+        .expect("create");
+
+        // Document has exactly MIN_PAGES_PER_DOCUMENT pages (1).
+        // Attempting to delete should fail.
+        let delete_op = DeletePage { page_id };
+        assert!(delete_op.validate(&doc).is_err());
+        assert!(delete_op.apply(&mut doc).is_err());
+        // Page must still be present.
+        assert_eq!(doc.pages.len(), 1);
     }
 
     // ── RenamePage ────────────────────────────────────────────────────
