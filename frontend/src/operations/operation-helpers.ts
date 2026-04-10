@@ -13,6 +13,10 @@ import type {
   ReparentValue,
   ReorderValue,
   ReorderPreviousValue,
+  CreatePageValue,
+  DeletePageSnapshot,
+  RenamePageValue,
+  ReorderPageValue,
   Transaction,
 } from "./types";
 
@@ -42,7 +46,9 @@ function makeOp(
 function inverseType(type: OperationType): OperationType {
   if (type === "create_node") return "delete_node";
   if (type === "delete_node") return "create_node";
-  return type; // set_field, reparent, reorder invert by swapping values
+  if (type === "create_page") return "delete_page";
+  if (type === "delete_page") return "create_page";
+  return type; // set_field, reparent, reorder, rename_page, reorder_page invert by swapping values
 }
 
 // ── Public factory functions ─────────────────────────────────────────
@@ -114,6 +120,50 @@ export function createReorderOp(
 }
 
 /**
+ * Create a create_page operation.
+ * `pageData` contains the page's id and name.
+ */
+export function createCreatePageOp(userId: string, pageData: CreatePageValue): Operation {
+  return makeOp(userId, pageData.id, "create_page", "", pageData, null);
+}
+
+/**
+ * Create a delete_page operation.
+ * `pageSnapshot` contains the page's id, name, and position for undo.
+ */
+export function createDeletePageOp(userId: string, pageSnapshot: DeletePageSnapshot): Operation {
+  return makeOp(userId, pageSnapshot.id, "delete_page", "", null, pageSnapshot);
+}
+
+/**
+ * Create a rename_page operation.
+ */
+export function createRenamePageOp(
+  userId: string,
+  pageId: string,
+  newName: string,
+  oldName: string,
+): Operation {
+  const value: RenamePageValue = { name: newName };
+  const previousValue: RenamePageValue = { name: oldName };
+  return makeOp(userId, pageId, "rename_page", "", value, previousValue);
+}
+
+/**
+ * Create a reorder_page operation.
+ */
+export function createReorderPageOp(
+  userId: string,
+  pageId: string,
+  newPosition: number,
+  oldPosition: number,
+): Operation {
+  const value: ReorderPageValue = { position: newPosition };
+  const previousValue: ReorderPageValue = { position: oldPosition };
+  return makeOp(userId, pageId, "reorder_page", "", value, previousValue);
+}
+
+/**
  * Create the inverse of an operation by swapping value/previousValue
  * and flipping create_node <-> delete_node.
  *
@@ -127,6 +177,11 @@ export function createInverse(op: Operation): Operation {
   if (op.type === "create_node" && nodeUuid === "") {
     const val = op.value as Record<string, unknown> | null;
     nodeUuid = (typeof val?.uuid === "string" ? val.uuid : "") as string;
+  }
+  // For create_page, the page ID is in the value payload's `id` field.
+  if (op.type === "create_page" && nodeUuid === "") {
+    const val = op.value as Record<string, unknown> | null;
+    nodeUuid = (typeof val?.id === "string" ? val.id : "") as string;
   }
 
   return {

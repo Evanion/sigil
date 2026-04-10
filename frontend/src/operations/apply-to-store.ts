@@ -12,7 +12,14 @@
  */
 
 import { produce } from "solid-js/store";
-import type { Operation, ReparentValue, ReorderValue } from "./types";
+import type {
+  Operation,
+  ReparentValue,
+  ReorderValue,
+  CreatePageValue,
+  RenamePageValue,
+  ReorderPageValue,
+} from "./types";
 
 /** Minimal setter interface matching Solid's SetStoreFunction signature. */
 export type StoreStateSetter = (...args: unknown[]) => void;
@@ -51,6 +58,18 @@ export function applyOperationToStore(
       break;
     case "reorder":
       applyReorder(op, setState, reader);
+      break;
+    case "create_page":
+      applyCreatePageOp(op, setState);
+      break;
+    case "delete_page":
+      applyDeletePageOp(op, setState);
+      break;
+    case "rename_page":
+      applyRenamePageOp(op, setState);
+      break;
+    case "reorder_page":
+      applyReorderPageOp(op, setState);
       break;
   }
 }
@@ -259,4 +278,91 @@ function applyReorder(op: Operation, setState: StoreStateSetter, reader: StoreSt
   const updated = [...children];
   updated.splice(insertAt, 0, nodeUuid);
   setState("nodes", parentUuid, "childrenUuids", updated);
+}
+
+// ── Page operations ────────────────────────────────────────────────────
+
+function applyCreatePageOp(op: Operation, setState: StoreStateSetter): void {
+  const pageData = op.value as CreatePageValue;
+  if (!pageData || !pageData.id) {
+    console.warn("applyCreatePageOp: missing page data");
+    return;
+  }
+
+  setState(
+    produce((s: Record<string, unknown>) => {
+      const pages = s["pages"] as Array<Record<string, unknown>>;
+      // Guard against duplicates
+      if (!pages.some((p) => p["id"] === pageData.id)) {
+        pages.push({
+          id: pageData.id,
+          name: pageData.name,
+          root_nodes: [],
+          rootNodeUuids: [],
+        });
+      }
+      const info = s["info"] as Record<string, unknown>;
+      info["page_count"] = pages.length;
+    }),
+  );
+}
+
+function applyDeletePageOp(op: Operation, setState: StoreStateSetter): void {
+  const pageId = op.nodeUuid;
+  if (!pageId) {
+    console.warn("applyDeletePageOp: missing pageId");
+    return;
+  }
+
+  setState(
+    produce((s: Record<string, unknown>) => {
+      const pages = s["pages"] as Array<Record<string, unknown>>;
+      const idx = pages.findIndex((p) => p["id"] === pageId);
+      if (idx !== -1) {
+        pages.splice(idx, 1);
+      }
+      const info = s["info"] as Record<string, unknown>;
+      info["page_count"] = pages.length;
+    }),
+  );
+}
+
+function applyRenamePageOp(op: Operation, setState: StoreStateSetter): void {
+  const pageId = op.nodeUuid;
+  const renameData = op.value as RenamePageValue;
+  if (!pageId || !renameData) {
+    console.warn("applyRenamePageOp: missing pageId or name");
+    return;
+  }
+
+  setState(
+    produce((s: Record<string, unknown>) => {
+      const pages = s["pages"] as Array<Record<string, unknown>>;
+      const page = pages.find((p) => p["id"] === pageId);
+      if (page) {
+        page["name"] = renameData.name;
+      }
+    }),
+  );
+}
+
+function applyReorderPageOp(op: Operation, setState: StoreStateSetter): void {
+  const pageId = op.nodeUuid;
+  const reorderData = op.value as ReorderPageValue;
+  if (!pageId || !reorderData) {
+    console.warn("applyReorderPageOp: missing pageId or position");
+    return;
+  }
+
+  setState(
+    produce((s: Record<string, unknown>) => {
+      const pages = s["pages"] as Array<Record<string, unknown>>;
+      const currentIdx = pages.findIndex((p) => p["id"] === pageId);
+      if (currentIdx === -1) return;
+      const [page] = pages.splice(currentIdx, 1);
+      if (page) {
+        pages.splice(reorderData.position, 0, page);
+      }
+    }),
+  );
 }

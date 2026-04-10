@@ -610,10 +610,12 @@ function applyReorderPage(
     return;
   }
 
-  const payload = value as { position?: number; newPosition?: number };
-  const position = payload.position ?? payload.newPosition;
+  // RF-019: Only accept `newPosition` — the server always sends this field name.
+  // The dead `position` key was never sent by the server and created confusion.
+  const payload = value as { newPosition?: number };
+  const position = payload.newPosition;
   if (typeof position !== "number" || !Number.isFinite(position)) {
-    console.warn("Remote reorder_page: missing or non-finite position");
+    console.warn("Remote reorder_page: missing or non-finite newPosition");
     return;
   }
 

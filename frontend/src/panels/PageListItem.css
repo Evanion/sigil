@@ -33,15 +33,28 @@
   outline-offset: calc(-1 * var(--focus-offset));
 }
 
-/* Drag handle */
+/* Drag handle — uses <button> for a11y (RF-002) */
 .sigil-page-list-item__handle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   width: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--text-3);
   cursor: grab;
+}
+
+/* Dragging state: reduce opacity to indicate the dragged item */
+.sigil-page-list-item--dragging {
+  opacity: var(--dragging-opacity, 0.4);
+}
+
+/* Drop target state: highlight when another item is being dragged over */
+.sigil-page-list-item--drop-target {
+  background: var(--surface-3);
 }
 
 /* Thumbnail container */

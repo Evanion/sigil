@@ -28,6 +28,10 @@ import {
   createReparentOp,
   createReorderOp,
   createSetFieldOp,
+  createCreatePageOp,
+  createDeletePageOp,
+  createRenamePageOp,
+  createReorderPageOp,
 } from "../operations/operation-helpers";
 import type { TextStylePatch } from "./document-store-types";
 
@@ -55,6 +59,9 @@ type MutableDocumentNode = {
 /** Mutable version of Page for use inside createStore. */
 type MutablePage = {
   -readonly [K in keyof Page]: Page[K];
+} & {
+  /** Root node UUIDs belonging to this page (populated during parsePagesResponse). */
+  rootNodeUuids: string[];
 };
 
 export interface DocumentState {
@@ -131,7 +138,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
 const MAX_TEXT_CONTENT_LENGTH = 1_000_000;
 
 /** Maximum page name length — matches crates/core/src/validate.rs MAX_PAGE_NAME_LEN. */
-const MAX_PAGE_NAME_LENGTH = 256;
+export const MAX_PAGE_NAME_LENGTH = 256;
 
 /** Maximum pages per document — matches crates/core/src/validate.rs MAX_PAGES_PER_DOCUMENT. */
 const MAX_PAGES_PER_DOCUMENT = 100;
@@ -180,10 +187,10 @@ function parseNode(raw: Record<string, unknown>): MutableDocumentNode {
 }
 
 function parsePagesResponse(data: unknown): {
-  pages: Page[];
+  pages: MutablePage[];
   nodes: Record<string, MutableDocumentNode>;
 } {
-  const pages: Page[] = [];
+  const pages: MutablePage[] = [];
   const nodes: Record<string, MutableDocumentNode> = {};
 
   if (!data || typeof data !== "object") return { pages, nodes };
@@ -195,6 +202,7 @@ function parsePagesResponse(data: unknown): {
     const p = pageRaw as Record<string, unknown>;
     const pageNodes = Array.isArray(p["nodes"]) ? p["nodes"] : [];
     const rootNodeIds: NodeId[] = [];
+    const rootNodeUuids: string[] = [];
 
     for (const nodeRaw of pageNodes) {
       if (!nodeRaw || typeof nodeRaw !== "object") continue;
@@ -203,12 +211,18 @@ function parsePagesResponse(data: unknown): {
       if (!uuid || typeof uuid !== "string" || !UUID_REGEX.test(uuid)) continue;
       nodes[uuid] = parseNode(n);
       rootNodeIds.push(PLACEHOLDER_NODE_ID);
+      // Track root nodes: nodes without a parentUuid belong to this page's root.
+      const parentUuid = n["parent"];
+      if (parentUuid === null || parentUuid === undefined) {
+        rootNodeUuids.push(uuid);
+      }
     }
 
     pages.push({
       id: p["id"] as string,
       name: p["name"] as string,
       root_nodes: rootNodeIds,
+      rootNodeUuids,
     });
   }
 
@@ -313,6 +327,39 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
         reorder: {
           nodeUuid: op.nodeUuid,
           newPosition: reorder.position,
+        },
+      };
+    }
+    case "create_page": {
+      const pageData = op.value as { id: string; name: string };
+      return {
+        createPage: {
+          pageUuid: pageData.id,
+          name: pageData.name,
+        },
+      };
+    }
+    case "delete_page":
+      return {
+        deletePage: {
+          pageId: op.nodeUuid,
+        },
+      };
+    case "rename_page": {
+      const renameData = op.value as { name: string };
+      return {
+        renamePage: {
+          pageId: op.nodeUuid,
+          newName: renameData.name,
+        },
+      };
+    }
+    case "reorder_page": {
+      const reorderData = op.value as { position: number };
+      return {
+        reorderPage: {
+          pageId: op.nodeUuid,
+          newPosition: reorderData.position,
         },
       };
     }
@@ -1314,17 +1361,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
 
     const pageUuid = crypto.randomUUID();
-    const newPage: Page = {
+    const newPage: MutablePage = {
       id: pageUuid,
       name,
       root_nodes: [],
+      rootNodeUuids: [],
     };
 
     // Snapshot for rollback
     // JSON clone: Solid proxy not structuredClone-safe
-    let pagesSnapshot: Page[];
+    let pagesSnapshot: MutablePage[];
     try {
-      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as Page[];
+      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as MutablePage[];
     } catch (err: unknown) {
       console.error("createPage: failed to snapshot pages", err);
       return;
@@ -1337,6 +1385,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         s.info.page_count = s.pages.length;
       }),
     );
+
+    // RF-011: Track for undo/redo
+    interceptor.trackStructural(createCreatePageOp(clientSessionId, { id: pageUuid, name }));
+    syncHistorySignals();
 
     // Send to server
     client
@@ -1381,14 +1433,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Snapshot for rollback
     // JSON clone: Solid proxy not structuredClone-safe
-    let pagesSnapshot: Page[];
+    let pagesSnapshot: MutablePage[];
     try {
-      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as Page[];
+      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as MutablePage[];
     } catch (err: unknown) {
       console.error("deletePage: failed to snapshot pages", err);
       return;
     }
     const previousActivePageId = activePageId();
+
+    // Capture page name and position before mutation (CLAUDE.md: capture snapshots before mutations).
+    const deletedPageName = state.pages[pageIndex].name;
 
     // Apply optimistically
     setState(
@@ -1397,6 +1452,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         s.info.page_count = s.pages.length;
       }),
     );
+
+    // RF-011: Track for undo/redo
+    interceptor.trackStructural(
+      createDeletePageOp(clientSessionId, {
+        id: pageId,
+        name: deletedPageName,
+        position: pageIndex,
+      }),
+    );
+    syncHistorySignals();
 
     // If deleting the active page, switch to the first remaining page
     if (activePageId() === pageId) {
@@ -1449,11 +1514,15 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Snapshot the old name for rollback
+    // Snapshot the old name for rollback (CLAUDE.md: capture snapshots before mutations).
     const oldName = state.pages[pageIndex].name;
 
     // Apply optimistically
     setState("pages", pageIndex, "name", newName);
+
+    // RF-011: Track for undo/redo
+    interceptor.trackStructural(createRenamePageOp(clientSessionId, pageId, newName, oldName));
+    syncHistorySignals();
 
     // Send to server
     client
@@ -1514,9 +1583,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Snapshot for rollback
     // JSON clone: Solid proxy not structuredClone-safe
-    let pagesSnapshot: Page[];
+    let pagesSnapshot: MutablePage[];
     try {
-      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as Page[];
+      pagesSnapshot = JSON.parse(JSON.stringify(state.pages)) as MutablePage[];
     } catch (err: unknown) {
       console.error("reorderPages: failed to snapshot pages", err);
       return;
@@ -1529,6 +1598,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         s.pages.splice(roundedPos, 0, page);
       }),
     );
+
+    // RF-011: Track for undo/redo
+    interceptor.trackStructural(
+      createReorderPageOp(clientSessionId, pageId, roundedPos, currentIndex),
+    );
+    syncHistorySignals();
 
     // Send to server
     client

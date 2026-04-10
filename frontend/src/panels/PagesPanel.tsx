@@ -11,12 +11,14 @@
  */
 
 import { createSignal, createEffect, onCleanup, Index, Show, type Component } from "solid-js";
+import { useDragDropMonitor } from "dnd-kit-solid";
 import { Plus } from "lucide-solid";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
 import { PageListItem } from "./PageListItem";
 import { renderPageThumbnail } from "./page-thumbnail";
 import { drawNodeForThumbnail } from "./page-thumbnail-draw";
+import type { PageDragData } from "../dnd/types";
 import "./PagesPanel.css";
 
 /** Debounce delay for thumbnail re-rendering (ms). */
@@ -27,8 +29,12 @@ export const PagesPanel: Component = () => {
   const announce = useAnnounce();
   const [focusedPageId, setFocusedPageId] = createSignal<string | null>(null);
   const [thumbnails, setThumbnails] = createSignal<Record<string, HTMLCanvasElement>>({});
+  /** RF-007: Page ID that should enter rename mode (replaces synthetic dblclick). */
+  const [renameRequestId, setRenameRequestId] = createSignal<string | null>(null);
   let listRef: HTMLDivElement | undefined;
   let thumbnailTimer: ReturnType<typeof setTimeout> | undefined;
+  /** rAF handle for focusPage — must be cancelled in onCleanup (RF-006). */
+  let focusRafHandle: number | undefined;
 
   // ── Thumbnail rendering ─────────────────────────────────────────────
 
@@ -38,13 +44,23 @@ export const PagesPanel: Component = () => {
     const result: Record<string, HTMLCanvasElement> = {};
 
     for (const page of pages) {
-      // Collect root node UUIDs for this page.
-      // Root nodes are nodes whose parentUuid is null.
-      const rootUuids: string[] = [];
-      for (const uuid of Object.keys(nodes)) {
-        const node = nodes[uuid];
-        if (node && node.parentUuid === null) {
-          rootUuids.push(uuid);
+      // Use per-page root node UUIDs if available (populated during parsePagesResponse).
+      // Falls back to all root nodes if rootNodeUuids is not populated (e.g., remotely created pages).
+      const pageWithUuids = page as typeof page & { rootNodeUuids?: string[] };
+      let rootUuids: string[];
+      if (pageWithUuids.rootNodeUuids && pageWithUuids.rootNodeUuids.length > 0) {
+        rootUuids = pageWithUuids.rootNodeUuids;
+      } else {
+        // Fallback: collect all root nodes (parentUuid === null).
+        // Known limitation: when multiple pages exist and rootNodeUuids is not populated,
+        // all pages will show the same thumbnail. This will be resolved when the server
+        // provides explicit page-to-node mapping.
+        rootUuids = [];
+        for (const uuid of Object.keys(nodes)) {
+          const node = nodes[uuid];
+          if (node && node.parentUuid === null) {
+            rootUuids.push(uuid);
+          }
         }
       }
 
@@ -80,19 +96,128 @@ export const PagesPanel: Component = () => {
     }, THUMBNAIL_DEBOUNCE_MS);
   });
 
-  // Cleanup timer on unmount (CLAUDE.md: timers must be cleared on teardown).
+  // RF-017: Initialize focusedPageId to the first page when pages load,
+  // so isFocused never falls back to positional pages[0].
+  createEffect(() => {
+    const pages = store.state.pages;
+    if (pages.length > 0 && focusedPageId() === null) {
+      setFocusedPageId(pages[0].id);
+    }
+  });
+
+  // Cleanup timer and rAF on unmount (CLAUDE.md: timers must be cleared on teardown).
   onCleanup(() => {
     if (thumbnailTimer !== undefined) {
       clearTimeout(thumbnailTimer);
       thumbnailTimer = undefined;
     }
+    if (focusRafHandle !== undefined) {
+      cancelAnimationFrame(focusRafHandle);
+      focusRafHandle = undefined;
+    }
+  });
+
+  // ── DnD reorder (RF-002) ────────────────────────────────────────────
+
+  /** Index where a drop indicator should be shown, or null if no drag in progress. */
+  const [dropIndicatorIndex, setDropIndicatorIndex] = createSignal<number | null>(null);
+
+  /** Height of a single page row in pixels (used for drop index calculation). */
+  const PAGE_ROW_HEIGHT = 56;
+
+  useDragDropMonitor({
+    onDragStart(event) {
+      const source = event.operation.source;
+      if (!source) return;
+      const data = source.data as PageDragData | undefined;
+      if (data?.type !== "page") return;
+      const page = store.state.pages.find((p) => p.id === data.pageId);
+      if (page) {
+        announce(`Grabbed ${page.name}`);
+      }
+    },
+
+    onDragOver(event) {
+      const source = event.operation.source;
+      const target = event.operation.target;
+      if (!source || !target) {
+        setDropIndicatorIndex(null);
+        return;
+      }
+
+      const sourceData = source.data as PageDragData | undefined;
+      const targetData = target.data as PageDragData | undefined;
+      if (sourceData?.type !== "page" || targetData?.type !== "page") {
+        setDropIndicatorIndex(null);
+        return;
+      }
+
+      const pages = store.state.pages;
+      const targetIndex = pages.findIndex((p) => p.id === targetData.pageId);
+      if (targetIndex === -1) {
+        setDropIndicatorIndex(null);
+        return;
+      }
+
+      // Compute whether cursor is in the top or bottom half of the target row.
+      const targetEl = target.element;
+      if (!targetEl) {
+        setDropIndicatorIndex(targetIndex);
+        return;
+      }
+      const rect = targetEl.getBoundingClientRect();
+      // Access cursor Y from the native event if available.
+      const nativeEvent = (event as unknown as { nativeEvent?: PointerEvent }).nativeEvent;
+      const cursorY = nativeEvent?.clientY ?? rect.top + rect.height / 2;
+      const midY = rect.top + rect.height / 2;
+      const insertIndex = cursorY < midY ? targetIndex : targetIndex + 1;
+
+      setDropIndicatorIndex(insertIndex);
+    },
+
+    onDragEnd(event) {
+      const insertIndex = dropIndicatorIndex();
+      setDropIndicatorIndex(null);
+
+      const source = event.operation.source;
+      if (!source) return;
+      const sourceData = source.data as PageDragData | undefined;
+      if (sourceData?.type !== "page") return;
+      if (insertIndex === null) return;
+
+      const pages = store.state.pages;
+      const sourceIndex = pages.findIndex((p) => p.id === sourceData.pageId);
+      if (sourceIndex === -1) return;
+
+      // Adjust target index since removal shifts positions.
+      const adjustedTarget = insertIndex > sourceIndex ? insertIndex - 1 : insertIndex;
+      if (adjustedTarget !== sourceIndex && adjustedTarget >= 0 && adjustedTarget < pages.length) {
+        store.reorderPages(sourceData.pageId, adjustedTarget);
+        const page = pages.find((p) => p.id === sourceData.pageId);
+        if (page) {
+          announce(`${page.name} moved to position ${adjustedTarget + 1}`);
+        }
+      }
+    },
   });
 
   // ── Page mutations ──────────────────────────────────────────────────
 
   function handleCreatePage(): void {
-    const pageCount = store.state.pages.length;
-    const name = `Page ${pageCount + 1}`;
+    // RF-020: Extract existing page numbers and use max+1 to avoid duplicates.
+    const pages = store.state.pages;
+    const pageNumberPattern = /^Page\s+(\d+)$/;
+    let maxNumber = 0;
+    for (const p of pages) {
+      const match = pageNumberPattern.exec(p.name);
+      if (match && match[1]) {
+        const num = parseInt(match[1], 10);
+        if (Number.isFinite(num) && num > maxNumber) {
+          maxNumber = num;
+        }
+      }
+    }
+    const name = `Page ${maxNumber + 1}`;
     store.createPage(name);
     announce(`Created ${name}`);
   }
@@ -205,11 +330,8 @@ export const PagesPanel: Component = () => {
       case "F2": {
         e.preventDefault();
         if (currentFocused) {
-          // Trigger rename via the PageListItem's internal mechanism.
-          const el = listRef?.querySelector(`[data-page-id="${CSS.escape(currentFocused)}"]`);
-          if (el) {
-            el.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
-          }
+          // RF-007: Use signal to trigger rename mode instead of synthetic dblclick.
+          setRenameRequestId(currentFocused);
         }
         break;
       }
@@ -238,7 +360,12 @@ export const PagesPanel: Component = () => {
 
   /** Scroll to a page item and move DOM focus to it (roving tabindex). */
   function focusPage(pageId: string): void {
-    requestAnimationFrame(() => {
+    // Cancel any pending focus rAF before scheduling a new one (RF-006).
+    if (focusRafHandle !== undefined) {
+      cancelAnimationFrame(focusRafHandle);
+    }
+    focusRafHandle = requestAnimationFrame(() => {
+      focusRafHandle = undefined;
       const el = listRef?.querySelector(`[data-page-id="${CSS.escape(pageId)}"]`);
       if (el instanceof HTMLElement) {
         el.scrollIntoView({ block: "nearest" });
@@ -267,6 +394,7 @@ export const PagesPanel: Component = () => {
         role="listbox"
         aria-label="Page list"
         onKeyDown={handleKeyDown}
+        style={{ position: "relative" }}
       >
         <Index each={store.state.pages}>
           {(page) => (
@@ -277,11 +405,21 @@ export const PagesPanel: Component = () => {
               onRename={handleRenamePage}
               onDelete={handleDeletePage}
               thumbnailCanvas={thumbnails()[page().id] ?? null}
-              isFocused={(focusedPageId() ?? store.state.pages[0]?.id) === page().id}
+              isFocused={focusedPageId() === page().id}
               tabIndex={getTabIndex(page().id)}
+              requestRename={renameRequestId() === page().id}
+              onRenameStarted={() => setRenameRequestId(null)}
             />
           )}
         </Index>
+        {/* RF-002: Drop indicator line for DnD reorder */}
+        <Show when={dropIndicatorIndex() !== null}>
+          <div
+            class="sigil-pages-panel__drop-indicator"
+            style={{ top: `${(dropIndicatorIndex() ?? 0) * PAGE_ROW_HEIGHT}px` }}
+            aria-hidden="true"
+          />
+        </Show>
         <Show when={store.state.pages.length === 0}>
           <div class="sigil-pages-panel__empty" role="status">
             No pages

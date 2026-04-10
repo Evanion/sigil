@@ -5,9 +5,12 @@
  * and active indicator. Supports keyboard navigation via roving tabindex.
  */
 
-import { createSignal, onMount, Show, splitProps, type Component } from "solid-js";
+import { createSignal, createEffect, onMount, Show, splitProps, type Component } from "solid-js";
+import { useDraggable, useDroppable } from "dnd-kit-solid";
 import { GripVertical } from "lucide-solid";
 import type { Page } from "../types/document";
+import type { PageDragData } from "../dnd/types";
+import { MAX_PAGE_NAME_LENGTH } from "../store/document-store-solid";
 import "./PageListItem.css";
 
 export interface PageListItemProps {
@@ -19,6 +22,10 @@ export interface PageListItemProps {
   readonly thumbnailCanvas: HTMLCanvasElement | null;
   readonly isFocused: boolean;
   readonly tabIndex: number;
+  /** When true, immediately enters rename mode (RF-007: replaces synthetic dblclick). */
+  readonly requestRename?: boolean;
+  /** Called after rename mode is entered from requestRename, to reset the signal. */
+  readonly onRenameStarted?: () => void;
 }
 
 export const PageListItem: Component<PageListItemProps> = (rawProps) => {
@@ -31,11 +38,26 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
     "thumbnailCanvas",
     "isFocused",
     "tabIndex",
+    "requestRename",
+    "onRenameStarted",
   ]);
 
   const [isRenaming, setIsRenaming] = createSignal(false);
   let inputRef: HTMLInputElement | undefined;
   let thumbnailRef: HTMLDivElement | undefined;
+
+  // RF-002: DnD — draggable via the drag handle.
+  const dragData: PageDragData = { type: "page", pageId: props.page.id };
+  const { isDragging, ref: dragRef } = useDraggable({
+    id: `page-drag-${props.page.id}`,
+    data: dragData,
+  });
+
+  // RF-002: DnD — droppable on the entire row for reorder targeting.
+  const { isDropTarget, ref: dropRef } = useDroppable({
+    id: `page-drop-${props.page.id}`,
+    data: dragData,
+  });
 
   // Mount the thumbnail canvas element when available.
   onMount(() => {
@@ -53,9 +75,21 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
     }
   }
 
-  // Re-mount thumbnail when it changes. We use a getter pattern
-  // since the parent passes new canvas elements when nodes change.
-  // This is called from the parent via effect.
+  // Re-mount thumbnail when the parent passes a new canvas element (RF-003).
+  createEffect(() => {
+    // Track the thumbnailCanvas prop reactively.
+    const _canvas = props.thumbnailCanvas;
+    void _canvas;
+    updateThumbnail();
+  });
+
+  // RF-007: Enter rename mode when parent requests it via prop (replaces synthetic dblclick).
+  createEffect(() => {
+    if (props.requestRename) {
+      startRename();
+      props.onRenameStarted?.();
+    }
+  });
 
   function handleClick(): void {
     props.onSelect(props.page.id);
@@ -110,10 +144,13 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
 
   return (
     <div
+      ref={(el) => dropRef(el)}
       class="sigil-page-list-item"
       classList={{
         "sigil-page-list-item--active": props.isActive,
         "sigil-page-list-item--focused": props.isFocused,
+        "sigil-page-list-item--dragging": isDragging(),
+        "sigil-page-list-item--drop-target": isDropTarget(),
       }}
       role="option"
       aria-selected={props.isActive}
@@ -123,10 +160,15 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
       onDblClick={handleDoubleClick}
       onKeyDown={handleItemKeyDown}
     >
-      {/* Drag handle */}
-      <span class="sigil-page-list-item__handle" aria-hidden="true">
+      {/* Drag handle (RF-002: wired to useDraggable) */}
+      <button
+        ref={(el) => dragRef(el)}
+        class="sigil-page-list-item__handle"
+        aria-label={`Drag ${props.page.name}`}
+        tabindex={-1}
+      >
         <GripVertical size={14} />
-      </span>
+      </button>
 
       {/* Thumbnail */}
       <div
@@ -149,7 +191,7 @@ export const PageListItem: Component<PageListItemProps> = (rawProps) => {
             class="sigil-page-list-item__name-input"
             aria-label={`Rename ${props.page.name}`}
             value={props.page.name}
-            maxLength={256}
+            maxLength={MAX_PAGE_NAME_LENGTH}
             onBlur={commitRename}
             onKeyDown={handleRenameKeyDown}
           />
