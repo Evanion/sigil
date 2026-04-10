@@ -378,7 +378,18 @@ export const LayersTree: Component = () => {
       ) {
         lastAnnounced = { uuid: computed.targetUuid, position: computed.position };
         const targetNodeName = targetNode.name;
-        announce(t("a11y:layers.over", { name: targetNodeName, position: computed.position }));
+        // RF-009: Translate the position discriminant so screen readers
+        // hear the localized word ("before"/"after"/"inside").
+        const positionKeyMap: Record<string, string> = {
+          before: "a11y:layers.dnd.positionBefore",
+          after: "a11y:layers.dnd.positionAfter",
+          inside: "a11y:layers.dnd.positionInside",
+        };
+        const positionKey = positionKeyMap[computed.position] ?? computed.position;
+        const translatedPosition = positionKeyMap[computed.position]
+          ? t(positionKey)
+          : computed.position;
+        announce(t("a11y:layers.over", { name: targetNodeName, position: translatedPosition }));
       }
     },
 

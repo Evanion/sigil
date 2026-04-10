@@ -112,7 +112,7 @@ describe("StatusBar", () => {
     expect(screen.getByText("100%")).toBeTruthy();
   });
 
-  it("has status role without aria-live (RF-008: prevents announcement flooding)", () => {
+  it("has a scoped status region containing only connection text (RF-002)", () => {
     const store = createMockStore();
     render(() => (
       <TransProvider instance={i18nInstance}>
@@ -122,6 +122,9 @@ describe("StatusBar", () => {
       </TransProvider>
     ));
     const status = screen.getByRole("status");
-    expect(status.getAttribute("aria-live")).toBeNull();
+    // The aria-live region should only contain the connection status text,
+    // not counts or zoom values that update frequently.
+    expect(status.textContent).toBe("Connected to server");
+    expect(status.getAttribute("aria-live")).toBe("polite");
   });
 });

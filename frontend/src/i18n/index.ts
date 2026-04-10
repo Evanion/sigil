@@ -17,7 +17,7 @@ function getInitialLocale(): string {
   } catch {
     // localStorage may be unavailable (e.g. in tests or private browsing).
   }
-  return navigator.language ?? "en";
+  return typeof navigator !== "undefined" ? (navigator.language ?? "en") : "en";
 }
 
 /**
@@ -39,6 +39,10 @@ const i18nInstance: i18n = i18next.createInstance();
  * Must be called (and awaited) before the first render.
  */
 export async function initI18n(): Promise<i18n> {
+  // RF-014: Guard against double initialization — i18next throws if
+  // init() is called twice on the same instance.
+  if (i18nInstance.isInitialized) return i18nInstance;
+
   const lng = getInitialLocale();
 
   await i18nInstance.init({
@@ -54,6 +58,10 @@ export async function initI18n(): Promise<i18n> {
         a11y: a11yEn,
       },
     },
+    // RF-011: Normalize BCP-47 subtags (e.g. "en-US" → "en") so that
+    // a locale like "pt-BR" falls back to "pt" resources instead of
+    // missing entirely.
+    load: "languageOnly",
     interpolation: {
       // Solid.js handles escaping — avoid double-escaping.
       escapeValue: false,

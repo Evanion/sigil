@@ -36,6 +36,7 @@ import { buildRenderOrder } from "../canvas/render-order";
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
 // the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
 import { useAnnounce } from "./AnnounceProvider";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { tinykeys } from "tinykeys";
 import "./Canvas.css";
 
@@ -87,6 +88,7 @@ export const Canvas: Component = () => {
   let canvasRef: HTMLCanvasElement | undefined;
   const store = useDocument();
   const announce = useAnnounce();
+  const [t] = useTransContext();
 
   // RF-036: Consolidated selection announcement — reads selectedNodeIds() (not
   // selectedNodeId()) to avoid double-firing when single- and multi-select
@@ -131,15 +133,16 @@ export const Canvas: Component = () => {
   });
 
   // RF-020 (a11y): Dynamic aria-label reflecting the selected node(s).
+  // RF-003: Use i18n t() calls instead of hardcoded English strings.
   const canvasAriaLabel = createMemo((): string => {
     const ids = store.selectedNodeIds();
-    if (ids.length === 0) return "Design canvas";
+    if (ids.length === 0) return t("a11y:canvas.label");
     if (ids.length === 1) {
       const node = store.state.nodes[ids[0]];
-      if (node) return `Design canvas — ${node.name} selected`;
-      return "Design canvas";
+      if (node) return t("a11y:canvas.selected", { name: node.name });
+      return t("a11y:canvas.label");
     }
-    return `Design canvas — ${String(ids.length)} nodes selected`;
+    return t("a11y:canvas.multiSelected", { count: ids.length });
   });
 
   // RF-006: Memoize selectedNodeIds as a Set so the renderer does not allocate

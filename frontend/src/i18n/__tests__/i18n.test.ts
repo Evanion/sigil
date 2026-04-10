@@ -77,10 +77,6 @@ describe("i18n initialization", () => {
     expect(instance.t("a11y:canvas.multiSelected", { count: 5 })).toBe("5 objects selected");
   });
 
-  it("should interpolate the toolActive template in tools namespace", () => {
-    expect(instance.t("tools:toolActive", { tool: "Select" })).toBe("Select tool active");
-  });
-
   it("should fall back to English when initialized with an unknown locale", async () => {
     const unknownInstance = await createTestInstance("xx-ZZ");
     expect(unknownInstance.t("common:ok")).toBe("OK");
@@ -97,5 +93,50 @@ describe("i18n initialization", () => {
     expect(instance.t("panels:fontWeight.400")).toBe("Regular");
     expect(instance.t("panels:fontWeight.700")).toBe("Bold");
     expect(instance.t("panels:fontWeight.900")).toBe("Black");
+  });
+
+  // RF-004: Verify locale-change reactivity
+  it("should return updated strings after changing language back to English", async () => {
+    // Change to a non-existent locale, then back to English to verify
+    // the t() function tracks language changes.
+    await instance.changeLanguage("xx");
+    // With fallbackLng, keys still resolve to English
+    expect(instance.t("common:ok")).toBe("OK");
+    await instance.changeLanguage("en");
+    expect(instance.t("common:ok")).toBe("OK");
+    expect(instance.t("a11y:canvas.label")).toBe("Design canvas");
+  });
+
+  // RF-012: Multi-parameter interpolation tests
+  it("should interpolate a11y:layers.over with name and position", () => {
+    expect(instance.t("a11y:layers.over", { name: "Frame 1", position: "before" })).toBe(
+      "Over Frame 1, before",
+    );
+  });
+
+  it("should interpolate a11y:layers.movedInside with name and container", () => {
+    expect(
+      instance.t("a11y:layers.movedInside", { name: "Rectangle 1", container: "Frame 1" }),
+    ).toBe("Rectangle 1 moved inside Frame 1");
+  });
+
+  it("should interpolate a11y:layers.movedTo with name and parent", () => {
+    expect(instance.t("a11y:layers.movedTo", { name: "Ellipse 1", parent: "Group 1" })).toBe(
+      "Ellipse 1 moved to Group 1",
+    );
+  });
+
+  it("should interpolate a11y:page.movedToPosition with name and position", () => {
+    expect(instance.t("a11y:page.movedToPosition", { name: "Page 1", position: "3" })).toBe(
+      "Page 1 moved to position 3",
+    );
+  });
+
+  it("should interpolate panels:pages.dragPage with name", () => {
+    expect(instance.t("panels:pages.dragPage", { name: "Page 2" })).toBe("Drag Page 2");
+  });
+
+  it("should interpolate common:panelLabel with name", () => {
+    expect(instance.t("common:panelLabel", { name: "Layers" })).toBe("Layers panel");
   });
 });

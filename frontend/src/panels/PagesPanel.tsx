@@ -240,7 +240,7 @@ export const PagesPanel: Component = () => {
 
   function handleRenamePage(pageId: string, newName: string): void {
     store.renamePage(pageId, newName);
-    announce(t("a11y:page.renamed", { name: newName }));
+    announce(t("a11y:page.renamed", { newName }));
   }
 
   function handleDeletePage(pageId: string): void {

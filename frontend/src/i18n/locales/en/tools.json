@@ -29,6 +29,5 @@
   "hand": {
     "label": "Hand",
     "shortcut": "H"
-  },
-  "toolActive": "{{tool}} tool active"
+  }
 }

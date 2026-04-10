@@ -31,7 +31,12 @@
     "movedDown": "{{name}} moved down",
     "movedOut": "{{name}} moved out",
     "nestedInside": "{{name}} nested inside {{parent}}",
-    "rename": "Rename {{name}}"
+    "rename": "Rename {{name}}",
+    "dnd": {
+      "positionBefore": "before",
+      "positionAfter": "after",
+      "positionInside": "inside"
+    }
   },
   "selection": {
     "cleared": "Selection cleared"
@@ -42,7 +47,7 @@
   "page": {
     "created": "Created {{name}}",
     "selected": "Selected {{name}}",
-    "renamed": "Renamed page to {{name}}",
+    "renamed": "Renamed page to {{newName}}",
     "deleted": "Deleted {{name}}",
     "movedUp": "Moved {{name}} up",
     "movedDown": "Moved {{name}} down",
@@ -56,8 +61,7 @@
     "textAlign": "Text alignment set to {{alignment}}",
     "textDecoration": "Text decoration set to {{decoration}}",
     "shadowEnabled": "Text shadow enabled",
-    "shadowDisabled": "Text shadow disabled",
-    "bold": "Bold {{state}}"
+    "shadowDisabled": "Text shadow disabled"
   },
   "status": {
     "connected": "Connected to server",

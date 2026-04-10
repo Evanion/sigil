@@ -22,7 +22,15 @@
  * - Cmd+I toggles font_style normal/italic
  * - Cmd+U toggles text_decoration none/underline
  */
-import { createMemo, createSignal, For, onCleanup, onMount, Show, type Component } from "solid-js";
+import {
+  createMemo,
+  createSignal,
+  Index,
+  onCleanup,
+  onMount,
+  Show,
+  type Component,
+} from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type {
   Color,
@@ -508,25 +516,28 @@ export const TypographySection: Component = () => {
           }
         }}
       >
-        <For each={TEXT_ALIGN_OPTIONS}>
+        <Index each={TEXT_ALIGN_OPTIONS}>
           {(opt) => (
             <button
               class="sigil-typography-section__align-btn"
               classList={{
-                "sigil-typography-section__align-btn--active": textAlign() === opt.value,
+                "sigil-typography-section__align-btn--active": textAlign() === opt().value,
               }}
               type="button"
               role="radio"
-              aria-checked={textAlign() === opt.value}
-              aria-label={t(opt.labelKey)}
+              aria-checked={textAlign() === opt().value}
+              aria-label={t(opt().labelKey)}
               disabled={disabled()}
-              tabIndex={textAlign() === opt.value ? 0 : -1}
-              onClick={() => handleTextAlignChange(opt.value)}
+              tabIndex={textAlign() === opt().value ? 0 : -1}
+              onClick={() => handleTextAlignChange(opt().value)}
             >
-              <opt.icon size={14} />
+              {(() => {
+                const Icon = opt().icon;
+                return <Icon size={14} />;
+              })()}
             </button>
           )}
-        </For>
+        </Index>
       </div>
 
       {/* ── Text decoration toggles ────────────────────────────────── */}
@@ -610,7 +621,7 @@ export const TypographySection: Component = () => {
               aria-label={t("panels:typography.shadowBlur")}
               step={1}
               min={0}
-              max={1000}
+              max={MAX_SHADOW_BLUR}
               suffix="px"
               disabled={disabled()}
             />

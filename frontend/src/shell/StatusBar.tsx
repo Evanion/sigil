@@ -10,7 +10,7 @@ export const StatusBar: Component = () => {
   const zoomPercent = () => Math.round(store.viewport().zoom * 100);
 
   return (
-    <div class="status-bar" role="status">
+    <div class="status-bar">
       <div class="status-bar__left">
         {/* RF-009: aria-hidden on indicator dot; adjacent span provides accessible name */}
         <div
@@ -31,6 +31,12 @@ export const StatusBar: Component = () => {
         <span>{t("a11y:status.pages", { count: store.state.info.page_count })}</span>
         <span>{zoomPercent()}%</span>
       </div>
+      {/* RF-002: Scoped aria-live region for connection status only.
+          The main wrapper no longer has role="status" to avoid flooding
+          the screen reader announcement queue with count/zoom updates. */}
+      <span role="status" aria-live="polite" class="sr-only">
+        {store.connected() ? t("a11y:status.connected") : t("a11y:status.disconnected")}
+      </span>
     </div>
   );
 };
