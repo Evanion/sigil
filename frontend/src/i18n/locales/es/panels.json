@@ -1,0 +1,96 @@
+{
+  "tabs": {
+    "design": "Diseño",
+    "inspect": "Inspeccionar",
+    "layers": "Capas",
+    "pages": "Páginas",
+    "layout": "Disposición",
+    "appearance": "Apariencia",
+    "effects": "Efectos",
+    "component": "Componente"
+  },
+  "regions": {
+    "leftPanel": "Panel izquierdo",
+    "rightPanel": "Panel derecho",
+    "leftPanelTabs": "Pestañas del panel izquierdo",
+    "rightPanelTabs": "Pestañas del panel derecho",
+    "designPanelTabs": "Pestañas del panel de diseño"
+  },
+  "emptyState": {
+    "selectLayer": "Selecciona una capa para ver sus propiedades"
+  },
+  "typography": {
+    "title": "Tipografía",
+    "fontFamily": "Familia tipográfica",
+    "fontWeight": "Peso de fuente",
+    "fontSize": "Tamaño de fuente",
+    "italic": "Cursiva",
+    "lineHeight": "Altura de línea",
+    "letterSpacing": "Espaciado entre letras",
+    "textAlign": "Alineación de texto",
+    "textAlignment": "Alineación de texto",
+    "alignLeft": "Alinear a la izquierda",
+    "alignCenter": "Centrar",
+    "alignRight": "Alinear a la derecha",
+    "justify": "Justificar",
+    "underline": "Subrayado",
+    "strikethrough": "Tachado",
+    "textColor": "Color de texto",
+    "color": "Color",
+    "shadow": "Sombra",
+    "shadowGroup": "Sombra de texto",
+    "shadowToggle": "Alternar sombra de texto",
+    "shadowOn": "Activada",
+    "shadowOff": "Desactivada",
+    "shadowOffsetX": "Desplazamiento X de sombra",
+    "shadowOffsetY": "Desplazamiento Y de sombra",
+    "shadowBlur": "Radio de desenfoque de sombra",
+    "shadowColor": "Color de sombra",
+    "opacity": "Opacidad",
+    "blendMode": "Modo de fusión"
+  },
+  "fontWeight": {
+    "100": "Fina",
+    "200": "Extra ligera",
+    "300": "Ligera",
+    "400": "Normal",
+    "500": "Media",
+    "600": "Semi negrita",
+    "700": "Negrita",
+    "800": "Extra negrita",
+    "900": "Negra"
+  },
+  "fill": {
+    "title": "Relleno",
+    "empty": "Sin rellenos",
+    "add": "Añadir relleno"
+  },
+  "stroke": {
+    "title": "Trazo",
+    "empty": "Sin trazos",
+    "add": "Añadir trazo"
+  },
+  "node": {
+    "title": "Nodo",
+    "name": "Nombre",
+    "visible": "Visible",
+    "locked": "Bloqueado"
+  },
+  "transform": {
+    "title": "Transformar"
+  },
+  "constraints": {
+    "title": "Restricciones"
+  },
+  "pages": {
+    "title": "Páginas",
+    "addPage": "Añadir página",
+    "pageList": "Lista de páginas",
+    "noPages": "Sin páginas",
+    "cannotDeleteLast": "No se puede eliminar la última página",
+    "dragHandle": "Arrastrar para reordenar",
+    "dragPage": "Arrastrar {{name}}",
+    "rename": "Renombrar página",
+    "renamePage": "Renombrar {{name}}"
+  }
+}

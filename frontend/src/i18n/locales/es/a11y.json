@@ -1,0 +1,72 @@
+{
+  "canvas": {
+    "label": "Lienzo de diseño",
+    "selected": "{{name}} seleccionado",
+    "multiSelected": "{{count}} objetos seleccionados"
+  },
+  "layers": {
+    "tree": "Árbol de capas",
+    "hierarchy": "Jerarquía de capas",
+    "lock": "Bloquear",
+    "unlock": "Desbloquear",
+    "hide": "Ocultar",
+    "show": "Mostrar",
+    "expand": "Expandir",
+    "collapse": "Contraer",
+    "grabbed": "{{name}} agarrado",
+    "over": "Sobre {{name}}, {{position}}",
+    "dropCancelled": "Soltar cancelado",
+    "cannotDropIntoSelf": "No se puede soltar una capa dentro de sí misma",
+    "movedInside": "{{name}} movido dentro de {{container}}",
+    "reordered": "{{name}} reordenado",
+    "movedTo": "{{name}} movido a {{parent}}",
+    "cannotMoveToRoot": "No se puede mover al nivel raíz",
+    "selected": "{{name}} seleccionado",
+    "deleted": "{{name}} eliminado",
+    "unlocked": "{{name}} desbloqueado",
+    "locked": "{{name}} bloqueado",
+    "hidden": "{{name}} oculto",
+    "shown": "{{name}} visible",
+    "movedUp": "{{name}} movido arriba",
+    "movedDown": "{{name}} movido abajo",
+    "movedOut": "{{name}} movido fuera",
+    "nestedInside": "{{name}} anidado dentro de {{parent}}",
+    "rename": "Renombrar {{name}}",
+    "dnd": {
+      "positionBefore": "antes",
+      "positionAfter": "después",
+      "positionInside": "dentro"
+    }
+  },
+  "selection": {
+    "cleared": "Selección borrada"
+  },
+  "tool": {
+    "active": "Herramienta {{tool}} activa"
+  },
+  "page": {
+    "created": "{{name}} creada",
+    "selected": "{{name}} seleccionada",
+    "renamed": "Página renombrada a {{newName}}",
+    "deleted": "{{name}} eliminada",
+    "movedUp": "{{name}} movida arriba",
+    "movedDown": "{{name}} movida abajo",
+    "movedToPosition": "{{name}} movida a la posición {{position}}",
+    "grabbed": "{{name}} agarrada",
+    "dropped": "{{name}} soltada"
+  },
+  "typography": {
+    "fontWeightSet": "Peso de fuente establecido a {{weight}}",
+    "fontStyle": "Estilo de fuente establecido a {{style}}",
+    "textAlign": "Alineación de texto establecida a {{alignment}}",
+    "textDecoration": "Decoración de texto establecida a {{decoration}}",
+    "shadowEnabled": "Sombra de texto activada",
+    "shadowDisabled": "Sombra de texto desactivada"
+  },
+  "status": {
+    "connected": "Conectado al servidor",
+    "disconnected": "Desconectado del servidor",
+    "nodes": "{{count}} nodos",
+    "pages": "{{count}} páginas"
+  }
+}

@@ -4,6 +4,14 @@ import commonEn from "../locales/en/common.json";
 import toolsEn from "../locales/en/tools.json";
 import panelsEn from "../locales/en/panels.json";
 import a11yEn from "../locales/en/a11y.json";
+import commonEs from "../locales/es/common.json";
+import toolsEs from "../locales/es/tools.json";
+import panelsEs from "../locales/es/panels.json";
+import a11yEs from "../locales/es/a11y.json";
+import commonFr from "../locales/fr/common.json";
+import toolsFr from "../locales/fr/tools.json";
+import panelsFr from "../locales/fr/panels.json";
+import a11yFr from "../locales/fr/a11y.json";
 
 /**
  * Creates a fresh i18next instance with the same config as initI18n()
@@ -22,6 +30,18 @@ async function createTestInstance(lng = "en"): Promise<i18n> {
         tools: toolsEn,
         panels: panelsEn,
         a11y: a11yEn,
+      },
+      es: {
+        common: commonEs,
+        tools: toolsEs,
+        panels: panelsEs,
+        a11y: a11yEs,
+      },
+      fr: {
+        common: commonFr,
+        tools: toolsFr,
+        panels: panelsFr,
+        a11y: a11yFr,
       },
     },
     interpolation: {
@@ -138,5 +158,135 @@ describe("i18n initialization", () => {
 
   it("should interpolate common:panelLabel with name", () => {
     expect(instance.t("common:panelLabel", { name: "Layers" })).toBe("Layers panel");
+  });
+});
+
+describe("i18n Spanish locale", () => {
+  let instance: i18n;
+
+  beforeEach(async () => {
+    instance = await createTestInstance("es");
+  });
+
+  it("should initialize with Spanish as the active language", () => {
+    expect(instance.language).toBe("es");
+  });
+
+  it("should load the common namespace in Spanish", () => {
+    expect(instance.t("common:ok")).toBe("Aceptar");
+    expect(instance.t("common:cancel")).toBe("Cancelar");
+    expect(instance.t("common:undo")).toBe("Deshacer");
+    expect(instance.t("common:redo")).toBe("Rehacer");
+    expect(instance.t("common:save")).toBe("Guardar");
+  });
+
+  it("should load the tools namespace in Spanish", () => {
+    expect(instance.t("tools:toolbar.label")).toBe("Herramientas de diseño");
+    expect(instance.t("tools:select.label")).toBe("Seleccionar");
+    expect(instance.t("tools:frame.label")).toBe("Marco");
+    expect(instance.t("tools:rectangle.label")).toBe("Rectángulo");
+    expect(instance.t("tools:pen.label")).toBe("Pluma");
+  });
+
+  it("should keep keyboard shortcuts unchanged in Spanish", () => {
+    expect(instance.t("tools:select.shortcut")).toBe("V");
+    expect(instance.t("tools:frame.shortcut")).toBe("F");
+    expect(instance.t("tools:rectangle.shortcut")).toBe("R");
+  });
+
+  it("should load the panels namespace in Spanish", () => {
+    expect(instance.t("panels:tabs.design")).toBe("Diseño");
+    expect(instance.t("panels:tabs.layers")).toBe("Capas");
+    expect(instance.t("panels:fill.title")).toBe("Relleno");
+    expect(instance.t("panels:stroke.title")).toBe("Trazo");
+    expect(instance.t("panels:typography.blendMode")).toBe("Modo de fusión");
+  });
+
+  it("should load the a11y namespace in Spanish", () => {
+    expect(instance.t("a11y:canvas.label")).toBe("Lienzo de diseño");
+    expect(instance.t("a11y:layers.tree")).toBe("Árbol de capas");
+    expect(instance.t("a11y:status.connected")).toBe("Conectado al servidor");
+  });
+
+  it("should interpolate variables in Spanish translation strings", () => {
+    expect(instance.t("a11y:page.created", { name: "Página 2" })).toBe("Página 2 creada");
+    expect(instance.t("a11y:canvas.selected", { name: "Rectángulo 1" })).toBe(
+      "Rectángulo 1 seleccionado",
+    );
+    expect(instance.t("a11y:canvas.multiSelected", { count: 5 })).toBe("5 objetos seleccionados");
+  });
+
+  it("should interpolate multi-parameter strings in Spanish", () => {
+    expect(
+      instance.t("a11y:layers.movedInside", { name: "Rectángulo 1", container: "Marco 1" }),
+    ).toBe("Rectángulo 1 movido dentro de Marco 1");
+    expect(instance.t("a11y:layers.over", { name: "Marco 1", position: "antes" })).toBe(
+      "Sobre Marco 1, antes",
+    );
+  });
+});
+
+describe("i18n French locale", () => {
+  let instance: i18n;
+
+  beforeEach(async () => {
+    instance = await createTestInstance("fr");
+  });
+
+  it("should initialize with French as the active language", () => {
+    expect(instance.language).toBe("fr");
+  });
+
+  it("should load the common namespace in French", () => {
+    expect(instance.t("common:ok")).toBe("OK");
+    expect(instance.t("common:cancel")).toBe("Annuler");
+    expect(instance.t("common:save")).toBe("Enregistrer");
+    expect(instance.t("common:redo")).toBe("Rétablir");
+    expect(instance.t("common:delete")).toBe("Supprimer");
+  });
+
+  it("should load the tools namespace in French", () => {
+    expect(instance.t("tools:toolbar.label")).toBe("Outils de conception");
+    expect(instance.t("tools:select.label")).toBe("Sélection");
+    expect(instance.t("tools:frame.label")).toBe("Cadre");
+    expect(instance.t("tools:pen.label")).toBe("Plume");
+    expect(instance.t("tools:hand.label")).toBe("Main");
+  });
+
+  it("should keep keyboard shortcuts unchanged in French", () => {
+    expect(instance.t("tools:select.shortcut")).toBe("V");
+    expect(instance.t("tools:frame.shortcut")).toBe("F");
+    expect(instance.t("tools:text.shortcut")).toBe("T");
+  });
+
+  it("should load the panels namespace in French", () => {
+    expect(instance.t("panels:tabs.layers")).toBe("Calques");
+    expect(instance.t("panels:fill.title")).toBe("Remplissage");
+    expect(instance.t("panels:stroke.title")).toBe("Contour");
+    expect(instance.t("panels:typography.blendMode")).toBe("Mode de fusion");
+    expect(instance.t("panels:typography.title")).toBe("Typographie");
+  });
+
+  it("should load the a11y namespace in French", () => {
+    expect(instance.t("a11y:canvas.label")).toBe("Canevas de conception");
+    expect(instance.t("a11y:layers.tree")).toBe("Arborescence des calques");
+    expect(instance.t("a11y:status.connected")).toBe("Connecté au serveur");
+  });
+
+  it("should interpolate variables in French translation strings", () => {
+    expect(instance.t("a11y:page.created", { name: "Page 2" })).toBe("Page 2 créée");
+    expect(instance.t("a11y:canvas.selected", { name: "Rectangle 1" })).toBe(
+      "Rectangle 1 sélectionné",
+    );
+    expect(instance.t("a11y:canvas.multiSelected", { count: 5 })).toBe("5 objets sélectionnés");
+  });
+
+  it("should interpolate multi-parameter strings in French", () => {
+    expect(
+      instance.t("a11y:layers.movedInside", { name: "Rectangle 1", container: "Cadre 1" }),
+    ).toBe("Rectangle 1 déplacé dans Cadre 1");
+    expect(instance.t("a11y:layers.over", { name: "Cadre 1", position: "avant" })).toBe(
+      "Au-dessus de Cadre 1, avant",
+    );
   });
 });

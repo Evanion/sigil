@@ -1,0 +1,96 @@
+{
+  "tabs": {
+    "design": "Design",
+    "inspect": "Inspecter",
+    "layers": "Calques",
+    "pages": "Pages",
+    "layout": "Disposition",
+    "appearance": "Apparence",
+    "effects": "Effets",
+    "component": "Composant"
+  },
+  "regions": {
+    "leftPanel": "Panneau gauche",
+    "rightPanel": "Panneau droit",
+    "leftPanelTabs": "Onglets du panneau gauche",
+    "rightPanelTabs": "Onglets du panneau droit",
+    "designPanelTabs": "Onglets du panneau de design"
+  },
+  "emptyState": {
+    "selectLayer": "Sélectionnez un calque pour voir ses propriétés"
+  },
+  "typography": {
+    "title": "Typographie",
+    "fontFamily": "Famille de polices",
+    "fontWeight": "Graisse",
+    "fontSize": "Taille de police",
+    "italic": "Italique",
+    "lineHeight": "Hauteur de ligne",
+    "letterSpacing": "Espacement des lettres",
+    "textAlign": "Alignement du texte",
+    "textAlignment": "Alignement du texte",
+    "alignLeft": "Aligner à gauche",
+    "alignCenter": "Centrer",
+    "alignRight": "Aligner à droite",
+    "justify": "Justifier",
+    "underline": "Souligné",
+    "strikethrough": "Barré",
+    "textColor": "Couleur du texte",
+    "color": "Couleur",
+    "shadow": "Ombre",
+    "shadowGroup": "Ombre du texte",
+    "shadowToggle": "Activer/désactiver l'ombre du texte",
+    "shadowOn": "Activée",
+    "shadowOff": "Désactivée",
+    "shadowOffsetX": "Décalage X de l'ombre",
+    "shadowOffsetY": "Décalage Y de l'ombre",
+    "shadowBlur": "Rayon de flou de l'ombre",
+    "shadowColor": "Couleur de l'ombre",
+    "opacity": "Opacité",
+    "blendMode": "Mode de fusion"
+  },
+  "fontWeight": {
+    "100": "Fin",
+    "200": "Extra léger",
+    "300": "Léger",
+    "400": "Normal",
+    "500": "Moyen",
+    "600": "Semi gras",
+    "700": "Gras",
+    "800": "Extra gras",
+    "900": "Noir"
+  },
+  "fill": {
+    "title": "Remplissage",
+    "empty": "Aucun remplissage",
+    "add": "Ajouter un remplissage"
+  },
+  "stroke": {
+    "title": "Contour",
+    "empty": "Aucun contour",
+    "add": "Ajouter un contour"
+  },
+  "node": {
+    "title": "Noeud",
+    "name": "Nom",
+    "visible": "Visible",
+    "locked": "Verrouillé"
+  },
+  "transform": {
+    "title": "Transformation"
+  },
+  "constraints": {
+    "title": "Contraintes"
+  },
+  "pages": {
+    "title": "Pages",
+    "addPage": "Ajouter une page",
+    "pageList": "Liste des pages",
+    "noPages": "Aucune page",
+    "cannotDeleteLast": "Impossible de supprimer la dernière page",
+    "dragHandle": "Glisser pour réordonner",
+    "dragPage": "Glisser {{name}}",
+    "rename": "Renommer la page",
+    "renamePage": "Renommer {{name}}"
+  }
+}
