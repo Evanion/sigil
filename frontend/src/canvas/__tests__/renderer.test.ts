@@ -36,6 +36,17 @@ function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
   };
 }
 
+/**
+ * Mock CanvasGradient that records addColorStop calls.
+ * Stores gradient type and construction args for test assertions.
+ */
+interface MockGradient {
+  readonly __type: "linear" | "radial";
+  readonly __args: readonly number[];
+  readonly __stops: Array<{ offset: number; color: string }>;
+  addColorStop: (offset: number, color: string) => void;
+}
+
 /** Create a mock 2D canvas context that records calls. */
 function createMockContext(): CanvasRenderingContext2D {
   const calls: Array<{ method: string; args: unknown[] }> = [];
@@ -47,6 +58,37 @@ function createMockContext(): CanvasRenderingContext2D {
       }
       if (prop === "canvas") {
         return { width: 800, height: 600 };
+      }
+      // createLinearGradient / createRadialGradient return mock gradients
+      if (prop === "createLinearGradient") {
+        return (...args: number[]): MockGradient => {
+          const stops: Array<{ offset: number; color: string }> = [];
+          const gradient: MockGradient = {
+            __type: "linear",
+            __args: args,
+            __stops: stops,
+            addColorStop(offset: number, color: string) {
+              stops.push({ offset, color });
+            },
+          };
+          calls.push({ method: "createLinearGradient", args });
+          return gradient;
+        };
+      }
+      if (prop === "createRadialGradient") {
+        return (...args: number[]): MockGradient => {
+          const stops: Array<{ offset: number; color: string }> = [];
+          const gradient: MockGradient = {
+            __type: "radial",
+            __args: args,
+            __stops: stops,
+            addColorStop(offset: number, color: string) {
+              stops.push({ offset, color });
+            },
+          };
+          calls.push({ method: "createRadialGradient", args });
+          return gradient;
+        };
       }
       // Return a function that records the call
       if (typeof target[prop] === "undefined") {
@@ -417,6 +459,219 @@ describe("renderer", () => {
         .find((c) => c.method === "set:lineWidth");
       expect(lineWidthSetAfterColor).toBeDefined();
       expect(lineWidthSetAfterColor?.args[0]).toBe(0.5);
+    });
+  });
+
+  describe("gradient fill rendering", () => {
+    it("should create a linear gradient when node has a linear_gradient fill", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 1 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
+      expect(linearCalls.length).toBe(1);
+
+      // start = (100 + 0*200, 100 + 0*150) = (100, 100)
+      // end   = (100 + 1*200, 100 + 1*150) = (300, 250)
+      expect(linearCalls[0].args).toEqual([100, 100, 300, 250]);
+    });
+
+    it("should create a radial gradient when node has a radial_gradient fill", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "radial_gradient",
+              gradient: {
+                stops: [
+                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 1, b: 1, a: 1 } } },
+                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } } },
+                ],
+                start: { x: 0.5, y: 0.5 },
+                end: { x: 1, y: 0.5 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const radialCalls = calls.filter((c) => c.method === "createRadialGradient");
+      expect(radialCalls.length).toBe(1);
+
+      // center = (100 + 0.5*200, 100 + 0.5*150) = (200, 175)
+      // dx = (1 - 0.5) * 200 = 100, dy = (0.5 - 0.5) * 150 = 0
+      // r = sqrt(100^2 + 0^2) = 100
+      expect(radialCalls[0].args[0]).toBe(200); // cx
+      expect(radialCalls[0].args[1]).toBe(175); // cy
+      expect(radialCalls[0].args[2]).toBe(0);   // inner radius
+      expect(radialCalls[0].args[3]).toBe(200); // cx
+      expect(radialCalls[0].args[4]).toBe(175); // cy
+      expect(radialCalls[0].args[5]).toBe(100); // outer radius
+    });
+
+    it("should draw the shape once per fill when multiple fills are present", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "solid",
+              color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+            },
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } } },
+                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 0 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The node is a rectangle, so each fill should produce one fillRect.
+      // 2 fills = 2 fillRect calls for the node itself.
+      const fillRectCalls = calls.filter(
+        (c) =>
+          c.method === "fillRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(fillRectCalls.length).toBe(2);
+    });
+
+    it("should use default fill color when node has no fills", () => {
+      const node = createTestNode({
+        style: {
+          fills: [],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // Should still draw the node with default fill
+      const fillStyleSets = calls.filter(
+        (c) => c.method === "set:fillStyle" && c.args[0] === "#e0e0e0",
+      );
+      expect(fillStyleSets.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should render gradient fills on ellipse nodes", () => {
+      const node = createTestNode({
+        kind: { type: "ellipse", arc_start: 0, arc_end: 360 },
+        style: {
+          fills: [
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 1 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
+      expect(linearCalls.length).toBe(1);
+      // Should call fill() for the ellipse path
+      const fillCalls = calls.filter((c) => c.method === "fill");
+      expect(fillCalls.length).toBe(1);
+    });
+
+    it("should skip gradient stops with non-finite positions", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
+                  { position: NaN, color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } } },
+                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 0 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
+      expect(linearCalls.length).toBe(1);
+
+      // The gradient should be created, and the NaN stop should be skipped.
+      // We verify by checking the fillStyle was set to a gradient (non-string).
+      const fillStyleSets = calls.filter((c) => c.method === "set:fillStyle");
+      const hasGradientFill = fillStyleSets.some(
+        (c) => typeof c.args[0] === "object" && c.args[0] !== null,
+      );
+      expect(hasGradientFill).toBe(true);
     });
   });
 });

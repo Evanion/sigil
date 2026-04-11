@@ -9,7 +9,7 @@
  * RF-006: Accepts ReadonlySet<string> for selectedUuids (caller memoizes).
  */
 
-import type { ColorSrgb, DocumentNode, Transform } from "../types/document";
+import type { ColorSrgb, DocumentNode, Fill, GradientDef, Transform } from "../types/document";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { MarqueeRect } from "../tools/select-tool";
@@ -17,6 +17,7 @@ import type { Viewport } from "./viewport";
 import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
 import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
+import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -66,22 +67,109 @@ function srgbColorToRgba(c: ColorSrgb): string | null {
   return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
 }
 
+
 /**
- * Resolve the first solid fill color from a node's style, or return the default.
+ * Add color stops from a GradientDef to a CanvasGradient.
+ *
+ * Skips stops with non-finite positions per CLAUDE.md "Floating-Point Validation".
+ * Stop positions are clamped to [0, 1] since Canvas gradient stops require this range.
+ * This is an explicit user-facing affordance (Canvas API constraint), not silent clamping.
  */
-function resolveFillColor(node: DocumentNode): string {
-  for (const fill of node.style.fills) {
-    if (fill.type === "solid") {
-      const colorValue = fill.color;
-      if (colorValue.type === "literal") {
-        const c = colorValue.value;
-        if (c.space === "srgb") {
-          return srgbColorToRgba(c) ?? DEFAULT_FILL;
-        }
-      }
+function addGradientStops(grad: CanvasGradient, gradient: GradientDef): void {
+  for (const stop of gradient.stops) {
+    if (!Number.isFinite(stop.position)) {
+      continue;
     }
+    const pos = Math.max(0, Math.min(1, stop.position));
+    grad.addColorStop(pos, resolveStopColorCSS(stop.color));
   }
-  return DEFAULT_FILL;
+}
+
+/**
+ * Create a Canvas linear gradient from a GradientDef.
+ *
+ * gradient.start and gradient.end are normalized 0-1 within the node's bounds.
+ * All coordinates are guarded with Number.isFinite() per CLAUDE.md.
+ */
+function createLinearGradientFill(
+  ctx: CanvasRenderingContext2D,
+  gradient: GradientDef,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): CanvasGradient {
+  const sx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x;
+  const sy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y;
+  const ex = Number.isFinite(gradient.end.x) ? x + gradient.end.x * width : x + width;
+  const ey = Number.isFinite(gradient.end.y) ? y + gradient.end.y * height : y + height;
+  const grad = ctx.createLinearGradient(sx, sy, ex, ey);
+  addGradientStops(grad, gradient);
+  return grad;
+}
+
+/**
+ * Create a Canvas radial gradient from a GradientDef.
+ *
+ * The center is at gradient.start (normalized 0-1). The outer radius is
+ * computed as the distance from start to end in node-local coordinates.
+ * A minimum radius of 0.001 prevents a degenerate gradient.
+ *
+ * Math.sqrt domain guard: the argument is always >= 0 (sum of squares),
+ * so no NaN can be produced. Math.max ensures a non-zero positive result.
+ */
+function createRadialGradientFill(
+  ctx: CanvasRenderingContext2D,
+  gradient: GradientDef,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): CanvasGradient {
+  const cx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x + width / 2;
+  const cy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y + height / 2;
+  const endX = Number.isFinite(gradient.end.x) ? gradient.end.x : 1;
+  const endY = Number.isFinite(gradient.end.y) ? gradient.end.y : 0.5;
+  const startX = Number.isFinite(gradient.start.x) ? gradient.start.x : 0.5;
+  const startY = Number.isFinite(gradient.start.y) ? gradient.start.y : 0.5;
+  const dx = (endX - startX) * width;
+  const dy = (endY - startY) * height;
+  // dx*dx + dy*dy is always >= 0, so Math.sqrt is safe here
+  const r = Math.max(Math.sqrt(dx * dx + dy * dy), 0.001);
+  const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
+  addGradientStops(grad, gradient);
+  return grad;
+}
+
+/**
+ * Resolve a fill to a Canvas fillStyle value.
+ *
+ * Returns a CSS color string for solid fills, a CanvasGradient for gradient
+ * fills, or null for unsupported fill types (image fills are deferred).
+ */
+function resolveFillStyle(
+  ctx: CanvasRenderingContext2D,
+  fill: Fill,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): string | CanvasGradient | null {
+  switch (fill.type) {
+    case "solid": {
+      if (fill.color.type === "literal" && fill.color.value.space === "srgb") {
+        return srgbColorToRgba(fill.color.value) ?? DEFAULT_FILL;
+      }
+      return DEFAULT_FILL;
+    }
+    case "linear_gradient":
+      return createLinearGradientFill(ctx, fill.gradient, x, y, width, height);
+    case "radial_gradient":
+      return createRadialGradientFill(ctx, fill.gradient, x, y, width, height);
+    case "image":
+      // Image fills are deferred to a later plan.
+      return null;
+  }
 }
 
 /**
@@ -109,15 +197,39 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
     case "group":
     case "image":
     case "component_instance": {
-      ctx.fillStyle = resolveFillColor(node);
-      ctx.fillRect(x, y, width, height);
+      if (node.style.fills.length === 0) {
+        // No fills — draw with default fill color for visibility
+        ctx.fillStyle = DEFAULT_FILL;
+        ctx.fillRect(x, y, width, height);
+      } else {
+        // Draw the shape once per fill (bottom-to-top = array order)
+        for (const fill of node.style.fills) {
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          if (fillStyle !== null) {
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(x, y, width, height);
+          }
+        }
+      }
       break;
     }
     case "ellipse": {
-      ctx.fillStyle = resolveFillColor(node);
-      ctx.beginPath();
-      ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
-      ctx.fill();
+      if (node.style.fills.length === 0) {
+        ctx.fillStyle = DEFAULT_FILL;
+        ctx.beginPath();
+        ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        for (const fill of node.style.fills) {
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          if (fillStyle !== null) {
+            ctx.fillStyle = fillStyle;
+            ctx.beginPath();
+            ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+      }
       break;
     }
     case "text": {
@@ -220,9 +332,19 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
     }
     case "path": {
       // Path rendering is deferred to a later plan (pen tool).
-      // Draw bounding box as placeholder.
-      ctx.fillStyle = resolveFillColor(node);
-      ctx.fillRect(x, y, width, height);
+      // Draw bounding box as placeholder with fill support.
+      if (node.style.fills.length === 0) {
+        ctx.fillStyle = DEFAULT_FILL;
+        ctx.fillRect(x, y, width, height);
+      } else {
+        for (const fill of node.style.fills) {
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          if (fillStyle !== null) {
+            ctx.fillStyle = fillStyle;
+            ctx.fillRect(x, y, width, height);
+          }
+        }
+      }
       break;
     }
   }
