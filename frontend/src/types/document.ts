@@ -105,6 +105,7 @@ export type Color = ColorSrgb | ColorDisplayP3 | ColorOklch | ColorOklab;
 // ── Gradient ──────────────────────────────────────────────────────────
 
 export interface GradientStop {
+  readonly id?: string; // Frontend-only stable identity for selection/dispatch
   readonly position: number;
   readonly color: StyleValue<Color>;
 }
