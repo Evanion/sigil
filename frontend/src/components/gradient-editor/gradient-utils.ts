@@ -77,10 +77,7 @@ function lerp(a: number, b: number, t: number): number {
  *
  * All inputs are guarded with Number.isFinite().
  */
-export function interpolateStopColor(
-  stops: readonly GradientStop[],
-  position: number,
-): Color {
+export function interpolateStopColor(stops: readonly GradientStop[], position: number): Color {
   const fallback: ColorSrgb = { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
 
   if (stops.length === 0) {

@@ -198,9 +198,7 @@ describe("stopsToLinearGradientCSS", () => {
   it("should produce correct CSS linear-gradient string", () => {
     const stops = [makeStop(0, 1, 0, 0), makeStop(1, 0, 0, 1)];
     const result = stopsToLinearGradientCSS(stops, 180);
-    expect(result).toBe(
-      "linear-gradient(180deg, rgba(255, 0, 0, 1) 0%, rgba(0, 0, 255, 1) 100%)",
-    );
+    expect(result).toBe("linear-gradient(180deg, rgba(255, 0, 0, 1) 0%, rgba(0, 0, 255, 1) 100%)");
   });
 
   it("should use default 90deg angle when not specified", () => {
