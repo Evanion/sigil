@@ -60,10 +60,23 @@
     "800": "Extra Bold",
     "900": "Black"
   },
+  "gradient": {
+    "angle": "Angle",
+    "centerX": "Center X",
+    "centerY": "Center Y",
+    "reverse": "Reverse gradient",
+    "stopPosition": "Stop position",
+    "stopColor": "Stop color",
+    "removeStop": "Remove color stop"
+  },
   "fill": {
     "title": "Fill",
     "empty": "No fills",
-    "add": "Add fill"
+    "add": "Add fill",
+    "typeSolid": "Solid",
+    "typeLinear": "Linear",
+    "typeRadial": "Radial",
+    "typeImage": "Image"
   },
   "stroke": {
     "title": "Stroke",

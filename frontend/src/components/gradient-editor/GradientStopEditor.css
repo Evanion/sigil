@@ -1,0 +1,75 @@
+/**
+ * GradientStopEditor — gradient bar with draggable stop markers.
+ *
+ * All colors, radii, and borders use CSS custom properties from theme.css.
+ * Transitions include prefers-reduced-motion overrides per CLAUDE.md.
+ */
+
+.sigil-gradient-stop-editor {
+  position: relative;
+  width: 100%;
+  user-select: none;
+}
+
+.sigil-gradient-stop-editor__bar {
+  position: relative;
+  height: 20px;
+  width: 100%;
+  border-radius: var(--color-picker-strip-radius);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  /* Checkerboard pattern behind the gradient to show transparency */
+  background-image:
+    var(--gradient-bar-bg, none),
+    repeating-conic-gradient(
+      var(--color-picker-checkerboard-dark) 0% 25%,
+      var(--color-picker-checkerboard-light) 0% 50%
+    );
+  background-size:
+    100% 100%,
+    8px 8px;
+}
+
+.sigil-gradient-stop-editor__bar:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Stop marker — positioned absolutely within the bar */
+.sigil-gradient-stop-editor__stop {
+  position: absolute;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border-2);
+  border-radius: 2px;
+  transform: translateX(-50%);
+  cursor: grab;
+  box-shadow: var(--color-picker-thumb-shadow);
+  transition:
+    border-color 0.1s ease,
+    width 0.1s ease,
+    height 0.1s ease;
+}
+
+.sigil-gradient-stop-editor__stop:active {
+  cursor: grabbing;
+}
+
+.sigil-gradient-stop-editor__stop--selected {
+  border-color: var(--color-picker-thumb-border);
+  width: 14px;
+  height: 14px;
+  bottom: -7px;
+}
+
+.sigil-gradient-stop-editor__stop:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-gradient-stop-editor__stop {
+    transition: none;
+  }
+}

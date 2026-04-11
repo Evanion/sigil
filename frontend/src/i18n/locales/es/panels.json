@@ -60,10 +60,23 @@
     "800": "Extra negrita",
     "900": "Negra"
   },
+  "gradient": {
+    "angle": "Ángulo",
+    "centerX": "Centro X",
+    "centerY": "Centro Y",
+    "reverse": "Invertir degradado",
+    "stopPosition": "Posición de parada",
+    "stopColor": "Color de parada",
+    "removeStop": "Eliminar parada de color"
+  },
   "fill": {
     "title": "Relleno",
     "empty": "Sin rellenos",
-    "add": "Añadir relleno"
+    "add": "Añadir relleno",
+    "typeSolid": "Sólido",
+    "typeLinear": "Lineal",
+    "typeRadial": "Radial",
+    "typeImage": "Imagen"
   },
   "stroke": {
     "title": "Trazo",

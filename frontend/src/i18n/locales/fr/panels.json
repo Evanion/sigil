@@ -60,10 +60,23 @@
     "800": "Extra gras",
     "900": "Noir"
   },
+  "gradient": {
+    "angle": "Angle",
+    "centerX": "Centre X",
+    "centerY": "Centre Y",
+    "reverse": "Inverser le dégradé",
+    "stopPosition": "Position de l'arrêt",
+    "stopColor": "Couleur de l'arrêt",
+    "removeStop": "Supprimer l'arrêt de couleur"
+  },
   "fill": {
     "title": "Remplissage",
     "empty": "Aucun remplissage",
-    "add": "Ajouter un remplissage"
+    "add": "Ajouter un remplissage",
+    "typeSolid": "Uni",
+    "typeLinear": "Linéaire",
+    "typeRadial": "Radial",
+    "typeImage": "Image"
   },
   "stroke": {
     "title": "Contour",
