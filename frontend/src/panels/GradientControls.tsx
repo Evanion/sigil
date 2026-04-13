@@ -30,7 +30,6 @@ import {
   angleFromPoints,
   pointsFromAngle,
   stopsToLinearGradientCSS,
-  stopsToConicGradientCSS,
   interpolateStopColor,
   MIN_GRADIENT_STOPS,
   MAX_GRADIENT_STOPS,
@@ -89,18 +88,12 @@ export function GradientControls(props: GradientControlsProps) {
     return assignStopIds(props.fill.gradient.stops);
   });
 
-  // ── Derived: CSS string for the gradient bar ────────────────────────
+  // The stop bar always shows a simple left-to-right gradient preview
+  // regardless of the actual gradient type or angle. The bar represents
+  // the color distribution along the gradient axis, not the spatial direction.
   const gradientCSS = createMemo((): string => {
     const stops = stopsWithIds();
     const sorted = [...stops].sort((a, b) => a.position - b.position);
-    if (props.fill.type === "linear_gradient") {
-      const angle = angleFromPoints(props.fill.gradient.start, props.fill.gradient.end);
-      return stopsToLinearGradientCSS(sorted, angle);
-    }
-    if (props.fill.type === "conic_gradient") {
-      return stopsToConicGradientCSS(sorted, props.fill.gradient.start_angle);
-    }
-    // Radial: render as left-to-right gradient in the bar for display
     return stopsToLinearGradientCSS(sorted, 90);
   });
 
