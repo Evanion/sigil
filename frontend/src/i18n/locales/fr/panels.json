@@ -147,6 +147,8 @@
     "close": "Fermer",
     "closeEditor": "Fermer l'éditeur",
     "noTokensInGroup": "Aucun jeton dans ce groupe",
-    "deleteConfirm": "Supprimer le jeton {{name}} ?"
+    "deleteConfirm": "Supprimer le jeton {{name}} ?",
+    "deleteButton": "Supprimer",
+    "editTokenForm": "Modifier le jeton {{name}}"
   }
 }

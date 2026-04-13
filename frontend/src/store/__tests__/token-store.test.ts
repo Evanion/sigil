@@ -7,6 +7,12 @@ import {
   resolveStyleValueNumber,
   MAX_ALIAS_DEPTH,
 } from "../token-store";
+import {
+  validateTokenName,
+  isValidTokenValue,
+  VALID_TOKEN_TYPES,
+} from "../../panels/token-helpers";
+import { MAX_TOKEN_NAME_LENGTH } from "../document-store-solid";
 import type { Token, TokenValue, Color, StyleValue } from "../../types/document";
 
 // Helpers to build test tokens
@@ -79,6 +85,24 @@ describe("resolveToken", () => {
     };
     const result = resolveToken(tokens, "cycle/a");
     expect(result).toBeNull();
+  });
+
+  // F-09: Positive boundary test — chain of MAX_ALIAS_DEPTH - 1 hops resolves successfully
+  it("should resolve a chain of MAX_ALIAS_DEPTH - 1 hops successfully", () => {
+    const tokens: Record<string, Token> = {};
+    // Build a chain: deep/0 → deep/1 → ... → deep/(MAX_ALIAS_DEPTH-2) → concrete
+    const maxHops = MAX_ALIAS_DEPTH - 1;
+    for (let i = 0; i < maxHops; i++) {
+      const name = `deep/${i}`;
+      const nextName = `deep/${i + 1}`;
+      tokens[name] = makeToken(String(i), name, { type: "alias", name: nextName });
+    }
+    // The concrete token at the end of the chain
+    const concreteName = `deep/${maxHops}`;
+    tokens[concreteName] = makeToken(String(maxHops), concreteName, { type: "color", value: RED });
+    // Resolving deep/0 requires maxHops hops — just under the limit, should succeed
+    const result = resolveToken(tokens, "deep/0");
+    expect(result).toEqual({ type: "color", value: RED });
   });
 
   it("should return null when alias depth exceeds MAX_ALIAS_DEPTH", () => {
@@ -211,5 +235,115 @@ describe("resolveStyleValueNumber", () => {
     const tokens: Record<string, Token> = {};
     const result = resolveStyleValueNumber(sv, tokens, 99);
     expect(result).toBe(99);
+  });
+});
+
+// ── F-01: Token name validation ───────────────────────────────────────
+
+describe("validateTokenName", () => {
+  it("should return null for a valid token name", () => {
+    expect(validateTokenName("brand/primary")).toBeNull();
+    expect(validateTokenName("color.red")).toBeNull();
+    expect(validateTokenName("spacing-md")).toBeNull();
+    expect(validateTokenName("a")).toBeNull();
+    expect(validateTokenName("Token_123")).toBeNull();
+  });
+
+  it("should reject an empty name", () => {
+    expect(validateTokenName("")).not.toBeNull();
+  });
+
+  it("should reject a name exceeding MAX_TOKEN_NAME_LENGTH", () => {
+    const longName = "a".repeat(MAX_TOKEN_NAME_LENGTH + 1);
+    expect(validateTokenName(longName)).not.toBeNull();
+  });
+
+  it("should reject a name starting with a digit", () => {
+    expect(validateTokenName("1color")).not.toBeNull();
+  });
+
+  it("should reject a name starting with a special character", () => {
+    expect(validateTokenName("_color")).not.toBeNull();
+    expect(validateTokenName("/color")).not.toBeNull();
+    expect(validateTokenName(".color")).not.toBeNull();
+    expect(validateTokenName("-color")).not.toBeNull();
+  });
+
+  it("should reject a name containing spaces", () => {
+    expect(validateTokenName("my color")).not.toBeNull();
+  });
+
+  it("should reject a name containing invalid characters", () => {
+    expect(validateTokenName("color@brand")).not.toBeNull();
+    expect(validateTokenName("color#1")).not.toBeNull();
+    expect(validateTokenName("color$red")).not.toBeNull();
+  });
+
+  it("should accept a name at exactly MAX_TOKEN_NAME_LENGTH", () => {
+    const maxName = "a".repeat(MAX_TOKEN_NAME_LENGTH);
+    expect(validateTokenName(maxName)).toBeNull();
+  });
+});
+
+// ── F-08: Token value shape validation ────────────────────────────────
+
+describe("isValidTokenValue", () => {
+  it("should return true for valid token value objects", () => {
+    expect(
+      isValidTokenValue({ type: "color", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } }),
+    ).toBe(true);
+    expect(isValidTokenValue({ type: "number", value: 42 })).toBe(true);
+    expect(isValidTokenValue({ type: "dimension", value: 16, unit: "px" })).toBe(true);
+    expect(isValidTokenValue({ type: "alias", name: "other/token" })).toBe(true);
+    expect(isValidTokenValue({ type: "typography", value: {} })).toBe(true);
+  });
+
+  it("should return false for null or undefined", () => {
+    expect(isValidTokenValue(null)).toBe(false);
+    expect(isValidTokenValue(undefined)).toBe(false);
+  });
+
+  it("should return false for non-objects", () => {
+    expect(isValidTokenValue("color")).toBe(false);
+    expect(isValidTokenValue(42)).toBe(false);
+    expect(isValidTokenValue(true)).toBe(false);
+  });
+
+  it("should return false for objects without a type field", () => {
+    expect(isValidTokenValue({ value: 42 })).toBe(false);
+  });
+
+  it("should return false for objects with an unknown type", () => {
+    expect(isValidTokenValue({ type: "unknown_type" })).toBe(false);
+    expect(isValidTokenValue({ type: "texture" })).toBe(false);
+  });
+});
+
+// ── F-14: VALID_TOKEN_TYPES ───────────────────────────────────────────
+
+describe("VALID_TOKEN_TYPES", () => {
+  it("should contain all 10 concrete token types", () => {
+    const expected = [
+      "color",
+      "dimension",
+      "number",
+      "font_family",
+      "font_weight",
+      "duration",
+      "cubic_bezier",
+      "shadow",
+      "gradient",
+      "typography",
+    ];
+    for (const type of expected) {
+      expect(VALID_TOKEN_TYPES.has(type)).toBe(true);
+    }
+    expect(VALID_TOKEN_TYPES.size).toBe(10);
+  });
+
+  it("should reject unknown types", () => {
+    expect(VALID_TOKEN_TYPES.has("alias")).toBe(false);
+    expect(VALID_TOKEN_TYPES.has("unknown")).toBe(false);
+    expect(VALID_TOKEN_TYPES.has("")).toBe(false);
   });
 });

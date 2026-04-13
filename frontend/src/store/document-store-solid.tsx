@@ -35,9 +35,13 @@ import {
   createDeletePageOp,
   createRenamePageOp,
   createReorderPageOp,
+  createCreateTokenOp,
+  createUpdateTokenOp,
+  createDeleteTokenOp,
 } from "../operations/operation-helpers";
 import type { TextStylePatch } from "./document-store-types";
 import { resolveToken as resolveTokenPure } from "./token-store";
+import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -282,9 +286,20 @@ function parseTokensResponse(data: unknown): Record<string, Token> {
 
     const tokenType = t["tokenType"];
     if (typeof tokenType !== "string") continue;
+    // F-14: Validate tokenType against allowlist
+    if (!VALID_TOKEN_TYPES.has(tokenType)) {
+      console.warn(
+        `parseTokensResponse: skipping token "${name}" with unknown type "${tokenType}"`,
+      );
+      continue;
+    }
 
     const rawValue = t["value"];
-    if (!rawValue || typeof rawValue !== "object") continue;
+    // F-08: Shape-validate token value
+    if (!isValidTokenValue(rawValue)) {
+      console.warn(`parseTokensResponse: skipping token "${name}" with invalid value shape`);
+      continue;
+    }
 
     const description = typeof t["description"] === "string" ? t["description"] : null;
 
@@ -434,15 +449,54 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
         },
       };
     }
+    case "create_token": {
+      const tokenData = op.value as {
+        name: string;
+        token_type: string;
+        value: unknown;
+        description: string | null;
+        id: string;
+      };
+      return {
+        addToken: {
+          tokenUuid: tokenData.id,
+          name: tokenData.name,
+          tokenType: tokenData.token_type,
+          value: JSON.stringify(tokenData.value),
+          description: tokenData.description,
+        },
+      };
+    }
+    case "update_token": {
+      const updateData = op.value as { name: string; value: unknown; description: string | null };
+      return {
+        updateToken: {
+          name: updateData.name,
+          value: JSON.stringify(updateData.value),
+          description: updateData.description,
+        },
+      };
+    }
+    case "delete_token":
+      return {
+        removeToken: {
+          name: op.nodeUuid,
+        },
+      };
   }
 }
 
 // ── Store factory ─────────────────────────────────────────────────────
 
 export function createDocumentStoreSolid(): DocumentStoreAPI {
-  // RF-010: Visible error notifications deferred until toast/notification system
-  // is implemented. console.error provides diagnostic trail per CLAUDE.md
-  // minimum requirement.
+  // F-05: announceError dispatches a custom DOM event that AnnounceProvider
+  // listens for, providing visible error notifications to screen readers.
+  // Falls back to console.error if window is not available (tests).
+  function announceError(message: string): void {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("sigil-announce-error", { detail: { message } }));
+    }
+  }
 
   // Client session ID for self-echo suppression (RF-004)
   const clientSessionId = crypto.randomUUID();
@@ -1441,11 +1495,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     value: TokenValue,
     description?: string,
   ): void {
-    // Validate name
-    if (name.length === 0 || name.length > MAX_TOKEN_NAME_LENGTH) {
-      console.error(
-        `createToken: name length ${name.length} outside valid range [1, ${MAX_TOKEN_NAME_LENGTH}]`,
-      );
+    // F-01: Validate name against core's rules
+    const nameError = validateTokenName(name);
+    if (nameError !== null) {
+      console.error(`createToken: ${nameError}`);
       return;
     }
 
@@ -1480,7 +1533,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       description: description ?? null,
     };
 
-    // Snapshot for rollback
+    // Snapshot for rollback (capture BEFORE mutation per CLAUDE.md)
     // JSON clone: Solid proxy not structuredClone-safe
     let tokensSnapshot: Record<string, Token>;
     try {
@@ -1496,6 +1549,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         s.tokens[name] = newToken;
       }),
     );
+
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createCreateTokenOp(clientSessionId, {
+        name,
+        token_type: tokenType,
+        value,
+        description: description ?? null,
+        id: tokenUuid,
+      }),
+    );
+    syncHistorySignals();
 
     // Send to server
     client
@@ -1517,12 +1582,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("createToken server error:", r.error.message);
+          // F-05: Announce error to screen reader
+          announceError(`Failed to create token "${name}": ${r.error.message}`);
           // Rollback
           setState("tokens", reconcile(tokensSnapshot));
         }
       })
       .catch((err: unknown) => {
         console.error("createToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to create token "${name}"`);
         // Rollback
         setState("tokens", reconcile(tokensSnapshot));
       });
@@ -1530,7 +1599,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function updateToken(name: string, value: TokenValue, description?: string): void {
     // Validate the token exists
-    if (state.tokens[name] === undefined) {
+    const existingToken = state.tokens[name];
+    if (existingToken === undefined) {
       console.error(`updateToken: token "${name}" not found`);
       return;
     }
@@ -1543,15 +1613,22 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Snapshot for rollback (capture BEFORE mutation per CLAUDE.md)
+    // Capture before-value for undo BEFORE mutation (CLAUDE.md: capture snapshots before mutations)
     // JSON clone: Solid proxy not structuredClone-safe
+    let previousValue: { value: TokenValue; description: string | null };
     let tokensSnapshot: Record<string, Token>;
     try {
+      previousValue = JSON.parse(
+        JSON.stringify({ value: existingToken.value, description: existingToken.description }),
+      ) as { value: TokenValue; description: string | null };
       tokensSnapshot = JSON.parse(JSON.stringify(state.tokens)) as Record<string, Token>;
     } catch (err: unknown) {
       console.error("updateToken: failed to snapshot tokens", err);
       return;
     }
+
+    const newDescription =
+      description !== undefined ? (description ?? null) : previousValue.description;
 
     // Apply optimistically
     setState(
@@ -1561,11 +1638,22 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           s.tokens[name] = {
             ...existing,
             value,
-            description: description !== undefined ? (description ?? null) : existing.description,
+            description: newDescription,
           };
         }
       }),
     );
+
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createUpdateTokenOp(
+        clientSessionId,
+        name,
+        { name, value, description: newDescription },
+        { name, value: previousValue.value, description: previousValue.description },
+      ),
+    );
+    syncHistorySignals();
 
     // Send to server
     client
@@ -1585,12 +1673,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("updateToken server error:", r.error.message);
+          // F-05: Announce error
+          announceError(`Failed to update token "${name}": ${r.error.message}`);
           // Rollback
           setState("tokens", reconcile(tokensSnapshot));
         }
       })
       .catch((err: unknown) => {
         console.error("updateToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to update token "${name}"`);
         // Rollback
         setState("tokens", reconcile(tokensSnapshot));
       });
@@ -1598,16 +1690,19 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function deleteToken(name: string): void {
     // Validate the token exists
-    if (state.tokens[name] === undefined) {
+    const existingToken = state.tokens[name];
+    if (existingToken === undefined) {
       console.error(`deleteToken: token "${name}" not found`);
       return;
     }
 
-    // Snapshot for rollback (capture BEFORE mutation per CLAUDE.md)
+    // Snapshot for rollback and undo (capture BEFORE mutation per CLAUDE.md)
     // JSON clone: Solid proxy not structuredClone-safe
     let tokensSnapshot: Record<string, Token>;
+    let tokenSnapshotForUndo: Token;
     try {
       tokensSnapshot = JSON.parse(JSON.stringify(state.tokens)) as Record<string, Token>;
+      tokenSnapshotForUndo = JSON.parse(JSON.stringify(existingToken)) as Token;
     } catch (err: unknown) {
       console.error("deleteToken: failed to snapshot tokens", err);
       return;
@@ -1620,6 +1715,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createDeleteTokenOp(clientSessionId, {
+        name: tokenSnapshotForUndo.name,
+        token_type: tokenSnapshotForUndo.token_type,
+        value: tokenSnapshotForUndo.value,
+        description: tokenSnapshotForUndo.description,
+        id: tokenSnapshotForUndo.id,
+      }),
+    );
+    syncHistorySignals();
+
     // Send to server
     client
       .mutation(gql(APPLY_OPERATIONS_MUTATION), {
@@ -1630,12 +1737,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       .then((r) => {
         if (r.error) {
           console.error("deleteToken server error:", r.error.message);
+          // F-05: Announce error
+          announceError(`Failed to delete token "${name}": ${r.error.message}`);
           // Rollback
           setState("tokens", reconcile(tokensSnapshot));
         }
       })
       .catch((err: unknown) => {
         console.error("deleteToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to delete token "${name}"`);
         // Rollback
         setState("tokens", reconcile(tokensSnapshot));
       });

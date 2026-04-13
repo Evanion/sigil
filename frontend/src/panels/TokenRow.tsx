@@ -65,7 +65,7 @@ function colorToHexPreview(color: Color): string {
  * Build a short human-readable preview string for a token value.
  * All numeric values are guarded against NaN/Infinity per CLAUDE.md.
  */
-function buildValuePreview(value: TokenValue): string {
+export function buildValuePreview(value: TokenValue): string {
   switch (value.type) {
     case "color":
       return colorToHexPreview(value.value);

@@ -1,10 +1,84 @@
 /**
  * Shared helpers for token panel components.
  *
- * Provides i18n label keys, default token values, and type grouping utilities.
+ * Provides i18n label keys, default token values, type grouping utilities,
+ * and token name/value validation.
  */
 
 import type { TokenType, TokenValue } from "../types/document";
+import { MAX_TOKEN_NAME_LENGTH } from "../store/document-store-solid";
+
+// ── Validation constants ──────────────────────────────────────────────
+
+/**
+ * Set of valid token type discriminants.
+ * Used to validate tokenType in parseTokensResponse and applyCreateToken.
+ */
+export const VALID_TOKEN_TYPES: ReadonlySet<string> = new Set<TokenType>([
+  "color",
+  "dimension",
+  "number",
+  "font_family",
+  "font_weight",
+  "duration",
+  "cubic_bezier",
+  "shadow",
+  "gradient",
+  "typography",
+]);
+
+/**
+ * Regex for valid token name characters.
+ * Must start with [a-zA-Z], contain only [a-zA-Z0-9/._-].
+ * Mirrors crates/core/src/validate.rs token name rules.
+ */
+const TOKEN_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9/._-]*$/;
+
+/**
+ * Validate a token name against core's rules.
+ * Returns null if valid, or a human-readable error string if invalid.
+ */
+export function validateTokenName(name: string): string | null {
+  if (name.length === 0) {
+    return "Token name must not be empty";
+  }
+  if (name.length > MAX_TOKEN_NAME_LENGTH) {
+    return `Token name must not exceed ${MAX_TOKEN_NAME_LENGTH} characters`;
+  }
+  if (!TOKEN_NAME_PATTERN.test(name)) {
+    return "Token name must start with a letter and contain only letters, digits, /, ., _, -";
+  }
+  return null;
+}
+
+/**
+ * Valid TokenValue discriminants. Used for shape validation of remote payloads.
+ */
+const VALID_TOKEN_VALUE_TYPES: ReadonlySet<string> = new Set([
+  "color",
+  "dimension",
+  "font_family",
+  "font_weight",
+  "duration",
+  "cubic_bezier",
+  "number",
+  "shadow",
+  "gradient",
+  "typography",
+  "alias",
+]);
+
+/**
+ * Type guard: validate that an unknown value has the shape of a TokenValue.
+ * Checks that it is an object with a `type` field matching a known discriminant.
+ */
+export function isValidTokenValue(v: unknown): v is TokenValue {
+  if (!v || typeof v !== "object") return false;
+  const obj = v as Record<string, unknown>;
+  return typeof obj["type"] === "string" && VALID_TOKEN_VALUE_TYPES.has(obj["type"]);
+}
+
+// ── Token types ──────────────────────────────────────────────────────
 
 /** All concrete token types (excluding alias which is a reference). */
 export const TOKEN_TYPES: readonly TokenType[] = [

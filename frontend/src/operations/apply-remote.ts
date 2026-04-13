@@ -24,6 +24,7 @@ import type {
   TokenValue,
   TokenType,
 } from "../types/document";
+import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
 
 /**
  * Recursively strips `readonly` from all properties.
@@ -674,10 +675,16 @@ function applyCreateToken(value: unknown, setState: SetStoreFunction<StoreState>
     console.warn("Remote create_token: missing or non-string token_type");
     return;
   }
+  // F-14: Validate tokenType against allowlist
+  if (!VALID_TOKEN_TYPES.has(tokenType)) {
+    console.warn(`Remote create_token: unknown token_type "${tokenType}"`);
+    return;
+  }
 
   const tokenValue = raw["value"];
-  if (!tokenValue || typeof tokenValue !== "object") {
-    console.warn("Remote create_token: missing or invalid value");
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote create_token: missing or invalid value shape");
     return;
   }
 
@@ -716,8 +723,9 @@ function applyUpdateToken(value: unknown, setState: SetStoreFunction<StoreState>
   }
 
   const tokenValue = raw["value"];
-  if (!tokenValue || typeof tokenValue !== "object") {
-    console.warn("Remote update_token: missing or invalid value");
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote update_token: missing or invalid value shape");
     return;
   }
 

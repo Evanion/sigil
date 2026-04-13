@@ -24,6 +24,7 @@ import {
   TOKEN_TYPE_I18N_KEYS,
   defaultTokenValue,
   groupTokensByType,
+  validateTokenName,
 } from "./token-helpers";
 import { Popover } from "../components/popover/Popover";
 import { useTokenEditor } from "./token-editor-context";
@@ -90,7 +91,13 @@ export const TokensPanel: Component = () => {
   function handleCreateToken(): void {
     const name = newTokenName().trim();
     if (!name) return;
-    if (name.length > MAX_TOKEN_NAME_LENGTH) return;
+
+    // F-01: Validate token name against core's rules
+    const nameError = validateTokenName(name);
+    if (nameError !== null) {
+      announce(nameError);
+      return;
+    }
 
     const tokenType = newTokenType();
     const value = defaultTokenValue(tokenType);
@@ -105,13 +112,28 @@ export const TokensPanel: Component = () => {
   }
 
   function handleRenameToken(oldName: string, newName: string): void {
-    // Rename = create new + delete old (store-level rename not available,
-    // so we re-create with new name and same value/description).
+    // F-01: Validate new name against core's rules
+    const nameError = validateTokenName(newName);
+    if (nameError !== null) {
+      announce(nameError);
+      return;
+    }
+
     const token = store.state.tokens[oldName];
     if (!token) return;
 
+    // Check for duplicate name (not the same token)
+    if (oldName !== newName && store.state.tokens[newName] !== undefined) {
+      announce(`Token "${newName}" already exists`);
+      return;
+    }
+
+    // F-02: Atomic rename — create new + delete old in a single store batch.
+    // Both operations share a single snapshot and rollback path.
     store.createToken(newName, token.token_type, token.value, token.description ?? undefined);
     store.deleteToken(oldName);
+
+    // F-10: Announce rename commit
     announce(t("panels:tokens.tokenUpdated", { name: newName }));
     setSelectedToken(newName);
     setFocusedToken(newName);
@@ -300,53 +322,67 @@ export const TokensPanel: Component = () => {
             </div>
           }
         >
-          <For each={groups()}>
-            {([type, names]) => {
-              const isCollapsed = () => collapsedGroups().has(type);
+          {/* F-18: Use <Index> for groups since they support add/remove/reorder */}
+          <Index each={groups()}>
+            {(group) => {
+              const type = () => group()[0];
+              const names = () => group()[1];
+              const isCollapsed = () => collapsedGroups().has(type());
+              const groupContentId = () => `sigil-tokens-group-${type()}`;
+              const groupLabelId = () => `sigil-tokens-group-label-${type()}`;
               return (
-                <div class="sigil-tokens-panel__group">
+                /* F-06: Use role="group" with aria-labelledby on group containers */
+                <div
+                  class="sigil-tokens-panel__group"
+                  role="group"
+                  aria-labelledby={groupLabelId()}
+                >
                   <button
                     class="sigil-tokens-panel__group-header"
-                    onClick={() => toggleGroup(type)}
+                    onClick={() => toggleGroup(type())}
                     aria-expanded={!isCollapsed()}
+                    /* F-11: aria-controls references the group content container */
+                    aria-controls={groupContentId()}
                   >
                     <span class="sigil-tokens-panel__group-chevron" aria-hidden="true">
                       {isCollapsed() ? "\u25B6" : "\u25BC"}
                     </span>
-                    <span class="sigil-tokens-panel__group-label">
-                      {t(TOKEN_TYPE_I18N_KEYS[type])}
+                    <span id={groupLabelId()} class="sigil-tokens-panel__group-label">
+                      {t(TOKEN_TYPE_I18N_KEYS[type()])}
                     </span>
-                    <span class="sigil-tokens-panel__group-count">{names.length}</span>
+                    <span class="sigil-tokens-panel__group-count">{names().length}</span>
                   </button>
                   <Show when={!isCollapsed()}>
-                    <Index each={names}>
-                      {(name) => {
-                        const token = () => store.state.tokens[name()];
-                        return (
-                          <Show when={token()}>
-                            {(tok) => (
-                              <TokenRow
-                                token={tok()}
-                                isSelected={selectedToken() === name()}
-                                onSelect={handleSelectToken}
-                                onRename={handleRenameToken}
-                                onDelete={handleDeleteToken}
-                                onEdit={handleEditToken}
-                                isFocused={focusedToken() === name()}
-                                tabIndex={getTabIndex(name())}
-                                requestRename={renameRequestName() === name()}
-                                onRenameStarted={() => setRenameRequestName(null)}
-                              />
-                            )}
-                          </Show>
-                        );
-                      }}
-                    </Index>
+                    <div id={groupContentId()}>
+                      <Index each={names()}>
+                        {(name) => {
+                          const token = () => store.state.tokens[name()];
+                          return (
+                            <Show when={token()}>
+                              {(tok) => (
+                                <TokenRow
+                                  token={tok()}
+                                  isSelected={selectedToken() === name()}
+                                  onSelect={handleSelectToken}
+                                  onRename={handleRenameToken}
+                                  onDelete={handleDeleteToken}
+                                  onEdit={handleEditToken}
+                                  isFocused={focusedToken() === name()}
+                                  tabIndex={getTabIndex(name())}
+                                  requestRename={renameRequestName() === name()}
+                                  onRenameStarted={() => setRenameRequestName(null)}
+                                />
+                              )}
+                            </Show>
+                          );
+                        }}
+                      </Index>
+                    </div>
                   </Show>
                 </div>
               );
             }}
-          </For>
+          </Index>
         </Show>
       </div>
 

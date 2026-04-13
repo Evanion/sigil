@@ -147,6 +147,8 @@
     "close": "Close",
     "closeEditor": "Close editor",
     "noTokensInGroup": "No tokens in this group",
-    "deleteConfirm": "Delete token {{name}}?"
+    "deleteConfirm": "Delete token {{name}}?",
+    "deleteButton": "Delete",
+    "editTokenForm": "Edit token {{name}}"
   }
 }

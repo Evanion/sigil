@@ -10,13 +10,23 @@
  * - Create new tokens
  */
 
-import { createSignal, createMemo, Show, Index, For, type Component, splitProps } from "solid-js";
+import {
+  createSignal,
+  createMemo,
+  createEffect,
+  Show,
+  Index,
+  For,
+  type Component,
+  splitProps,
+} from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { Dialog } from "../components/dialog/Dialog";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
 import { TokenDetailEditor } from "./TokenDetailEditor";
 import { TOKEN_TYPES, TOKEN_TYPE_I18N_KEYS, defaultTokenValue } from "./token-helpers";
+import { buildValuePreview } from "./TokenRow";
 import type { Token, TokenType, TokenValue } from "../types/document";
 import "./TokenEditorWindow.css";
 
@@ -42,6 +52,13 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
   const [selectedTokenName, setSelectedTokenName] = createSignal<string | null>(
     props.initialSelection ?? null,
   );
+
+  // F-13: Sync initialSelection → selectedTokenName when isOpen changes
+  createEffect(() => {
+    if (props.isOpen && props.initialSelection) {
+      setSelectedTokenName(props.initialSelection);
+    }
+  });
 
   // ── Derived: filtered token list ─────────────────────────────────────
 
@@ -152,11 +169,8 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
 
       <div class="sigil-token-editor-window__content">
         <div class="sigil-token-editor-window__table-container">
-          <table
-            class="sigil-token-editor-window__table"
-            role="grid"
-            aria-label={t("panels:tokens.tokenList")}
-          >
+          {/* F-07: Use native table semantics instead of role="grid" */}
+          <table class="sigil-token-editor-window__table" aria-label={t("panels:tokens.tokenList")}>
             <thead>
               <tr>
                 <th>{t("panels:tokens.name")}</th>
@@ -192,7 +206,10 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
                           <td class="sigil-token-editor-window__cell-type">
                             {t(TOKEN_TYPE_I18N_KEYS[tok().token_type])}
                           </td>
-                          <td class="sigil-token-editor-window__cell-value">{tok().value.type}</td>
+                          {/* F-16: Use buildValuePreview instead of raw discriminant */}
+                          <td class="sigil-token-editor-window__cell-value">
+                            {buildValuePreview(tok().value)}
+                          </td>
                           <td class="sigil-token-editor-window__cell-desc">
                             {tok().description ?? ""}
                           </td>

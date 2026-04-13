@@ -17,7 +17,10 @@ export type OperationType =
   | "create_page"
   | "delete_page"
   | "rename_page"
-  | "reorder_page";
+  | "reorder_page"
+  | "create_token"
+  | "update_token"
+  | "delete_token";
 
 /**
  * A single field-level mutation.
@@ -142,6 +145,40 @@ export interface RenamePageValue {
  */
 export interface ReorderPageValue {
   readonly position: number;
+}
+
+/**
+ * Create token operation value payload.
+ * Stored in Operation.value for type="create_token".
+ */
+export interface CreateTokenValue {
+  readonly name: string;
+  readonly token_type: string;
+  readonly value: unknown;
+  readonly description: string | null;
+  readonly id: string;
+}
+
+/**
+ * Update token operation value payload.
+ * Stored in Operation.value for type="update_token".
+ */
+export interface UpdateTokenValue {
+  readonly name: string;
+  readonly value: unknown;
+  readonly description: string | null;
+}
+
+/**
+ * Delete token operation value payload.
+ * Stored in Operation.previousValue for type="delete_token" (snapshot for undo).
+ */
+export interface DeleteTokenSnapshot {
+  readonly name: string;
+  readonly token_type: string;
+  readonly value: unknown;
+  readonly description: string | null;
+  readonly id: string;
 }
 
 /** Maximum number of transactions in the undo or redo stack. */

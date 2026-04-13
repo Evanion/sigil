@@ -549,7 +549,12 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
   }
 
   return (
-    <div class="sigil-token-detail" role="form" aria-label={props.token.name}>
+    // F-17: Use dedicated i18n key for form label context
+    <div
+      class="sigil-token-detail"
+      role="form"
+      aria-label={t("panels:tokens.editTokenForm", { name: props.token.name })}
+    >
       <h4 class="sigil-token-detail__name">{props.token.name}</h4>
 
       {renderValueEditor()}
@@ -572,7 +577,8 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
           class="sigil-token-detail__delete-button"
           onClick={() => props.onDelete?.(props.token.name)}
         >
-          {t("panels:tokens.tokenDeleted", { name: "" }).replace(" deleted", "")}
+          {/* F-15: Use dedicated i18n key for delete button label */}
+          {t("panels:tokens.deleteButton")}
         </button>
       </Show>
     </div>
