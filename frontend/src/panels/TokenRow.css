@@ -1,0 +1,110 @@
+.sigil-token-row {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  gap: var(--size-2);
+  padding: 0 var(--size-2);
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-1);
+  transition: background-color 120ms;
+}
+
+.sigil-token-row:hover {
+  background: var(--surface-3);
+}
+
+.sigil-token-row--selected {
+  background: var(--surface-4);
+}
+
+.sigil-token-row--selected:hover {
+  background: var(--surface-4);
+}
+
+/* Keyboard focus ring (roving tabindex pattern) */
+.sigil-token-row--focused {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+.sigil-token-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset));
+}
+
+/* Type icon — fixed width to keep names aligned */
+.sigil-token-row__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+
+/* Color swatch — 12×12 filled square */
+.sigil-token-row__color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+/* Token name — truncate with ellipsis */
+.sigil-token-row__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-0);
+  line-height: 1.4;
+  color: var(--text-1);
+}
+
+/* Inline rename input */
+.sigil-token-row__name-input {
+  flex: 1;
+  min-width: 40px;
+  height: 22px;
+  padding: 0 var(--size-1);
+  border: 1px solid var(--accent);
+  border-radius: var(--input-radius);
+  background: var(--surface-4);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  outline: none;
+}
+
+.sigil-token-row__name-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Value preview — right-aligned, muted */
+.sigil-token-row__value {
+  flex-shrink: 0;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+  text-align: right;
+}
+
+/* Alias value — italic to distinguish from literal values */
+.sigil-token-row__value--alias {
+  font-style: italic;
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-row {
+    transition: none;
+  }
+}

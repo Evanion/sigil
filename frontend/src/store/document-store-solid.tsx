@@ -165,7 +165,7 @@ const MAX_PAGES_PER_DOCUMENT = 100;
 const MIN_PAGES_PER_DOCUMENT = 1;
 
 /** Maximum token name length — matches crates/core/src/validate.rs MAX_TOKEN_NAME_LEN. */
-const MAX_TOKEN_NAME_LENGTH = 256;
+export const MAX_TOKEN_NAME_LENGTH = 256;
 
 /** Maximum tokens per context — matches crates/core/src/validate.rs MAX_TOKENS_PER_CONTEXT. */
 const MAX_TOKENS_PER_CONTEXT = 50_000;
