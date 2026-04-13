@@ -121,11 +121,7 @@ export function GradientEditorPopover(props: GradientEditorPopoverProps) {
         />
         <div class="sigil-gradient-editor-popover__footer">
           <label>
-            <input
-              type="checkbox"
-              checked={isRepeating()}
-              onChange={handleRepeatingToggle}
-            />
+            <input type="checkbox" checked={isRepeating()} onChange={handleRepeatingToggle} />
             {t("panels:gradient.repeating")}
           </label>
         </div>
