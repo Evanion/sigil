@@ -963,6 +963,12 @@ fn parse_add_token(input: &AddTokenInput) -> Result<ParsedOp> {
     .map_err(|e| async_graphql::Error::new(format!("invalid token: {e}")))?;
 
     let token_name = token.name().to_string();
+    let token_type_val = serde_json::to_value(token.token_type())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token type: {e}")))?;
+    let token_value_val = serde_json::to_value(token.value())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token value: {e}")))?;
+    let description_val = serde_json::to_value(token.description())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize description: {e}")))?;
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
         node_uuid: token_uuid.to_string(),
@@ -971,6 +977,9 @@ fn parse_add_token(input: &AddTokenInput) -> Result<ParsedOp> {
         value: Some(serde_json::json!({
             "id": token_uuid.to_string(),
             "name": &token_name,
+            "token_type": token_type_val,
+            "value": token_value_val,
+            "description": description_val,
         })),
     };
 
@@ -994,13 +1003,21 @@ fn parse_update_token(input: &UpdateTokenInput) -> Result<ParsedOp> {
 
     let token_name = input.name.clone();
     let description = input.description.clone();
+    let token_value_val = serde_json::to_value(&token_value)
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token value: {e}")))?;
+    let description_val = serde_json::to_value(&description)
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize description: {e}")))?;
 
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
         node_uuid: String::new(),
         op_type: "update_token".to_string(),
         path: String::new(),
-        value: Some(serde_json::json!({ "name": &token_name })),
+        value: Some(serde_json::json!({
+            "name": &token_name,
+            "value": token_value_val,
+            "description": description_val,
+        })),
     };
 
     Ok(ParsedOp {
