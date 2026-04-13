@@ -68,7 +68,9 @@
     "stopPosition": "Posición de parada",
     "stopColor": "Color de parada",
     "removeStop": "Eliminar parada de color",
-    "radius": "Radio"
+    "radius": "Radio",
+    "editGradient": "Editar degradado",
+    "repeating": "Repetir"
   },
   "fill": {
     "title": "Relleno",

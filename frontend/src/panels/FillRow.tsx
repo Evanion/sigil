@@ -1,11 +1,12 @@
 /**
  * FillRow — single row in the Fills section of the Design panel.
  *
- * Shows a drag handle, color swatch (opens ColorPicker popover), fill type
+ * Shows a drag handle, color swatch (or gradient swatch popover), fill type
  * dropdown, and a remove button.
  *
- * When the fill is a gradient type, expands to show GradientControls below
- * the main row.
+ * For solid fills, the swatch opens a ColorPicker popover.
+ * For gradient fills, the swatch opens a GradientEditorPopover with the
+ * full gradient editor (stop editor, type controls, repeating toggle).
  *
  * Type conversion logic (per spec section 2.1):
  *   Solid -> Linear: first stop = solid color, last stop = black. Default 180deg.
@@ -32,12 +33,8 @@ import type {
 } from "../types/document";
 import { ColorSwatch } from "../components/color-picker";
 import { Select } from "../components/select/Select";
-import {
-  stopsToLinearGradientCSS,
-  stopsToConicGradientCSS,
-  pointsFromAngle,
-} from "../components/gradient-editor/gradient-utils";
-import { GradientControls } from "./GradientControls";
+import { pointsFromAngle } from "../components/gradient-editor/gradient-utils";
+import { GradientEditorPopover } from "./GradientEditorPopover";
 import "./FillRow.css";
 
 export interface FillRowProps {
@@ -229,20 +226,6 @@ export function FillRow(props: FillRowProps) {
     props.fill.type === "solid" ? solidFillColor(props.fill as FillSolid) : BLACK,
   );
 
-  /**
-   * CSS gradient string for the swatch preview.
-   * For solid fills, this is unused (swatch shows solid color).
-   * For gradient fills, shows a mini gradient preview.
-   */
-  const gradientPreviewCSS = createMemo((): string | null => {
-    if (props.fill.type === "solid" || props.fill.type === "image") return null;
-    const sorted = [...props.fill.gradient.stops].sort((a, b) => a.position - b.position);
-    if (props.fill.type === "conic_gradient") {
-      return stopsToConicGradientCSS(sorted, props.fill.gradient.start_angle);
-    }
-    return stopsToLinearGradientCSS(sorted, 90);
-  });
-
   return (
     <div class="sigil-fill-row-container">
       <div class="sigil-fill-row">
@@ -253,11 +236,24 @@ export function FillRow(props: FillRowProps) {
         <Show
           when={props.fill.type === "solid"}
           fallback={
-            <span
-              class="sigil-fill-row__gradient-swatch"
-              style={{ background: gradientPreviewCSS() ?? "transparent" }}
-              aria-hidden="true"
-            />
+            <Show
+              when={
+                props.fill.type === "linear_gradient" ||
+                props.fill.type === "radial_gradient" ||
+                props.fill.type === "conic_gradient"
+                  ? (props.fill as FillLinearGradient | FillRadialGradient | FillConicGradient)
+                  : null
+              }
+            >
+              {(gradientFill) => (
+                <GradientEditorPopover
+                  fill={gradientFill()}
+                  onUpdate={handleGradientUpdate}
+                  onDragStart={props.onDragStart}
+                  onDragEnd={props.onDragEnd}
+                />
+              )}
+            </Show>
           }
         >
           <ColorSwatch color={solidColor()} onColorChange={handleColorChange} />
@@ -282,25 +278,7 @@ export function FillRow(props: FillRowProps) {
         </button>
       </div>
 
-      {/* Gradient controls shown when fill is a gradient type */}
-      <Show
-        when={
-          props.fill.type === "linear_gradient" ||
-          props.fill.type === "radial_gradient" ||
-          props.fill.type === "conic_gradient"
-            ? (props.fill as FillLinearGradient | FillRadialGradient | FillConicGradient)
-            : null
-        }
-      >
-        {(gradientFill) => (
-          <GradientControls
-            fill={gradientFill()}
-            onUpdate={handleGradientUpdate}
-            onDragStart={props.onDragStart}
-            onDragEnd={props.onDragEnd}
-          />
-        )}
-      </Show>
+      {/* Gradient controls are now inside GradientEditorPopover (swatch trigger above) */}
     </div>
   );
 }

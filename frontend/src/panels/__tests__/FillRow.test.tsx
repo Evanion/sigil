@@ -186,43 +186,48 @@ describe("FillRow", () => {
     expect(trigger.textContent).toContain("Radial");
   });
 
-  it("should show gradient controls when fill is a linear gradient", () => {
+  it("should show gradient editor popover trigger when fill is a linear gradient", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={gradientFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const controls = document.querySelector(".sigil-gradient-controls");
-    expect(controls).toBeTruthy();
+    // The gradient swatch is rendered inside a popover trigger button
+    const swatch = document.querySelector(".sigil-gradient-swatch");
+    expect(swatch).toBeTruthy();
+    const trigger = screen.getByRole("button", { name: /Edit gradient/ });
+    expect(trigger).toBeTruthy();
   });
 
-  it("should show gradient controls when fill is a radial gradient", () => {
+  it("should show gradient editor popover trigger when fill is a radial gradient", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={radialFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const controls = document.querySelector(".sigil-gradient-controls");
-    expect(controls).toBeTruthy();
+    const swatch = document.querySelector(".sigil-gradient-swatch");
+    expect(swatch).toBeTruthy();
+    const trigger = screen.getByRole("button", { name: /Edit gradient/ });
+    expect(trigger).toBeTruthy();
   });
 
-  it("should not show gradient controls when fill is solid", () => {
+  it("should not show gradient editor popover trigger when fill is solid", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const controls = document.querySelector(".sigil-gradient-controls");
-    expect(controls).toBeNull();
+    const swatch = document.querySelector(".sigil-gradient-swatch");
+    expect(swatch).toBeNull();
   });
 
-  it("should show gradient preview swatch instead of color swatch for gradient fills", () => {
+  it("should show gradient swatch instead of color swatch for gradient fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={gradientFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const gradientSwatch = document.querySelector(".sigil-fill-row__gradient-swatch");
+    const gradientSwatch = document.querySelector(".sigil-gradient-swatch");
     expect(gradientSwatch).toBeTruthy();
     // Should not have the regular color swatch
     const colorSwatch = document.querySelector(".sigil-color-swatch");

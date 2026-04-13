@@ -68,7 +68,9 @@
     "stopPosition": "Stop position",
     "stopColor": "Stop color",
     "removeStop": "Remove color stop",
-    "radius": "Radius"
+    "radius": "Radius",
+    "editGradient": "Edit gradient",
+    "repeating": "Repeating"
   },
   "fill": {
     "title": "Fill",
