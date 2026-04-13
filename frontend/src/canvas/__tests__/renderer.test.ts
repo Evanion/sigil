@@ -41,7 +41,7 @@ function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
  * Stores gradient type and construction args for test assertions.
  */
 interface MockGradient {
-  readonly __type: "linear" | "radial";
+  readonly __type: "linear" | "radial" | "conic";
   readonly __args: readonly number[];
   readonly __stops: Array<{ offset: number; color: string }>;
   addColorStop: (offset: number, color: string) => void;
@@ -87,6 +87,21 @@ function createMockContext(): CanvasRenderingContext2D {
             },
           };
           calls.push({ method: "createRadialGradient", args });
+          return gradient;
+        };
+      }
+      if (prop === "createConicGradient") {
+        return (...args: number[]): MockGradient => {
+          const stops: Array<{ offset: number; color: string }> = [];
+          const gradient: MockGradient = {
+            __type: "conic",
+            __args: args,
+            __stops: stops,
+            addColorStop(offset: number, color: string) {
+              stops.push({ offset, color });
+            },
+          };
+          calls.push({ method: "createConicGradient", args });
           return gradient;
         };
       }
@@ -797,6 +812,138 @@ describe("renderer", () => {
         (c) => typeof c.args[0] === "object" && c.args[0] !== null,
       );
       expect(hasGradientFill).toBe(true);
+    });
+
+    it("should create a conic gradient when node has a conic_gradient fill", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "conic_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
+                ],
+                center: { x: 0.5, y: 0.5 },
+                start_angle: 90,
+                repeating: false,
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const conicCalls = calls.filter((c) => c.method === "createConicGradient");
+      expect(conicCalls.length).toBe(1);
+
+      // 90 degrees = PI/2 radians
+      const expectedAngle = (90 * Math.PI) / 180;
+      // center = (100 + 0.5*200, 100 + 0.5*150) = (200, 175)
+      expect(conicCalls[0].args[0]).toBeCloseTo(expectedAngle, 10);
+      expect(conicCalls[0].args[1]).toBe(200); // cx
+      expect(conicCalls[0].args[2]).toBe(175); // cy
+    });
+
+    it("should add color stops to a conic gradient", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "conic_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 0.5,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
+                ],
+                center: { x: 0.5, y: 0.5 },
+                start_angle: 0,
+                repeating: false,
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const fillStyleSet = calls.find(
+        (c) => c.method === "set:fillStyle" && typeof c.args[0] === "object" && c.args[0] !== null,
+      );
+      expect(fillStyleSet).toBeDefined();
+      const gradient = fillStyleSet?.args[0] as MockGradient;
+      expect(gradient.__type).toBe("conic");
+      expect(gradient.__stops).toHaveLength(3);
+      expect(gradient.__stops[0].offset).toBe(0);
+      expect(gradient.__stops[1].offset).toBe(0.5);
+      expect(gradient.__stops[2].offset).toBe(1);
+    });
+
+    it("should default conic gradient angle to 0 when start_angle is non-finite", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "conic_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
+                ],
+                center: { x: 0.5, y: 0.5 },
+                start_angle: NaN,
+                repeating: false,
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const conicCalls = calls.filter((c) => c.method === "createConicGradient");
+      expect(conicCalls.length).toBe(1);
+      // NaN angle should default to 0
+      expect(conicCalls[0].args[0]).toBe(0);
     });
   });
 });

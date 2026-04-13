@@ -9,7 +9,14 @@
  * RF-006: Accepts ReadonlySet<string> for selectedUuids (caller memoizes).
  */
 
-import type { ColorSrgb, DocumentNode, Fill, GradientDef, Transform } from "../types/document";
+import type {
+  ColorSrgb,
+  ConicGradientDef,
+  DocumentNode,
+  Fill,
+  GradientDef,
+  Transform,
+} from "../types/document";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { MarqueeRect } from "../tools/select-tool";
@@ -74,7 +81,7 @@ function srgbColorToRgba(c: ColorSrgb): string | null {
  * Stop positions are clamped to [0, 1] since Canvas gradient stops require this range.
  * This is an explicit user-facing affordance (Canvas API constraint), not silent clamping.
  */
-function addGradientStops(grad: CanvasGradient, gradient: GradientDef): void {
+function addGradientStops(grad: CanvasGradient, gradient: GradientDef | ConicGradientDef): void {
   for (const stop of gradient.stops) {
     if (!Number.isFinite(stop.position)) {
       continue;
@@ -148,6 +155,31 @@ function createRadialGradientFill(
 }
 
 /**
+ * Create a Canvas conic gradient from a ConicGradientDef.
+ *
+ * gradient.center is normalized 0-1 within the node's bounds.
+ * gradient.start_angle is in degrees; Canvas API expects radians.
+ * All coordinates are guarded with Number.isFinite() per CLAUDE.md.
+ */
+function createConicGradientFill(
+  ctx: CanvasRenderingContext2D,
+  gradient: ConicGradientDef,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): CanvasGradient {
+  const cx = Number.isFinite(gradient.center.x) ? x + gradient.center.x * width : x + width / 2;
+  const cy = Number.isFinite(gradient.center.y) ? y + gradient.center.y * height : y + height / 2;
+  // Convert degrees to radians for the Canvas API.
+  // Math.PI / 180 is a constant multiplication — no domain guard needed.
+  const angle = Number.isFinite(gradient.start_angle) ? (gradient.start_angle * Math.PI) / 180 : 0;
+  const grad = ctx.createConicGradient(angle, cx, cy);
+  addGradientStops(grad, gradient);
+  return grad;
+}
+
+/**
  * Resolve a fill to a Canvas fillStyle value.
  *
  * Returns a CSS color string for solid fills, a CanvasGradient for gradient
@@ -172,6 +204,8 @@ function resolveFillStyle(
       return createLinearGradientFill(ctx, fill.gradient, x, y, width, height);
     case "radial_gradient":
       return createRadialGradientFill(ctx, fill.gradient, x, y, width, height);
+    case "conic_gradient":
+      return createConicGradientFill(ctx, fill.gradient, x, y, width, height);
     case "image":
       // Image fills are deferred to a later plan.
       return null;

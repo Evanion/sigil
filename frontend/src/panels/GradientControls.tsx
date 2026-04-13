@@ -16,6 +16,7 @@ import { Trash2 } from "lucide-solid";
 import type {
   Color,
   Fill,
+  FillConicGradient,
   FillLinearGradient,
   FillRadialGradient,
   GradientStop,
@@ -29,6 +30,7 @@ import {
   angleFromPoints,
   pointsFromAngle,
   stopsToLinearGradientCSS,
+  stopsToConicGradientCSS,
   interpolateStopColor,
   MIN_GRADIENT_STOPS,
   MAX_GRADIENT_STOPS,
@@ -62,7 +64,7 @@ const RADIUS_MIN = 0;
 const RADIUS_MAX = 100;
 
 export interface GradientControlsProps {
-  readonly fill: FillLinearGradient | FillRadialGradient;
+  readonly fill: FillLinearGradient | FillRadialGradient | FillConicGradient;
   readonly onUpdate: (fill: Fill) => void;
   /**
    * Called when a continuous drag gesture begins (e.g., stop drag).
@@ -95,6 +97,9 @@ export function GradientControls(props: GradientControlsProps) {
       const angle = angleFromPoints(props.fill.gradient.start, props.fill.gradient.end);
       return stopsToLinearGradientCSS(sorted, angle);
     }
+    if (props.fill.type === "conic_gradient") {
+      return stopsToConicGradientCSS(sorted, props.fill.gradient.start_angle);
+    }
     // Radial: render as left-to-right gradient in the bar for display
     return stopsToLinearGradientCSS(sorted, 90);
   });
@@ -116,6 +121,13 @@ export function GradientControls(props: GradientControlsProps) {
     // dx*dx + dy*dy is always >= 0, so Math.sqrt is safe here
     const r = Math.sqrt(dx * dx + dy * dy);
     return Number.isFinite(r) ? Math.round(r * 100) : 50;
+  });
+
+  // ── Derived: current start angle for conic gradients ────────────────
+  const currentConicAngle = createMemo((): number => {
+    if (props.fill.type !== "conic_gradient") return 0;
+    const a = props.fill.gradient.start_angle;
+    return Number.isFinite(a) ? Math.round(a) : 0;
   });
 
   // ── Derived: selected stop data ─────────────────────────────────────
@@ -142,6 +154,15 @@ export function GradientControls(props: GradientControlsProps) {
     if (props.fill.type === "linear_gradient") {
       return {
         type: "linear_gradient",
+        gradient: {
+          ...props.fill.gradient,
+          stops: newStops,
+        },
+      };
+    }
+    if (props.fill.type === "conic_gradient") {
+      return {
+        type: "conic_gradient",
         gradient: {
           ...props.fill.gradient,
           stops: newStops,
@@ -244,6 +265,24 @@ export function GradientControls(props: GradientControlsProps) {
         stops,
         start,
         end,
+        repeating: props.fill.gradient.repeating,
+      },
+    };
+    props.onUpdate(newFill);
+  }
+
+  // ── Conic angle change ──────────────────────────────────────────────
+
+  function handleConicAngleChange(angleDeg: number): void {
+    if (!Number.isFinite(angleDeg)) return;
+    if (props.fill.type !== "conic_gradient") return;
+    const stops = stopsWithIds();
+    const newFill: FillConicGradient = {
+      type: "conic_gradient",
+      gradient: {
+        ...props.fill.gradient,
+        start_angle: angleDeg,
+        stops,
       },
     };
     props.onUpdate(newFill);
@@ -275,6 +314,7 @@ export function GradientControls(props: GradientControlsProps) {
         stops,
         start: { x: cx, y: props.fill.gradient.start.y },
         end: props.fill.gradient.end,
+        repeating: props.fill.gradient.repeating,
       },
     };
     props.onUpdate(newFill);
@@ -292,6 +332,7 @@ export function GradientControls(props: GradientControlsProps) {
         stops,
         start: { x: props.fill.gradient.start.x, y: cy },
         end: props.fill.gradient.end,
+        repeating: props.fill.gradient.repeating,
       },
     };
     props.onUpdate(newFill);
@@ -314,6 +355,7 @@ export function GradientControls(props: GradientControlsProps) {
         stops,
         start,
         end: newEnd,
+        repeating: props.fill.gradient.repeating,
       },
     };
     props.onUpdate(newFill);
@@ -429,6 +471,29 @@ export function GradientControls(props: GradientControlsProps) {
             max={RADIUS_MAX}
             suffix="%"
           />
+        </div>
+      </Show>
+
+      {/* Conic-specific: start angle + reverse */}
+      <Show when={props.fill.type === "conic_gradient"}>
+        <div class="sigil-gradient-controls__type-row">
+          <NumberInput
+            value={currentConicAngle()}
+            onValueChange={handleConicAngleChange}
+            aria-label={t("panels:gradient.angle")}
+            step={1}
+            min={ANGLE_MIN}
+            max={ANGLE_MAX}
+            suffix={"\u00B0"}
+          />
+          <button
+            class="sigil-gradient-controls__reverse-btn"
+            type="button"
+            aria-label={t("panels:gradient.reverse")}
+            onClick={handleReverse}
+          >
+            {t("panels:gradient.reverse")}
+          </button>
         </div>
       </Show>
     </div>

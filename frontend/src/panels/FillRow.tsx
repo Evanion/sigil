@@ -20,7 +20,9 @@ import { useTransContext } from "@mbarzda/solid-i18next";
 import { GripVertical } from "lucide-solid";
 import type {
   Color,
+  ConicGradientDef,
   Fill,
+  FillConicGradient,
   FillLinearGradient,
   FillRadialGradient,
   FillSolid,
@@ -32,6 +34,7 @@ import { ColorSwatch } from "../components/color-picker";
 import { Select } from "../components/select/Select";
 import {
   stopsToLinearGradientCSS,
+  stopsToConicGradientCSS,
   pointsFromAngle,
 } from "../components/gradient-editor/gradient-utils";
 import { GradientControls } from "./GradientControls";
@@ -71,7 +74,7 @@ function solidFillColor(fill: FillSolid): Color {
 /**
  * Get the first stop's color from a gradient fill, falling back to black.
  */
-function firstStopColor(gradient: GradientDef): StyleValue<Color> {
+function firstStopColor(gradient: GradientDef | ConicGradientDef): StyleValue<Color> {
   const sorted = [...gradient.stops].sort((a, b) => a.position - b.position);
   const first = sorted[0];
   if (first) return first.color;
@@ -87,6 +90,7 @@ function toSolid(fill: Fill): FillSolid {
       return fill;
     case "linear_gradient":
     case "radial_gradient":
+    case "conic_gradient":
       return { type: "solid", color: firstStopColor(fill.gradient) };
     case "image":
       return {
@@ -105,6 +109,7 @@ function stopsFromFill(fill: Fill): GradientStop[] {
   switch (fill.type) {
     case "linear_gradient":
     case "radial_gradient":
+    case "conic_gradient":
       return [...fill.gradient.stops];
     case "solid": {
       const colorValue: StyleValue<Color> =
@@ -125,6 +130,9 @@ function stopsFromFill(fill: Fill): GradientStop[] {
   }
 }
 
+/** Default conic gradient start angle. */
+const DEFAULT_CONIC_ANGLE = 0;
+
 /**
  * Convert a fill to a linear gradient fill.
  */
@@ -134,7 +142,7 @@ function toLinear(fill: Fill): FillLinearGradient {
   const { start, end } = pointsFromAngle(DEFAULT_LINEAR_ANGLE);
   return {
     type: "linear_gradient",
-    gradient: { stops, start, end },
+    gradient: { stops, start, end, repeating: false },
   };
 }
 
@@ -150,6 +158,24 @@ function toRadial(fill: Fill): FillRadialGradient {
       stops,
       start: DEFAULT_RADIAL_CENTER,
       end: { x: 1, y: 0.5 },
+      repeating: false,
+    },
+  };
+}
+
+/**
+ * Convert a fill to a conic gradient fill.
+ */
+function toConic(fill: Fill): FillConicGradient {
+  if (fill.type === "conic_gradient") return fill;
+  const stops = stopsFromFill(fill);
+  return {
+    type: "conic_gradient",
+    gradient: {
+      center: { x: 0.5, y: 0.5 },
+      start_angle: DEFAULT_CONIC_ANGLE,
+      stops,
+      repeating: false,
     },
   };
 }
@@ -164,6 +190,7 @@ export function FillRow(props: FillRowProps) {
     { value: "solid", label: t("panels:fill.typeSolid") },
     { value: "linear_gradient", label: t("panels:fill.typeLinear") },
     { value: "radial_gradient", label: t("panels:fill.typeRadial") },
+    { value: "conic_gradient", label: t("panels:fill.typeConic") },
   ]);
 
   function handleColorChange(newColor: Color): void {
@@ -184,6 +211,9 @@ export function FillRow(props: FillRowProps) {
         break;
       case "radial_gradient":
         newFill = toRadial(props.fill);
+        break;
+      case "conic_gradient":
+        newFill = toConic(props.fill);
         break;
       default:
         return;
@@ -207,6 +237,9 @@ export function FillRow(props: FillRowProps) {
   const gradientPreviewCSS = createMemo((): string | null => {
     if (props.fill.type === "solid" || props.fill.type === "image") return null;
     const sorted = [...props.fill.gradient.stops].sort((a, b) => a.position - b.position);
+    if (props.fill.type === "conic_gradient") {
+      return stopsToConicGradientCSS(sorted, props.fill.gradient.start_angle);
+    }
     return stopsToLinearGradientCSS(sorted, 90);
   });
 
@@ -252,8 +285,10 @@ export function FillRow(props: FillRowProps) {
       {/* Gradient controls shown when fill is a gradient type */}
       <Show
         when={
-          props.fill.type === "linear_gradient" || props.fill.type === "radial_gradient"
-            ? (props.fill as FillLinearGradient | FillRadialGradient)
+          props.fill.type === "linear_gradient" ||
+          props.fill.type === "radial_gradient" ||
+          props.fill.type === "conic_gradient"
+            ? (props.fill as FillLinearGradient | FillRadialGradient | FillConicGradient)
             : null
         }
       >

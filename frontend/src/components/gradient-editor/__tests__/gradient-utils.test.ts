@@ -18,6 +18,8 @@ import {
   pointsFromAngle,
   resolveStopColorCSS,
   stopsToLinearGradientCSS,
+  stopsToRadialGradientCSS,
+  stopsToConicGradientCSS,
 } from "../gradient-utils";
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -350,5 +352,69 @@ describe("test_min_gradient_stops_enforced", () => {
 
   it("should reject removing a stop when below MIN_GRADIENT_STOPS", () => {
     expect(canRemoveStop(1)).toBe(false);
+  });
+});
+
+// ── stopsToLinearGradientCSS repeating ──────────────────────────────
+
+describe("stopsToLinearGradientCSS repeating", () => {
+  it("should produce repeating-linear-gradient when repeating is true", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(0.5, 0, 0, 1)];
+    const result = stopsToLinearGradientCSS(stops, 90, true);
+    expect(result).toMatch(/^repeating-linear-gradient\(/);
+    expect(result).toContain("90deg");
+  });
+
+  it("should produce linear-gradient when repeating is false", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(1, 0, 0, 1)];
+    const result = stopsToLinearGradientCSS(stops, 180, false);
+    expect(result).toMatch(/^linear-gradient\(/);
+  });
+});
+
+// ── stopsToRadialGradientCSS ────────────────────────────────────────
+
+describe("stopsToRadialGradientCSS", () => {
+  it("should produce correct CSS radial-gradient string", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(1, 0, 0, 1)];
+    const result = stopsToRadialGradientCSS(stops);
+    expect(result).toBe("radial-gradient(circle, rgba(255, 0, 0, 1) 0%, rgba(0, 0, 255, 1) 100%)");
+  });
+
+  it("should produce repeating-radial-gradient when repeating is true", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(0.5, 0, 0, 1)];
+    const result = stopsToRadialGradientCSS(stops, true);
+    expect(result).toMatch(/^repeating-radial-gradient\(/);
+  });
+});
+
+// ── stopsToConicGradientCSS ─────────────────────────────────────────
+
+describe("stopsToConicGradientCSS", () => {
+  it("should produce correct CSS conic-gradient string", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(1, 0, 0, 1)];
+    const result = stopsToConicGradientCSS(stops, 45);
+    expect(result).toBe(
+      "conic-gradient(from 45deg, rgba(255, 0, 0, 1) 0%, rgba(0, 0, 255, 1) 100%)",
+    );
+  });
+
+  it("should default start angle to 0 when not specified", () => {
+    const stops = [makeStop(0, 0, 0, 0), makeStop(1, 1, 1, 1)];
+    const result = stopsToConicGradientCSS(stops);
+    expect(result).toMatch(/^conic-gradient\(from 0deg/);
+  });
+
+  it("should produce repeating-conic-gradient when repeating is true", () => {
+    const stops = [makeStop(0, 1, 0, 0), makeStop(0.25, 0, 0, 1)];
+    const result = stopsToConicGradientCSS(stops, 0, true);
+    expect(result).toMatch(/^repeating-conic-gradient\(/);
+  });
+
+  it("should guard NaN start angle", () => {
+    const stops = [makeStop(0, 0, 0, 0)];
+    const result = stopsToConicGradientCSS(stops, NaN);
+    // NaN angle should fall back to 0
+    expect(result).toMatch(/^conic-gradient\(from 0deg/);
   });
 });

@@ -174,27 +174,75 @@ export function resolveStopColorCSS(color: StyleValue<Color>): string {
 }
 
 /**
+ * Build CSS color stop strings from gradient stops.
+ *
+ * Each stop becomes `rgba(r,g,b,a) position%`.
+ * All numeric values are guarded with Number.isFinite() before CSS interpolation.
+ */
+function buildCSSColorStops(stops: readonly GradientStop[]): string[] {
+  return stops.map((stop) => {
+    const css = resolveStopColorCSS(stop.color);
+    const pct = Number.isFinite(stop.position) ? stop.position * 100 : 0;
+    return `${css} ${String(pct)}%`;
+  });
+}
+
+/**
  * Build a CSS linear-gradient() string from gradient stops.
  *
  * Each stop becomes `rgba(r,g,b,a) position%`.
  * All numeric values are guarded with Number.isFinite() before CSS interpolation.
  *
  * @param stops - The gradient stops (should be sorted by position)
- * @param angleDeg - Optional angle in degrees (default: 90, top-to-bottom)
+ * @param angleDeg - Optional angle in degrees (default: 180, top-to-bottom)
+ * @param repeating - When true, produces repeating-linear-gradient()
  */
 export function stopsToLinearGradientCSS(
   stops: readonly GradientStop[],
   angleDeg?: number,
+  repeating = false,
 ): string {
   const angle = angleDeg !== undefined && Number.isFinite(angleDeg) ? angleDeg : 180;
+  const colorStops = buildCSSColorStops(stops);
+  const fn = repeating ? "repeating-linear-gradient" : "linear-gradient";
+  return `${fn}(${String(angle)}deg, ${colorStops.join(", ")})`;
+}
 
-  const colorStops = stops.map((stop) => {
-    const css = resolveStopColorCSS(stop.color);
-    const pct = Number.isFinite(stop.position) ? stop.position * 100 : 0;
-    return `${css} ${String(pct)}%`;
-  });
+/**
+ * Build a CSS radial-gradient() string from gradient stops.
+ *
+ * All numeric values are guarded with Number.isFinite() before CSS interpolation.
+ *
+ * @param stops - The gradient stops (should be sorted by position)
+ * @param repeating - When true, produces repeating-radial-gradient()
+ */
+export function stopsToRadialGradientCSS(
+  stops: readonly GradientStop[],
+  repeating = false,
+): string {
+  const colorStops = buildCSSColorStops(stops);
+  const fn = repeating ? "repeating-radial-gradient" : "radial-gradient";
+  return `${fn}(circle, ${colorStops.join(", ")})`;
+}
 
-  return `linear-gradient(${String(angle)}deg, ${colorStops.join(", ")})`;
+/**
+ * Build a CSS conic-gradient() string from gradient stops.
+ *
+ * All numeric values are guarded with Number.isFinite() before CSS interpolation.
+ *
+ * @param stops - The gradient stops (should be sorted by position)
+ * @param startAngleDeg - Start angle in degrees (default: 0)
+ * @param repeating - When true, produces repeating-conic-gradient()
+ */
+export function stopsToConicGradientCSS(
+  stops: readonly GradientStop[],
+  startAngleDeg = 0,
+  repeating = false,
+): string {
+  const angle = Number.isFinite(startAngleDeg) ? startAngleDeg : 0;
+  const colorStops = buildCSSColorStops(stops);
+  const fn = repeating ? "repeating-conic-gradient" : "conic-gradient";
+  return `${fn}(from ${String(angle)}deg, ${colorStops.join(", ")})`;
 }
 
 // ── Angle/Point Conversion ──────────────────────────────────────────
