@@ -152,7 +152,8 @@ describe("GradientControls", () => {
     // Use the bar element inside the stop editor, identified by its class.
     const bar = document.querySelector(".sigil-gradient-stop-editor__bar");
     expect(bar).not.toBeNull();
-    fireEvent.click(bar!);
+    if (!bar) return;
+    fireEvent.click(bar);
 
     // onUpdate should NOT have been called again (add was blocked)
     expect(onUpdate.mock.calls.length).toBe(callsAfterMount);
