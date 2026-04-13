@@ -43,7 +43,11 @@ export function Popover(props: PopoverProps) {
       <KobaltePopover.Portal>
         <KobaltePopover.Content
           class={className()}
-          {...(local.preventDismissOnInteract
+          // Default: prevent dismiss on interact. Sigil popovers contain
+          // interactive editors (color pickers, gradient editors, token forms)
+          // that require pointer/focus interaction without closing the popover.
+          // Pass preventDismissOnInteract={false} to opt out for simple tooltips.
+          {...(local.preventDismissOnInteract !== false
             ? {
                 onPointerDownOutside: (e: Event) => e.preventDefault(),
                 onFocusOutside: (e: Event) => e.preventDefault(),
