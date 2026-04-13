@@ -115,6 +115,13 @@ export interface DocumentStoreAPI {
   ungroupNodes(uuids: string[]): void;
   undo(): void;
   redo(): void;
+  /**
+   * Flush the interceptor's pending coalesce buffer, committing any buffered
+   * changes as a single undo entry. Used at gesture boundaries (drag start/end)
+   * to ensure continuous-value controls coalesce correctly. See CLAUDE.md
+   * "Continuous-Value Controls Must Coalesce History Entries".
+   */
+  flushHistory(): void;
 
   // Page mutations
   createPage(name: string): void;
@@ -1657,6 +1664,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // RF-003: syncHistorySignals is already called by the interceptor's onCommit callback.
   }
 
+  function flushHistory(): void {
+    interceptor.flush();
+  }
+
   // ── Lifecycle (RF-002) ──────────────────────────────────────────────
 
   function destroy(): void {
@@ -1700,6 +1711,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     ungroupNodes,
     undo,
     redo,
+    flushHistory,
     createPage,
     deletePage,
     renamePage,

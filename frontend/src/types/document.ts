@@ -105,6 +105,7 @@ export type Color = ColorSrgb | ColorDisplayP3 | ColorOklch | ColorOklab;
 // ── Gradient ──────────────────────────────────────────────────────────
 
 export interface GradientStop {
+  readonly id?: string; // Frontend-only stable identity for selection/dispatch
   readonly position: number;
   readonly color: StyleValue<Color>;
 }
@@ -113,6 +114,16 @@ export interface GradientDef {
   readonly stops: readonly GradientStop[];
   readonly start: Point;
   readonly end: Point;
+  /** Whether the gradient repeats. Defaults to false (matches Rust #[serde(default)]). */
+  readonly repeating?: boolean;
+}
+
+export interface ConicGradientDef {
+  readonly center: Point;
+  readonly start_angle: number;
+  readonly stops: readonly GradientStop[];
+  /** Whether the gradient repeats. Defaults to false (matches Rust #[serde(default)]). */
+  readonly repeating?: boolean;
 }
 
 // ── Scale Mode ────────────────────────────────────────────────────────
@@ -136,13 +147,23 @@ export interface FillRadialGradient {
   readonly gradient: GradientDef;
 }
 
+export interface FillConicGradient {
+  readonly type: "conic_gradient";
+  readonly gradient: ConicGradientDef;
+}
+
 export interface FillImage {
   readonly type: "image";
   readonly asset_ref: string;
   readonly scale_mode: ScaleMode;
 }
 
-export type Fill = FillSolid | FillLinearGradient | FillRadialGradient | FillImage;
+export type Fill =
+  | FillSolid
+  | FillLinearGradient
+  | FillRadialGradient
+  | FillConicGradient
+  | FillImage;
 
 // ── Stroke ────────────────────────────────────────────────────────────
 

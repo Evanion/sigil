@@ -52,6 +52,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     activePageId: () => null,
     undo: () => {},
     redo: () => {},
+    flushHistory: () => {},
     destroy: () => {},
     ...overrides,
   } as DocumentStoreAPI;

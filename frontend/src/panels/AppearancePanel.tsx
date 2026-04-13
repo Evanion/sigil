@@ -329,6 +329,18 @@ export const AppearancePanel: Component = () => {
     }
   }
 
+  // ── Gradient drag lifecycle (CLAUDE.md: Continuous-Value Controls) ─
+  // Flush history buffer at gesture boundaries to ensure the entire drag
+  // collapses into a single undo entry.
+
+  function handleGradientDragStart(): void {
+    store.flushHistory();
+  }
+
+  function handleGradientDragEnd(): void {
+    store.flushHistory();
+  }
+
   // ── Render ────────────────────────────────────────────────────────
 
   return (
@@ -392,6 +404,8 @@ export const AppearancePanel: Component = () => {
                 index={index}
                 onUpdate={handleFillUpdate}
                 onRemove={handleFillRemove}
+                onDragStart={handleGradientDragStart}
+                onDragEnd={handleGradientDragEnd}
               />
             </div>
           )}

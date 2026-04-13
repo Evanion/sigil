@@ -1,0 +1,78 @@
+/**
+ * GradientControls — layout for gradient controls below the stop editor.
+ */
+
+.sigil-gradient-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2);
+  padding: var(--size-1) 0;
+}
+
+.sigil-gradient-controls__stop-detail {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--size-1);
+}
+
+.sigil-gradient-controls__stop-detail-label {
+  font-size: var(--font-size-0, 11px);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.sigil-gradient-controls__type-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--size-1);
+}
+
+.sigil-gradient-controls__reverse-btn {
+  background: var(--surface-3);
+  color: var(--text-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  padding: 2px 8px;
+  font-size: var(--font-size-0, 11px);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sigil-gradient-controls__reverse-btn:hover {
+  background: var(--surface-4);
+  color: var(--text-1);
+}
+
+.sigil-gradient-controls__reverse-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-gradient-controls__remove-btn {
+  background: transparent;
+  color: var(--text-3);
+  border: none;
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--button-radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sigil-gradient-controls__remove-btn:hover {
+  color: var(--danger);
+}
+
+.sigil-gradient-controls__remove-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-gradient-controls__remove-btn:disabled {
+  color: var(--text-3);
+  opacity: var(--opacity-hidden);
+  cursor: not-allowed;
+}

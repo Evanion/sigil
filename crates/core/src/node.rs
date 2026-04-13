@@ -537,6 +537,23 @@ pub struct GradientDef {
     pub stops: Vec<GradientStop>,
     pub start: Point,
     pub end: Point,
+    /// Whether the gradient repeats beyond its bounds.
+    #[serde(default)]
+    pub repeating: bool,
+}
+
+/// Conic (angular sweep) gradient definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ConicGradientDef {
+    /// Center point of the sweep, in normalised [0, 1] coordinates relative to the node bounds.
+    pub center: Point,
+    /// Starting angle in degrees (0 = 3 o'clock, increasing clockwise).
+    pub start_angle: f64,
+    /// Color stops for the sweep.
+    pub stops: Vec<GradientStop>,
+    /// Whether the gradient repeats beyond its `start_angle`..`start_angle + 360°` bounds.
+    #[serde(default)]
+    pub repeating: bool,
 }
 
 /// Scale mode for image fills.
@@ -561,6 +578,9 @@ pub enum Fill {
     },
     RadialGradient {
         gradient: GradientDef,
+    },
+    ConicGradient {
+        gradient: ConicGradientDef,
     },
     Image {
         asset_ref: String,
@@ -1499,6 +1519,85 @@ mod tests {
             }
             other => panic!("expected Image, got {other:?}"),
         }
+    }
+
+    // ── ConicGradientDef / ConicGradient fill ──────────────────────────
+
+    #[test]
+    fn test_conic_gradient_def_serde_roundtrip() {
+        let def = ConicGradientDef {
+            center: Point::new(0.5, 0.5),
+            start_angle: 45.0,
+            stops: vec![
+                GradientStop {
+                    position: 0.0,
+                    color: StyleValue::Literal {
+                        value: Color::Srgb {
+                            r: 1.0,
+                            g: 0.0,
+                            b: 0.0,
+                            a: 1.0,
+                        },
+                    },
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: StyleValue::Literal {
+                        value: Color::Srgb {
+                            r: 0.0,
+                            g: 0.0,
+                            b: 1.0,
+                            a: 1.0,
+                        },
+                    },
+                },
+            ],
+            repeating: false,
+        };
+        let json = serde_json::to_string(&def).expect("serialize ConicGradientDef");
+        let back: ConicGradientDef =
+            serde_json::from_str(&json).expect("deserialize ConicGradientDef");
+        assert_eq!(def, back);
+    }
+
+    #[test]
+    fn test_fill_conic_gradient_serializes_with_conic_gradient_tag() {
+        let fill = Fill::ConicGradient {
+            gradient: ConicGradientDef {
+                center: Point::new(0.5, 0.5),
+                start_angle: 0.0,
+                stops: vec![GradientStop {
+                    position: 0.0,
+                    color: StyleValue::Literal {
+                        value: Color::default(),
+                    },
+                }],
+                repeating: false,
+            },
+        };
+        let json = serde_json::to_string(&fill).expect("serialize Fill::ConicGradient");
+        assert!(
+            json.contains("\"type\":\"conic_gradient\""),
+            "expected conic_gradient tag in JSON, got: {json}"
+        );
+        let back: Fill = serde_json::from_str(&json).expect("deserialize Fill::ConicGradient");
+        assert_eq!(fill, back);
+    }
+
+    #[test]
+    fn test_gradient_def_repeating_default_is_false() {
+        let def = GradientDef {
+            stops: vec![],
+            start: Point::zero(),
+            end: Point::new(1.0, 0.0),
+            repeating: false,
+        };
+        // Deserialise JSON that lacks the "repeating" field — serde default should set it to false.
+        let json = r#"{"stops":[],"start":{"x":0.0,"y":0.0},"end":{"x":1.0,"y":0.0}}"#;
+        let deserialized: GradientDef =
+            serde_json::from_str(json).expect("deserialize GradientDef without repeating");
+        assert_eq!(deserialized.repeating, false);
+        assert_eq!(def.repeating, false);
     }
 
     // ── Stroke ─────────────────────────────────────────────────────────

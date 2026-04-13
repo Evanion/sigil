@@ -520,6 +520,38 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
     Ok(())
 }
 
+/// Validates a [`crate::node::ConicGradientDef`].
+///
+/// Checks:
+/// - `center.x` and `center.y` are finite.
+/// - `start_angle` is finite.
+/// - Stops count does not exceed [`MAX_GRADIENT_STOPS`].
+/// - Each stop `position` is finite and in `[0.0, 1.0]`.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any check fails.
+pub fn validate_conic_gradient(g: &crate::node::ConicGradientDef) -> Result<(), CoreError> {
+    validate_finite("conic_gradient.center.x", g.center.x)?;
+    validate_finite("conic_gradient.center.y", g.center.y)?;
+    validate_finite("conic_gradient.start_angle", g.start_angle)?;
+    if g.stops.len() > MAX_GRADIENT_STOPS {
+        return Err(CoreError::ValidationError(format!(
+            "too many conic gradient stops: {} (max {MAX_GRADIENT_STOPS})",
+            g.stops.len()
+        )));
+    }
+    for (i, stop) in g.stops.iter().enumerate() {
+        validate_finite(&format!("conic_gradient.stop[{i}].position"), stop.position)?;
+        if stop.position < 0.0 || stop.position > 1.0 {
+            return Err(CoreError::ValidationError(format!(
+                "conic_gradient.stop[{i}].position must be in [0.0, 1.0], got {}",
+                stop.position
+            )));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1032,6 +1064,123 @@ mod tests {
         assert!(
             TextShadow::new(0.0, 0.0, MAX_TEXT_SHADOW_BLUR + 0.001, black).is_err(),
             "blur_radius above MAX_TEXT_SHADOW_BLUR should be rejected"
+        );
+    }
+
+    // ── validate_conic_gradient ────────────────────────────────────────
+
+    fn make_valid_conic() -> crate::node::ConicGradientDef {
+        use crate::node::{Color, ConicGradientDef, GradientStop, Point, StyleValue};
+        ConicGradientDef {
+            center: Point::new(0.5, 0.5),
+            start_angle: 0.0,
+            stops: vec![GradientStop {
+                position: 0.0,
+                color: StyleValue::Literal {
+                    value: Color::default(),
+                },
+            }],
+            repeating: false,
+        }
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_valid() {
+        assert!(
+            validate_conic_gradient(&make_valid_conic()).is_ok(),
+            "valid conic gradient should pass validation"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_nan_start_angle_rejected() {
+        let mut def = make_valid_conic();
+        def.start_angle = f64::NAN;
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "NaN start_angle must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_infinite_start_angle_rejected() {
+        let mut def = make_valid_conic();
+        def.start_angle = f64::INFINITY;
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "infinite start_angle must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_nan_center_x_rejected() {
+        use crate::node::Point;
+        let mut def = make_valid_conic();
+        def.center = Point::new(f64::NAN, 0.5);
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "NaN center.x must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_nan_center_y_rejected() {
+        use crate::node::Point;
+        let mut def = make_valid_conic();
+        def.center = Point::new(0.5, f64::NAN);
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "NaN center.y must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_too_many_stops_rejected() {
+        use crate::node::{Color, GradientStop, StyleValue};
+        let mut def = make_valid_conic();
+        def.stops = (0..=MAX_GRADIENT_STOPS)
+            .map(|i| GradientStop {
+                position: i as f64 / MAX_GRADIENT_STOPS as f64,
+                color: StyleValue::Literal {
+                    value: Color::default(),
+                },
+            })
+            .collect();
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "too many stops must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_stop_position_out_of_range_rejected() {
+        use crate::node::{Color, GradientStop, StyleValue};
+        let mut def = make_valid_conic();
+        def.stops = vec![GradientStop {
+            position: 1.5,
+            color: StyleValue::Literal {
+                value: Color::default(),
+            },
+        }];
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "stop position > 1.0 must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_validate_conic_gradient_nan_stop_position_rejected() {
+        use crate::node::{Color, GradientStop, StyleValue};
+        let mut def = make_valid_conic();
+        def.stops = vec![GradientStop {
+            position: f64::NAN,
+            color: StyleValue::Literal {
+                value: Color::default(),
+            },
+        }];
+        assert!(
+            validate_conic_gradient(&def).is_err(),
+            "NaN stop position must be rejected"
         );
     }
 }

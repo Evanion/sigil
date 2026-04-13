@@ -1,3 +1,8 @@
+.sigil-fill-row-container {
+  display: flex;
+  flex-direction: column;
+}
+
 .sigil-fill-row {
   display: flex;
   flex-direction: row;
@@ -31,10 +36,23 @@
   outline-offset: var(--focus-offset);
 }
 
+.sigil-fill-row__gradient-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
 .sigil-fill-row__type {
   font-size: var(--font-size-0, 11px);
   color: var(--text-2);
   flex: 1;
+}
+
+.sigil-fill-row__type-select {
+  flex: 1;
+  min-width: 0;
 }
 
 .sigil-fill-row__remove {

@@ -1,0 +1,41 @@
+/**
+ * GradientEditorPopover — popover for gradient editing.
+ *
+ * All visual values use CSS custom properties from theme.css.
+ * No hardcoded colors, z-index, or box-shadow values.
+ */
+
+.sigil-gradient-editor-popover {
+  width: 280px;
+  padding: var(--size-3);
+}
+
+.sigil-gradient-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sigil-gradient-editor-popover__footer {
+  margin-top: var(--size-3);
+  padding-top: var(--size-2);
+  border-top: 1px solid var(--border-1);
+  font-size: var(--font-size-1);
+  color: var(--text-2);
+}
+
+.sigil-gradient-editor-popover__footer label {
+  display: flex;
+  align-items: center;
+  gap: var(--size-2);
+  cursor: pointer;
+  user-select: none;
+}
+
+.sigil-gradient-editor-popover__footer input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}

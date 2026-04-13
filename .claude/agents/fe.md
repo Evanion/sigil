@@ -81,6 +81,8 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - Kobalte's `NumberField` fires `onRawValueChange` during mount with its initial value. If your effect or handler should only respond to user-initiated changes, gate it with a `mounted` flag set via `onMount` or `queueMicrotask`. Document the guard with a comment explaining the mount-time emission behavior.
 - Plain class instances are NOT reactive. `() => myManager.getValue()` will not re-run when the manager's internal state changes. Bridge external/imperative state into Solid by creating `createSignal` pairs and calling the setter after every mutation to the external object.
 - When capturing a "before" value for undo or rollback, read it BEFORE calling `produce()` or `setState()`. Reading after the mutation returns the new value, not the old one. Pattern: `const before = node.field; setState(produce(s => { s.field = newValue; })); trackUndo(before);`.
+- `onCleanup` must be called synchronously during component setup — never inside DOM event handlers, setTimeout callbacks, or Promise.then. Outside a reactive owner, onCleanup silently no-ops, leaving timers and event listeners alive after the component is destroyed.
+- Frontend-assigned stable IDs on list items must flow through the full prop callback chain. Strip them only at the store's outbound mutation boundary, not before calling onUpdate/onChange props — regenerating IDs per render causes identity churn.
 
 ### Styling Conventions
 
@@ -122,6 +124,10 @@ The canvas is an imperative rendering island — Solid does not manage it:
 - Import types from `storybook-solidjs-vite` (NOT the deprecated `storybook-solidjs`)
 - Stories import `global.css` via the Storybook preview config (already set up)
 - Run Storybook: `pnpm --prefix frontend storybook`
+
+### Continuous-Value Gesture Coalescing
+
+Controls that fire at high frequency during a gesture (gradient stop drag, color picker drag, slider scrub) MUST NOT create a history entry per event. Pattern: capture snapshot on pointerdown, apply intermediate values without history during drag, commit single entry on pointerup. Wiring drag directly to a history-recording mutation is a Critical bug — see CLAUDE.md §11 "Continuous-Value Controls Must Coalesce History Entries".
 
 ## Before You Start
 

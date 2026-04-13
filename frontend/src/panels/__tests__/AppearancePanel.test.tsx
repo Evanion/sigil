@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { AppearancePanel } from "../AppearancePanel";
 import { DocumentProvider } from "../../store/document-context";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { Fill, Stroke } from "../../types/document";
+import { createTestI18n } from "../../test-utils/i18n";
 
 // ── Mock store factory ─────────────────────────────────────────────────
 
@@ -60,6 +63,7 @@ function createMockStore(
     activePageId: () => null,
     undo: vi.fn(),
     redo: vi.fn(),
+    flushHistory: vi.fn(),
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }
@@ -113,7 +117,13 @@ function makeNode(
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
+let i18nInstance: i18n;
+
 describe("AppearancePanel", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -123,9 +133,11 @@ describe("AppearancePanel", () => {
   it("should render the panel with sigil-appearance-panel class", () => {
     const store = createMockStore();
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(document.querySelector(".sigil-appearance-panel")).toBeTruthy();
   });
@@ -133,9 +145,11 @@ describe("AppearancePanel", () => {
   it("should render Fill and Stroke section headers", () => {
     const store = createMockStore("node-1", { "node-1": makeNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("Fill")).toBeTruthy();
     expect(screen.getByText("Stroke")).toBeTruthy();
@@ -144,9 +158,11 @@ describe("AppearancePanel", () => {
   it("should render Add fill and Add stroke buttons", () => {
     const store = createMockStore("node-1", { "node-1": makeNode() });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByRole("button", { name: "Add fill" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Add stroke" })).toBeTruthy();
@@ -157,9 +173,11 @@ describe("AppearancePanel", () => {
   it("should show no fills empty state when node has no fills", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ fills: [] }) });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("No fills")).toBeTruthy();
   });
@@ -167,9 +185,11 @@ describe("AppearancePanel", () => {
   it("should show no strokes empty state when node has no strokes", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ strokes: [] }) });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     expect(screen.getByText("No strokes")).toBeTruthy();
   });
@@ -177,9 +197,11 @@ describe("AppearancePanel", () => {
   it("should disable add buttons when no node is selected", () => {
     const store = createMockStore(null, {});
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const addFill = screen.getByRole("button", { name: "Add fill" });
     const addStroke = screen.getByRole("button", { name: "Add stroke" });
@@ -192,9 +214,11 @@ describe("AppearancePanel", () => {
   it("should render a FillRow for each fill on the selected node", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ fills: [solidFill] }) });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const rows = document.querySelectorAll(".sigil-fill-row");
     expect(rows.length).toBe(1);
@@ -205,9 +229,11 @@ describe("AppearancePanel", () => {
     const store = createMockStore("node-1", { "node-1": makeNode() });
     store.setFills = setFills;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Add fill" }));
     expect(setFills).toHaveBeenCalledWith(
@@ -221,9 +247,11 @@ describe("AppearancePanel", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ fills: [solidFill] }) });
     store.setFills = setFills;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const removeBtn = screen.getByRole("button", { name: "Remove fill" });
     fireEvent.click(removeBtn);
@@ -235,9 +263,11 @@ describe("AppearancePanel", () => {
   it("should render a StrokeRow for each stroke on the selected node", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ strokes: [solidStroke] }) });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const rows = document.querySelectorAll(".sigil-stroke-row");
     expect(rows.length).toBe(1);
@@ -248,9 +278,11 @@ describe("AppearancePanel", () => {
     const store = createMockStore("node-1", { "node-1": makeNode() });
     store.setStrokes = setStrokes;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     fireEvent.click(screen.getByRole("button", { name: "Add stroke" }));
     expect(setStrokes).toHaveBeenCalledWith(
@@ -266,9 +298,11 @@ describe("AppearancePanel", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ strokes: [solidStroke] }) });
     store.setStrokes = setStrokes;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const removeBtn = screen.getByRole("button", { name: "Remove stroke" });
     fireEvent.click(removeBtn);
@@ -280,9 +314,11 @@ describe("AppearancePanel", () => {
   it("should render opacity input accessible via aria-label", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 0.8 }) });
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // Kobalte NumberField associates aria-label via aria-labelledby, not a direct attribute.
     // Use getByLabelText which resolves both aria-label and aria-labelledby associations.
@@ -295,9 +331,11 @@ describe("AppearancePanel", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 0.5 }) });
     store.setOpacity = setOpacity;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // Trigger increment — Kobalte fires onRawValueChange synchronously
     const incrementBtn = screen.getByLabelText("Increment");
@@ -326,9 +364,11 @@ describe("AppearancePanel", () => {
     });
     store.setFills = setFills;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const rows = document.querySelectorAll(".sigil-fill-row");
     const secondRow = rows[1];
@@ -348,9 +388,11 @@ describe("AppearancePanel", () => {
     });
     store.setFills = setFills;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const rows = document.querySelectorAll(".sigil-fill-row");
     const firstRow = rows[0];
@@ -375,9 +417,11 @@ describe("AppearancePanel", () => {
     });
     store.setStrokes = setStrokes;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const rows = document.querySelectorAll(".sigil-stroke-row");
     const secondRow = rows[1];
@@ -398,9 +442,11 @@ describe("AppearancePanel", () => {
     });
     store.setFills = setFills;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     const addBtn = screen.getByRole("button", { name: "Add fill" });
     fireEvent.click(addBtn);
@@ -417,9 +463,11 @@ describe("AppearancePanel", () => {
     });
     store.setStrokes = setStrokes;
     render(() => (
-      <DocumentProvider store={store}>
-        <AppearancePanel />
-      </DocumentProvider>
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
     ));
     // Clear calls from Kobalte NumberField firing onRawValueChange during mount
     setStrokes.mockClear();

@@ -63,6 +63,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     isNodeSelected: () => false,
     undo: () => {},
     redo: () => {},
+    flushHistory: () => {},
     destroy: () => {},
     ...overrides,
   } as DocumentStoreAPI;

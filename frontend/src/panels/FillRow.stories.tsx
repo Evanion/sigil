@@ -4,10 +4,15 @@
  * FillRow does not use useDocument() or useAnnounce() — it receives all data
  * via props and emits changes through callbacks. No DocumentProvider is needed.
  *
+ * FillRow uses useTransContext() for i18n — TransProvider is added as a
+ * decorator.
+ *
  * ColorPicker (used internally by solid fills) requires no DragDropProvider.
  */
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import { i18nInstance } from "../i18n";
 import { FillRow } from "./FillRow";
 import type { Fill } from "../types/document";
 
@@ -19,9 +24,11 @@ const meta: Meta<typeof FillRow> = {
   tags: ["autodocs"],
   decorators: [
     (Story) => (
-      <div style={{ width: "280px", background: "var(--surface-2)", padding: "8px" }}>
-        <Story />
-      </div>
+      <TransProvider instance={i18nInstance}>
+        <div style={{ width: "280px", background: "var(--surface-2)", padding: "8px" }}>
+          <Story />
+        </div>
+      </TransProvider>
     ),
   ],
 };
