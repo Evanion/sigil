@@ -694,6 +694,7 @@ mod tests {
                 ],
                 start: Point::zero(),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         let json = serde_json::to_string(&val).expect("serialize");
@@ -1811,6 +1812,7 @@ mod tests {
                 stops,
                 start: Point::zero(),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         assert!(
@@ -1832,6 +1834,7 @@ mod tests {
                 }],
                 start: Point::new(f64::NAN, 0.0),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         assert!(
@@ -1853,6 +1856,7 @@ mod tests {
                 }],
                 start: Point::zero(),
                 end: Point::new(1.0, f64::INFINITY),
+                repeating: false,
             },
         };
         assert!(
@@ -1874,6 +1878,7 @@ mod tests {
                 }],
                 start: Point::zero(),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         assert!(
@@ -1895,6 +1900,7 @@ mod tests {
                 }],
                 start: Point::zero(),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         assert!(
@@ -1916,6 +1922,7 @@ mod tests {
                 }],
                 start: Point::zero(),
                 end: Point::new(1.0, 1.0),
+                repeating: false,
             },
         };
         assert!(
