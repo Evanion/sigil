@@ -12,6 +12,8 @@ import {
   MIN_GRADIENT_STOPS,
   angleFromPoints,
   assignStopIds,
+  canAddStop,
+  canRemoveStop,
   interpolateStopColor,
   pointsFromAngle,
   resolveStopColorCSS,
@@ -201,10 +203,10 @@ describe("stopsToLinearGradientCSS", () => {
     expect(result).toBe("linear-gradient(180deg, rgba(255, 0, 0, 1) 0%, rgba(0, 0, 255, 1) 100%)");
   });
 
-  it("should use default 90deg angle when not specified", () => {
+  it("should use default 180deg angle when not specified", () => {
     const stops = [makeStop(0, 0, 0, 0), makeStop(1, 1, 1, 1)];
     const result = stopsToLinearGradientCSS(stops);
-    expect(result).toMatch(/^linear-gradient\(90deg/);
+    expect(result).toMatch(/^linear-gradient\(180deg/);
   });
 
   it("should handle midpoint stops", () => {
@@ -216,8 +218,8 @@ describe("stopsToLinearGradientCSS", () => {
   it("should guard NaN angle", () => {
     const stops = [makeStop(0, 0, 0, 0)];
     const result = stopsToLinearGradientCSS(stops, NaN);
-    // NaN angle should fall back to 90
-    expect(result).toMatch(/^linear-gradient\(90deg/);
+    // NaN angle should fall back to 180 (default top-to-bottom)
+    expect(result).toMatch(/^linear-gradient\(180deg/);
   });
 
   it("should guard NaN stop position", () => {
@@ -318,5 +320,35 @@ describe("MIN_GRADIENT_STOPS constant", () => {
     expect(Number.isInteger(MIN_GRADIENT_STOPS)).toBe(true);
     expect(MIN_GRADIENT_STOPS).toBeGreaterThan(0);
     expect(MIN_GRADIENT_STOPS).toBeLessThan(MAX_GRADIENT_STOPS);
+  });
+});
+
+// ── canAddStop / canRemoveStop enforcement tests ────────────────────
+
+describe("test_max_gradient_stops_enforced", () => {
+  it("should reject adding a stop when at MAX_GRADIENT_STOPS", () => {
+    expect(canAddStop(MAX_GRADIENT_STOPS)).toBe(false);
+  });
+
+  it("should allow adding a stop when below MAX_GRADIENT_STOPS", () => {
+    expect(canAddStop(MAX_GRADIENT_STOPS - 1)).toBe(true);
+  });
+
+  it("should allow adding a stop when count is 0", () => {
+    expect(canAddStop(0)).toBe(true);
+  });
+});
+
+describe("test_min_gradient_stops_enforced", () => {
+  it("should reject removing a stop when at MIN_GRADIENT_STOPS", () => {
+    expect(canRemoveStop(MIN_GRADIENT_STOPS)).toBe(false);
+  });
+
+  it("should allow removing a stop when above MIN_GRADIENT_STOPS", () => {
+    expect(canRemoveStop(MIN_GRADIENT_STOPS + 1)).toBe(true);
+  });
+
+  it("should reject removing a stop when below MIN_GRADIENT_STOPS", () => {
+    expect(canRemoveStop(1)).toBe(false);
   });
 });

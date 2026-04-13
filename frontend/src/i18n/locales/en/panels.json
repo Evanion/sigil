@@ -67,7 +67,8 @@
     "reverse": "Reverse gradient",
     "stopPosition": "Stop position",
     "stopColor": "Stop color",
-    "removeStop": "Remove color stop"
+    "removeStop": "Remove color stop",
+    "radius": "Radius"
   },
   "fill": {
     "title": "Fill",

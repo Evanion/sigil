@@ -549,6 +549,98 @@ describe("renderer", () => {
       expect(radialCalls[0].args[5]).toBe(100); // outer radius
     });
 
+    it("should call addColorStop for each stop in a linear gradient", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 0.5,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 0 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // Retrieve the gradient object set as fillStyle
+      const fillStyleSet = calls.find(
+        (c) => c.method === "set:fillStyle" && typeof c.args[0] === "object" && c.args[0] !== null,
+      );
+      expect(fillStyleSet).toBeDefined();
+      const gradient = fillStyleSet?.args[0] as MockGradient;
+      expect(gradient.__type).toBe("linear");
+      expect(gradient.__stops).toHaveLength(3);
+      expect(gradient.__stops[0].offset).toBe(0);
+      expect(gradient.__stops[1].offset).toBe(0.5);
+      expect(gradient.__stops[2].offset).toBe(1);
+    });
+
+    it("should call addColorStop for each stop in a radial gradient", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "radial_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 1, b: 1, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
+                  },
+                ],
+                start: { x: 0.5, y: 0.5 },
+                end: { x: 1, y: 0.5 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const fillStyleSet = calls.find(
+        (c) => c.method === "set:fillStyle" && typeof c.args[0] === "object" && c.args[0] !== null,
+      );
+      expect(fillStyleSet).toBeDefined();
+      const gradient = fillStyleSet?.args[0] as MockGradient;
+      expect(gradient.__type).toBe("radial");
+      expect(gradient.__stops).toHaveLength(2);
+      expect(gradient.__stops[0].offset).toBe(0);
+      expect(gradient.__stops[1].offset).toBe(1);
+    });
+
     it("should draw the shape once per fill when multiple fills are present", () => {
       const node = createTestNode({
         style: {

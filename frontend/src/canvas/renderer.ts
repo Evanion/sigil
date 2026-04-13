@@ -89,6 +89,13 @@ function addGradientStops(grad: CanvasGradient, gradient: GradientDef): void {
  *
  * gradient.start and gradient.end are normalized 0-1 within the node's bounds.
  * All coordinates are guarded with Number.isFinite() per CLAUDE.md.
+ *
+ * NOTE: The spec's pseudocode uses an angle-based approach (degrees from top),
+ * but the implementation uses start/end points directly. Points are more general
+ * than angles — they support non-centered and non-symmetric gradients. The angle
+ * is a derived value computed from the points in the UI (angleFromPoints in
+ * gradient-utils.ts). Both representations are equivalent for centered gradients;
+ * points are the canonical representation stored in GradientDef.
  */
 function createLinearGradientFill(
   ctx: CanvasRenderingContext2D,

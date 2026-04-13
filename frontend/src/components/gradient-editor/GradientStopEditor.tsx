@@ -37,6 +37,10 @@ export interface GradientStopEditorProps {
   readonly onRemoveStop: (id: string) => void;
   /** CSS linear-gradient string for the bar background. */
   readonly gradientCSS: string;
+  /** Called when a stop drag gesture begins (pointerdown on a stop). */
+  readonly onDragStart?: () => void;
+  /** Called when a stop drag gesture ends (pointerup after drag). */
+  readonly onDragEnd?: () => void;
 }
 
 export function GradientStopEditor(props: GradientStopEditorProps) {
@@ -45,6 +49,12 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
   const [draggingId, setDraggingId] = createSignal<string | null>(null);
   // Track whether a drag just ended to suppress click-to-add
   const [justDragged, setJustDragged] = createSignal(false);
+  // Timer ref for justDragged reset — must be at component scope for
+  // onCleanup to work (onCleanup is a no-op inside DOM event handlers).
+  let justDraggedTimer: ReturnType<typeof setTimeout> | null = null;
+  onCleanup(() => {
+    if (justDraggedTimer) clearTimeout(justDraggedTimer);
+  });
 
   // ── Bar click (add stop) ────────────────────────────────────────────
   function handleBarClick(e: MouseEvent): void {
@@ -86,6 +96,7 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
     setDraggingId(id);
     setJustDragged(false);
     props.onSelectStop(id);
+    props.onDragStart?.();
   }
 
   function handleStopPointerMove(e: PointerEvent, stop: GradientStop): void {
@@ -112,9 +123,11 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
     setDraggingId(null);
     setJustDragged(true);
-    // Reset justDragged flag after a tick so subsequent clicks work
-    const timer = setTimeout(() => setJustDragged(false), 0);
-    onCleanup(() => clearTimeout(timer));
+    props.onDragEnd?.();
+    // Reset justDragged flag after a tick so subsequent clicks work.
+    // Timer ref is at component scope so onCleanup can clear it.
+    if (justDraggedTimer) clearTimeout(justDraggedTimer);
+    justDraggedTimer = setTimeout(() => setJustDragged(false), 0);
   }
 
   // ── Stop keyboard navigation ────────────────────────────────────────
@@ -185,7 +198,7 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
                 }}
                 role="slider"
                 tabindex={0}
-                aria-label={`Color stop at ${String(Math.round(positionPct()))}%`}
+                aria-label="Color stop"
                 aria-valuenow={Math.round(positionPct())}
                 aria-valuemin={STOP_POSITION_MIN}
                 aria-valuemax={STOP_POSITION_MAX}

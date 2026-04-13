@@ -64,6 +64,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     activePageId: () => null,
     undo: vi.fn(),
     redo: vi.fn(),
+    flushHistory: vi.fn(),
     destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;

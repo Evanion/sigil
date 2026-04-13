@@ -67,7 +67,8 @@
     "reverse": "Inverser le dégradé",
     "stopPosition": "Position de l'arrêt",
     "stopColor": "Couleur de l'arrêt",
-    "removeStop": "Supprimer l'arrêt de couleur"
+    "removeStop": "Supprimer l'arrêt de couleur",
+    "radius": "Rayon"
   },
   "fill": {
     "title": "Remplissage",

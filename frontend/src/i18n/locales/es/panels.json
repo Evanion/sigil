@@ -67,7 +67,8 @@
     "reverse": "Invertir degradado",
     "stopPosition": "Posición de parada",
     "stopColor": "Color de parada",
-    "removeStop": "Eliminar parada de color"
+    "removeStop": "Eliminar parada de color",
+    "radius": "Radio"
   },
   "fill": {
     "title": "Relleno",

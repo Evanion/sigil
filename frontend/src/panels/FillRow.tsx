@@ -42,6 +42,16 @@ export interface FillRowProps {
   readonly index: number;
   readonly onUpdate: (index: number, fill: Fill) => void;
   readonly onRemove: (index: number) => void;
+  /**
+   * Called when a continuous drag gesture begins inside gradient controls.
+   * Parent should flush pending history buffer to start a fresh coalesce window.
+   */
+  readonly onDragStart?: () => void;
+  /**
+   * Called when a continuous drag gesture ends inside gradient controls.
+   * Parent should flush the history buffer to commit the drag as one undo entry.
+   */
+  readonly onDragEnd?: () => void;
 }
 
 /** Default opaque black color. */
@@ -231,7 +241,7 @@ export function FillRow(props: FillRowProps) {
         <button
           class="sigil-fill-row__remove"
           type="button"
-          tabIndex={-1}
+          tabIndex={0}
           aria-label="Remove fill"
           onClick={() => props.onRemove(props.index)}
         >
@@ -248,7 +258,12 @@ export function FillRow(props: FillRowProps) {
         }
       >
         {(gradientFill) => (
-          <GradientControls fill={gradientFill()} onUpdate={handleGradientUpdate} />
+          <GradientControls
+            fill={gradientFill()}
+            onUpdate={handleGradientUpdate}
+            onDragStart={props.onDragStart}
+            onDragEnd={props.onDragEnd}
+          />
         )}
       </Show>
     </div>

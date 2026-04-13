@@ -81,6 +81,7 @@ function createMockStore(
     activePageId: () => null,
     undo: vi.fn(),
     redo: vi.fn(),
+    flushHistory: vi.fn(),
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }

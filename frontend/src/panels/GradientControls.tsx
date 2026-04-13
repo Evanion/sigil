@@ -55,20 +55,27 @@ const CENTER_MIN = 0;
 /** Maximum center coordinate percentage. */
 const CENTER_MAX = 100;
 
-/**
- * Strip frontend-only `id` field from gradient stops before sending upstream.
- * The `id` is a client-side-only field for stable selection identity.
- */
-function stripStopIds(stops: GradientStop[]): GradientStop[] {
-  return stops.map((stop) => ({
-    position: stop.position,
-    color: stop.color,
-  }));
-}
+/** Minimum radial gradient radius percentage. */
+const RADIUS_MIN = 0;
+
+/** Maximum radial gradient radius percentage. */
+const RADIUS_MAX = 100;
 
 export interface GradientControlsProps {
   readonly fill: FillLinearGradient | FillRadialGradient;
   readonly onUpdate: (fill: Fill) => void;
+  /**
+   * Called when a continuous drag gesture begins (e.g., stop drag).
+   * Parent should flush any pending history buffer so the drag starts
+   * a fresh coalesce window. See CLAUDE.md "Continuous-Value Controls
+   * Must Coalesce History Entries".
+   */
+  readonly onDragStart?: () => void;
+  /**
+   * Called when a continuous drag gesture ends. Parent should flush
+   * the history buffer to commit the entire drag as a single undo entry.
+   */
+  readonly onDragEnd?: () => void;
 }
 
 export function GradientControls(props: GradientControlsProps) {
@@ -99,6 +106,18 @@ export function GradientControls(props: GradientControlsProps) {
     return Number.isFinite(a) ? Math.round(a) : 0;
   });
 
+  // ── Derived: current radius for radial gradients ───────────────────
+  const currentRadius = createMemo((): number => {
+    if (props.fill.type !== "radial_gradient") return 50;
+    const s = props.fill.gradient.start;
+    const e = props.fill.gradient.end;
+    const dx = (Number.isFinite(e.x) ? e.x : 1) - (Number.isFinite(s.x) ? s.x : 0.5);
+    const dy = (Number.isFinite(e.y) ? e.y : 0.5) - (Number.isFinite(s.y) ? s.y : 0.5);
+    // dx*dx + dy*dy is always >= 0, so Math.sqrt is safe here
+    const r = Math.sqrt(dx * dx + dy * dy);
+    return Number.isFinite(r) ? Math.round(r * 100) : 50;
+  });
+
   // ── Derived: selected stop data ─────────────────────────────────────
   const selectedStop = createMemo((): GradientStop | null => {
     const id = selectedStopId();
@@ -117,14 +136,15 @@ export function GradientControls(props: GradientControlsProps) {
   // ── Helpers: rebuild fill from modified stops ───────────────────────
 
   function rebuildFill(newStops: GradientStop[]): Fill {
-    // Strip frontend-only `id` fields before sending upstream
-    const cleanStops = stripStopIds(newStops);
+    // Preserve `id` fields on stops — they are harmless extra fields that
+    // the server ignores, and stripping them causes assignStopIds to
+    // re-assign new UUIDs on every update, breaking stable selection identity.
     if (props.fill.type === "linear_gradient") {
       return {
         type: "linear_gradient",
         gradient: {
           ...props.fill.gradient,
-          stops: cleanStops,
+          stops: newStops,
         },
       };
     }
@@ -132,7 +152,7 @@ export function GradientControls(props: GradientControlsProps) {
       type: "radial_gradient",
       gradient: {
         ...props.fill.gradient,
-        stops: cleanStops,
+        stops: newStops,
       },
     };
   }
@@ -145,8 +165,10 @@ export function GradientControls(props: GradientControlsProps) {
 
   function handleUpdateStop(id: string, position: number): void {
     if (!Number.isFinite(position)) return;
+    // Clamp: slider affordance — user drags a stop within the 0-1 bar range
+    const clamped = Math.max(0, Math.min(1, position));
     const stops = stopsWithIds();
-    const newStops = stops.map((s) => (s.id === id ? { ...s, position } : s));
+    const newStops = stops.map((s) => (s.id === id ? { ...s, position: clamped } : s));
     props.onUpdate(rebuildFill(newStops));
   }
 
@@ -216,12 +238,10 @@ export function GradientControls(props: GradientControlsProps) {
     if (props.fill.type !== "linear_gradient") return;
     const { start, end } = pointsFromAngle(angleDeg);
     const stops = stopsWithIds();
-    // Strip frontend-only `id` fields
-    const cleanStops = stripStopIds(stops);
     const newFill: FillLinearGradient = {
       type: "linear_gradient",
       gradient: {
-        stops: cleanStops,
+        stops,
         start,
         end,
       },
@@ -249,11 +269,10 @@ export function GradientControls(props: GradientControlsProps) {
     const cx = pct / 100;
     if (!Number.isFinite(cx)) return;
     const stops = stopsWithIds();
-    const cleanStops = stripStopIds(stops);
     const newFill: FillRadialGradient = {
       type: "radial_gradient",
       gradient: {
-        stops: cleanStops,
+        stops,
         start: { x: cx, y: props.fill.gradient.start.y },
         end: props.fill.gradient.end,
       },
@@ -267,13 +286,34 @@ export function GradientControls(props: GradientControlsProps) {
     const cy = pct / 100;
     if (!Number.isFinite(cy)) return;
     const stops = stopsWithIds();
-    const cleanStops = stripStopIds(stops);
     const newFill: FillRadialGradient = {
       type: "radial_gradient",
       gradient: {
-        stops: cleanStops,
+        stops,
         start: { x: props.fill.gradient.start.x, y: cy },
         end: props.fill.gradient.end,
+      },
+    };
+    props.onUpdate(newFill);
+  }
+
+  // ── Radius change (radial only) ─────────────────────────────────────
+
+  function handleRadiusChange(pct: number): void {
+    if (!Number.isFinite(pct)) return;
+    if (props.fill.type !== "radial_gradient") return;
+    const r = pct / 100;
+    if (!Number.isFinite(r)) return;
+    const start = props.fill.gradient.start;
+    // Set end point at (start.x + r, start.y) — radius in X direction
+    const newEnd = { x: start.x + r, y: start.y };
+    const stops = stopsWithIds();
+    const newFill: FillRadialGradient = {
+      type: "radial_gradient",
+      gradient: {
+        stops,
+        start,
+        end: newEnd,
       },
     };
     props.onUpdate(newFill);
@@ -292,6 +332,8 @@ export function GradientControls(props: GradientControlsProps) {
         onAddStop={handleAddStop}
         onRemoveStop={handleRemoveStop}
         gradientCSS={gradientCSS()}
+        onDragStart={props.onDragStart}
+        onDragEnd={props.onDragEnd}
       />
 
       {/* Selected stop detail row */}
@@ -351,7 +393,7 @@ export function GradientControls(props: GradientControlsProps) {
         </div>
       </Show>
 
-      {/* Radial-specific: center X/Y */}
+      {/* Radial-specific: center X/Y + radius */}
       <Show when={props.fill.type === "radial_gradient"}>
         <div class="sigil-gradient-controls__type-row">
           <NumberInput
@@ -376,6 +418,15 @@ export function GradientControls(props: GradientControlsProps) {
             step={1}
             min={CENTER_MIN}
             max={CENTER_MAX}
+            suffix="%"
+          />
+          <NumberInput
+            value={currentRadius()}
+            onValueChange={handleRadiusChange}
+            aria-label={t("panels:gradient.radius")}
+            step={1}
+            min={RADIUS_MIN}
+            max={RADIUS_MAX}
             suffix="%"
           />
         </div>

@@ -60,6 +60,7 @@ function createMockStore(
     isNodeSelected: () => false,
     undo: () => {},
     redo: () => {},
+    flushHistory: () => {},
     destroy: () => {},
   } as DocumentStoreAPI;
 }

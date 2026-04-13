@@ -16,6 +16,22 @@ export const MAX_GRADIENT_STOPS = 32;
 /** Minimum number of gradient stops required for a valid gradient. */
 export const MIN_GRADIENT_STOPS = 2;
 
+/**
+ * Check whether a stop can be added given the current count.
+ * Returns false when the count has reached MAX_GRADIENT_STOPS.
+ */
+export function canAddStop(count: number): boolean {
+  return count < MAX_GRADIENT_STOPS;
+}
+
+/**
+ * Check whether a stop can be removed given the current count.
+ * Returns false when the count is at or below MIN_GRADIENT_STOPS.
+ */
+export function canRemoveStop(count: number): boolean {
+  return count > MIN_GRADIENT_STOPS;
+}
+
 // ── Stop ID Assignment ──────────────────────────────────────────────
 
 /**
@@ -170,7 +186,7 @@ export function stopsToLinearGradientCSS(
   stops: readonly GradientStop[],
   angleDeg?: number,
 ): string {
-  const angle = angleDeg !== undefined && Number.isFinite(angleDeg) ? angleDeg : 90;
+  const angle = angleDeg !== undefined && Number.isFinite(angleDeg) ? angleDeg : 180;
 
   const colorStops = stops.map((stop) => {
     const css = resolveStopColorCSS(stop.color);
