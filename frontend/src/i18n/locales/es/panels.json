@@ -7,7 +7,8 @@
     "layout": "Disposición",
     "appearance": "Apariencia",
     "effects": "Efectos",
-    "component": "Componente"
+    "component": "Componente",
+    "tokens": "Tokens"
   },
   "regions": {
     "leftPanel": "Panel izquierdo",
@@ -109,5 +110,43 @@
     "dragPage": "Arrastrar {{name}}",
     "rename": "Renombrar página",
     "renamePage": "Renombrar {{name}}"
+  },
+  "tokens": {
+    "title": "Tokens",
+    "addToken": "Añadir token",
+    "tokenList": "Lista de tokens",
+    "noTokens": "Aún no hay tokens",
+    "openEditor": "Abrir editor completo",
+    "editorTitle": "Tokens de diseño",
+    "search": "Buscar tokens...",
+    "filterAll": "Todos los tipos",
+    "newToken": "Nuevo token",
+    "import": "Importar",
+    "save": "Guardar",
+    "typeColor": "Color",
+    "typeDimension": "Dimensión",
+    "typeNumber": "Número",
+    "typeFontFamily": "Familia tipográfica",
+    "typeFontWeight": "Peso de fuente",
+    "typeDuration": "Duración",
+    "typeCubicBezier": "Curva Bézier",
+    "typeShadow": "Sombra",
+    "typeGradient": "Degradado",
+    "typeTypography": "Tipografía",
+    "typeAlias": "Alias",
+    "tokenCreated": "Token {{name}} creado",
+    "tokenUpdated": "Token {{name}} actualizado",
+    "tokenDeleted": "Token {{name}} eliminado",
+    "description": "Descripción",
+    "name": "Nombre",
+    "type": "Tipo",
+    "value": "Valor",
+    "createTitle": "Crear token",
+    "create": "Crear",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "closeEditor": "Cerrar editor",
+    "noTokensInGroup": "No hay tokens en este grupo",
+    "deleteConfirm": "¿Eliminar token {{name}}?"
   }
 }

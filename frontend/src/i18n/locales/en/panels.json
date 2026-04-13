@@ -7,7 +7,8 @@
     "layout": "Layout",
     "appearance": "Appearance",
     "effects": "Effects",
-    "component": "Component"
+    "component": "Component",
+    "tokens": "Tokens"
   },
   "regions": {
     "leftPanel": "Left panel",
@@ -109,5 +110,43 @@
     "dragPage": "Drag {{name}}",
     "rename": "Rename page",
     "renamePage": "Rename {{name}}"
+  },
+  "tokens": {
+    "title": "Tokens",
+    "addToken": "Add token",
+    "tokenList": "Token list",
+    "noTokens": "No tokens yet",
+    "openEditor": "Open full editor",
+    "editorTitle": "Design Tokens",
+    "search": "Search tokens...",
+    "filterAll": "All types",
+    "newToken": "New token",
+    "import": "Import",
+    "save": "Save",
+    "typeColor": "Color",
+    "typeDimension": "Dimension",
+    "typeNumber": "Number",
+    "typeFontFamily": "Font Family",
+    "typeFontWeight": "Font Weight",
+    "typeDuration": "Duration",
+    "typeCubicBezier": "Cubic Bezier",
+    "typeShadow": "Shadow",
+    "typeGradient": "Gradient",
+    "typeTypography": "Typography",
+    "typeAlias": "Alias",
+    "tokenCreated": "Token {{name}} created",
+    "tokenUpdated": "Token {{name}} updated",
+    "tokenDeleted": "Token {{name}} deleted",
+    "description": "Description",
+    "name": "Name",
+    "type": "Type",
+    "value": "Value",
+    "createTitle": "Create Token",
+    "create": "Create",
+    "cancel": "Cancel",
+    "close": "Close",
+    "closeEditor": "Close editor",
+    "noTokensInGroup": "No tokens in this group",
+    "deleteConfirm": "Delete token {{name}}?"
   }
 }

@@ -1,6 +1,7 @@
 import { registerPanel } from "./registry";
 import { LayersPanel } from "./LayersPanel";
 import { PagesPanel } from "./PagesPanel";
+import { TokensPanel } from "./TokensPanel";
 import { DesignPanel } from "./DesignPanel";
 import { InspectPanel } from "./InspectPanel";
 import { ComponentPanel } from "./ComponentPanel";
@@ -23,6 +24,14 @@ export function registerDefaultPanels(store: DocumentStoreAPI): void {
     region: "left",
     order: 1,
     component: PagesPanel,
+  });
+
+  registerPanel({
+    id: "tokens",
+    label: "panels:tabs.tokens",
+    region: "left",
+    order: 2,
+    component: TokensPanel,
   });
 
   registerPanel({

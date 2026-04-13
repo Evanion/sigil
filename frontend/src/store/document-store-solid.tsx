@@ -171,7 +171,7 @@ export const MAX_TOKEN_NAME_LENGTH = 256;
 const MAX_TOKENS_PER_CONTEXT = 50_000;
 
 /** Maximum token description length — matches crates/core/src/validate.rs MAX_TOKEN_DESCRIPTION_LEN. */
-const MAX_TOKEN_DESCRIPTION_LENGTH = 1_024;
+export const MAX_TOKEN_DESCRIPTION_LENGTH = 1_024;
 
 // RF-028: deepClone is imported from operations/interceptor as sharedDeepClone.
 // Alias it as deepClone for local use to keep call sites unchanged.
