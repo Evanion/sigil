@@ -24,10 +24,7 @@ export const MAX_ALIAS_DEPTH = 16;
  * - An alias chain forms a cycle.
  * - The alias chain exceeds MAX_ALIAS_DEPTH hops.
  */
-export function resolveToken(
-  tokens: Record<string, Token>,
-  name: string,
-): TokenValue | null {
+export function resolveToken(tokens: Record<string, Token>, name: string): TokenValue | null {
   // Iterative resolution — no recursion, explicit depth counter.
   // The visited set detects cycles (A→B→A) without relying solely on the depth guard.
   const visited = new Set<string>();
@@ -68,10 +65,7 @@ export function resolveToken(
  * Resolve a token and extract its Color value.
  * Returns null if the token does not exist, cannot be resolved, or is not a color token.
  */
-export function resolveColorToken(
-  tokens: Record<string, Token>,
-  name: string,
-): Color | null {
+export function resolveColorToken(tokens: Record<string, Token>, name: string): Color | null {
   const resolved = resolveToken(tokens, name);
   if (resolved === null || resolved.type !== "color") {
     return null;
@@ -85,10 +79,7 @@ export function resolveColorToken(
  * Returns null if the token does not exist, cannot be resolved, is not numeric,
  * or the resolved number is not finite (NaN/Infinity guard per CLAUDE.md §11).
  */
-export function resolveNumberToken(
-  tokens: Record<string, Token>,
-  name: string,
-): number | null {
+export function resolveNumberToken(tokens: Record<string, Token>, name: string): number | null {
   const resolved = resolveToken(tokens, name);
   if (resolved === null) {
     return null;

@@ -90,9 +90,7 @@ describe("resolveToken", () => {
       tokens[name] = makeToken(
         String(i),
         name,
-        i < MAX_ALIAS_DEPTH
-          ? { type: "alias", name: nextName }
-          : { type: "color", value: RED },
+        i < MAX_ALIAS_DEPTH ? { type: "alias", name: nextName } : { type: "color", value: RED },
       );
     }
     // Resolving deep/0 requires MAX_ALIAS_DEPTH hops — exactly at the limit this must return null
