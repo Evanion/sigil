@@ -471,8 +471,14 @@ describe("renderer", () => {
               type: "linear_gradient",
               gradient: {
                 stops: [
-                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
-                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
                 ],
                 start: { x: 0, y: 0 },
                 end: { x: 1, y: 1 },
@@ -505,8 +511,14 @@ describe("renderer", () => {
               type: "radial_gradient",
               gradient: {
                 stops: [
-                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 1, b: 1, a: 1 } } },
-                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } } },
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 1, b: 1, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
+                  },
                 ],
                 start: { x: 0.5, y: 0.5 },
                 end: { x: 1, y: 0.5 },
@@ -531,7 +543,7 @@ describe("renderer", () => {
       // r = sqrt(100^2 + 0^2) = 100
       expect(radialCalls[0].args[0]).toBe(200); // cx
       expect(radialCalls[0].args[1]).toBe(175); // cy
-      expect(radialCalls[0].args[2]).toBe(0);   // inner radius
+      expect(radialCalls[0].args[2]).toBe(0); // inner radius
       expect(radialCalls[0].args[3]).toBe(200); // cx
       expect(radialCalls[0].args[4]).toBe(175); // cy
       expect(radialCalls[0].args[5]).toBe(100); // outer radius
@@ -549,8 +561,14 @@ describe("renderer", () => {
               type: "linear_gradient",
               gradient: {
                 stops: [
-                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } } },
-                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
                 ],
                 start: { x: 0, y: 0 },
                 end: { x: 1, y: 0 },
@@ -610,8 +628,14 @@ describe("renderer", () => {
               type: "linear_gradient",
               gradient: {
                 stops: [
-                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
-                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
                 ],
                 start: { x: 0, y: 0 },
                 end: { x: 1, y: 1 },
@@ -643,9 +667,18 @@ describe("renderer", () => {
               type: "linear_gradient",
               gradient: {
                 stops: [
-                  { position: 0, color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } } },
-                  { position: NaN, color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } } },
-                  { position: 1, color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } } },
+                  {
+                    position: 0,
+                    color: { type: "literal", value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 } },
+                  },
+                  {
+                    position: NaN,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 1, b: 0, a: 1 } },
+                  },
+                  {
+                    position: 1,
+                    color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+                  },
                 ],
                 start: { x: 0, y: 0 },
                 end: { x: 1, y: 0 },

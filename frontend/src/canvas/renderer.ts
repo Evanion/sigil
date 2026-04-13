@@ -67,7 +67,6 @@ function srgbColorToRgba(c: ColorSrgb): string | null {
   return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
 }
 
-
 /**
  * Add color stops from a GradientDef to a CanvasGradient.
  *
