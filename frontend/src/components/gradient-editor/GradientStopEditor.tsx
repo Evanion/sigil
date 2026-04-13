@@ -28,6 +28,12 @@ const STOP_POSITION_MIN = 0;
 /** Position max bound for stop slider. */
 const STOP_POSITION_MAX = 100;
 
+/**
+ * Vertical distance in pixels from the gradient bar at which a dragged
+ * stop is considered "dragged off" and will be removed on pointer up.
+ */
+const DRAG_OFF_THRESHOLD_PX = 30;
+
 export interface GradientStopEditorProps {
   readonly stops: GradientStop[];
   readonly selectedStopId: string | null;
@@ -49,6 +55,8 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
   const [draggingId, setDraggingId] = createSignal<string | null>(null);
   // Track whether a drag just ended to suppress click-to-add
   const [justDragged, setJustDragged] = createSignal(false);
+  // Track whether the currently dragged stop is beyond the drag-off threshold
+  const [removingId, setRemovingId] = createSignal<string | null>(null);
   // Timer ref for justDragged reset — must be at component scope for
   // onCleanup to work (onCleanup is a no-op inside DOM event handlers).
   let justDraggedTimer: ReturnType<typeof setTimeout> | null = null;
@@ -103,11 +111,23 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
     const id = stop.id;
     if (!id) return;
     if (draggingId() !== id) return;
-    if (!Number.isFinite(e.clientX)) return;
+    if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
     if (!barRef) return;
 
     const rect = barRef.getBoundingClientRect();
     if (rect.width <= 0) return;
+
+    // Check vertical distance from the bar center for drag-off-to-remove
+    const barCenterY = rect.top + rect.height / 2;
+    const verticalDistance = Math.abs(e.clientY - barCenterY);
+    const canRemove = props.stops.length > MIN_GRADIENT_STOPS;
+
+    if (canRemove && verticalDistance > DRAG_OFF_THRESHOLD_PX) {
+      setRemovingId(id);
+    } else {
+      setRemovingId(null);
+    }
+
     const rawPos = (e.clientX - rect.left) / rect.width;
     if (!Number.isFinite(rawPos)) return;
 
@@ -121,9 +141,18 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
     if (!id) return;
     if (draggingId() !== id) return;
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+
+    const wasRemoving = removingId() === id;
     setDraggingId(null);
+    setRemovingId(null);
     setJustDragged(true);
     props.onDragEnd?.();
+
+    // If the stop was dragged off the bar and can be removed, remove it
+    if (wasRemoving && props.stops.length > MIN_GRADIENT_STOPS) {
+      props.onRemoveStop(id);
+    }
+
     // Reset justDragged flag after a tick so subsequent clicks work.
     // Timer ref is at component scope so onCleanup can clear it.
     if (justDraggedTimer) clearTimeout(justDraggedTimer);
@@ -179,19 +208,23 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
         <Index each={props.stops}>
           {(stop) => {
             const isSelected = () => props.selectedStopId === stop().id;
+            const isRemoving = () => removingId() === stop().id;
             const positionPct = () => {
               const p = stop().position;
               return Number.isFinite(p) ? p * 100 : 0;
             };
             const stopId = () => stop().id ?? "";
 
+            const stopClass = () => {
+              let cls = "sigil-gradient-stop-editor__stop";
+              if (isSelected()) cls += " sigil-gradient-stop-editor__stop--selected";
+              if (isRemoving()) cls += " sigil-gradient-stop-editor__stop--removing";
+              return cls;
+            };
+
             return (
               <div
-                class={
-                  isSelected()
-                    ? "sigil-gradient-stop-editor__stop sigil-gradient-stop-editor__stop--selected"
-                    : "sigil-gradient-stop-editor__stop"
-                }
+                class={stopClass()}
                 style={{
                   left: `${String(positionPct())}%`,
                   background: stopHandleColor(stop()),

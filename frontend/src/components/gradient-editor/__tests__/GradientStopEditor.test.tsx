@@ -237,4 +237,196 @@ describe("GradientStopEditor", () => {
     // stop-c at 100% -> left: 100%
     expect(sliders[2]?.style.left).toBe("100%");
   });
+
+  describe("drag-off-to-remove", () => {
+    it("should not call onRemoveStop when dragged within the bar bounds", () => {
+      const onRemoveStop = vi.fn();
+      const { container } = renderEditor({ onRemoveStop });
+      const bar = container.querySelector(".sigil-gradient-stop-editor__bar") as HTMLElement;
+
+      // Mock getBoundingClientRect for the bar — bar is at y=100, height=20
+      vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 100,
+        width: 200,
+        height: 20,
+        top: 100,
+        right: 200,
+        bottom: 120,
+        left: 0,
+        toJSON: () => ({}),
+      });
+
+      const sliders = screen.getAllByRole("slider");
+      const second = sliders[1];
+      if (!second) throw new Error("slider not found");
+
+      // Mock setPointerCapture and releasePointerCapture
+      // JSDOM does not define setPointerCapture/releasePointerCapture
+      second.setPointerCapture = vi.fn();
+      second.releasePointerCapture = vi.fn();
+
+      // Start drag at bar center (y=110)
+      fireEvent.pointerDown(second, {
+        clientX: 100,
+        clientY: 110,
+        pointerId: 1,
+      });
+
+      // Move within threshold (y=125, distance from bar center 110 = 15 < 30)
+      fireEvent.pointerMove(second, {
+        clientX: 120,
+        clientY: 125,
+        pointerId: 1,
+      });
+
+      // Release
+      fireEvent.pointerUp(second, {
+        clientX: 120,
+        clientY: 125,
+        pointerId: 1,
+      });
+
+      expect(onRemoveStop).not.toHaveBeenCalled();
+    });
+
+    it("should call onRemoveStop when stop is dragged beyond the threshold", () => {
+      const onRemoveStop = vi.fn();
+      const { container } = renderEditor({ onRemoveStop });
+      const bar = container.querySelector(".sigil-gradient-stop-editor__bar") as HTMLElement;
+
+      // Mock getBoundingClientRect — bar center Y = 110
+      vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 100,
+        width: 200,
+        height: 20,
+        top: 100,
+        right: 200,
+        bottom: 120,
+        left: 0,
+        toJSON: () => ({}),
+      });
+
+      const sliders = screen.getAllByRole("slider");
+      const second = sliders[1];
+      if (!second) throw new Error("slider not found");
+
+      // JSDOM does not define setPointerCapture/releasePointerCapture
+      second.setPointerCapture = vi.fn();
+      second.releasePointerCapture = vi.fn();
+
+      // Start drag
+      fireEvent.pointerDown(second, {
+        clientX: 100,
+        clientY: 110,
+        pointerId: 1,
+      });
+
+      // Move beyond threshold (y=150, distance from bar center 110 = 40 > 30)
+      fireEvent.pointerMove(second, {
+        clientX: 120,
+        clientY: 150,
+        pointerId: 1,
+      });
+
+      // Release while still beyond threshold
+      fireEvent.pointerUp(second, {
+        clientX: 120,
+        clientY: 150,
+        pointerId: 1,
+      });
+
+      expect(onRemoveStop).toHaveBeenCalledWith("stop-b");
+    });
+
+    it("should not call onRemoveStop via drag-off when at MIN_GRADIENT_STOPS", () => {
+      const minStops = [makeStop("s1", 0), makeStop("s2", 1)];
+      const onRemoveStop = vi.fn();
+      const { container } = renderEditor({ stops: minStops, onRemoveStop });
+      const bar = container.querySelector(".sigil-gradient-stop-editor__bar") as HTMLElement;
+
+      vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 100,
+        width: 200,
+        height: 20,
+        top: 100,
+        right: 200,
+        bottom: 120,
+        left: 0,
+        toJSON: () => ({}),
+      });
+
+      const sliders = screen.getAllByRole("slider");
+      const first = sliders[0];
+      if (!first) throw new Error("slider not found");
+
+      // JSDOM does not define setPointerCapture/releasePointerCapture
+      first.setPointerCapture = vi.fn();
+      first.releasePointerCapture = vi.fn();
+
+      // Start drag
+      fireEvent.pointerDown(first, {
+        clientX: 0,
+        clientY: 110,
+        pointerId: 1,
+      });
+
+      // Move far beyond threshold
+      fireEvent.pointerMove(first, {
+        clientX: 0,
+        clientY: 200,
+        pointerId: 1,
+      });
+
+      // Release
+      fireEvent.pointerUp(first, {
+        clientX: 0,
+        clientY: 200,
+        pointerId: 1,
+      });
+
+      expect(onRemoveStop).not.toHaveBeenCalled();
+    });
+
+    it("should apply removing class when dragged beyond threshold", () => {
+      const { container } = renderEditor();
+      const bar = container.querySelector(".sigil-gradient-stop-editor__bar") as HTMLElement;
+
+      vi.spyOn(bar, "getBoundingClientRect").mockReturnValue({
+        x: 0,
+        y: 100,
+        width: 200,
+        height: 20,
+        top: 100,
+        right: 200,
+        bottom: 120,
+        left: 0,
+        toJSON: () => ({}),
+      });
+
+      const sliders = screen.getAllByRole("slider");
+      const second = sliders[1];
+      if (!second) throw new Error("slider not found");
+
+      // JSDOM does not define setPointerCapture
+      second.setPointerCapture = vi.fn();
+
+      fireEvent.pointerDown(second, {
+        clientX: 100,
+        clientY: 110,
+        pointerId: 1,
+      });
+
+      // Move beyond threshold
+      fireEvent.pointerMove(second, {
+        clientX: 120,
+        clientY: 150,
+        pointerId: 1,
+      });
+
+      expect(second.classList.contains("sigil-gradient-stop-editor__stop--removing")).toBe(true);
+    });
+  });
 });
