@@ -311,6 +311,11 @@ Any spec that introduces a new canvas tool MUST include a section titled **"Tool
 
 These rules address recurring bug patterns. They apply to ALL implementation work.
 
+> **Domain-specific rules** are in separate files to keep this document focused:
+> - [Rust defensive rules](.claude/rules/rust-defensive.md) — core crate, validation, serialization, arena, locks
+> - [Frontend defensive rules](.claude/rules/frontend-defensive.md) — Solid.js, store, history, optimistic updates
+> - [Accessibility rules](.claude/rules/a11y-rules.md) — ARIA, keyboard, screen reader, reduced motion
+
 ### Constants Must Be Enforced
 
 Every validation constant (e.g., `MAX_FILE_SIZE`, `MAX_NESTING_DEPTH`, `MAX_NAME_LENGTH`) MUST have a corresponding enforcement point. A constant without enforcement is worse than no constant — it gives false confidence. When you define a limit:
@@ -328,29 +333,9 @@ Every recursive function MUST accept a depth parameter or use an explicit stack 
 
 The depth limit must be a named constant, not a magic number. Use `>=` (not `>`) when comparing depth to the limit constant — depth is zero-indexed, so `depth >= MAX` allows exactly MAX levels (0 through MAX-1). An off-by-one here silently permits one extra recursion level.
 
-### Constructors Must Validate
+### Floating-Point Validation
 
-Every public constructor (`new`, `from_*`, `try_from_*`) must call all applicable validation functions. If `validate.rs` defines rules for a field, the constructor for any type containing that field must enforce those rules. "Validation exists but isn't called" is a bug.
-
-### Deserialization Boundaries Must Match Validation Rules
-
-When validation rules are added or changed in `validate.rs` (or equivalent), the deserialization entry points MUST be updated in the same commit to enforce the new rules. A checklist:
-- Every field validated in `validate.rs` must also be validated during deserialization.
-- When adding a new validation rule, search for all `deserialize_*` and `from_json` functions and update them.
-
-Custom `Deserialize` implementations MUST reject duplicate keys in map/struct inputs. Serde's default behavior silently resolves duplicates via last-writer-wins, which can mask data corruption. When implementing custom deserializers that collect into maps, track seen keys and return an error on the first duplicate.
-
-### Arena Operations Must Preserve Identity on Undo
-
-When using generational arenas, removing and re-inserting an entity produces a NEW key. Any operation that needs to restore a previous state (undo, rollback) MUST use `reinsert(key, value)` or equivalent to preserve the original key. Never use `insert()` in an undo path for arena-managed entities — this silently breaks all external references to that entity.
-
-### Restore State Before Propagating Errors
-
-When an item is removed from a collection (popped from a stack, removed from a vec, taken from a map) and a subsequent operation on that item may fail, the item MUST be restored to its original position before returning the error. Pattern: pop, attempt operation, push back on failure. Using `?` after a destructive removal without restoration loses the item permanently.
-
-### Multi-Item Mutations Must Roll Back on Partial Failure
-
-When a mutation function loops over multiple items (reparenting N children, removing N nodes from a group, applying N property changes), the loop MUST track which items have been successfully modified. If item K fails, the method must reverse modifications to items 0 through K-1 before returning the error. Pattern: maintain a `completed: Vec<ReverseInfo>` alongside the loop; on failure, iterate `completed` in reverse order and undo each. This applies to loops within any single mutation function — whether a `FieldOperation`'s `apply()`, a GraphQL resolver, or an MCP tool handler. A loop that modifies 5 of 10 items and then returns an error has corrupted the document.
+Every `f32`/`f64` field arriving from external input (deserialization, API parameter, MCP tool input) MUST be validated to reject NaN and infinity. For fields with domain constraints (e.g., opacity 0.0..=1.0, positive dimensions), validate the range in the same check. In TypeScript, every numeric value received from a third-party component callback (e.g., Kobalte NumberInput `onChange`), parsed from user input (`parseFloat`, `Number()`), or received from an external API must be guarded with `Number.isFinite()` before use. Do not rely on downstream code to handle non-finite floats — IEEE 754 NaN propagation corrupts calculations silently. This also applies to CSS string construction: any numeric value interpolated into a CSS property string (e.g., `linear-gradient()`, `rgba()`, `hsl()`, `transform`) must be validated with `Number.isFinite()` before interpolation. NaN or Infinity in a CSS value string produces malformed styles silently — the browser ignores the rule without error. This guard obligation is not limited to external boundaries. Any pure function or reactive memo that operates on a numeric value must guard against NaN and infinity at its own entry point — do not assume an upstream caller already validated. NaN propagates silently through computation chains; a guard at the origin does not protect a function that is later called from a different call site that bypasses the origin.
 
 ### No Silent Error Suppression
 
@@ -358,138 +343,25 @@ Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppresse
 
 The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` on a `Result` where the error represents a real failure (e.g., serialization failure). Prefer `match` with an explicit log branch. "Silent" also includes mapping a specific error to a generic variant — if a rollback error is mapped to `InvalidInput`, the diagnostic trail is corrupted. Create a typed variant (e.g., `RollbackFailed`) instead.
 
-### Ordered Collection Mutations Must Preserve Position
+### No Silent Clamping of Invalid Input
 
-When removing an element from an ordered collection (Vec, VecDeque) for a reversible operation, record the element's index at the time of removal. The undo path must use `insert(index, element)`, not `push(element)`. Pushing to the end silently changes ordering, which violates undo semantics.
-
-### Floating-Point Validation
-
-Every `f32`/`f64` field arriving from external input (deserialization, API parameter, MCP tool input) MUST be validated to reject NaN and infinity. For fields with domain constraints (e.g., opacity 0.0..=1.0, positive dimensions), validate the range in the same check. In TypeScript, every numeric value received from a third-party component callback (e.g., Kobalte NumberInput `onChange`), parsed from user input (`parseFloat`, `Number()`), or received from an external API must be guarded with `Number.isFinite()` before use. Do not rely on downstream code to handle non-finite floats — IEEE 754 NaN propagation corrupts calculations silently. This also applies to CSS string construction: any numeric value interpolated into a CSS property string (e.g., `linear-gradient()`, `rgba()`, `hsl()`, `transform`) must be validated with `Number.isFinite()` before interpolation. NaN or Infinity in a CSS value string produces malformed styles silently — the browser ignores the rule without error. This guard obligation is not limited to external boundaries. Any pure function or reactive memo that operates on a numeric value must guard against NaN and infinity at its own entry point — do not assume an upstream caller already validated. NaN propagates silently through computation chains; a guard at the origin does not protect a function that is later called from a different call site that bypasses the origin.
-
-### Reactive Pipelines Must Be Verified End-to-End
-
-When a value flows from a producer (signal, computed memo, callback prop, store field) to a renderer or side-effecting consumer, the connection MUST be verified by a test that exercises the full path: trigger the producer, assert the consumer's output. A pipeline that compiles and type-checks but whose downstream consumer receives a voided or disconnected value is a silent no-op — the compiler cannot detect broken wiring. This pattern recurs: a signal read but assigned to `_` or not forwarded; a callback prop defined but never passed to the child; a store field populated but the renderer reads a different field. Every new reactive connection introduced in a PR must have at least one integration or component test that asserts the consumer receives and acts on the value. Unit-testing the producer in isolation is not sufficient — the wiring itself must be tested.
-
-### CSS Animations Must Respect Reduced Motion
-
-Every CSS `transition`, `animation`, or `@keyframes` rule in component stylesheets MUST have a corresponding `@media (prefers-reduced-motion: reduce)` block that disables or shortens the animation. This applies to all frontend CSS files. Omitting this causes vestibular discomfort for users with motion sensitivity (WCAG 2.3.3). When adding a transition or animation, add the media query in the same file, in the same commit.
-
-### Accessibility Behavior Must Be Audited During UI Rewrites
-
-When rewriting or replacing a frontend module (framework migration, component refactor, full-page reimplementation), the implementer MUST produce an explicit a11y audit of the module being replaced before writing new code. The audit must enumerate: (1) all `aria-live` regions and their announcement triggers, (2) all focus management calls (`focus()`, `FocusScope`, trap logic), (3) all keyboard event handlers. Each item from the outgoing code must be either preserved in the new implementation or documented as intentionally removed with rationale. A rewrite that loses accessibility behavior without documentation is incomplete, regardless of visual parity.
-
-### `aria-live` Regions Must Be Scoped to Discrete Status Changes
-
-Never place `aria-live="polite"` or `aria-live="assertive"` on a container whose content updates more frequently than once per user action (e.g., a zoom percentage that updates on every wheel event, a cursor coordinate display). Each update to an `aria-live` region interrupts or queues a screen reader announcement — high-frequency updates flood the announcement queue and make the application unusable for screen reader users. Pattern: use a dedicated, visually-hidden `<span role="status">` element and update it only on discrete events (tool change, selection change, operation completion). For continuously-updating values, omit `aria-live` and provide the value in context only (e.g., as a label on the containing toolbar region).
-
-### Symmetric Validation for Reversible Operations
-
-For any operation with an apply/undo pair (commands, transactions, client-side Operations), both directions MUST validate their inputs. If `apply` validates a field before modifying it, `undo` must validate before reverting. Asymmetric validation means undo can corrupt state when applied to a document that has diverged. Additionally, forward and inverse operations MUST use the same field schema. If the forward operation's apply function reads `value.position`, the inverse operation must also provide `value.position` — not `value.oldPosition` or any other renamed field. A renamed field in the inverse silently produces `undefined` when the shared apply function reads the forward field name, causing the operation to no-op or corrupt state. When defining an operation type, define a single value schema and populate it from different sources (forward populates from user intent, inverse populates from the captured snapshot), but never change the field names.
-
-### Cross-Field Invariant Validation
-
-When a type has fields that must be mutually consistent (e.g., a discriminant enum and a value enum, a unit field and a numeric field), the constructor and deserialization path MUST validate the relationship between them. Single-field validation is not sufficient — add an explicit cross-field check and a test for each invalid combination.
-
-### No Derive Deserialize on Validated Types
-
-Any type in `crates/core/` that has validation logic in its constructor MUST NOT use `#[derive(Deserialize)]`. Instead, implement `Deserialize` manually (or via a helper) that routes through the validating constructor. Fields on validated types MUST be private to prevent direct construction. This prevents `#[derive(Deserialize)]` from creating an invisible second construction path that bypasses all validation.
-
-### Validated Types Must Have Private Fields
-
-Every type in `crates/core/` whose constructor (`new`, `from_*`, `try_from_*`) performs validation or computes derived state MUST have all fields private (`pub(crate)` at most). This applies to value objects and any type with invariants — not only deserialized types. Public fields allow callers to construct instances via struct literal syntax, bypassing the constructor entirely. They also allow mutation of internal state (e.g., pre-populated snapshots) between construction and use. If external code needs to read a field, add an accessor method. **Exception:** `FieldOperation` structs (forward-only operations with a `validate()` method on the trait) may have public fields. These are pure data carriers where validation happens at the trait level via `validate()` before `apply()`, not in a constructor. The server and MCP crates construct them via struct literal syntax, which is the intended pattern.
-
-### FieldOperations Must Be Self-Contained
-
-A `FieldOperation` struct's `apply()` method must be callable immediately after construction and `validate()` without the caller performing any additional setup. The struct receives the operation's parameters (what to do); `validate()` checks preconditions against the document; `apply()` performs the mutation. Callers MUST call `validate()` before `apply()`. The caller (server/MCP) is responsible for rollback on partial failure in multi-step operations — `FieldOperation` structs are forward-only and do not capture undo state.
-
-### Constant Enforcement Tests
-
-Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
-
-### Arena-Local IDs Must Not Be Serialized
-
-Types that represent arena indices or generational IDs (e.g., `NodeId`) MUST NOT appear in serialized or persisted data formats. Serialized document formats MUST use stable, globally-unique identifiers (UUIDs). Arena-keyed types must be mapped to their stable ID at the serialization boundary. Arena indices are meaningless outside a running session — serializing them produces corrupt references on reload.
-
-### Uniqueness Constraints on Named Collections
-
-When a collection contains entities with a name or identifier field that must be unique within that collection (e.g., component names in a document, property names in a component, variant names in a component), the insertion point MUST reject duplicates with a typed error. Do not rely on the collection type (HashMap vs Vec) to enforce this implicitly — validate explicitly and return an error that identifies the conflicting name.
-
-### Defensive Message Parsing
-
-Every `JSON.parse` call on data from an external source (WebSocket, fetch, postMessage, file read) must be wrapped in try-catch. Parse failures must be handled gracefully — log and discard, never crash the application. After parsing, validate the shape of the parsed object before type-casting. This applies to both frontend TypeScript and any future Node.js code.
-
-### Filesystem Writes Must Be Atomic
-
-Every file write in the server crate must use the write-to-temp-then-rename pattern. Write the full content to a temporary file in the SAME directory as the target (to ensure same-filesystem rename), then `fs::rename()` to the final path. This prevents partial writes on crash or power loss. Direct `fs::write()` to the final path is a bug in the server crate.
+Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
 
 ### No Fire-and-Forget Mutations
 
 Every mutation call (GraphQL mutation, REST POST/PUT/DELETE, WebSocket command) that modifies server state MUST handle the response or rejection. Calling a mutation without awaiting the result or attaching an error handler is a bug — it silently drops failures and leaves the UI in a state that diverges from the server. At minimum: log the error AND revert any optimistic local state change. For user-initiated operations: display a visible error notification. This applies to both frontend TypeScript and any future backend-to-backend calls.
 
-### Hold Locks for the Full Read-Modify-Write Sequence
+### Capture Snapshots Before Mutations, Not After
 
-Never split a read-then-write into two separate lock acquisitions. Acquiring a read lock, releasing it, and then acquiring a write lock is a TOCTOU race — another thread can mutate the value between the two acquisitions. Any logic of the form "read to check a condition, then write based on that condition" MUST hold a single write lock (or upgradeable read lock) for the entire sequence. This applies to `RwLock`, `Mutex`, and any wrapper around them. If the write lock scope is too coarse, redesign the data structure rather than splitting the lock.
+When an operation needs to record the previous value of a field for undo, rollback, or logging, read the field BEFORE applying the mutation. Do not read it after calling `produce()`, `setState()`, `applyOperation()`, or any other state-modifying function — the value has already changed. This is a TOCTOU error specific to reactive and mutable-state systems. Pattern: `const before = store.field; produce(s => { s.field = newValue; }); trackUndo(before);`. Anti-pattern: `produce(s => { s.field = newValue; }); trackUndo(store.field); // BUG: reads the new value`.
 
-### Migrations Must Remove All Superseded Code
+### Temporary State Flags Must Use try-finally
 
-When migrating from one protocol, library, or API to another (e.g., WebSocket to GraphQL, REST to gRPC), the migration PR MUST include deletion of ALL superseded artifacts. Before marking a migration complete, search for:
-1. Dead route/proxy configuration (e.g., Vite proxy entries, nginx routes, reverse proxy rules).
-2. Dead type definitions that only served the old protocol's wire format, and over-wide interfaces carried forward from the old implementation that expose more surface area than the new code requires — trim to the actually-used subset.
-3. Dead handler/endpoint code that is no longer reachable.
-4. Dead test fixtures or mocks for the old protocol.
-5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
-A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.
+When a boolean or enum flag is set to temporarily change system behavior (suppress history recording, suppress broadcasts, mark undo-in-progress, enable batch mode), the flag MUST be reset in a `finally` block (TypeScript) or via an RAII guard (Rust). If the guarded operation throws or returns an error, the flag stays set permanently, breaking all subsequent operations that check it. Pattern: `flag = true; try { riskyOperation(); } finally { flag = false; }`. Anti-pattern: `flag = true; riskyOperation(); flag = false;` — if riskyOperation throws, the flag is never reset.
 
-### User-Initiated Mutations Must Use Optimistic Updates
+### Constant Enforcement Tests
 
-Every mutation triggered by a direct user action (drag-and-drop, rename, toggle, delete) that modifies server state MUST apply the expected state change to the local store immediately, before the server responds. Waiting for a server round-trip before updating the UI creates perceptible lag that violates the "feels like Figma" UX requirement. The optimistic update contract:
-1. Snapshot the pre-mutation local state.
-2. Apply the change to the local store immediately.
-3. Send the mutation to the server.
-4. On success: reconcile with server response (accept server-canonical values).
-5. On error: revert to the snapshot and display a visible error notification.
-A mutation that does a full refetch on success instead of optimistic update is a performance bug. A full refetch is only acceptable as a fallback on error.
-
-### Debounced Mutations Must Preserve Rollback Snapshots
-
-When a mutation is debounced (delayed to batch rapid user input), the pre-mutation snapshot for rollback MUST be captured on the first invocation of the debounce window, not when the debounced function finally fires. The debounce timer resets on each call, but the snapshot must remain from the first call — otherwise the rollback target drifts with each intermediate state. On error, revert to this original snapshot. On success, discard the snapshot and clear the timer. Every debounced mutation must implement the same five-step optimistic update contract from "User-Initiated Mutations Must Use Optimistic Updates" — debouncing delays the server call but does not exempt the function from error handling or rollback.
-
-### Module-Level Timers and Subscriptions Must Be Cleared on Teardown
-
-Every `setTimeout`, `setInterval`, `requestAnimationFrame`, `addEventListener`, or subscription registration at module scope or store scope MUST have a corresponding cleanup in the module's or store's teardown/destroy function. A timer that fires after its owning context is destroyed operates on stale references — this causes silent errors, memory leaks, and test flakiness. When adding a timer or subscription, add the cleanup call in the same commit.
-
-### Pointer-Only Operations Must Have Keyboard Equivalents
-
-Every operation achievable via pointer gesture (drag-and-drop reorder, drag-and-drop reparent, hover-to-reveal controls, long-press, right-click context menu) MUST have a keyboard-accessible equivalent in the same PR. This is a WCAG 2.1.1 (Keyboard) requirement, not optional polish. Common patterns:
-- Drag-and-drop reorder: Alt+Arrow Up/Down to move the focused item.
-- Drag-and-drop reparent: Alt+Arrow Left (outdent) / Alt+Arrow Right (indent).
-- Hover-to-reveal controls: controls must be reachable via Tab or a disclosed keyboard shortcut.
-- Context menu: must open on Shift+F10 or the Menu key.
-If a keyboard equivalent cannot ship in the same PR due to technical constraints, file a tracking issue and document the deferral in the PR description — do not merge without acknowledgment.
-
-### No Silent Clamping of Invalid Input
-
-Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
-
-### Do Not Use Positional Index as Item Identity in Dynamic Lists
-
-When a list can be mutated (items added, removed, or reordered), the array index MUST NOT be used as the stable identity of an item for selection, dispatch, or key generation. Array indices shift when items are inserted or removed — code that selects "stop at index 2" breaks silently when a stop is inserted before it. Instead: assign a stable `id` (UUID or incrementing counter) to each item at creation time, and use that `id` for selection and dispatch. This applies to: gradient stops, layer lists, token groups, component variants, field sets, and any other UI or data list whose membership changes at runtime. Using index as identity is a bug — it produces incorrect behavior on any mutation that changes list order or length.
-
-### Math Helpers Must Guard Their Domain
-
-Any function that wraps a standard math operation with a constrained domain (`Math.pow`, `Math.sqrt`, `Math.log`, `Math.asin`, `Math.acos`) MUST validate that its input falls within the function's valid domain before calling it. Do not rely on callers to have pre-validated inputs — a helper function receives values from multiple call sites, and one caller passing an out-of-range value produces NaN that propagates silently through the entire computation chain. Required guards: `Math.sqrt(x)` requires `x >= 0`; `Math.pow(x, p)` with a fractional exponent requires `x >= 0`; `Math.log(x)` requires `x > 0`; `Math.asin(x)` and `Math.acos(x)` require `-1 <= x <= 1`. Return 0, clamp to the valid range, or throw — but do not allow NaN to escape the function. Document the choice in a comment.
-
-### 2D Canvas Widgets Must Have Complete ARIA Slider Semantics
-
-Any `<canvas>` element (or its wrapper) used as a 2D interactive control (color picker area, gradient map, rotation dial, hue ring) MUST implement the full WAI-ARIA slider pattern for each axis it exposes: `role="slider"`, `aria-label` naming the controlled value, `aria-valuenow` set to the current numeric value (updated on every change), `aria-valuemin` and `aria-valuemax` reflecting the axis range, and `aria-valuetext` providing a human-readable string. A canvas widget with `role="slider"` but without `aria-valuenow` is non-functional for screen readers — the role declares intent but provides no state. If a 2D widget exposes two axes, expose two complementary ARIA widgets rather than a single slider. Arrow key navigation must move the focus point in the corresponding axis.
-
-### Error Recovery Must Not Produce User-Visible Side Effects
-
-When an operation fails and the error handler reverts local state, the revert mechanism MUST NOT produce side effects that are visible to the user as new operations. Specifically: error rollback must not create undo entries, redo entries, toast notifications of success, or broadcast events to other clients. If the system's primary revert API (e.g., `undo()`) produces such side effects, the error path must use a dedicated rollback API that suppresses them (e.g., `rollbackLast()`, `revertWithoutHistory()`). The general principle: from the user's perspective, a failed operation that was rolled back should be as if it never happened — no trace in the undo stack, no trace in the redo stack, no trace in the activity log.
-
-### History Commits Must Contain At Least One Operation
-
-Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
 
 ### Behavioral Inventory Before Deleting Implementation Code
 
@@ -501,53 +373,20 @@ When a validation check exists at one API boundary (GraphQL resolver, MCP tool h
 
 The frontend store layer (functions in `document-store-solid.tsx` that call GraphQL mutations) is also a transport boundary — it must validate inputs against the same constants as the server before making the network call.
 
-### RAII Guards Do Not Provide Transactional Rollback
+### Migrations Must Remove All Superseded Code
 
-Dropping a lock guard (`MutexGuard`, `RwLockWriteGuard`) releases the lock — it does NOT revert mutations made while the lock was held. If a batch of N mutations is applied under a single lock acquisition and mutation K fails, mutations 0 through K-1 remain applied after the guard drops. The lock only serializes access; it provides no undo semantics. When a batch must be atomic (all-or-nothing), the code must implement explicit rollback: track completed mutations, and on failure, reverse them before releasing the lock. This also applies to TypeScript: holding a reference to an object during a sequence of mutations does not provide transactional semantics.
+When migrating from one protocol, library, or API to another (e.g., WebSocket to GraphQL, REST to gRPC), the migration PR MUST include deletion of ALL superseded artifacts. Before marking a migration complete, search for:
+1. Dead route/proxy configuration (e.g., Vite proxy entries, nginx routes, reverse proxy rules).
+2. Dead type definitions that only served the old protocol's wire format, and over-wide interfaces carried forward from the old implementation that expose more surface area than the new code requires — trim to the actually-used subset.
+3. Dead handler/endpoint code that is no longer reachable.
+4. Dead test fixtures or mocks for the old protocol.
+5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
+A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.
 
-### Capture Snapshots Before Mutations, Not After
+### Do Not Use Positional Index as Item Identity in Dynamic Lists
 
-When an operation needs to record the previous value of a field for undo, rollback, or logging, read the field BEFORE applying the mutation. Do not read it after calling `produce()`, `setState()`, `applyOperation()`, or any other state-modifying function — the value has already changed. This is a TOCTOU error specific to reactive and mutable-state systems. Pattern: `const before = store.field; produce(s => { s.field = newValue; }); trackUndo(before);`. Anti-pattern: `produce(s => { s.field = newValue; }); trackUndo(store.field); // BUG: reads the new value`.
+When a list can be mutated (items added, removed, or reordered), the array index MUST NOT be used as the stable identity of an item for selection, dispatch, or key generation. Array indices shift when items are inserted or removed — code that selects "stop at index 2" breaks silently when a stop is inserted before it. Instead: assign a stable `id` (UUID or incrementing counter) to each item at creation time, and use that `id` for selection and dispatch. This applies to: gradient stops, layer lists, token groups, component variants, field sets, and any other UI or data list whose membership changes at runtime. Using index as identity is a bug — it produces incorrect behavior on any mutation that changes list order or length.
 
-### Temporary State Flags Must Use try-finally
+### Math Helpers Must Guard Their Domain
 
-When a boolean or enum flag is set to temporarily change system behavior (suppress history recording, suppress broadcasts, mark undo-in-progress, enable batch mode), the flag MUST be reset in a `finally` block (TypeScript) or via an RAII guard (Rust). If the guarded operation throws or returns an error, the flag stays set permanently, breaking all subsequent operations that check it. Pattern: `flag = true; try { riskyOperation(); } finally { flag = false; }`. Anti-pattern: `flag = true; riskyOperation(); flag = false;` — if riskyOperation throws, the flag is never reset.
-
-### Continuous-Value Controls Must Coalesce History Entries
-
-Any UI control that fires change events at high frequency during a single user gesture (color picker during drag, slider during drag, canvas transform during drag, numeric scrub) MUST coalesce those events into a single history/undo entry. The pattern: capture the pre-gesture snapshot on gesture start (pointerdown, focus), apply intermediate values to the store without creating history entries, and commit a single history entry on gesture end (pointerup, blur, dialog close). Creating a discrete undo entry per intermediate value floods the undo stack — the user must press Ctrl+Z dozens of times to undo a single drag. This obligation applies to both the client-side history manager and server-side mutations. If the control does not expose gesture start/end events, the implementer must add them or wrap the control to provide them before wiring it to a tracked mutation.
-
-### NodeKind Variants Must Have Complete Validation Coverage
-
-When a new `NodeKind` variant is added to `crates/core/`, the same PR MUST add a corresponding arm to every dispatch site that branches on `NodeKind`. The mandatory sites are:
-1. `CreateNode::validate` — must validate all fields introduced by the variant's associated data.
-2. The workfile deserialization path — must call the same validation.
-3. Any `match kind { ... }` in the core crate.
-
-A `match` that uses a catch-all (`_ =>`) arm for a `NodeKind` dispatch is a bug — it silently ignores new variants. All `NodeKind` matches in `crates/core/` must be exhaustive with no wildcard arms.
-
-### CSS-Rendered String Fields Must Reject CSS-Significant Characters
-
-Any string field in `crates/core/` or the frontend that is used to produce a CSS property value or Canvas 2D context property (e.g., `ctx.font`, `ctx.fillStyle`) MUST be validated to reject CSS-significant characters. Denylist: single quote, double quote, semicolon, curly braces, backslash, and C0 control characters (bytes 0x00–0x1F). Apply in `validate.rs` (Rust) and a shared validation helper (TypeScript). Examples: `font_family`, variable font axis names, CSS custom property names.
-
-This validation obligation applies at two boundaries, both mandatory: (1) input arrival — validate at the API/deserialization boundary before storing; (2) output use — any function that constructs a Canvas 2D context property (`ctx.font`, `ctx.fillStyle`) or a CSS property string by interpolating a user-controlled field MUST call the CSS character validation helper immediately before interpolation, even if the value was already validated at input. Defense in depth: values may travel through code paths that bypass input validation.
-
-### Overlay-Mode Keyboard Handlers Must Use stopPropagation at the Overlay Root
-
-Any component that activates an "overlay edit mode" (text editing, in-place rename, formula input) MUST register a `keydown` handler on the overlay's root element that calls `event.stopPropagation()` for every shortcut it handles locally. Document-level shortcut handlers MUST check `event.defaultPrevented` or rely on propagation being stopped before acting. Do NOT use `document.addEventListener` for shortcuts that should be inactive during overlay modes.
-
-### Imperative Canvas Classes Must Expose a `destroy()` Method
-
-Every class in `frontend/` that lives outside Solid's component tree and registers DOM event listeners, `requestAnimationFrame` loops, or timers MUST expose a `destroy()` method that cancels all rAF handles, removes all event listeners, clears all timers, and sets internal state to a destroyed sentinel. The Solid component that owns the class MUST call `destroy()` in `onCleanup()`.
-
-### Polymorphic Style Setter APIs Must Use Discriminated Unions
-
-Any store function that accepts a style field name and value as separate arguments MUST use a discriminated union type — not `(field: string, value: unknown)`. The discriminated union enforces field-value type relationships at compile time. A `(field: string, value: unknown)` signature is a typed hole.
-
-### Side-Effect Artifacts Must Be Constructed After Precondition Verification
-
-When implementing a mutation that requires lock acquisition and entity existence verification, all side-effect artifacts (broadcast payloads, response objects, audit log entries) MUST be constructed AFTER the lock is acquired and AFTER preconditions (entity exists, fields valid) are confirmed. Pre-building these artifacts before verification wastes allocation on error paths and risks constructing a payload from stale pre-lock state. Pattern: acquire lock, verify preconditions, apply mutation, construct broadcast payload from verified post-mutation state, release lock, send broadcast.
-
-### Delete Operations Must Enforce Collection-Level Invariants
-
-Any `FieldOperation` that removes an entity from a bounded collection MUST validate both (1) that the entity exists, AND (2) that removing it will not violate a minimum-cardinality invariant. If a document must always contain at least one page, `DeletePage::validate` must check `page_count > MIN_PAGES_PER_DOCUMENT`. The minimum MUST be defined as a `MIN_*` constant in `validate.rs`. Do not rely on the frontend to enforce this — frontend guards are bypassable via GraphQL and MCP.
+Any function that wraps a standard math operation with a constrained domain (`Math.pow`, `Math.sqrt`, `Math.log`, `Math.asin`, `Math.acos`) MUST validate that its input falls within the function's valid domain before calling it. Do not rely on callers to have pre-validated inputs — a helper function receives values from multiple call sites, and one caller passing an out-of-range value produces NaN that propagates silently through the entire computation chain. Required guards: `Math.sqrt(x)` requires `x >= 0`; `Math.pow(x, p)` with a fractional exponent requires `x >= 0`; `Math.log(x)` requires `x > 0`; `Math.asin(x)` and `Math.acos(x)` require `-1 <= x <= 1`. Return 0, clamp to the valid range, or throw — but do not allow NaN to escape the function. Document the choice in a comment.
