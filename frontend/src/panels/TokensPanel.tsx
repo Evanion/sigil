@@ -43,6 +43,7 @@ export const TokensPanel: Component = () => {
   const [collapsedGroups, setCollapsedGroups] = createSignal<Set<TokenType>>(new Set());
 
   // Create-token popover state
+  const [createPopoverOpen, setCreatePopoverOpen] = createSignal(false);
   const [newTokenName, setNewTokenName] = createSignal("");
   const [newTokenType, setNewTokenType] = createSignal<TokenType>("color");
   const [createError, setCreateError] = createSignal<string | null>(null);
@@ -119,6 +120,7 @@ export const TokensPanel: Component = () => {
     announce(t("panels:tokens.tokenCreated", { name }));
     setNewTokenName("");
     setCreateError(null);
+    setCreatePopoverOpen(false);
   }
 
   function handleSelectToken(name: string): void {
@@ -284,6 +286,8 @@ export const TokensPanel: Component = () => {
           placement="bottom"
           triggerAriaLabel={t("panels:tokens.addToken")}
           trigger={<Plus size={16} />}
+          open={createPopoverOpen()}
+          onOpenChange={setCreatePopoverOpen}
         >
           <div class="sigil-tokens-panel__create-form" onKeyDown={handleCreateFormKeyDown}>
             <label class="sigil-tokens-panel__create-label">

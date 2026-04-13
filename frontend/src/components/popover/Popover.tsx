@@ -13,10 +13,18 @@ export interface PopoverProps {
   placement?: PopoverPlacement;
   /** Additional CSS class names appended to the content element. */
   class?: string;
-  /** Whether to prevent closing when interacting inside the content. */
+  /**
+   * Prevent closing when clicking/focusing inside the popover content.
+   * Use for editor popovers (color picker, gradient editor) that need
+   * continuous interaction. Default: false (popover closes normally).
+   */
   preventDismissOnInteract?: boolean;
   /** Accessible label for the trigger button. */
   triggerAriaLabel?: string;
+  /** Controlled open state. When provided, the popover is controlled externally. */
+  open?: boolean;
+  /** Called when the popover's open state changes (controlled mode). */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function Popover(props: PopoverProps) {
@@ -27,6 +35,8 @@ export function Popover(props: PopoverProps) {
     "class",
     "preventDismissOnInteract",
     "triggerAriaLabel",
+    "open",
+    "onOpenChange",
   ]);
 
   const className = () => {
@@ -36,18 +46,19 @@ export function Popover(props: PopoverProps) {
   };
 
   return (
-    <KobaltePopover placement={local.placement ?? "bottom"} {...others}>
+    <KobaltePopover
+      placement={local.placement ?? "bottom"}
+      open={local.open}
+      onOpenChange={local.onOpenChange}
+      {...others}
+    >
       <KobaltePopover.Trigger class="sigil-popover-trigger" aria-label={local.triggerAriaLabel}>
         {local.trigger}
       </KobaltePopover.Trigger>
       <KobaltePopover.Portal>
         <KobaltePopover.Content
           class={className()}
-          // Default: prevent dismiss on interact. Sigil popovers contain
-          // interactive editors (color pickers, gradient editors, token forms)
-          // that require pointer/focus interaction without closing the popover.
-          // Pass preventDismissOnInteract={false} to opt out for simple tooltips.
-          {...(local.preventDismissOnInteract !== false
+          {...(local.preventDismissOnInteract
             ? {
                 onPointerDownOutside: (e: Event) => e.preventDefault(),
                 onFocusOutside: (e: Event) => e.preventDefault(),
