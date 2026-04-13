@@ -133,6 +133,11 @@
   outline-offset: var(--focus-offset);
 }
 
+.sigil-tokens-panel__create-error {
+  font-size: var(--font-size-00);
+  color: var(--danger);
+}
+
 .sigil-tokens-panel__create-button {
   height: var(--input-height);
   border: none;

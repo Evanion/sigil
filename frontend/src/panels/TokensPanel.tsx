@@ -45,6 +45,7 @@ export const TokensPanel: Component = () => {
   // Create-token popover state
   const [newTokenName, setNewTokenName] = createSignal("");
   const [newTokenType, setNewTokenType] = createSignal<TokenType>("color");
+  const [createError, setCreateError] = createSignal<string | null>(null);
 
   let listRef: HTMLDivElement | undefined;
   let focusRafHandle: number | undefined;
@@ -90,12 +91,25 @@ export const TokensPanel: Component = () => {
 
   function handleCreateToken(): void {
     const name = newTokenName().trim();
-    if (!name) return;
+    if (!name) {
+      setCreateError("Token name must not be empty");
+      announce("Token name must not be empty");
+      return;
+    }
 
     // F-01: Validate token name against core's rules
     const nameError = validateTokenName(name);
     if (nameError !== null) {
+      setCreateError(nameError);
       announce(nameError);
+      return;
+    }
+
+    // Check for duplicate name
+    if (store.state.tokens[name] !== undefined) {
+      const dupError = `Token "${name}" already exists`;
+      setCreateError(dupError);
+      announce(dupError);
       return;
     }
 
@@ -104,6 +118,7 @@ export const TokensPanel: Component = () => {
     store.createToken(name, tokenType, value);
     announce(t("panels:tokens.tokenCreated", { name }));
     setNewTokenName("");
+    setCreateError(null);
   }
 
   function handleSelectToken(name: string): void {
@@ -279,8 +294,24 @@ export const TokensPanel: Component = () => {
                 value={newTokenName()}
                 maxLength={MAX_TOKEN_NAME_LENGTH}
                 placeholder={t("panels:tokens.name")}
-                onInput={(e) => setNewTokenName(e.currentTarget.value)}
+                onInput={(e) => {
+                  setNewTokenName(e.currentTarget.value);
+                  setCreateError(null);
+                }}
+                aria-invalid={createError() !== null}
+                aria-describedby={createError() !== null ? "sigil-create-token-error" : undefined}
               />
+              <Show when={createError()}>
+                {(err) => (
+                  <span
+                    id="sigil-create-token-error"
+                    class="sigil-tokens-panel__create-error"
+                    role="alert"
+                  >
+                    {err()}
+                  </span>
+                )}
+              </Show>
             </label>
             <label class="sigil-tokens-panel__create-label">
               {t("panels:tokens.type")}

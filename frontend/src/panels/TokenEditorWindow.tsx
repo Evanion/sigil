@@ -24,8 +24,14 @@ import { useTransContext } from "@mbarzda/solid-i18next";
 import { Dialog } from "../components/dialog/Dialog";
 import { useDocument } from "../store/document-context";
 import { useAnnounce } from "../shell/AnnounceProvider";
+import { MAX_TOKEN_NAME_LENGTH } from "../store/document-store-solid";
 import { TokenDetailEditor } from "./TokenDetailEditor";
-import { TOKEN_TYPES, TOKEN_TYPE_I18N_KEYS, defaultTokenValue } from "./token-helpers";
+import {
+  TOKEN_TYPES,
+  TOKEN_TYPE_I18N_KEYS,
+  defaultTokenValue,
+  validateTokenName,
+} from "./token-helpers";
 import { buildValuePreview } from "./TokenRow";
 import type { Token, TokenType, TokenValue } from "../types/document";
 import "./TokenEditorWindow.css";
@@ -90,23 +96,69 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
     return store.state.tokens[name] ?? null;
   });
 
+  // ── Create-token inline form state ──────────────────────────────────
+
+  const [showCreateForm, setShowCreateForm] = createSignal(false);
+  const [newTokenName, setNewTokenName] = createSignal("");
+  const [newTokenType, setNewTokenType] = createSignal<TokenType>("color");
+  const [createError, setCreateError] = createSignal<string | null>(null);
+
   // ── Handlers ────────────────────────────────────────────────────────
 
-  function handleNewToken(): void {
-    const existing = Object.keys(store.state.tokens);
-    let index = existing.length + 1;
-    let name = `token-${index}`;
-    // Ensure unique name
-    while (store.state.tokens[name] !== undefined) {
-      index++;
-      name = `token-${index}`;
+  function handleShowCreateForm(): void {
+    setShowCreateForm(true);
+    setNewTokenName("");
+    setNewTokenType("color");
+    setCreateError(null);
+  }
+
+  function handleCancelCreate(): void {
+    setShowCreateForm(false);
+    setNewTokenName("");
+    setCreateError(null);
+  }
+
+  function handleConfirmCreate(): void {
+    const name = newTokenName().trim();
+    if (!name) {
+      setCreateError("Token name must not be empty");
+      announce("Token name must not be empty");
+      return;
     }
 
-    const tokenType: TokenType = "color";
+    const nameError = validateTokenName(name);
+    if (nameError !== null) {
+      setCreateError(nameError);
+      announce(nameError);
+      return;
+    }
+
+    if (store.state.tokens[name] !== undefined) {
+      const dupError = `Token "${name}" already exists`;
+      setCreateError(dupError);
+      announce(dupError);
+      return;
+    }
+
+    const tokenType = newTokenType();
     const value = defaultTokenValue(tokenType);
     store.createToken(name, tokenType, value);
     announce(t("panels:tokens.tokenCreated", { name }));
     setSelectedTokenName(name);
+    setShowCreateForm(false);
+    setNewTokenName("");
+    setCreateError(null);
+  }
+
+  function handleCreateFormKeyDown(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      handleConfirmCreate();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      handleCancelCreate();
+    }
   }
 
   function handleUpdateToken(name: string, value: TokenValue, description?: string): void {
@@ -159,13 +211,71 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
             {(type) => <option value={type}>{t(TOKEN_TYPE_I18N_KEYS[type])}</option>}
           </For>
         </select>
-        <button class="sigil-token-editor-window__new-button" onClick={handleNewToken}>
+        <button class="sigil-token-editor-window__new-button" onClick={handleShowCreateForm}>
           {t("panels:tokens.newToken")}
         </button>
         <button class="sigil-token-editor-window__import-button" disabled>
           {t("panels:tokens.import")}
         </button>
       </div>
+
+      <Show when={showCreateForm()}>
+        <div class="sigil-token-editor-window__create-form" onKeyDown={handleCreateFormKeyDown}>
+          <label class="sigil-token-editor-window__create-label">
+            {t("panels:tokens.name")}
+            <input
+              class="sigil-token-editor-window__create-input"
+              type="text"
+              value={newTokenName()}
+              maxLength={MAX_TOKEN_NAME_LENGTH}
+              placeholder={t("panels:tokens.name")}
+              onInput={(e) => {
+                setNewTokenName(e.currentTarget.value);
+                setCreateError(null);
+              }}
+              aria-invalid={createError() !== null}
+              aria-describedby={
+                createError() !== null ? "sigil-editor-create-token-error" : undefined
+              }
+            />
+          </label>
+          <label class="sigil-token-editor-window__create-label">
+            {t("panels:tokens.type")}
+            <select
+              class="sigil-token-editor-window__create-select"
+              value={newTokenType()}
+              onChange={(e) => setNewTokenType(e.currentTarget.value as TokenType)}
+            >
+              <For each={TOKEN_TYPES}>
+                {(type) => <option value={type}>{t(TOKEN_TYPE_I18N_KEYS[type])}</option>}
+              </For>
+            </select>
+          </label>
+          <Show when={createError()}>
+            {(err) => (
+              <span
+                id="sigil-editor-create-token-error"
+                class="sigil-token-editor-window__create-error"
+                role="alert"
+              >
+                {err()}
+              </span>
+            )}
+          </Show>
+          <div class="sigil-token-editor-window__create-actions">
+            <button
+              class="sigil-token-editor-window__create-confirm"
+              onClick={handleConfirmCreate}
+              disabled={newTokenName().trim().length === 0}
+            >
+              {t("panels:tokens.create")}
+            </button>
+            <button class="sigil-token-editor-window__create-cancel" onClick={handleCancelCreate}>
+              {t("panels:tokens.cancel")}
+            </button>
+          </div>
+        </div>
+      </Show>
 
       <div class="sigil-token-editor-window__content">
         <div class="sigil-token-editor-window__table-container">

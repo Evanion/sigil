@@ -83,6 +83,115 @@
   outline-offset: var(--focus-offset);
 }
 
+/* ── Create-token inline form ─────────────────────────────────────── */
+
+.sigil-token-editor-window__create-form {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--size-2);
+  padding: var(--size-2) var(--size-3);
+  border-bottom: 1px solid var(--border-1);
+  background: var(--surface-3);
+}
+
+.sigil-token-editor-window__create-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+}
+
+.sigil-token-editor-window__create-input {
+  height: var(--input-height);
+  padding: 0 var(--input-padding-x);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  min-width: 180px;
+}
+
+.sigil-token-editor-window__create-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-editor-window__create-select {
+  height: var(--input-height);
+  padding: 0 var(--input-padding-x);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+}
+
+.sigil-token-editor-window__create-select:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-editor-window__create-error {
+  font-size: var(--font-size-00);
+  color: var(--danger);
+  align-self: center;
+}
+
+.sigil-token-editor-window__create-actions {
+  display: flex;
+  gap: var(--size-1);
+}
+
+.sigil-token-editor-window__create-confirm {
+  height: var(--input-height);
+  padding: 0 var(--size-3);
+  border: none;
+  border-radius: var(--button-radius);
+  background: var(--accent);
+  color: var(--text-on-accent);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sigil-token-editor-window__create-confirm:disabled {
+  opacity: var(--opacity-hidden);
+  cursor: not-allowed;
+}
+
+.sigil-token-editor-window__create-confirm:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.sigil-token-editor-window__create-confirm:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-editor-window__create-cancel {
+  height: var(--input-height);
+  padding: 0 var(--size-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sigil-token-editor-window__create-cancel:hover {
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+
+.sigil-token-editor-window__create-cancel:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
 /* ── Content layout ───────────────────────────────────────────────── */
 
 .sigil-token-editor-window__content {

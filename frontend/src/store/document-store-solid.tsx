@@ -1498,13 +1498,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // F-01: Validate name against core's rules
     const nameError = validateTokenName(name);
     if (nameError !== null) {
-      console.error(`createToken: ${nameError}`);
+      announceError(`createToken: ${nameError}`);
       return;
     }
 
     // Validate description length if provided
     if (description !== undefined && description.length > MAX_TOKEN_DESCRIPTION_LENGTH) {
-      console.error(
+      announceError(
         `createToken: description length ${description.length} exceeds max ${MAX_TOKEN_DESCRIPTION_LENGTH}`,
       );
       return;
@@ -1512,7 +1512,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Validate token count limit
     if (Object.keys(state.tokens).length >= MAX_TOKENS_PER_CONTEXT) {
-      console.error(
+      announceError(
         `createToken: document already has ${Object.keys(state.tokens).length} tokens (max ${MAX_TOKENS_PER_CONTEXT})`,
       );
       return;
@@ -1520,7 +1520,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Reject duplicate name
     if (state.tokens[name] !== undefined) {
-      console.error(`createToken: token with name "${name}" already exists`);
+      announceError(`createToken: token with name "${name}" already exists`);
       return;
     }
 
