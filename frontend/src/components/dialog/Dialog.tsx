@@ -35,19 +35,22 @@ export function Dialog(props: DialogProps) {
         <KobalteDialog.Overlay class="sigil-dialog__overlay" />
         <KobalteDialog.Content
           class={className()}
-          onPointerDownOutside={(e: Event) => {
+          onPointerDownOutside={(e: CustomEvent) => {
             // Allow interaction with portaled popovers (color pickers, gradient editors)
-            // that were opened from within this dialog. Kobalte portals these to the
-            // document body, so the Dialog sees them as "outside" interactions.
-            const target = e.target as HTMLElement | null;
-            if (target?.closest(".sigil-popover, .sigil-color-picker-popover")) {
+            // opened from within this dialog. Kobalte portals these to document body,
+            // so the Dialog sees them as "outside". The Kobalte event wraps the original
+            // PointerEvent in e.detail.originalEvent.
+            const original = e.detail?.originalEvent as PointerEvent | undefined;
+            const target = original?.target as HTMLElement | null;
+            if (target?.closest(".sigil-popover, .sigil-color-picker-popover, [data-kobalte-popover-content]")) {
               e.preventDefault();
             }
           }}
-          onFocusOutside={(e: Event) => {
+          onFocusOutside={(e: CustomEvent) => {
             // Same — allow focus to move to portaled popovers from this dialog.
-            const target = (e as FocusEvent).relatedTarget as HTMLElement | null;
-            if (target?.closest(".sigil-popover, .sigil-color-picker-popover")) {
+            const original = e.detail?.originalEvent as FocusEvent | undefined;
+            const target = original?.relatedTarget as HTMLElement | null;
+            if (target?.closest(".sigil-popover, .sigil-color-picker-popover, [data-kobalte-popover-content]")) {
               e.preventDefault();
             }
           }}
