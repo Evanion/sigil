@@ -124,15 +124,13 @@
   margin: 0;
   word-break: break-all;
   cursor: text;
-  padding: var(--size-1) var(--size-2);
   border-radius: var(--radius-1);
-  border: 1px solid transparent;
-  transition: border-color 0.1s, background 0.1s;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.1s;
 }
 
 .sigil-token-detail-pane__name:hover {
-  border-color: var(--border-2);
-  background: var(--surface-3);
+  border-bottom-color: var(--border-2);
 }
 
 .sigil-token-detail-pane__name:focus-visible {
