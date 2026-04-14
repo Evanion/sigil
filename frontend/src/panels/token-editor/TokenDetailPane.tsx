@@ -6,12 +6,13 @@
  * and provides duplicate and delete actions.
  */
 
-import { createMemo, For, Show, splitProps, type Component } from "solid-js";
+import { createMemo, createSignal, For, Show, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenValue } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
-import { TOKEN_TYPE_I18N_KEYS } from "../token-helpers";
+import { TOKEN_TYPE_I18N_KEYS, validateTokenName } from "../token-helpers";
 import { TokenDetailEditor } from "../TokenDetailEditor";
+import { MAX_TOKEN_NAME_LENGTH } from "../../store/document-store-solid";
 import { colorToCss } from "./TokenColorGrid";
 import { shadowToCss } from "./TokenPreviewCard";
 import { extractNumericValue } from "./TokenSpacingList";
@@ -33,6 +34,7 @@ export interface TokenDetailPaneProps {
   readonly token: Token;
   readonly tokens: Record<string, Token>;
   readonly onUpdate: (name: string, value: TokenValue, description?: string) => void;
+  readonly onRename: (oldName: string, newName: string) => void;
   readonly onDelete: (name: string) => void;
   readonly onDuplicate: (name: string) => void;
   readonly onNavigate: (name: string) => void;
@@ -45,12 +47,16 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
     "token",
     "tokens",
     "onUpdate",
+    "onRename",
     "onDelete",
     "onDuplicate",
     "onNavigate",
   ]);
 
   const [t] = useTransContext();
+  const [isRenaming, setIsRenaming] = createSignal(false);
+  const [renameError, setRenameError] = createSignal<string | null>(null);
+  let renameInputRef: HTMLInputElement | undefined;
 
   // ── Derived data ─────────────────────────────────────────────────────
 
@@ -74,6 +80,53 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
     }
     return result.sort();
   });
+
+  // ── Rename ─────────────────────────────────────────────────────────
+
+  function startRename(): void {
+    setIsRenaming(true);
+    setRenameError(null);
+    requestAnimationFrame(() => {
+      renameInputRef?.focus();
+      renameInputRef?.select();
+    });
+  }
+
+  function commitRename(): void {
+    const newName = renameInputRef?.value.trim() ?? "";
+    if (!newName || newName === props.token.name) {
+      setIsRenaming(false);
+      setRenameError(null);
+      return;
+    }
+
+    const nameError = validateTokenName(newName);
+    if (nameError !== null) {
+      setRenameError(nameError);
+      return;
+    }
+
+    if (props.tokens[newName] !== undefined) {
+      setRenameError(`Token "${newName}" already exists`);
+      return;
+    }
+
+    props.onRename(props.token.name, newName);
+    setIsRenaming(false);
+    setRenameError(null);
+  }
+
+  function handleRenameKeyDown(e: KeyboardEvent): void {
+    e.stopPropagation();
+    if (e.key === "Enter") {
+      e.preventDefault();
+      commitRename();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setIsRenaming(false);
+      setRenameError(null);
+    }
+  }
 
   // ── Preview rendering ────────────────────────────────────────────────
 
@@ -175,9 +228,46 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
       role="complementary"
       aria-label={props.token.name}
     >
-      {/* Header */}
+      {/* Header with editable name */}
       <div class="sigil-token-detail-pane__header">
-        <h3 class="sigil-token-detail-pane__name">{props.token.name}</h3>
+        <Show
+          when={!isRenaming()}
+          fallback={
+            <div class="sigil-token-detail-pane__rename-form">
+              <input
+                ref={(el) => { renameInputRef = el; }}
+                class="sigil-token-detail-pane__rename-input"
+                type="text"
+                value={props.token.name}
+                maxLength={MAX_TOKEN_NAME_LENGTH}
+                aria-label={t("panels:tokens.name")}
+                aria-invalid={renameError() !== null}
+                aria-describedby={renameError() !== null ? "sigil-detail-rename-error" : undefined}
+                onBlur={commitRename}
+                onKeyDown={handleRenameKeyDown}
+              />
+              <Show when={renameError()}>
+                {(err) => (
+                  <span
+                    id="sigil-detail-rename-error"
+                    class="sigil-token-detail-pane__rename-error"
+                    role="alert"
+                  >
+                    {err()}
+                  </span>
+                )}
+              </Show>
+            </div>
+          }
+        >
+          <h3
+            class="sigil-token-detail-pane__name"
+            onDblClick={startRename}
+            title={t("panels:tokens.name")}
+          >
+            {props.token.name}
+          </h3>
+        </Show>
         <span class="sigil-token-detail-pane__type-badge">
           {t(TOKEN_TYPE_I18N_KEYS[props.token.token_type])}
         </span>

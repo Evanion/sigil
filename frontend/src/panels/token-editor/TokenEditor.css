@@ -123,6 +123,35 @@
   color: var(--text-1);
   margin: 0;
   word-break: break-all;
+  cursor: text;
+}
+
+.sigil-token-detail-pane__rename-form {
+  width: 100%;
+}
+
+.sigil-token-detail-pane__rename-input {
+  width: 100%;
+  background: var(--surface-3);
+  border: 1px solid var(--brand);
+  color: var(--text-1);
+  padding: var(--size-1) var(--size-2);
+  border-radius: var(--radius-1);
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  box-sizing: border-box;
+}
+
+.sigil-token-detail-pane__rename-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.sigil-token-detail-pane__rename-error {
+  display: block;
+  color: var(--error);
+  font-size: var(--font-size-00);
+  margin-top: var(--size-1);
 }
 
 .sigil-token-detail-pane__type-badge {

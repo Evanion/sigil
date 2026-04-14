@@ -74,6 +74,17 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
     store.updateToken(name, value, description);
   }
 
+  function handleRenameToken(oldName: string, newName: string): void {
+    const token = store.state.tokens[oldName];
+    if (!token) return;
+
+    // Atomic rename: create new + delete old
+    store.createToken(newName, token.token_type, token.value, token.description ?? undefined);
+    store.deleteToken(oldName);
+    announce(t("panels:tokens.tokenUpdated", { name: newName }));
+    setSelectedTokenName(newName);
+  }
+
   function handleDeleteToken(name: string): void {
     store.deleteToken(name);
     announce(t("panels:tokens.tokenDeleted", { name }));
@@ -182,6 +193,7 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
                 token={tok()}
                 tokens={store.state.tokens}
                 onUpdate={handleUpdateToken}
+                onRename={handleRenameToken}
                 onDelete={handleDeleteToken}
                 onDuplicate={handleDuplicateToken}
                 onNavigate={handleNavigateToToken}
