@@ -52,6 +52,7 @@ pub use tokens::{
 
 // ── Re-exports: Expression AST ────────────────────────────────────────
 pub use tokens::errors::ExprError;
+pub use tokens::evaluator::{EvalValue, evaluate};
 pub use tokens::expression::{BinaryOperator, ExprLiteral, TokenExpression};
 
 // ── Re-exports: Arena ──────────────────────────────────────────────────
