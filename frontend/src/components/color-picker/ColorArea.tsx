@@ -95,6 +95,8 @@ export function ColorArea(props: ColorAreaProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) return;
+    // Prevent default to stop the dialog/browser from interfering with the drag
+    e.preventDefault();
     if (e.currentTarget instanceof Element) {
       e.currentTarget.setPointerCapture(e.pointerId);
     }

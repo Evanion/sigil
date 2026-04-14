@@ -89,6 +89,7 @@ export function HueStrip(props: HueStripProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX)) return;
+    e.preventDefault();
     if (e.currentTarget instanceof Element) {
       e.currentTarget.setPointerCapture(e.pointerId);
     }
