@@ -9,6 +9,7 @@ import { createMemo, Index, Show, splitProps, type Component } from "solid-js";
 import type { Token, Color } from "../../types/document";
 import { buildValuePreview } from "../TokenRow";
 import { colorToCss } from "./TokenColorGrid";
+import { shortName } from "./token-grouping";
 import "./TokenPreviewCard.css";
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -39,14 +40,6 @@ export function shadowToCss(token: Token): string | null {
   const c = colorToCss(color as Color);
 
   return `${x}px ${y}px ${b}px ${s}px ${c}`;
-}
-
-/**
- * Extract the short name from a dotted token name.
- */
-function shortName(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  return lastDot >= 0 ? name.substring(lastDot + 1) : name;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────

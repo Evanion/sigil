@@ -8,6 +8,7 @@
 import { createMemo, Index, splitProps, type Component } from "solid-js";
 import type { Token } from "../../types/document";
 import { buildValuePreview } from "../TokenRow";
+import { shortName } from "./token-grouping";
 import "./TokenSpacingList.css";
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -43,14 +44,6 @@ export function extractNumericValue(token: Token): number {
     default:
       return 0;
   }
-}
-
-/**
- * Extract the short name from a dotted token name.
- */
-function shortName(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  return lastDot >= 0 ? name.substring(lastDot + 1) : name;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────

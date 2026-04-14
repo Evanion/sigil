@@ -8,6 +8,7 @@
 import { createMemo, Index, splitProps, type Component } from "solid-js";
 import type { Token, Color } from "../../types/document";
 import { buildValuePreview } from "../TokenRow";
+import { shortName } from "./token-grouping";
 import "./TokenColorGrid.css";
 
 // ── Props ──────────────────────────────────────────────────────────────────
@@ -35,15 +36,6 @@ export function colorToCss(color: Color): string {
   const b = Number.isFinite(color.b) ? Math.round(Math.max(0, Math.min(1, color.b)) * 255) : 0;
   const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
   return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
-
-/**
- * Extract the short name from a dotted token name.
- * e.g. "brand.primary" -> "primary", "red" -> "red"
- */
-function shortName(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  return lastDot >= 0 ? name.substring(lastDot + 1) : name;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────

@@ -173,7 +173,7 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
             when={selectedToken()}
             fallback={
               <div class="sigil-token-editor__no-selection">
-                {t("panels:tokens.noTokens")}
+                {t("panels:tokens.noSelection")}
               </div>
             }
           >

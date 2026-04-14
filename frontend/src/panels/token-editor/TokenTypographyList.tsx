@@ -8,6 +8,7 @@
 import { createMemo, Index, splitProps, Show, type Component } from "solid-js";
 import type { Token } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
+import { shortName } from "./token-grouping";
 import "./TokenTypographyList.css";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -24,16 +25,6 @@ export interface TokenTypographyListProps {
   readonly tokens: Record<string, Token>;
   readonly selectedToken: string | null;
   readonly onSelect: (name: string) => void;
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Extract the short name from a dotted token name.
- */
-function shortName(name: string): string {
-  const lastDot = name.lastIndexOf(".");
-  return lastDot >= 0 ? name.substring(lastDot + 1) : name;
 }
 
 // ── Component ──────────────────────────────────────────────────────────────

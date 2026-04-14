@@ -61,6 +61,15 @@ export function groupTokensByHierarchy(
 }
 
 /**
+ * Extract the short name from a dotted token name.
+ * e.g. "brand.primary" -> "primary", "red" -> "red"
+ */
+export function shortName(fullName: string): string {
+  const lastDot = fullName.lastIndexOf(".");
+  return lastDot >= 0 ? fullName.substring(lastDot + 1) : fullName;
+}
+
+/**
  * Count tokens grouped by their `token_type`.
  * Returns a Map from TokenType to count.
  */
