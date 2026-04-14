@@ -551,8 +551,6 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
       role="form"
       aria-label={t("panels:tokens.editTokenForm", { name: props.token.name })}
     >
-      <h4 class="sigil-token-detail__name">{props.token.name}</h4>
-
       {/* Color editor is rendered via Show to preserve DOM across reactive
           updates — an imperative renderColorEditor() call would re-create the
           ColorPicker on every store update, losing pointer capture during drag.
