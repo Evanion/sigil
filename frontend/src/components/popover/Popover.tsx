@@ -193,7 +193,10 @@ export function Popover(props: PopoverProps) {
           "position-try-fallbacks": placementToTryFallbacks(placement()),
         }}
       >
-        <div class="sigil-popover__arrow" />
+        <div
+          class="sigil-popover__arrow"
+          style={{ "position-anchor": anchorName }}
+        />
         <Show when={isOpen()}>{local.children}</Show>
       </div>
     </>

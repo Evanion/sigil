@@ -62,37 +62,44 @@
   z-index: 1;
 }
 
-/* Bottom placement: arrow at top center, pointing up */
+/* Arrow positioning uses CSS anchor() to align with the trigger center.
+   The arrow inherits position-anchor from inline style set by the component. */
+
+/* Bottom placement: arrow at top edge, horizontally aligned to anchor center */
 .sigil-popover--bottom .sigil-popover__arrow {
   top: -7px;
-  left: calc(50% - 6px);
+  left: anchor(center);
+  translate: -50% 0;
   transform: rotate(45deg);
   border-bottom-color: transparent;
   border-right-color: transparent;
 }
 
-/* Top placement: arrow at bottom center, pointing down */
+/* Top placement: arrow at bottom edge */
 .sigil-popover--top .sigil-popover__arrow {
   bottom: -7px;
-  left: calc(50% - 6px);
+  left: anchor(center);
+  translate: -50% 0;
   transform: rotate(45deg);
   border-top-color: transparent;
   border-left-color: transparent;
 }
 
-/* Left placement: arrow at right center, pointing right */
+/* Left placement: arrow at right edge, vertically aligned to anchor center */
 .sigil-popover--left .sigil-popover__arrow {
   right: -7px;
-  top: calc(50% - 6px);
+  top: anchor(center);
+  translate: 0 -50%;
   transform: rotate(45deg);
   border-left-color: transparent;
   border-bottom-color: transparent;
 }
 
-/* Right placement: arrow at left center, pointing left */
+/* Right placement: arrow at left edge */
 .sigil-popover--right .sigil-popover__arrow {
   left: -7px;
-  top: calc(50% - 6px);
+  top: anchor(center);
+  translate: 0 -50%;
   transform: rotate(45deg);
   border-top-color: transparent;
   border-right-color: transparent;
