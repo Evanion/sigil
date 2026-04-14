@@ -553,7 +553,25 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     >
       <h4 class="sigil-token-detail__name">{props.token.name}</h4>
 
-      {renderValueEditor()}
+      {/* Color editor is rendered via Show to preserve DOM across reactive
+          updates — an imperative renderColorEditor() call would re-create the
+          ColorPicker on every store update, losing pointer capture during drag.
+          Other types use the imperative renderValueEditor() since they don't
+          have continuous drag interactions. */}
+      <Show when={props.token.value.type === "color" ? props.token.value : null}>
+        {(colorVal) => (
+          <div class="sigil-token-detail__field">
+            <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
+            <ColorPicker
+              color={colorVal().value}
+              onColorChange={(c) => updateValue({ type: "color", value: c })}
+            />
+          </div>
+        )}
+      </Show>
+      <Show when={props.token.value.type !== "color"}>
+        {renderValueEditor()}
+      </Show>
 
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.description")}</label>

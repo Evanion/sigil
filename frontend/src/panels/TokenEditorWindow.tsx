@@ -175,11 +175,6 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
     setSelectedTokenName(name);
   }
 
-  function handleOpenChange(open: boolean): void {
-    if (!open) {
-      props.onClose();
-    }
-  }
 
   // ── Render ──────────────────────────────────────────────────────────
 
