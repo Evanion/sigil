@@ -18,26 +18,75 @@
   outline-offset: 2px;
 }
 
-/* Native popover — uses browser's top layer, no z-index conflicts */
+/* Native popover with CSS Anchor Positioning.
+   position-anchor, position-area, and position-try-fallbacks are set
+   inline by the component for dynamic anchor names and placement. */
 .sigil-popover {
+  position: fixed;
   background: var(--surface-3);
   color: var(--text-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-3);
   padding: var(--size-3);
-  /* Reset default popover margin/inset */
+  /* Reset default popover margin/inset so anchor positioning works */
   margin: 0;
   inset: unset;
   animation: sigil-popover-fade-in 150ms ease-out;
 }
 
-/* Override browser default popover backdrop (usually transparent) */
+/* Override browser default popover backdrop */
 .sigil-popover::backdrop {
   background: transparent;
 }
 
-/* Reduced motion */
+/* ── Arrow ─────────────────────────────────────────────────────────── */
+
+.sigil-popover__arrow {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  transform: rotate(45deg);
+  /* Hide the border sides that overlap with the popover body */
+  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+}
+
+/* Arrow positioning for each placement direction */
+.sigil-popover--bottom .sigil-popover__arrow {
+  top: -6px;
+  left: 50%;
+  margin-left: -5px;
+  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+}
+
+.sigil-popover--top .sigil-popover__arrow {
+  bottom: -6px;
+  left: 50%;
+  margin-left: -5px;
+  transform: rotate(225deg);
+  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+}
+
+.sigil-popover--left .sigil-popover__arrow {
+  right: -6px;
+  top: 50%;
+  margin-top: -5px;
+  transform: rotate(135deg);
+  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+}
+
+.sigil-popover--right .sigil-popover__arrow {
+  left: -6px;
+  top: 50%;
+  margin-top: -5px;
+  transform: rotate(-45deg);
+  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
   .sigil-popover {
     animation: none;

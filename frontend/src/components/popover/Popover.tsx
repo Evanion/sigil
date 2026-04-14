@@ -1,29 +1,14 @@
 /**
- * Popover — native HTML popover implementation.
+ * Popover — native HTML popover with CSS Anchor Positioning.
  *
- * Uses the HTML `popover` attribute for top-layer rendering, which avoids
- * the JavaScript-based layer stack issues (e.g., body.style.pointerEvents = "none")
- * that break popovers inside modal dialogs.
+ * Uses the HTML `popover` attribute for top-layer rendering and
+ * CSS Anchor Positioning (`anchor-name`, `position-anchor`, `position-area`,
+ * `position-try-fallbacks`) for viewport-aware positioning.
  *
- * - `popover="auto"` (default): light dismiss (click outside closes), Escape closes
- * - `popover="manual"` (modal=true): no light dismiss, must be closed programmatically
+ * - `popover="auto"` (default): light dismiss (click outside closes)
+ * - `popover="manual"` (modal=true): no light dismiss, close via Escape or programmatically
  *
- * Children are lazily rendered (only mounted when the popover is open) to match
- * Kobalte's Portal behavior and avoid duplicate DOM elements from color pickers
- * and other interactive content.
- *
- * Positioning is computed manually since CSS Anchor Positioning is not yet
- * fully supported across browsers.
- *
- * A11y audit (replacing Kobalte Popover):
- * - Trigger: preserved as <button> with aria-label
- * - Focus trap: not provided by native popover; modal=true consumers (ColorSwatch,
- *   GradientEditorPopover) handle focus internally via their interactive controls
- * - Escape to close: preserved via native popover behavior (auto mode) and
- *   manual keydown handler (manual mode)
- * - Light dismiss: preserved via native popover="auto"
- * - aria-expanded: added on trigger button
- * - :focus-visible: preserved in CSS
+ * The arrow is a CSS pseudo-element (::before) that points toward the trigger.
  */
 import {
   type JSX,
@@ -49,63 +34,41 @@ export interface PopoverProps {
   class?: string;
   /**
    * When true, the popover uses popover="manual" — no light dismiss.
-   * The popover must be closed programmatically or via Escape.
-   * Use for color pickers and gradient editors where continuous interaction
-   * is needed without accidental dismissal.
+   * Must be closed programmatically or via Escape.
    */
   modal?: boolean;
   /** Accessible label for the trigger button. */
   triggerAriaLabel?: string;
-  /** Controlled open state. When provided, the popover is controlled externally. */
+  /** Controlled open state. */
   open?: boolean;
-  /** Called when the popover's open state changes (controlled mode). */
+  /** Called when the popover's open state changes. */
   onOpenChange?: (open: boolean) => void;
 }
 
-const POPOVER_GAP = 8;
-
-/**
- * Compute fixed position for the popover relative to the trigger.
- *
- * All numeric values are guarded with Number.isFinite() per CLAUDE.md.
- */
-function positionPopover(
-  popoverEl: HTMLElement,
-  triggerEl: HTMLElement,
-  placement: PopoverPlacement,
-): void {
-  const triggerRect = triggerEl.getBoundingClientRect();
-  const popoverRect = popoverEl.getBoundingClientRect();
-
-  let top = 0;
-  let left = 0;
-
+/** Map placement prop to CSS position-area value. */
+function placementToPositionArea(placement: PopoverPlacement): string {
   switch (placement) {
     case "bottom":
-      top = triggerRect.bottom + POPOVER_GAP;
-      left = triggerRect.left + triggerRect.width / 2 - popoverRect.width / 2;
-      break;
+      return "bottom";
     case "top":
-      top = triggerRect.top - popoverRect.height - POPOVER_GAP;
-      left = triggerRect.left + triggerRect.width / 2 - popoverRect.width / 2;
-      break;
+      return "top";
     case "left":
-      top = triggerRect.top + triggerRect.height / 2 - popoverRect.height / 2;
-      left = triggerRect.left - popoverRect.width - POPOVER_GAP;
-      break;
+      return "left";
     case "right":
-      top = triggerRect.top + triggerRect.height / 2 - popoverRect.height / 2;
-      left = triggerRect.right + POPOVER_GAP;
-      break;
+      return "right";
   }
+}
 
-  // Guard against NaN/Infinity (CLAUDE.md §11 floating-point validation)
-  if (!Number.isFinite(top)) top = 0;
-  if (!Number.isFinite(left)) left = 0;
-
-  popoverEl.style.position = "fixed";
-  popoverEl.style.top = `${top}px`;
-  popoverEl.style.left = `${left}px`;
+/** Map placement to position-try-fallbacks for viewport flipping. */
+function placementToTryFallbacks(placement: PopoverPlacement): string {
+  switch (placement) {
+    case "bottom":
+    case "top":
+      return "flip-block";
+    case "left":
+    case "right":
+      return "flip-inline";
+  }
 }
 
 export function Popover(props: PopoverProps) {
@@ -120,14 +83,10 @@ export function Popover(props: PopoverProps) {
     "onOpenChange",
   ]);
 
+  const anchorName = `--sigil-popover-anchor-${createUniqueId()}`;
   const popoverId = `sigil-popover-${createUniqueId()}`;
-  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
-  let triggerRef: HTMLButtonElement | undefined;
-  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
   let popoverRef: HTMLDivElement | undefined;
 
-  // Internal open state — tracks whether the popover is currently open.
-  // Used for lazy rendering of children (Show) and aria-expanded.
   const [isOpen, setIsOpen] = createSignal(local.open ?? false);
 
   const className = () => {
@@ -136,7 +95,9 @@ export function Popover(props: PopoverProps) {
     return classes.join(" ");
   };
 
-  // For manual mode: close on Escape key
+  const placement = () => local.placement ?? "bottom";
+
+  // For manual mode: close on Escape
   function handlePopoverKeyDown(e: KeyboardEvent): void {
     if (e.key === "Escape" && local.modal) {
       e.preventDefault();
@@ -150,7 +111,7 @@ export function Popover(props: PopoverProps) {
     try {
       popoverRef.showPopover();
     } catch {
-      // Already showing or element removed — ignore
+      // Already showing or element removed
     }
   }
 
@@ -159,32 +120,17 @@ export function Popover(props: PopoverProps) {
     try {
       popoverRef.hidePopover();
     } catch {
-      // Already hidden or element removed — ignore
+      // Already hidden or element removed
     }
   }
 
-  // Handle the native toggle event to sync controlled state
   function handleToggle(e: Event): void {
     const toggleEvent = e as ToggleEvent;
     const newOpen = toggleEvent.newState === "open";
-
     setIsOpen(newOpen);
-
-    if (newOpen && popoverRef && triggerRef) {
-      // Position after the content is rendered; use rAF so the popover
-      // dimensions are available after the Show renders children.
-      requestAnimationFrame(() => {
-        if (popoverRef && triggerRef) {
-          positionPopover(popoverRef, triggerRef, local.placement ?? "bottom");
-        }
-      });
-    }
-
     local.onOpenChange?.(newOpen);
   }
 
-  // For manual mode: handle trigger click manually since popovertarget
-  // only works for auto popovers
   function handleTriggerClick(): void {
     if (local.modal) {
       if (!popoverRef) return;
@@ -195,18 +141,15 @@ export function Popover(props: PopoverProps) {
           showPopover();
         }
       } catch {
-        // :popover-open not supported — try toggling
         showPopover();
       }
     }
-    // For auto mode, popovertarget handles it
   }
 
-  // Controlled mode: sync open prop with popover state
+  // Controlled mode
   createEffect(() => {
     const shouldBeOpen = local.open;
     if (shouldBeOpen === undefined || !popoverRef) return;
-
     if (shouldBeOpen) {
       showPopover();
     } else {
@@ -214,7 +157,6 @@ export function Popover(props: PopoverProps) {
     }
   });
 
-  // Cleanup: ensure popover is closed on unmount
   onCleanup(() => {
     hidePopover();
   });
@@ -222,13 +164,13 @@ export function Popover(props: PopoverProps) {
   return (
     <>
       <button
-        ref={triggerRef}
         class="sigil-popover-trigger"
         aria-label={local.triggerAriaLabel}
         aria-expanded={isOpen()}
         aria-controls={popoverId}
         popovertarget={local.modal ? undefined : popoverId}
         onClick={handleTriggerClick}
+        style={{ "anchor-name": anchorName }}
       >
         {local.trigger}
       </button>
@@ -237,9 +179,21 @@ export function Popover(props: PopoverProps) {
         id={popoverId}
         popover={local.modal ? "manual" : "auto"}
         class={className()}
+        classList={{
+          "sigil-popover--top": placement() === "top",
+          "sigil-popover--bottom": placement() === "bottom",
+          "sigil-popover--left": placement() === "left",
+          "sigil-popover--right": placement() === "right",
+        }}
         onKeyDown={handlePopoverKeyDown}
         onToggle={handleToggle}
+        style={{
+          "position-anchor": anchorName,
+          "position-area": placementToPositionArea(placement()),
+          "position-try-fallbacks": placementToTryFallbacks(placement()),
+        }}
       >
+        <div class="sigil-popover__arrow" />
         <Show when={isOpen()}>{local.children}</Show>
       </div>
     </>
