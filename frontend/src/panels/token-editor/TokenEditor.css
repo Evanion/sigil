@@ -124,6 +124,26 @@
   margin: 0;
   word-break: break-all;
   cursor: text;
+  padding: var(--size-1) var(--size-2);
+  border-radius: var(--radius-1);
+  border: 1px solid transparent;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.sigil-token-detail-pane__name:hover {
+  border-color: var(--border-2);
+  background: var(--surface-3);
+}
+
+.sigil-token-detail-pane__name:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-detail-pane__name {
+    transition: none;
+  }
 }
 
 .sigil-token-detail-pane__rename-form {

@@ -262,8 +262,16 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
         >
           <h3
             class="sigil-token-detail-pane__name"
-            onDblClick={startRename}
-            title={t("panels:tokens.name")}
+            tabindex={0}
+            role="button"
+            onClick={startRename}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                startRename();
+              }
+            }}
+            title="Click to rename"
           >
             {props.token.name}
           </h3>
