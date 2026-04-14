@@ -165,7 +165,6 @@
     "duplicate": "Duplicar",
     "noSelection": "Selecciona un token para editar",
     "tokenCount": "{{count}} tokens",
-    "ungrouped": "Sin grupo",
-    "import": "Importar"
+    "ungrouped": "Sin grupo"
   }
 }

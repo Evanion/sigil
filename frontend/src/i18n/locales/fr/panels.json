@@ -165,7 +165,6 @@
     "duplicate": "Dupliquer",
     "noSelection": "Selectionnez un jeton pour le modifier",
     "tokenCount": "{{count}} jetons",
-    "ungrouped": "Non groupe",
-    "import": "Importer"
+    "ungrouped": "Non groupe"
   }
 }
