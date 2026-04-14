@@ -8,7 +8,7 @@
 import { Show, For, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../components/number-input/NumberInput";
-import { ColorSwatch } from "../components/color-picker/ColorSwatch";
+import { ColorPicker } from "../components/color-picker/ColorPicker";
 import { Select, type SelectOption } from "../components/select/Select";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
@@ -126,11 +126,9 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     return (
       <div class="sigil-token-detail__field">
         <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
-        <ColorSwatch
+        <ColorPicker
           color={color}
           onColorChange={(c) => updateValue({ type: "color", value: c })}
-          placement="bottom"
-          aria-label={t("panels:tokens.typeColor")}
         />
       </div>
     );
@@ -305,7 +303,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
           <div class="sigil-token-detail__shadow-grid">
             <div class="sigil-token-detail__field">
               <span class="sigil-token-detail__field-label">{t("panels:tokens.typeColor")}</span>
-              <ColorSwatch
+              <ColorPicker
                 color={shadow().color}
                 onColorChange={(c) =>
                   updateValue({
@@ -313,8 +311,6 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
                     value: { ...shadow(), color: c },
                   })
                 }
-                placement="bottom"
-                aria-label={t("panels:tokens.typeColor")}
               />
             </div>
             <NumberInput
