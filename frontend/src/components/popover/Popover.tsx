@@ -124,10 +124,43 @@ export function Popover(props: PopoverProps) {
     }
   }
 
+  /** Position the arrow to point at the trigger's center along the popover edge. */
+  function positionArrow(): void {
+    if (!popoverRef || !triggerRef) return;
+    const arrow = popoverRef.querySelector(".sigil-popover__arrow") as HTMLElement | null;
+    if (!arrow) return;
+
+    const triggerRect = triggerRef.getBoundingClientRect();
+    const popoverRect = popoverRef.getBoundingClientRect();
+    const p = placement();
+
+    if (p === "top" || p === "bottom") {
+      // Arrow on top/bottom edge — position horizontally at trigger center
+      const triggerCenterX = triggerRect.left + triggerRect.width / 2;
+      const arrowLeft = triggerCenterX - popoverRect.left - 6; // 6 = half arrow size
+      arrow.style.left = `${Math.max(8, Math.min(popoverRect.width - 20, arrowLeft))}px`;
+      arrow.style.top = "";
+      arrow.style.right = "";
+      arrow.style.bottom = "";
+    } else {
+      // Arrow on left/right edge — position vertically at trigger center
+      const triggerCenterY = triggerRect.top + triggerRect.height / 2;
+      const arrowTop = triggerCenterY - popoverRect.top - 6;
+      arrow.style.top = `${Math.max(8, Math.min(popoverRect.height - 20, arrowTop))}px`;
+      arrow.style.left = "";
+      arrow.style.right = "";
+      arrow.style.bottom = "";
+    }
+  }
+
   function handleToggle(e: Event): void {
     const toggleEvent = e as ToggleEvent;
     const newOpen = toggleEvent.newState === "open";
     setIsOpen(newOpen);
+    if (newOpen) {
+      // Position arrow after the popover is positioned by CSS anchor
+      requestAnimationFrame(positionArrow);
+    }
     local.onOpenChange?.(newOpen);
   }
 
@@ -193,10 +226,7 @@ export function Popover(props: PopoverProps) {
           "position-try-fallbacks": placementToTryFallbacks(placement()),
         }}
       >
-        <div
-          class="sigil-popover__arrow"
-          style={{ "position-anchor": anchorName }}
-        />
+        <div class="sigil-popover__arrow" />
         <Show when={isOpen()}>{local.children}</Show>
       </div>
     </>

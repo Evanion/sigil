@@ -62,44 +62,37 @@
   z-index: 1;
 }
 
-/* Arrow positioning uses CSS anchor() to align with the trigger center.
-   The arrow inherits position-anchor from inline style set by the component. */
+/* Arrow edge positioning. The cross-axis position (left for top/bottom,
+   top for left/right) is set by JavaScript in positionArrow() after the
+   popover opens, aligning the arrow with the trigger element's center. */
 
-/* Bottom placement: arrow at top edge, horizontally aligned to anchor center */
+/* Bottom placement: arrow at top edge, pointing up */
 .sigil-popover--bottom .sigil-popover__arrow {
   top: -7px;
-  left: anchor(center);
-  translate: -50% 0;
   transform: rotate(45deg);
   border-bottom-color: transparent;
   border-right-color: transparent;
 }
 
-/* Top placement: arrow at bottom edge */
+/* Top placement: arrow at bottom edge, pointing down */
 .sigil-popover--top .sigil-popover__arrow {
   bottom: -7px;
-  left: anchor(center);
-  translate: -50% 0;
   transform: rotate(45deg);
   border-top-color: transparent;
   border-left-color: transparent;
 }
 
-/* Left placement: arrow at right edge, vertically aligned to anchor center */
+/* Left placement: arrow at right edge, pointing right */
 .sigil-popover--left .sigil-popover__arrow {
   right: -7px;
-  top: anchor(center);
-  translate: 0 -50%;
   transform: rotate(45deg);
   border-left-color: transparent;
   border-bottom-color: transparent;
 }
 
-/* Right placement: arrow at left edge */
+/* Right placement: arrow at left edge, pointing left */
 .sigil-popover--right .sigil-popover__arrow {
   left: -7px;
-  top: anchor(center);
-  translate: 0 -50%;
   transform: rotate(45deg);
   border-top-color: transparent;
   border-right-color: transparent;
