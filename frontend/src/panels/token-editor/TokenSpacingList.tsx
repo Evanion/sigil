@@ -67,7 +67,11 @@ export const TokenSpacingList: Component<TokenSpacingListProps> = (rawProps) => 
   });
 
   return (
-    <div class="sigil-token-spacing-list" role="listbox" aria-label={t("panels:tokens.typeDimension")}>
+    <div
+      class="sigil-token-spacing-list"
+      role="listbox"
+      aria-label={t("panels:tokens.typeDimension")}
+    >
       <Index each={props.tokenNames}>
         {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
@@ -109,10 +113,7 @@ export const TokenSpacingList: Component<TokenSpacingListProps> = (rawProps) => 
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >
-              <div
-                class="sigil-token-spacing-list__bar"
-                style={{ width: `${barPercent()}%` }}
-              />
+              <div class="sigil-token-spacing-list__bar" style={{ width: `${barPercent()}%` }} />
               <span class="sigil-token-spacing-list__name">{shortName(name())}</span>
               <span class="sigil-token-spacing-list__value">{valueText()}</span>
             </div>

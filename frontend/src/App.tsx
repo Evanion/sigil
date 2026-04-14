@@ -74,10 +74,7 @@ const AppShell: Component = () => {
                 {announcement()}
               </div>
             </div>
-            <TokenEditor
-              isOpen={tokenEditorOpen()}
-              onClose={() => setTokenEditorOpen(false)}
-            />
+            <TokenEditor isOpen={tokenEditorOpen()} onClose={() => setTokenEditorOpen(false)} />
           </DragDropProvider>
         </TokenEditorProvider>
       </AnnounceProvider>

@@ -1575,7 +1575,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           // F-05: Announce error to screen reader
           announceError(`Failed to create token "${name}": ${r.error.message}`);
           // Surgical rollback: remove only the optimistically-added key
-          setState(produce((s) => { Reflect.deleteProperty(s.tokens, name); }));
+          setState(
+            produce((s) => {
+              Reflect.deleteProperty(s.tokens, name);
+            }),
+          );
         }
       })
       .catch((err: unknown) => {
@@ -1583,7 +1587,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         // F-05: Announce error
         announceError(`Failed to create token "${name}"`);
         // Surgical rollback: remove only the optimistically-added key
-        setState(produce((s) => { Reflect.deleteProperty(s.tokens, name); }));
+        setState(
+          produce((s) => {
+            Reflect.deleteProperty(s.tokens, name);
+          }),
+        );
       });
   }
 
@@ -1668,7 +1676,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           // F-05: Announce error
           announceError(`Failed to update token "${name}": ${r.error.message}`);
           // Surgical rollback: restore only the single token
-          setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
+          setState(
+            produce((s) => {
+              s.tokens[name] = tokenSnapshot;
+            }),
+          );
         }
       })
       .catch((err: unknown) => {
@@ -1676,7 +1688,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         // F-05: Announce error
         announceError(`Failed to update token "${name}"`);
         // Surgical rollback: restore only the single token
-        setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
+        setState(
+          produce((s) => {
+            s.tokens[name] = tokenSnapshot;
+          }),
+        );
       });
   }
 
@@ -1730,7 +1746,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           // F-05: Announce error
           announceError(`Failed to delete token "${name}": ${r.error.message}`);
           // Surgical rollback: re-insert only the deleted token
-          setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
+          setState(
+            produce((s) => {
+              s.tokens[name] = tokenSnapshot;
+            }),
+          );
         }
       })
       .catch((err: unknown) => {
@@ -1738,7 +1758,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         // F-05: Announce error
         announceError(`Failed to delete token "${name}"`);
         // Surgical rollback: re-insert only the deleted token
-        setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
+        setState(
+          produce((s) => {
+            s.tokens[name] = tokenSnapshot;
+          }),
+        );
       });
   }
 

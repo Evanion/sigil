@@ -567,9 +567,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
           </div>
         )}
       </Show>
-      <Show when={props.token.value.type !== "color"}>
-        {renderValueEditor()}
-      </Show>
+      <Show when={props.token.value.type !== "color"}>{renderValueEditor()}</Show>
 
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.description")}</label>

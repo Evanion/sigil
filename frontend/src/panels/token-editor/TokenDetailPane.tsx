@@ -10,7 +10,12 @@ import { createMemo, createSignal, For, Show, splitProps, type Component } from 
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenValue } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
-import { TOKEN_TYPE_I18N_KEYS, validateTokenName, sanitizeTokenName, colorToCss } from "../token-helpers";
+import {
+  TOKEN_TYPE_I18N_KEYS,
+  validateTokenName,
+  sanitizeTokenName,
+  colorToCss,
+} from "../token-helpers";
 import { TokenDetailEditor } from "../TokenDetailEditor";
 import { MAX_TOKEN_NAME_LENGTH } from "../../store/document-store-solid";
 import { shadowToCss } from "./TokenPreviewCard";
@@ -183,9 +188,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
           ? Math.min(v.font_size, MAX_TYPO_PREVIEW_SIZE)
           : 16;
         const fontWeight = Number.isFinite(v.font_weight) ? v.font_weight : 400;
-        const fontFamily = validateCssIdentifier(v.font_family)
-          ? v.font_family
-          : "sans-serif";
+        const fontFamily = validateCssIdentifier(v.font_family) ? v.font_family : "sans-serif";
         return (
           <div class="sigil-token-detail-pane__preview sigil-token-detail-pane__preview--typo">
             <span
@@ -206,10 +209,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
         if (!css) return null;
         return (
           <div class="sigil-token-detail-pane__preview sigil-token-detail-pane__preview--shadow">
-            <div
-              class="sigil-token-detail-pane__shadow-box"
-              style={{ "box-shadow": css }}
-            />
+            <div class="sigil-token-detail-pane__shadow-box" style={{ "box-shadow": css }} />
           </div>
         );
       }
@@ -230,11 +230,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
   // ── Render ───────────────────────────────────────────────────────────
 
   return (
-    <div
-      class="sigil-token-detail-pane"
-      role="complementary"
-      aria-label={props.token.name}
-    >
+    <div class="sigil-token-detail-pane" role="complementary" aria-label={props.token.name}>
       {/* Header with editable name */}
       <div class="sigil-token-detail-pane__header">
         <Show
@@ -242,7 +238,9 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
           fallback={
             <div class="sigil-token-detail-pane__rename-form">
               <input
-                ref={(el) => { renameInputRef = el; }}
+                ref={(el) => {
+                  renameInputRef = el;
+                }}
                 class="sigil-token-detail-pane__rename-input"
                 type="text"
                 value={props.token.name}
@@ -293,17 +291,12 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
       {renderPreview()}
 
       {/* Value editor */}
-      <TokenDetailEditor
-        token={props.token}
-        onUpdate={props.onUpdate}
-      />
+      <TokenDetailEditor token={props.token} onUpdate={props.onUpdate} />
 
       {/* Depends on section */}
       <Show when={dependsOn().length > 0}>
         <div class="sigil-token-detail-pane__refs">
-          <span class="sigil-token-detail-pane__refs-label">
-            {t("panels:tokens.dependsOn")}
-          </span>
+          <span class="sigil-token-detail-pane__refs-label">{t("panels:tokens.dependsOn")}</span>
           <For each={dependsOn()}>
             {(refName) => (
               <button
@@ -321,9 +314,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
       {/* Referenced by section */}
       <Show when={referencedBy().length > 0}>
         <div class="sigil-token-detail-pane__refs">
-          <span class="sigil-token-detail-pane__refs-label">
-            {t("panels:tokens.referencedBy")}
-          </span>
+          <span class="sigil-token-detail-pane__refs-label">{t("panels:tokens.referencedBy")}</span>
           <For each={referencedBy()}>
             {(refName) => (
               <button

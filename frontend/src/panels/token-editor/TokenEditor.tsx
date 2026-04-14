@@ -8,23 +8,13 @@
  * Replaces the legacy TokenEditorWindow with a richer visual layout.
  */
 
-import {
-  createSignal,
-  createMemo,
-  createEffect,
-  Show,
-  splitProps,
-  type Component,
-} from "solid-js";
+import { createSignal, createMemo, createEffect, Show, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { Dialog } from "../../components/dialog/Dialog";
 import { useDocument } from "../../store/document-context";
 import { useAnnounce } from "../../shell/AnnounceProvider";
 import type { Token, TokenType, TokenValue } from "../../types/document";
-import {
-  defaultTokenValue,
-  validateTokenName,
-} from "../token-helpers";
+import { defaultTokenValue, validateTokenName } from "../token-helpers";
 import { TokenNavigationPane } from "./TokenNavigationPane";
 import { TokenStyleguideView } from "./TokenStyleguideView";
 import { TokenDetailPane } from "./TokenDetailPane";
@@ -110,7 +100,12 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
       return;
     }
 
-    store.createToken(copyName, original.token_type, original.value, original.description ?? undefined);
+    store.createToken(
+      copyName,
+      original.token_type,
+      original.value,
+      original.description ?? undefined,
+    );
     announce(t("panels:tokens.tokenCreated", { name: copyName }));
     setSelectedTokenName(copyName);
   }
@@ -154,7 +149,9 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
   return (
     <Dialog
       open={props.isOpen}
-      onOpenChange={(open) => { if (!open) props.onClose(); }}
+      onOpenChange={(open) => {
+        if (!open) props.onClose();
+      }}
       title={t("panels:tokens.editorTitle")}
       class="sigil-token-editor"
     >
@@ -183,9 +180,7 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
           <Show
             when={selectedToken()}
             fallback={
-              <div class="sigil-token-editor__no-selection">
-                {t("panels:tokens.noSelection")}
-              </div>
+              <div class="sigil-token-editor__no-selection">{t("panels:tokens.noSelection")}</div>
             }
           >
             {(tok) => (

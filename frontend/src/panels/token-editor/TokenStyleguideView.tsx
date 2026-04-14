@@ -107,11 +107,7 @@ export const TokenStyleguideView: Component<TokenStyleguideViewProps> = (rawProp
   }
 
   return (
-    <div
-      class="sigil-token-styleguide"
-      role="region"
-      aria-label={t("panels:tokens.styleguide")}
-    >
+    <div class="sigil-token-styleguide" role="region" aria-label={t("panels:tokens.styleguide")}>
       {/* Header */}
       <div class="sigil-token-styleguide__header">
         <h3 class="sigil-token-styleguide__title">{categoryTitle()}</h3>
@@ -144,9 +140,7 @@ export const TokenStyleguideView: Component<TokenStyleguideViewProps> = (rawProp
               return (
                 <div class="sigil-token-styleguide__group">
                   <h4 class="sigil-token-styleguide__group-header">
-                    {group.label === "ungrouped"
-                      ? t("panels:tokens.globalSet")
-                      : group.label}
+                    {group.label === "ungrouped" ? t("panels:tokens.globalSet") : group.label}
                   </h4>
                   {renderTokenList(group.tokenNames, groupTokenType())}
                 </div>

@@ -154,7 +154,9 @@
   color: var(--accent);
   font-size: var(--font-size-0);
   cursor: pointer;
-  transition: background-color 120ms, border-color 120ms;
+  transition:
+    background-color 120ms,
+    border-color 120ms;
 }
 
 .sigil-token-nav__create-button:hover {

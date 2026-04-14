@@ -50,7 +50,11 @@ export const TokenPreviewCardList: Component<TokenPreviewCardListProps> = (rawPr
   const [t] = useTransContext();
 
   return (
-    <div class="sigil-token-preview-list" role="listbox" aria-label={t("panels:tokens.categoryAll")}>
+    <div
+      class="sigil-token-preview-list"
+      role="listbox"
+      aria-label={t("panels:tokens.categoryAll")}
+    >
       <Index each={props.tokenNames}>
         {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);

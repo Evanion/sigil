@@ -35,7 +35,11 @@ export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProp
   const [t] = useTransContext();
 
   return (
-    <div class="sigil-token-typo-list" role="listbox" aria-label={t("panels:tokens.typeTypography")}>
+    <div
+      class="sigil-token-typo-list"
+      role="listbox"
+      aria-label={t("panels:tokens.typeTypography")}
+    >
       <Index each={props.tokenNames}>
         {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
@@ -58,9 +62,7 @@ export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProp
             const fontWeight = Number.isFinite(v.font_weight) ? v.font_weight : 400;
 
             // Validate font-family before CSS interpolation (CLAUDE.md: CSS-rendered string fields)
-            const fontFamily = validateCssIdentifier(v.font_family)
-              ? v.font_family
-              : "sans-serif";
+            const fontFamily = validateCssIdentifier(v.font_family) ? v.font_family : "sans-serif";
 
             return {
               "font-family": `${fontFamily}, sans-serif`,

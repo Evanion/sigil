@@ -68,10 +68,7 @@ export const TokenColorGrid: Component<TokenColorGridProps> = (rawProps) => {
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >
-              <div
-                class="sigil-token-color-grid__swatch"
-                style={{ background: swatchColor() }}
-              />
+              <div class="sigil-token-color-grid__swatch" style={{ background: swatchColor() }} />
               <div class="sigil-token-color-grid__info">
                 <span class="sigil-token-color-grid__name">{shortName(name())}</span>
                 <span
