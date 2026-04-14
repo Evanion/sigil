@@ -25,6 +25,7 @@ import {
   defaultTokenValue,
   groupTokensByType,
   validateTokenName,
+  sanitizeTokenName,
 } from "./token-helpers";
 import { Popover } from "../components/popover/Popover";
 import { useTokenEditor } from "./token-editor-context";
@@ -301,8 +302,7 @@ export const TokensPanel: Component = () => {
                 onInput={(e) => {
                   const input = e.currentTarget;
                   const pos = input.selectionStart ?? 0;
-                  // Replace spaces with dots, strip invalid characters
-                  const sanitized = input.value.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+                  const sanitized = sanitizeTokenName(input.value);
                   if (sanitized !== input.value) {
                     input.value = sanitized;
                     const newPos = Math.min(pos, sanitized.length);

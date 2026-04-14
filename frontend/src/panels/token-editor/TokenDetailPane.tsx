@@ -10,7 +10,7 @@ import { createMemo, createSignal, For, Show, splitProps, type Component } from 
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenValue } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
-import { TOKEN_TYPE_I18N_KEYS, validateTokenName } from "../token-helpers";
+import { TOKEN_TYPE_I18N_KEYS, validateTokenName, sanitizeTokenName } from "../token-helpers";
 import { TokenDetailEditor } from "../TokenDetailEditor";
 import { MAX_TOKEN_NAME_LENGTH } from "../../store/document-store-solid";
 import { colorToCss } from "./TokenColorGrid";
@@ -83,15 +83,13 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
 
   // ── Input sanitization ──────────────────────────────────────────────
 
-  /** Replace spaces with dots and strip invalid characters as the user types. */
+  /** Sanitize token name as the user types. */
   function handleRenameInput(e: InputEvent): void {
     const input = e.currentTarget as HTMLInputElement;
     const pos = input.selectionStart ?? 0;
-    // Replace spaces with dots, strip characters not in the allowed set
-    const sanitized = input.value.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+    const sanitized = sanitizeTokenName(input.value);
     if (sanitized !== input.value) {
       input.value = sanitized;
-      // Restore cursor position (may shift if characters were removed)
       const newPos = Math.min(pos, sanitized.length);
       input.setSelectionRange(newPos, newPos);
     }

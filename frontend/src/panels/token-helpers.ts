@@ -52,6 +52,15 @@ export function validateTokenName(name: string): string | null {
 }
 
 /**
+ * Sanitize a token name as the user types.
+ * Replaces spaces with dots (creating hierarchy groups) and strips
+ * characters not in the allowed set [a-zA-Z0-9/._-].
+ */
+export function sanitizeTokenName(raw: string): string {
+  return raw.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+}
+
+/**
  * Valid TokenValue discriminants. Used for shape validation of remote payloads.
  */
 const VALID_TOKEN_VALUE_TYPES: ReadonlySet<string> = new Set([
