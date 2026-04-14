@@ -2,6 +2,7 @@ pub mod color_convert;
 pub mod errors;
 pub mod evaluator;
 pub mod expression;
+pub mod functions;
 pub mod parser;
 mod types;
 pub use evaluator::{EvalValue, evaluate};

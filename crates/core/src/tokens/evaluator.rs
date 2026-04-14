@@ -26,7 +26,7 @@ pub enum EvalValue {
 
 impl EvalValue {
     /// Returns a human-readable type name for error messages.
-    fn type_name(&self) -> &'static str {
+    pub(crate) fn type_name(&self) -> &'static str {
         match self {
             Self::Number(_) => "number",
             Self::Color(_) => "color",
@@ -60,9 +60,12 @@ pub fn evaluate(
             evaluate_binary_op(left, *op, right, context, depth)
         }
         TokenExpression::UnaryNeg(inner) => evaluate_unary_neg(inner, context, depth),
-        TokenExpression::FunctionCall { name, .. } => {
-            // Function registry (Task 5) will replace this stub.
-            Err(ExprError::UnknownFunction(name.clone()))
+        TokenExpression::FunctionCall { name, args } => {
+            let mut evaluated_args = Vec::with_capacity(args.len());
+            for arg in args {
+                evaluated_args.push(evaluate(arg, context, depth + 1)?);
+            }
+            crate::tokens::functions::call_function(name, &evaluated_args)
         }
     }
 }
@@ -521,5 +524,63 @@ mod tests {
         assert_eq!(EvalValue::Number(1.0).type_name(), "number");
         assert_eq!(EvalValue::Color(Color::default()).type_name(), "color");
         assert_eq!(EvalValue::Str("x".to_string()).type_name(), "string");
+    }
+
+    #[test]
+    fn test_eval_function_call_round() {
+        let ctx = test_context();
+        let expr = TokenExpression::FunctionCall {
+            name: "round".to_string(),
+            args: vec![TokenExpression::Literal(ExprLiteral::Number(16.7))],
+        };
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(17.0));
+    }
+
+    #[test]
+    fn test_eval_function_call_with_token_ref_arg() {
+        let ctx = test_context();
+        // round({spacing.md} + 0.7) = round(16.7) = 17
+        let expr = TokenExpression::FunctionCall {
+            name: "round".to_string(),
+            args: vec![TokenExpression::BinaryOp {
+                left: Box::new(TokenExpression::TokenRef("spacing.md".to_string())),
+                op: BinaryOperator::Add,
+                right: Box::new(TokenExpression::Literal(ExprLiteral::Number(0.7))),
+            }],
+        };
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(17.0));
+    }
+
+    #[test]
+    fn test_eval_integration_parse_round() {
+        use crate::tokens::parser::parse_expression;
+        let ctx = test_context();
+        let expr = parse_expression("round(16.7)").expect("should parse");
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(17.0));
+    }
+
+    #[test]
+    fn test_eval_integration_parse_rem() {
+        use crate::tokens::parser::parse_expression;
+        let ctx = test_context();
+        let expr = parse_expression("rem(32)").expect("should parse");
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(2.0));
+    }
+
+    #[test]
+    fn test_eval_integration_parse_min_max() {
+        use crate::tokens::parser::parse_expression;
+        let ctx = test_context();
+        let expr = parse_expression("min(10, 20)").expect("should parse");
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(10.0));
+
+        let expr = parse_expression("max(10, 20)").expect("should parse");
+        let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
+        assert_eq!(result, EvalValue::Number(20.0));
     }
 }
