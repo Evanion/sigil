@@ -10,10 +10,9 @@ import { createMemo, createSignal, For, Show, splitProps, type Component } from 
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenValue } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
-import { TOKEN_TYPE_I18N_KEYS, validateTokenName, sanitizeTokenName } from "../token-helpers";
+import { TOKEN_TYPE_I18N_KEYS, validateTokenName, sanitizeTokenName, colorToCss } from "../token-helpers";
 import { TokenDetailEditor } from "../TokenDetailEditor";
 import { MAX_TOKEN_NAME_LENGTH } from "../../store/document-store-solid";
-import { colorToCss } from "./TokenColorGrid";
 import { shadowToCss } from "./TokenPreviewCard";
 import { extractNumericValue } from "./TokenSpacingList";
 
@@ -228,13 +227,6 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
     props.onNavigate(name);
   }
 
-  function handleRefKeyDown(e: KeyboardEvent, name: string): void {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      props.onNavigate(name);
-    }
-  }
-
   // ── Render ───────────────────────────────────────────────────────────
 
   return (
@@ -314,15 +306,13 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
           </span>
           <For each={dependsOn()}>
             {(refName) => (
-              <span
+              <button
+                type="button"
                 class="sigil-token-detail-pane__ref-link"
-                role="link"
-                tabindex={0}
                 onClick={() => handleRefClick(refName)}
-                onKeyDown={(e) => handleRefKeyDown(e, refName)}
               >
                 {refName}
-              </span>
+              </button>
             )}
           </For>
         </div>
@@ -336,15 +326,13 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
           </span>
           <For each={referencedBy()}>
             {(refName) => (
-              <span
+              <button
+                type="button"
                 class="sigil-token-detail-pane__ref-link"
-                role="link"
-                tabindex={0}
                 onClick={() => handleRefClick(refName)}
-                onKeyDown={(e) => handleRefKeyDown(e, refName)}
               >
                 {refName}
-              </span>
+              </button>
             )}
           </For>
         </div>

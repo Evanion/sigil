@@ -6,6 +6,7 @@
  */
 
 import { createMemo, Index, splitProps, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token } from "../../types/document";
 import { buildValuePreview } from "../TokenRow";
 import { shortName } from "./token-grouping";
@@ -50,6 +51,7 @@ export function extractNumericValue(token: Token): number {
 
 export const TokenSpacingList: Component<TokenSpacingListProps> = (rawProps) => {
   const [props] = splitProps(rawProps, ["tokenNames", "tokens", "selectedToken", "onSelect"]);
+  const [t] = useTransContext();
 
   /** Maximum numeric value across all tokens in the list, for bar scaling. */
   const maxValue = createMemo(() => {
@@ -65,9 +67,9 @@ export const TokenSpacingList: Component<TokenSpacingListProps> = (rawProps) => 
   });
 
   return (
-    <div class="sigil-token-spacing-list" role="listbox" aria-label="Spacing tokens">
+    <div class="sigil-token-spacing-list" role="listbox" aria-label={t("panels:tokens.typeDimension")}>
       <Index each={props.tokenNames}>
-        {(name) => {
+        {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
           const isSelected = createMemo(() => props.selectedToken === name());
 
@@ -103,7 +105,7 @@ export const TokenSpacingList: Component<TokenSpacingListProps> = (rawProps) => 
               classList={{ "sigil-token-spacing-list__row--selected": isSelected() }}
               role="option"
               aria-selected={isSelected()}
-              tabindex={0}
+              tabindex={index === 0 ? 0 : -1}
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >

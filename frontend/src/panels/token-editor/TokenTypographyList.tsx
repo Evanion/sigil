@@ -6,6 +6,7 @@
  */
 
 import { createMemo, Index, splitProps, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token } from "../../types/document";
 import { validateCssIdentifier } from "../../validation/css-identifiers";
 import { shortName } from "./token-grouping";
@@ -31,11 +32,12 @@ export interface TokenTypographyListProps {
 
 export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProps) => {
   const [props] = splitProps(rawProps, ["tokenNames", "tokens", "selectedToken", "onSelect"]);
+  const [t] = useTransContext();
 
   return (
-    <div class="sigil-token-typo-list" role="listbox" aria-label="Typography tokens">
+    <div class="sigil-token-typo-list" role="listbox" aria-label={t("panels:tokens.typeTypography")}>
       <Index each={props.tokenNames}>
-        {(name) => {
+        {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
           const isSelected = createMemo(() => props.selectedToken === name());
 
@@ -88,7 +90,7 @@ export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProp
               classList={{ "sigil-token-typo-list__row--selected": isSelected() }}
               role="option"
               aria-selected={isSelected()}
-              tabindex={0}
+              tabindex={index === 0 ? 0 : -1}
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >

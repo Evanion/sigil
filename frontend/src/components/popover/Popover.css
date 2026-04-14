@@ -21,8 +21,7 @@
    position-anchor, position-area, and position-try-fallbacks are set
    inline by the component for dynamic anchor names and placement. */
 .sigil-popover {
-  position: fixed;
-  position: fixed;
+  position: absolute;
   background: var(--surface-3);
   color: var(--text-1);
   border: 1px solid var(--border-2);

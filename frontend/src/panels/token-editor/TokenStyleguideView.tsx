@@ -58,55 +58,52 @@ export const TokenStyleguideView: Component<TokenStyleguideViewProps> = (rawProp
   });
 
   /**
-   * Render the appropriate type-specific list for the current category.
-   * When "all categories" is selected (or an unrecognized category),
-   * fall back to the generic preview card list.
+   * Return the appropriate renderer component for a given token type.
+   * Used both when a specific category is selected and when "All Categories"
+   * dispatches each group to its type-specific renderer.
    */
-  function renderTokenList(tokenNames: readonly string[]): ReturnType<Component> {
-    const cat = props.selectedCategory;
-
-    switch (cat) {
+  function rendererForType(tokenType: TokenType | ""): Component<{
+    tokenNames: readonly string[];
+    tokens: Record<string, Token>;
+    selectedToken: string | null;
+    onSelect: (name: string) => void;
+  }> {
+    switch (tokenType) {
       case "color":
-        return (
-          <TokenColorGrid
-            tokenNames={tokenNames}
-            tokens={props.tokens}
-            selectedToken={props.selectedToken}
-            onSelect={props.onSelect}
-          />
-        );
-
+        return TokenColorGrid;
       case "dimension":
       case "number":
-        return (
-          <TokenSpacingList
-            tokenNames={tokenNames}
-            tokens={props.tokens}
-            selectedToken={props.selectedToken}
-            onSelect={props.onSelect}
-          />
-        );
-
+        return TokenSpacingList;
       case "typography":
-        return (
-          <TokenTypographyList
-            tokenNames={tokenNames}
-            tokens={props.tokens}
-            selectedToken={props.selectedToken}
-            onSelect={props.onSelect}
-          />
-        );
-
+        return TokenTypographyList;
       default:
-        return (
-          <TokenPreviewCardList
-            tokenNames={tokenNames}
-            tokens={props.tokens}
-            selectedToken={props.selectedToken}
-            onSelect={props.onSelect}
-          />
-        );
+        return TokenPreviewCardList;
     }
+  }
+
+  /**
+   * Render the appropriate type-specific list for the current category.
+   * When "All Categories" is selected, each group is dispatched to the
+   * renderer matching the token type of its first token.
+   */
+  function renderTokenList(
+    tokenNames: readonly string[],
+    groupTokenType?: TokenType,
+  ): ReturnType<Component> {
+    const cat = props.selectedCategory;
+
+    // When showing all categories, use the group's detected token type
+    const effectiveType = cat === "" ? (groupTokenType ?? "") : cat;
+    const Renderer = rendererForType(effectiveType);
+
+    return (
+      <Renderer
+        tokenNames={tokenNames}
+        tokens={props.tokens}
+        selectedToken={props.selectedToken}
+        onSelect={props.onSelect}
+      />
+    );
   }
 
   return (
@@ -135,16 +132,26 @@ export const TokenStyleguideView: Component<TokenStyleguideViewProps> = (rawProp
         >
           {/* Groups are read-only (derived from token data), so <For> is correct here */}
           <For each={groups()}>
-            {(group) => (
-              <div class="sigil-token-styleguide__group">
-                <div class="sigil-token-styleguide__group-header">
-                  {group.label === "ungrouped"
-                    ? t("panels:tokens.globalSet")
-                    : group.label}
+            {(group) => {
+              // Detect the token type from the first token in the group
+              // for dispatching to type-specific renderers in "All Categories" mode
+              const groupTokenType = createMemo((): TokenType | undefined => {
+                const firstName = group.tokenNames[0];
+                if (!firstName) return undefined;
+                return props.tokens[firstName]?.token_type;
+              });
+
+              return (
+                <div class="sigil-token-styleguide__group">
+                  <h4 class="sigil-token-styleguide__group-header">
+                    {group.label === "ungrouped"
+                      ? t("panels:tokens.globalSet")
+                      : group.label}
+                  </h4>
+                  {renderTokenList(group.tokenNames, groupTokenType())}
                 </div>
-                {renderTokenList(group.tokenNames)}
-              </div>
-            )}
+              );
+            }}
           </For>
         </Show>
       </div>

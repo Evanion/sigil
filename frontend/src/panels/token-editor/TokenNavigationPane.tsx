@@ -5,7 +5,7 @@
  * category filter buttons with counts, and a "New Token" button.
  */
 
-import { createMemo, Index, splitProps, type Component } from "solid-js";
+import { createMemo, For, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenType } from "../../types/document";
 import { TOKEN_TYPES, TOKEN_TYPE_I18N_KEYS } from "../token-helpers";
@@ -87,31 +87,30 @@ export const TokenNavigationPane: Component<TokenNavigationPaneProps> = (rawProp
           <span class="sigil-token-nav__category-count">{totalCount()}</span>
         </button>
 
-        {/* Per-type categories */}
-        <Index each={TOKEN_TYPES}>
+        {/* Per-type categories — static readonly array, so <For> is correct */}
+        <For each={TOKEN_TYPES}>
           {(tokenType) => {
-            const count = createMemo(() => counts().get(tokenType()) ?? 0);
+            const count = createMemo(() => counts().get(tokenType) ?? 0);
             const isEmpty = createMemo(() => count() === 0);
 
             return (
               <button
                 class="sigil-token-nav__category"
                 classList={{
-                  "sigil-token-nav__category--active": props.selectedCategory === tokenType(),
+                  "sigil-token-nav__category--active": props.selectedCategory === tokenType,
                   "sigil-token-nav__category--empty": isEmpty(),
                 }}
                 type="button"
-                disabled={isEmpty()}
-                onClick={() => props.onCategoryChange(tokenType())}
+                onClick={() => props.onCategoryChange(tokenType)}
               >
                 <span class="sigil-token-nav__category-label">
-                  {t(TOKEN_TYPE_I18N_KEYS[tokenType()])}
+                  {t(TOKEN_TYPE_I18N_KEYS[tokenType])}
                 </span>
                 <span class="sigil-token-nav__category-count">{count()}</span>
               </button>
             );
           }}
-        </Index>
+        </For>
       </div>
 
       <hr class="sigil-token-nav__divider" />

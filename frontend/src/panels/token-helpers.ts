@@ -5,7 +5,7 @@
  * and token name/value validation.
  */
 
-import type { TokenType, TokenValue } from "../types/document";
+import type { Color, TokenType, TokenValue } from "../types/document";
 import { MAX_TOKEN_NAME_LENGTH } from "../store/document-store-solid";
 
 // ── Validation constants ──────────────────────────────────────────────
@@ -29,10 +29,10 @@ export const VALID_TOKEN_TYPES: ReadonlySet<string> = new Set<TokenType>([
 
 /**
  * Regex for valid token name characters.
- * Must start with [a-zA-Z], contain only [a-zA-Z0-9/._-].
+ * Must start with [a-zA-Z], contain only [a-zA-Z0-9._-].
  * Mirrors crates/core/src/validate.rs token name rules.
  */
-const TOKEN_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9/._-]*$/;
+const TOKEN_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9._-]*$/;
 
 /**
  * Validate a token name against core's rules.
@@ -46,7 +46,7 @@ export function validateTokenName(name: string): string | null {
     return `Token name must not exceed ${MAX_TOKEN_NAME_LENGTH} characters`;
   }
   if (!TOKEN_NAME_PATTERN.test(name)) {
-    return "Token name must start with a letter and contain only letters, digits, /, ., _, -";
+    return "Token name must start with a letter and contain only letters, digits, ., _, -";
   }
   return null;
 }
@@ -54,10 +54,10 @@ export function validateTokenName(name: string): string | null {
 /**
  * Sanitize a token name as the user types.
  * Replaces spaces with dots (creating hierarchy groups) and strips
- * characters not in the allowed set [a-zA-Z0-9/._-].
+ * characters not in the allowed set [a-zA-Z0-9._-].
  */
 export function sanitizeTokenName(raw: string): string {
-  return raw.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+  return raw.replace(/ /g, ".").replace(/[^a-zA-Z0-9._-]/g, "");
 }
 
 /**
@@ -85,6 +85,24 @@ export function isValidTokenValue(v: unknown): v is TokenValue {
   if (!v || typeof v !== "object") return false;
   const obj = v as Record<string, unknown>;
   return typeof obj["type"] === "string" && VALID_TOKEN_VALUE_TYPES.has(obj["type"]);
+}
+
+// ── Color conversion ────────────────────────────────────────────────
+
+/**
+ * Convert a sRGB Color to an rgba() CSS string.
+ * Guards all channels with Number.isFinite() per CLAUDE.md floating-point validation.
+ */
+export function colorToCss(color: Color): string {
+  if (color.space !== "srgb") {
+    // Non-sRGB colors fallback to gray
+    return "rgba(128, 128, 128, 1)";
+  }
+  const r = Number.isFinite(color.r) ? Math.round(Math.max(0, Math.min(1, color.r)) * 255) : 0;
+  const g = Number.isFinite(color.g) ? Math.round(Math.max(0, Math.min(1, color.g)) * 255) : 0;
+  const b = Number.isFinite(color.b) ? Math.round(Math.max(0, Math.min(1, color.b)) * 255) : 0;
+  const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
+  return `rgba(${r}, ${g}, ${b}, ${a})`;
 }
 
 // ── Token types ──────────────────────────────────────────────────────

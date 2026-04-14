@@ -6,7 +6,9 @@
  */
 
 import { createMemo, Index, splitProps, type Component } from "solid-js";
-import type { Token, Color } from "../../types/document";
+import { useTransContext } from "@mbarzda/solid-i18next";
+import type { Token } from "../../types/document";
+import { colorToCss } from "../token-helpers";
 import { buildValuePreview } from "../TokenRow";
 import { shortName } from "./token-grouping";
 import "./TokenColorGrid.css";
@@ -20,33 +22,16 @@ export interface TokenColorGridProps {
   readonly onSelect: (name: string) => void;
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Convert a sRGB Color to an rgba() CSS string.
- * Guards all channels with Number.isFinite() per CLAUDE.md floating-point validation.
- */
-export function colorToCss(color: Color): string {
-  if (color.space !== "srgb") {
-    // Non-sRGB colors fallback to gray
-    return "rgba(128, 128, 128, 1)";
-  }
-  const r = Number.isFinite(color.r) ? Math.round(Math.max(0, Math.min(1, color.r)) * 255) : 0;
-  const g = Number.isFinite(color.g) ? Math.round(Math.max(0, Math.min(1, color.g)) * 255) : 0;
-  const b = Number.isFinite(color.b) ? Math.round(Math.max(0, Math.min(1, color.b)) * 255) : 0;
-  const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
-}
-
 // ── Component ──────────────────────────────────────────────────────────────
 
 export const TokenColorGrid: Component<TokenColorGridProps> = (rawProps) => {
   const [props] = splitProps(rawProps, ["tokenNames", "tokens", "selectedToken", "onSelect"]);
+  const [t] = useTransContext();
 
   return (
-    <div class="sigil-token-color-grid" role="listbox" aria-label="Color tokens">
+    <div class="sigil-token-color-grid" role="listbox" aria-label={t("panels:tokens.typeColor")}>
       <Index each={props.tokenNames}>
-        {(name) => {
+        {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
           const isSelected = createMemo(() => props.selectedToken === name());
           const isAlias = createMemo(() => token()?.value.type === "alias");
@@ -79,7 +64,7 @@ export const TokenColorGrid: Component<TokenColorGridProps> = (rawProps) => {
               classList={{ "sigil-token-color-grid__card--selected": isSelected() }}
               role="option"
               aria-selected={isSelected()}
-              tabindex={0}
+              tabindex={index === 0 ? 0 : -1}
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >

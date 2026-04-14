@@ -111,6 +111,7 @@ export function GradientEditorPopover(props: GradientEditorPopoverProps) {
       trigger={<GradientSwatch fill={props.fill} />}
       triggerAriaLabel={t("panels:gradient.editGradient")}
       placement="bottom"
+      modal
     >
       <div class="sigil-gradient-editor-popover">
         <GradientControls

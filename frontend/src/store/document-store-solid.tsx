@@ -1533,17 +1533,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       description: description ?? null,
     };
 
-    // Snapshot for rollback (capture BEFORE mutation per CLAUDE.md)
-    // JSON clone: Solid proxy not structuredClone-safe
-    let tokensSnapshot: Record<string, Token>;
-    try {
-      tokensSnapshot = JSON.parse(JSON.stringify(state.tokens)) as Record<string, Token>;
-    } catch (err: unknown) {
-      console.error("createToken: failed to snapshot tokens", err);
-      return;
-    }
-
-    // Apply optimistically
+    // Apply optimistically (no full snapshot needed — surgical rollback deletes the new key)
     setState(
       produce((s) => {
         s.tokens[name] = newToken;
@@ -1584,16 +1574,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("createToken server error:", r.error.message);
           // F-05: Announce error to screen reader
           announceError(`Failed to create token "${name}": ${r.error.message}`);
-          // Rollback
-          setState("tokens", reconcile(tokensSnapshot));
+          // Surgical rollback: remove only the optimistically-added key
+          setState(produce((s) => { Reflect.deleteProperty(s.tokens, name); }));
         }
       })
       .catch((err: unknown) => {
         console.error("createToken exception:", err);
         // F-05: Announce error
         announceError(`Failed to create token "${name}"`);
-        // Rollback
-        setState("tokens", reconcile(tokensSnapshot));
+        // Surgical rollback: remove only the optimistically-added key
+        setState(produce((s) => { Reflect.deleteProperty(s.tokens, name); }));
       });
   }
 
@@ -1616,14 +1606,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Capture before-value for undo BEFORE mutation (CLAUDE.md: capture snapshots before mutations)
     // JSON clone: Solid proxy not structuredClone-safe
     let previousValue: { value: TokenValue; description: string | null };
-    let tokensSnapshot: Record<string, Token>;
+    let tokenSnapshot: Token;
     try {
       previousValue = JSON.parse(
         JSON.stringify({ value: existingToken.value, description: existingToken.description }),
       ) as { value: TokenValue; description: string | null };
-      tokensSnapshot = JSON.parse(JSON.stringify(state.tokens)) as Record<string, Token>;
+      // Snapshot only the single token for surgical rollback
+      // JSON clone: Solid proxy not structuredClone-safe
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
     } catch (err: unknown) {
-      console.error("updateToken: failed to snapshot tokens", err);
+      console.error("updateToken: failed to snapshot token", err);
       return;
     }
 
@@ -1663,7 +1655,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             updateToken: {
               name,
               value: JSON.stringify(value),
-              description: description ?? null,
+              description: newDescription,
             },
           },
         ],
@@ -1675,16 +1667,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("updateToken server error:", r.error.message);
           // F-05: Announce error
           announceError(`Failed to update token "${name}": ${r.error.message}`);
-          // Rollback
-          setState("tokens", reconcile(tokensSnapshot));
+          // Surgical rollback: restore only the single token
+          setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
         }
       })
       .catch((err: unknown) => {
         console.error("updateToken exception:", err);
         // F-05: Announce error
         announceError(`Failed to update token "${name}"`);
-        // Rollback
-        setState("tokens", reconcile(tokensSnapshot));
+        // Surgical rollback: restore only the single token
+        setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
       });
   }
 
@@ -1696,15 +1688,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // Snapshot for rollback and undo (capture BEFORE mutation per CLAUDE.md)
+    // Snapshot only the single token for rollback and undo (capture BEFORE mutation per CLAUDE.md)
     // JSON clone: Solid proxy not structuredClone-safe
-    let tokensSnapshot: Record<string, Token>;
-    let tokenSnapshotForUndo: Token;
+    let tokenSnapshot: Token;
     try {
-      tokensSnapshot = JSON.parse(JSON.stringify(state.tokens)) as Record<string, Token>;
-      tokenSnapshotForUndo = JSON.parse(JSON.stringify(existingToken)) as Token;
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
     } catch (err: unknown) {
-      console.error("deleteToken: failed to snapshot tokens", err);
+      console.error("deleteToken: failed to snapshot token", err);
       return;
     }
 
@@ -1718,11 +1708,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // F-03: Track for undo/redo
     interceptor.trackStructural(
       createDeleteTokenOp(clientSessionId, {
-        name: tokenSnapshotForUndo.name,
-        token_type: tokenSnapshotForUndo.token_type,
-        value: tokenSnapshotForUndo.value,
-        description: tokenSnapshotForUndo.description,
-        id: tokenSnapshotForUndo.id,
+        name: tokenSnapshot.name,
+        token_type: tokenSnapshot.token_type,
+        value: tokenSnapshot.value,
+        description: tokenSnapshot.description,
+        id: tokenSnapshot.id,
       }),
     );
     syncHistorySignals();
@@ -1739,16 +1729,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           console.error("deleteToken server error:", r.error.message);
           // F-05: Announce error
           announceError(`Failed to delete token "${name}": ${r.error.message}`);
-          // Rollback
-          setState("tokens", reconcile(tokensSnapshot));
+          // Surgical rollback: re-insert only the deleted token
+          setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
         }
       })
       .catch((err: unknown) => {
         console.error("deleteToken exception:", err);
         // F-05: Announce error
         announceError(`Failed to delete token "${name}"`);
-        // Rollback
-        setState("tokens", reconcile(tokensSnapshot));
+        // Surgical rollback: re-insert only the deleted token
+        setState(produce((s) => { s.tokens[name] = tokenSnapshot; }));
       });
   }
 

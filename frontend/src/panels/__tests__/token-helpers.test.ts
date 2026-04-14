@@ -15,7 +15,7 @@ describe("sanitizeTokenName", () => {
   });
 
   it("preserves valid characters", () => {
-    expect(sanitizeTokenName("brand.primary-100_alt/v2")).toBe("brand.primary-100_alt/v2");
+    expect(sanitizeTokenName("brand.primary-100_altv2")).toBe("brand.primary-100_altv2");
   });
 
   it("handles empty string", () => {

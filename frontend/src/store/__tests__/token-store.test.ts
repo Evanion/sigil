@@ -242,7 +242,7 @@ describe("resolveStyleValueNumber", () => {
 
 describe("validateTokenName", () => {
   it("should return null for a valid token name", () => {
-    expect(validateTokenName("brand/primary")).toBeNull();
+    expect(validateTokenName("brand.primary")).toBeNull();
     expect(validateTokenName("color.red")).toBeNull();
     expect(validateTokenName("spacing-md")).toBeNull();
     expect(validateTokenName("a")).toBeNull();
@@ -277,6 +277,8 @@ describe("validateTokenName", () => {
     expect(validateTokenName("color@brand")).not.toBeNull();
     expect(validateTokenName("color#1")).not.toBeNull();
     expect(validateTokenName("color$red")).not.toBeNull();
+    // RF-004: slash is not allowed (must match Rust validation)
+    expect(validateTokenName("brand/primary")).not.toBeNull();
   });
 
   it("should accept a name at exactly MAX_TOKEN_NAME_LENGTH", () => {

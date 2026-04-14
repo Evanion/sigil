@@ -6,9 +6,10 @@
  */
 
 import { createMemo, Index, Show, splitProps, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, Color } from "../../types/document";
+import { colorToCss } from "../token-helpers";
 import { buildValuePreview } from "../TokenRow";
-import { colorToCss } from "./TokenColorGrid";
 import { shortName } from "./token-grouping";
 import "./TokenPreviewCard.css";
 
@@ -46,11 +47,12 @@ export function shadowToCss(token: Token): string | null {
 
 export const TokenPreviewCardList: Component<TokenPreviewCardListProps> = (rawProps) => {
   const [props] = splitProps(rawProps, ["tokenNames", "tokens", "selectedToken", "onSelect"]);
+  const [t] = useTransContext();
 
   return (
-    <div class="sigil-token-preview-list" role="listbox" aria-label="Token list">
+    <div class="sigil-token-preview-list" role="listbox" aria-label={t("panels:tokens.categoryAll")}>
       <Index each={props.tokenNames}>
-        {(name) => {
+        {(name, index) => {
           const token = createMemo(() => props.tokens[name()]);
           const isSelected = createMemo(() => props.selectedToken === name());
 
@@ -79,7 +81,7 @@ export const TokenPreviewCardList: Component<TokenPreviewCardListProps> = (rawPr
               classList={{ "sigil-token-preview-list__card--selected": isSelected() }}
               role="option"
               aria-selected={isSelected()}
-              tabindex={0}
+              tabindex={index === 0 ? 0 : -1}
               onClick={() => props.onSelect(name())}
               onKeyDown={handleKeyDown}
             >
