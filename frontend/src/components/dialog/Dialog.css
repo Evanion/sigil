@@ -10,12 +10,18 @@
   background: transparent;
 
   /* Make the dialog element itself fill the viewport so clicks on it
-     (outside the inner content) act as backdrop clicks */
+     (outside the inner content) act as backdrop clicks.
+     IMPORTANT: use display: none by default to respect the native dialog
+     hidden state. The [open] attribute is set by showModal(). */
+  display: none;
+}
+
+.sigil-dialog[open] {
+  display: flex;
   position: fixed;
   inset: 0;
   width: 100vw;
   height: 100vh;
-  display: flex;
   align-items: center;
   justify-content: center;
 }
