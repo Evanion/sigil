@@ -85,6 +85,7 @@ export function Popover(props: PopoverProps) {
 
   const anchorName = `--sigil-popover-anchor-${createUniqueId()}`;
   const popoverId = `sigil-popover-${createUniqueId()}`;
+  let triggerRef: HTMLButtonElement | undefined;
   let popoverRef: HTMLDivElement | undefined;
 
   const [isOpen, setIsOpen] = createSignal(local.open ?? false);
@@ -197,6 +198,7 @@ export function Popover(props: PopoverProps) {
   return (
     <>
       <button
+        ref={triggerRef}
         class="sigil-popover-trigger"
         aria-label={local.triggerAriaLabel}
         aria-expanded={isOpen()}
