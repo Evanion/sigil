@@ -149,6 +149,23 @@
     "noTokensInGroup": "No hay tokens en este grupo",
     "deleteConfirm": "¿Eliminar token {{name}}?",
     "deleteButton": "Eliminar",
-    "editTokenForm": "Editar token {{name}}"
+    "editTokenForm": "Editar token {{name}}",
+    "styleguide": "Guia de estilo",
+    "categoryAll": "Todas las categorias",
+    "categoryColors": "Colores",
+    "categorySpacing": "Espaciado",
+    "categoryTypography": "Tipografia",
+    "categoryShadows": "Sombras",
+    "categoryOther": "Otros",
+    "tokenSets": "Conjuntos de tokens",
+    "globalSet": "Global",
+    "resolvedValue": "Valor resuelto",
+    "dependsOn": "Depende de",
+    "referencedBy": "Referenciado por",
+    "duplicate": "Duplicar",
+    "noSelection": "Selecciona un token para editar",
+    "tokenCount": "{{count}} tokens",
+    "ungrouped": "Sin grupo",
+    "import": "Importar"
   }
 }

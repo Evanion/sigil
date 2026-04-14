@@ -149,6 +149,23 @@
     "noTokensInGroup": "Aucun jeton dans ce groupe",
     "deleteConfirm": "Supprimer le jeton {{name}} ?",
     "deleteButton": "Supprimer",
-    "editTokenForm": "Modifier le jeton {{name}}"
+    "editTokenForm": "Modifier le jeton {{name}}",
+    "styleguide": "Guide de style",
+    "categoryAll": "Toutes les categories",
+    "categoryColors": "Couleurs",
+    "categorySpacing": "Espacement",
+    "categoryTypography": "Typographie",
+    "categoryShadows": "Ombres",
+    "categoryOther": "Autres",
+    "tokenSets": "Ensembles de jetons",
+    "globalSet": "Global",
+    "resolvedValue": "Valeur resolue",
+    "dependsOn": "Depend de",
+    "referencedBy": "Reference par",
+    "duplicate": "Dupliquer",
+    "noSelection": "Selectionnez un jeton pour le modifier",
+    "tokenCount": "{{count}} jetons",
+    "ungrouped": "Non groupe",
+    "import": "Importer"
   }
 }
