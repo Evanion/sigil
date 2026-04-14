@@ -33,28 +33,7 @@ export function Dialog(props: DialogProps) {
     <KobalteDialog open={local.open} onOpenChange={local.onOpenChange} modal {...others}>
       <KobalteDialog.Portal>
         <KobalteDialog.Overlay class="sigil-dialog__overlay" />
-        <KobalteDialog.Content
-          class={className()}
-          onPointerDownOutside={(e: CustomEvent) => {
-            // Allow interaction with portaled popovers (color pickers, gradient editors)
-            // opened from within this dialog. Kobalte portals these to document body,
-            // so the Dialog sees them as "outside". The Kobalte event wraps the original
-            // PointerEvent in e.detail.originalEvent.
-            const original = e.detail?.originalEvent as PointerEvent | undefined;
-            const target = original?.target as HTMLElement | null;
-            if (target?.closest(".sigil-popover, .sigil-color-picker-popover, [data-kobalte-popover-content]")) {
-              e.preventDefault();
-            }
-          }}
-          onFocusOutside={(e: CustomEvent) => {
-            // Same — allow focus to move to portaled popovers from this dialog.
-            const original = e.detail?.originalEvent as FocusEvent | undefined;
-            const target = original?.relatedTarget as HTMLElement | null;
-            if (target?.closest(".sigil-popover, .sigil-color-picker-popover, [data-kobalte-popover-content]")) {
-              e.preventDefault();
-            }
-          }}
-        >
+        <KobalteDialog.Content class={className()}>
           <div class="sigil-dialog__header">
             <KobalteDialog.Title class="sigil-dialog__title">{local.title}</KobalteDialog.Title>
             <KobalteDialog.CloseButton class="sigil-dialog__close" aria-label="Close">

@@ -14,11 +14,14 @@ export interface PopoverProps {
   /** Additional CSS class names appended to the content element. */
   class?: string;
   /**
-   * Prevent closing when clicking/focusing inside the popover content.
-   * Use for editor popovers (color picker, gradient editor) that need
-   * continuous interaction. Default: false (popover closes normally).
+   * When true, the popover behaves as a modal: interaction with outside
+   * elements is disabled, focus is trapped inside the popover content.
+   * Required when the popover is inside a modal Dialog — without this,
+   * the Dialog's pointer-blocking layer disables pointer events on the
+   * popover content (Kobalte layer stack assigns pointer-events: none
+   * to non-modal layers below a pointer-blocking layer).
    */
-  preventDismissOnInteract?: boolean;
+  modal?: boolean;
   /** Accessible label for the trigger button. */
   triggerAriaLabel?: string;
   /** Controlled open state. When provided, the popover is controlled externally. */
@@ -33,7 +36,7 @@ export function Popover(props: PopoverProps) {
     "children",
     "placement",
     "class",
-    "preventDismissOnInteract",
+    "modal",
     "triggerAriaLabel",
     "open",
     "onOpenChange",
@@ -50,21 +53,14 @@ export function Popover(props: PopoverProps) {
       placement={local.placement ?? "bottom"}
       open={local.open}
       onOpenChange={local.onOpenChange}
+      modal={local.modal}
       {...others}
     >
       <KobaltePopover.Trigger class="sigil-popover-trigger" aria-label={local.triggerAriaLabel}>
         {local.trigger}
       </KobaltePopover.Trigger>
       <KobaltePopover.Portal>
-        <KobaltePopover.Content
-          class={className()}
-          {...(local.preventDismissOnInteract
-            ? {
-                onPointerDownOutside: (e: Event) => e.preventDefault(),
-                onFocusOutside: (e: Event) => e.preventDefault(),
-              }
-            : {})}
-        >
+        <KobaltePopover.Content class={className()}>
           <KobaltePopover.Arrow class="sigil-popover__arrow" />
           {local.children}
         </KobaltePopover.Content>

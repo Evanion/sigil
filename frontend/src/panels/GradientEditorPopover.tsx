@@ -5,8 +5,9 @@
  * The swatch shows a CSS gradient preview. Clicking it opens the popover
  * with the full gradient editor (type tabs, stop editor, angle/center controls).
  *
- * Uses `preventDismissOnInteract={true}` so that stop drag gestures that
- * temporarily move the pointer outside the popover boundary do not close it.
+ * Uses `modal` so that focus is trapped and the popover works correctly
+ * inside modal dialogs (Kobalte's layer stack requires modal popovers
+ * to receive pointer events when a pointer-blocking dialog is open).
  *
  * All numeric values are guarded with Number.isFinite() per CLAUDE.md.
  */
@@ -110,7 +111,7 @@ export function GradientEditorPopover(props: GradientEditorPopoverProps) {
       trigger={<GradientSwatch fill={props.fill} />}
       triggerAriaLabel={t("panels:gradient.editGradient")}
       placement="bottom"
-      preventDismissOnInteract={true}
+      modal
     >
       <div class="sigil-gradient-editor-popover">
         <GradientControls
