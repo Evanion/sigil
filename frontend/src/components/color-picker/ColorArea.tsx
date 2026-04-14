@@ -15,8 +15,10 @@
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import "./ColorArea.css";
 
-export const AREA_WIDTH = 240;
-export const AREA_HEIGHT = 160;
+/** Default width when container hasn't been measured yet. */
+const DEFAULT_AREA_WIDTH = 240;
+/** Aspect ratio: height = width * AREA_ASPECT */
+const AREA_ASPECT = 2 / 3;
 
 export interface ColorAreaProps {
   /** Normalized x position in [0, 1]. */
@@ -45,6 +47,25 @@ export function ColorArea(props: ColorAreaProps) {
   let containerRef: HTMLDivElement | undefined;
   const [isDragging, setIsDragging] = createSignal(false);
 
+  // ── Measured container width ────────────────────────────────────────
+  const [measuredWidth, setMeasuredWidth] = createSignal(DEFAULT_AREA_WIDTH);
+
+  onMount(() => {
+    if (!containerRef) return;
+    // Initial measurement
+    const w = containerRef.clientWidth;
+    if (w > 0) setMeasuredWidth(w);
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newW = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (Number.isFinite(newW) && newW > 0) setMeasuredWidth(newW);
+      }
+    });
+    ro.observe(containerRef);
+    onCleanup(() => ro.disconnect());
+  });
+
   // ── DPR signal ────────────────────────────────────────────────────────
   // window.devicePixelRatio is NOT a Solid signal; we must listen for changes.
   const [dpr, setDpr] = createSignal(window.devicePixelRatio || 1);
@@ -56,14 +77,19 @@ export function ColorArea(props: ColorAreaProps) {
     onCleanup(() => mq.removeEventListener("change", handleDprChange));
   });
 
+  const areaWidth = () => measuredWidth();
+  const areaHeight = () => Math.round(measuredWidth() * AREA_ASPECT);
+
   // ── Canvas render ─────────────────────────────────────────────────────
   createEffect(() => {
     const canvas = canvasRef;
     if (!canvas) return;
 
+    const w = areaWidth();
+    const h = areaHeight();
     const currentDpr = dpr();
-    const pixelWidth = AREA_WIDTH * currentDpr;
-    const pixelHeight = AREA_HEIGHT * currentDpr;
+    const pixelWidth = Math.round(w * currentDpr);
+    const pixelHeight = Math.round(h * currentDpr);
 
     if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
       canvas.width = pixelWidth;
@@ -76,7 +102,7 @@ export function ColorArea(props: ColorAreaProps) {
     // Apply DPR scaling so canvas gradients render at logical CSS dimensions
     // (the canvas backing store is at physical pixel resolution).
     ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
-    props.renderBackground(ctx, AREA_WIDTH, AREA_HEIGHT);
+    props.renderBackground(ctx, w, h);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
 
@@ -167,7 +193,7 @@ export function ColorArea(props: ColorAreaProps) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuetext={ariaValueText()}
-      style={{ width: `${AREA_WIDTH}px`, height: `${AREA_HEIGHT}px` }}
+      style={{ width: "100%", height: `${areaHeight()}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -177,7 +203,7 @@ export function ColorArea(props: ColorAreaProps) {
         ref={canvasRef}
         class="sigil-color-area__canvas"
         aria-hidden="true"
-        style={{ width: `${AREA_WIDTH}px`, height: `${AREA_HEIGHT}px` }}
+        style={{ width: "100%", height: `${areaHeight()}px` }}
       >
         {/* Fallback text for non-canvas environments */}
         Color selection area
