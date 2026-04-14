@@ -3,7 +3,7 @@
 use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
-use crate::token::Token;
+use crate::tokens::Token;
 
 /// Adds a token to the document's token context.
 #[derive(Debug)]
@@ -92,7 +92,7 @@ mod tests {
     use super::*;
     use crate::id::TokenId;
     use crate::node::Color;
-    use crate::token::{TokenType, TokenValue};
+    use crate::tokens::{TokenType, TokenValue};
     use uuid::Uuid;
 
     fn make_uuid(n: u8) -> Uuid {

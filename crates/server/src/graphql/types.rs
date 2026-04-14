@@ -1,6 +1,6 @@
 use async_graphql::{InputObject, OneofObject, SimpleObject};
 
-use agent_designer_core::token::{Token, TokenType, TokenValue};
+use agent_designer_core::tokens::{Token, TokenType, TokenValue};
 use agent_designer_core::{Document, NodeId};
 use agent_designer_state::{MutationEvent, MutationEventKind, TransactionPayload};
 

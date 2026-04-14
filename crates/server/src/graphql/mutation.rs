@@ -35,7 +35,7 @@ use agent_designer_core::node::{
     BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
     TextDecoration, TextShadow, Transform,
 };
-use agent_designer_core::token::{Token, TokenValue};
+use agent_designer_core::tokens::{Token, TokenValue};
 use agent_designer_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
@@ -2127,7 +2127,7 @@ mod tests {
         use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
         use agent_designer_core::id::TokenId;
         use agent_designer_core::node::Color;
-        use agent_designer_core::token::{Token, TokenType, TokenValue};
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
@@ -2180,7 +2180,7 @@ mod tests {
         use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
         use agent_designer_core::id::TokenId;
         use agent_designer_core::node::Color;
-        use agent_designer_core::token::{Token, TokenType, TokenValue};
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
@@ -2230,7 +2230,7 @@ mod tests {
         use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
         use agent_designer_core::id::TokenId;
         use agent_designer_core::node::Color;
-        use agent_designer_core::token::{Token, TokenType, TokenValue};
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
