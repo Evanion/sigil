@@ -29,6 +29,8 @@
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-3);
   padding: var(--size-3);
+  /* overflow: visible is required so the arrow (positioned outside the box)
+     is not clipped. Content scrolling is handled by the inner content wrapper. */
   overflow: visible;
 
   /* Reset default popover inset so anchor positioning works.
@@ -39,8 +41,6 @@
   /* Prevent the popover from being wider than the viewport minus margins */
   max-width: calc(100vw - var(--size-4) * 2);
   max-height: calc(100vh - var(--size-4) * 2);
-  overflow-y: auto;
-  overflow-x: hidden;
 
   animation: sigil-popover-fade-in 150ms ease-out;
 }
@@ -67,35 +67,35 @@
   top: -7px;
   left: calc(50% - 6px);
   transform: rotate(45deg);
-  border-bottom: none;
-  border-right: none;
+  border-bottom-color: transparent;
+  border-right-color: transparent;
 }
 
 /* Top placement: arrow at bottom center, pointing down */
 .sigil-popover--top .sigil-popover__arrow {
   bottom: -7px;
   left: calc(50% - 6px);
-  transform: rotate(225deg);
-  border-bottom: none;
-  border-right: none;
+  transform: rotate(45deg);
+  border-top-color: transparent;
+  border-left-color: transparent;
 }
 
 /* Left placement: arrow at right center, pointing right */
 .sigil-popover--left .sigil-popover__arrow {
   right: -7px;
   top: calc(50% - 6px);
-  transform: rotate(135deg);
-  border-bottom: none;
-  border-right: none;
+  transform: rotate(45deg);
+  border-left-color: transparent;
+  border-bottom-color: transparent;
 }
 
 /* Right placement: arrow at left center, pointing left */
 .sigil-popover--right .sigil-popover__arrow {
   left: -7px;
   top: calc(50% - 6px);
-  transform: rotate(-45deg);
-  border-bottom: none;
-  border-right: none;
+  transform: rotate(45deg);
+  border-top-color: transparent;
+  border-right-color: transparent;
 }
 
 /* ── Reduced motion ────────────────────────────────────────────────── */
