@@ -1,6 +1,5 @@
 /* Trigger button — renders as a <button> by default,
-   providing keyboard focus, Enter/Space activation, and ARIA semantics
-   (CLAUDE.md §5 Kobalte override rule). */
+   providing keyboard focus, Enter/Space activation, and ARIA semantics. */
 .sigil-popover-trigger {
   display: inline-flex;
   align-items: center;
@@ -23,15 +22,26 @@
    inline by the component for dynamic anchor names and placement. */
 .sigil-popover {
   position: fixed;
+  position: fixed;
   background: var(--surface-3);
   color: var(--text-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-3);
   padding: var(--size-3);
-  /* Reset default popover margin/inset so anchor positioning works */
-  margin: 0;
+  overflow: visible;
+
+  /* Reset default popover inset so anchor positioning works.
+     Keep a small margin from the anchor (gap) and viewport edges. */
   inset: unset;
+  margin: var(--size-2);
+
+  /* Prevent the popover from being wider than the viewport minus margins */
+  max-width: calc(100vw - var(--size-4) * 2);
+  max-height: calc(100vh - var(--size-4) * 2);
+  overflow-y: auto;
+  overflow-x: hidden;
+
   animation: sigil-popover-fade-in 150ms ease-out;
 }
 
@@ -44,45 +54,48 @@
 
 .sigil-popover__arrow {
   position: absolute;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   background: var(--surface-3);
   border: 1px solid var(--border-2);
-  transform: rotate(45deg);
-  /* Hide the border sides that overlap with the popover body */
-  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+  pointer-events: none;
+  z-index: 1;
 }
 
-/* Arrow positioning for each placement direction */
+/* Bottom placement: arrow at top center, pointing up */
 .sigil-popover--bottom .sigil-popover__arrow {
-  top: -6px;
-  left: 50%;
-  margin-left: -5px;
-  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+  top: -7px;
+  left: calc(50% - 6px);
+  transform: rotate(45deg);
+  border-bottom: none;
+  border-right: none;
 }
 
+/* Top placement: arrow at bottom center, pointing down */
 .sigil-popover--top .sigil-popover__arrow {
-  bottom: -6px;
-  left: 50%;
-  margin-left: -5px;
+  bottom: -7px;
+  left: calc(50% - 6px);
   transform: rotate(225deg);
-  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+  border-bottom: none;
+  border-right: none;
 }
 
+/* Left placement: arrow at right center, pointing right */
 .sigil-popover--left .sigil-popover__arrow {
-  right: -6px;
-  top: 50%;
-  margin-top: -5px;
+  right: -7px;
+  top: calc(50% - 6px);
   transform: rotate(135deg);
-  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+  border-bottom: none;
+  border-right: none;
 }
 
+/* Right placement: arrow at left center, pointing left */
 .sigil-popover--right .sigil-popover__arrow {
-  left: -6px;
-  top: 50%;
-  margin-top: -5px;
+  left: -7px;
+  top: calc(50% - 6px);
   transform: rotate(-45deg);
-  clip-path: polygon(0% 0%, 100% 0%, 0% 100%);
+  border-bottom: none;
+  border-right: none;
 }
 
 /* ── Reduced motion ────────────────────────────────────────────────── */
