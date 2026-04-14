@@ -432,8 +432,9 @@ describe("TokenRow interaction", () => {
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
     expect(input).toBeTruthy();
-    fireEvent.input(input!, { target: { value: "color/brand" } });
-    fireEvent.keyDown(input!, { key: "Enter" });
+    if (!input) throw new Error("rename input not found");
+    fireEvent.input(input, { target: { value: "color/brand" } });
+    fireEvent.keyDown(input, { key: "Enter" });
     expect(onRename).toHaveBeenCalledWith("color/primary", "color/brand");
   });
 
@@ -453,7 +454,8 @@ describe("TokenRow interaction", () => {
     ));
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
-    fireEvent.keyDown(input!, { key: "Escape" });
+    if (!input) throw new Error("rename input not found");
+    fireEvent.keyDown(input, { key: "Escape" });
     expect(onRename).not.toHaveBeenCalled();
     expect(container.querySelector(".sigil-token-row__name-input")).toBeNull();
   });
@@ -477,7 +479,8 @@ describe("TokenRow interaction", () => {
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
     outerHandler.mockClear();
-    fireEvent.keyDown(input!, { key: "a" });
+    if (!input) throw new Error("rename input not found");
+    fireEvent.keyDown(input, { key: "a" });
     // keydown from the rename input must not propagate to outer handlers
     expect(outerHandler).not.toHaveBeenCalled();
   });

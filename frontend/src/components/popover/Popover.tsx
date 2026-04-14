@@ -85,7 +85,9 @@ export function Popover(props: PopoverProps) {
 
   const anchorName = `--sigil-popover-anchor-${createUniqueId()}`;
   const popoverId = `sigil-popover-${createUniqueId()}`;
+  // eslint-disable-next-line no-unassigned-vars
   let triggerRef: HTMLButtonElement | undefined;
+  // eslint-disable-next-line no-unassigned-vars
   let popoverRef: HTMLDivElement | undefined;
 
   const [isOpen, setIsOpen] = createSignal(local.open ?? false);
