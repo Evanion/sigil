@@ -14,7 +14,7 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 | Layer | Technology |
 |---|---|
 | UI framework | Solid.js 1.9 (panels, toolbar, dialogs) |
-| Headless components | Kobalte (`@kobalte/core`) — accessible primitives |
+| Headless components | Kobalte (`@kobalte/core`) — accessible primitives (NOT for Popover/Dialog — use native HTML) |
 | Icons | Lucide (`lucide-solid`) — tree-shakeable |
 | Design tokens | Open Props + CSS custom properties (dark theme in `styles/theme.css`) |
 | Canvas | HTML5 Canvas 2D (vanilla — NOT managed by Solid) |
@@ -66,7 +66,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - Components use `.tsx` extension. Non-JSX modules stay `.ts`.
 - Use `splitProps` for separating local props from pass-through props
 - Use Solid's `createSignal`, `createMemo`, `createEffect` for reactivity — not manual pub/sub
-- Wrap Kobalte primitives for all interactive components (Button, Tooltip, Popover, Select, etc.)
+- Wrap Kobalte primitives for interactive components (Button, Tooltip, Select, DropdownMenu, etc.) — except Popover and Dialog, which use native HTML implementations (see CLAUDE.md Section 5)
 - Never use `innerHTML` in JSX — use `textContent` or children
 - Components go in `src/components/<name>/` with `.tsx`, `.css`, `.stories.tsx`, `.test.tsx`
 - Use `<Index>` for lists that support add/remove/reorder (fills, strokes, effects, layers). Use `<For>` only for read-only or append-only lists. See CLAUDE.md section 5.
@@ -109,7 +109,7 @@ The canvas is an imperative rendering island — Solid does not manage it:
 - Text must meet WCAG 2.2 AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
 - Status changes must use ARIA live regions for screen reader announcement
 - Include `:focus-visible` styles and `prefers-reduced-motion` media queries
-- Kobalte primitives provide WAI-ARIA compliance — use them for all interactive components
+- Kobalte primitives provide WAI-ARIA compliance — use them for interactive components except Popover and Dialog (which use native HTML with equivalent a11y)
 
 ### Canvas DPR Handling
 

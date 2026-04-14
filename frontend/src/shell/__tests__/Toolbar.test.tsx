@@ -24,6 +24,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
       info: { name: "", page_count: 0, node_count: 0, can_undo: false, can_redo: false },
       pages: [],
       nodes: {},
+      tokens: {},
     },
     selectedNodeId: () => null,
     setSelectedNodeId: vi.fn(),
@@ -65,6 +66,10 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     undo: vi.fn(),
     redo: vi.fn(),
     flushHistory: vi.fn(),
+    createToken: vi.fn(),
+    updateToken: vi.fn(),
+    deleteToken: vi.fn(),
+    resolveToken: () => null,
     destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;

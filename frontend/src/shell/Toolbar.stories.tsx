@@ -13,6 +13,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
       info: { name: "Untitled", page_count: 1, node_count: 3, can_undo: false, can_redo: false },
       pages: [],
       nodes: {},
+      tokens: {},
     },
     selectedNodeId: () => null,
     setSelectedNodeId: () => {},
@@ -54,6 +55,10 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     undo: () => {},
     redo: () => {},
     flushHistory: () => {},
+    createToken: () => {},
+    updateToken: () => {},
+    deleteToken: () => {},
+    resolveToken: () => null,
     destroy: () => {},
     ...overrides,
   } as DocumentStoreAPI;

@@ -20,7 +20,11 @@ import type {
   NodeKind,
   StyleValue,
   NodeId,
+  Token,
+  TokenValue,
+  TokenType,
 } from "../types/document";
+import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
 
 /**
  * Recursively strips `readonly` from all properties.
@@ -89,6 +93,7 @@ export interface MutablePage {
 export interface StoreState {
   nodes: Record<string, StoreDocumentNode>;
   pages: MutablePage[];
+  tokens: Record<string, Token>;
 }
 
 // ── Placeholder for new nodes ─────────────────────────────────────────
@@ -178,6 +183,15 @@ function applyRemoteOperation(
       break;
     case "reorder_page":
       applyReorderPage(op.nodeUuid, op.value, setState);
+      break;
+    case "create_token":
+      applyCreateToken(op.value, setState);
+      break;
+    case "update_token":
+      applyUpdateToken(op.value, setState);
+      break;
+    case "delete_token":
+      applyDeleteToken(op.value, setState);
       break;
     default:
       console.warn(`Unknown remote operation type: ${op.type}`);
@@ -630,6 +644,138 @@ function applyReorderPage(
       if (page) {
         s.pages.splice(position, 0, page);
       }
+    }),
+  );
+}
+
+// ── Internal: create_token ────────────────────────────────────────────
+
+function applyCreateToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote create_token: missing or invalid token data");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+
+  const name = raw["name"];
+  if (!name || typeof name !== "string") {
+    console.warn("Remote create_token: missing or non-string name");
+    return;
+  }
+
+  const id = raw["id"];
+  if (!id || typeof id !== "string") {
+    console.warn("Remote create_token: missing or non-string id");
+    return;
+  }
+
+  const tokenType = raw["token_type"] ?? raw["tokenType"];
+  if (typeof tokenType !== "string") {
+    console.warn("Remote create_token: missing or non-string token_type");
+    return;
+  }
+  // F-14: Validate tokenType against allowlist
+  if (!VALID_TOKEN_TYPES.has(tokenType)) {
+    console.warn(`Remote create_token: unknown token_type "${tokenType}"`);
+    return;
+  }
+
+  const tokenValue = raw["value"];
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote create_token: missing or invalid value shape");
+    return;
+  }
+
+  const description = typeof raw["description"] === "string" ? raw["description"] : null;
+
+  const token: Token = {
+    id: id,
+    name,
+    token_type: tokenType as TokenType,
+    value: tokenValue as TokenValue,
+    description,
+  };
+
+  setState(
+    produce((s) => {
+      // Guard against duplicates — last-writer-wins for remote ops
+      s.tokens[name] = token;
+    }),
+  );
+}
+
+// ── Internal: update_token ────────────────────────────────────────────
+
+function applyUpdateToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote update_token: missing or invalid payload");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+
+  const name = raw["name"];
+  if (!name || typeof name !== "string") {
+    console.warn("Remote update_token: missing or non-string name");
+    return;
+  }
+
+  const tokenValue = raw["value"];
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote update_token: missing or invalid value shape");
+    return;
+  }
+
+  const description =
+    "description" in raw
+      ? typeof raw["description"] === "string"
+        ? raw["description"]
+        : null
+      : undefined;
+
+  setState(
+    produce((s) => {
+      const existing = s.tokens[name];
+      if (!existing) {
+        console.warn(`Remote update_token: token "${name}" not found in store, skipping`);
+        return;
+      }
+      s.tokens[name] = {
+        ...existing,
+        value: tokenValue as TokenValue,
+        description: description !== undefined ? description : existing.description,
+      };
+    }),
+  );
+}
+
+// ── Internal: delete_token ────────────────────────────────────────────
+
+function applyDeleteToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  // The name can come either as the value payload or as a string field within it
+  let name: string | null = null;
+
+  if (typeof value === "string") {
+    name = value;
+  } else if (value && typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    if (typeof raw["name"] === "string") {
+      name = raw["name"];
+    }
+  }
+
+  if (!name) {
+    console.warn("Remote delete_token: missing token name");
+    return;
+  }
+
+  const tokenName = name;
+  setState(
+    produce((s) => {
+      Reflect.deleteProperty(s.tokens, tokenName);
     }),
   );
 }

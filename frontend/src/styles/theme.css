@@ -75,9 +75,9 @@
   --z-text-overlay: 5;
   --z-drop-indicator: 10;
   --z-dropdown: 50;
-  --z-popover: 50;
-  --z-dialog-overlay: 60;
-  --z-dialog: 61;
+  --z-dialog-overlay: 50;
+  --z-dialog: 51;
+  --z-popover: 60;
   --z-toast: 80;
   --z-tooltip: 100;
 

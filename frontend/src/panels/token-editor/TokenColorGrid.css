@@ -1,0 +1,79 @@
+/* TokenColorGrid — responsive card grid of color token swatches */
+
+.sigil-token-color-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: var(--size-2);
+  padding: var(--size-2);
+}
+
+.sigil-token-color-grid__card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface-2);
+  transition: border-color 120ms;
+}
+
+.sigil-token-color-grid__card:hover {
+  border-color: var(--border-2);
+}
+
+.sigil-token-color-grid__card--selected {
+  border-color: var(--accent);
+}
+
+.sigil-token-color-grid__card--selected:hover {
+  border-color: var(--accent);
+}
+
+.sigil-token-color-grid__card:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Color swatch area */
+.sigil-token-color-grid__swatch {
+  height: 48px;
+  width: 100%;
+}
+
+/* Info area below swatch */
+.sigil-token-color-grid__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--size-1);
+}
+
+/* Token short name */
+.sigil-token-color-grid__name {
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Token value preview */
+.sigil-token-color-grid__value {
+  font-size: var(--font-size-00);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sigil-token-color-grid__value--alias {
+  font-style: italic;
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-color-grid__card {
+    transition: none;
+  }
+}
