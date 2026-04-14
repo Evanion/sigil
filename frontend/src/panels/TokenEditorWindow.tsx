@@ -186,7 +186,7 @@ export const TokenEditorWindow: Component<TokenEditorWindowProps> = (rawProps) =
   return (
     <Dialog
       open={props.isOpen}
-      onOpenChange={handleOpenChange}
+      onOpenChange={(open) => { if (!open) props.onClose(); }}
       title={t("panels:tokens.editorTitle")}
       class="sigil-token-editor-window"
     >
