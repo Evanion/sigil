@@ -57,3 +57,14 @@ When an operation fails and the error handler reverts local state, the revert me
 ### History Commits Must Contain At Least One Operation
 
 Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+
+### Business Logic Must Not Live in Inline JSX Handlers
+
+Any logic in a JSX event handler (`onInput`, `onChange`, `onClick`, `onPointerDown`, etc.) that does more than (a) read the event value, (b) call a single named function, or (c) set a single signal/store value MUST be extracted into a named, exported function in a same-concern utility file (e.g., `*-helpers.ts`, `*-utils.ts`). "Business logic" includes: input sanitization, validation, formatting, transformation, computation, and any conditional branching beyond a simple null/undefined guard.
+
+The extracted function:
+1. Must be a named export (not a default export) so it is discoverable via import search.
+2. Must have at least one unit test that exercises its core behavior and edge cases.
+3. Must be imported by all call sites that need the same logic — duplication of the function body across components is a bug, subject to the same reasoning as the Rust rule "inline copies diverge silently."
+
+This rule is the TypeScript counterpart to the Rust convention "Define all validation artifacts in `validate.rs`." Inline anonymous functions in JSX are not independently testable, not discoverable by other developers, and get copy-pasted when the same logic is needed elsewhere.
