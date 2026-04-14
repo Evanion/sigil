@@ -299,7 +299,16 @@ export const TokensPanel: Component = () => {
                 maxLength={MAX_TOKEN_NAME_LENGTH}
                 placeholder={t("panels:tokens.name")}
                 onInput={(e) => {
-                  setNewTokenName(e.currentTarget.value);
+                  const input = e.currentTarget;
+                  const pos = input.selectionStart ?? 0;
+                  // Replace spaces with dots, strip invalid characters
+                  const sanitized = input.value.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+                  if (sanitized !== input.value) {
+                    input.value = sanitized;
+                    const newPos = Math.min(pos, sanitized.length);
+                    input.setSelectionRange(newPos, newPos);
+                  }
+                  setNewTokenName(sanitized);
                   setCreateError(null);
                 }}
                 aria-invalid={createError() !== null}

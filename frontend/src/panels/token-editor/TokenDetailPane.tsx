@@ -81,6 +81,23 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
     return result.sort();
   });
 
+  // ── Input sanitization ──────────────────────────────────────────────
+
+  /** Replace spaces with dots and strip invalid characters as the user types. */
+  function handleRenameInput(e: InputEvent): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const pos = input.selectionStart ?? 0;
+    // Replace spaces with dots, strip characters not in the allowed set
+    const sanitized = input.value.replace(/ /g, ".").replace(/[^a-zA-Z0-9/._-]/g, "");
+    if (sanitized !== input.value) {
+      input.value = sanitized;
+      // Restore cursor position (may shift if characters were removed)
+      const newPos = Math.min(pos, sanitized.length);
+      input.setSelectionRange(newPos, newPos);
+    }
+    setRenameError(null);
+  }
+
   // ── Rename ─────────────────────────────────────────────────────────
 
   function startRename(): void {
@@ -243,6 +260,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
                 aria-label={t("panels:tokens.name")}
                 aria-invalid={renameError() !== null}
                 aria-describedby={renameError() !== null ? "sigil-detail-rename-error" : undefined}
+                onInput={handleRenameInput}
                 onBlur={commitRename}
                 onKeyDown={handleRenameKeyDown}
               />
