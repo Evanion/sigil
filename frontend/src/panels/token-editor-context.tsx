@@ -1,8 +1,8 @@
 /**
- * Context for controlling the TokenEditorWindow open/close state.
+ * Context for controlling the TokenEditor open/close state.
  *
  * This context bridges the TokensPanel (rendered through Dynamic without props)
- * and the TokenEditorWindow (rendered in App.tsx at the shell level).
+ * and the TokenEditor (rendered in App.tsx at the shell level).
  */
 
 import { createContext, useContext, type ParentComponent, type Accessor } from "solid-js";

@@ -1,0 +1,269 @@
+/* ── TokenEditor: three-pane dialog ──────────────────────────────────────── */
+
+.sigil-token-editor {
+  width: 90vw;
+  max-width: 1200px;
+  height: 80vh;
+  max-height: 800px;
+  padding: 0;
+}
+
+/* Override Dialog body padding to zero for full-bleed layout */
+.sigil-token-editor .sigil-dialog__body {
+  padding: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: 0;
+}
+
+.sigil-token-editor__layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+/* ── Middle pane: TokenStyleguideView ──────────────────────────────────── */
+
+.sigil-token-styleguide {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border-1);
+  border-right: 1px solid var(--border-1);
+}
+
+.sigil-token-styleguide__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2);
+  padding: var(--size-3);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+
+.sigil-token-styleguide__title {
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+}
+
+.sigil-token-styleguide__subtitle {
+  font-size: var(--font-size-00);
+  color: var(--text-3);
+}
+
+.sigil-token-styleguide__content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--size-2);
+}
+
+.sigil-token-styleguide__group {
+  margin-bottom: var(--size-3);
+}
+
+.sigil-token-styleguide__group-header {
+  font-size: var(--font-size-00);
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: var(--size-1) 0;
+  margin-bottom: var(--size-1);
+  border-bottom: 1px solid var(--border-1);
+}
+
+.sigil-token-styleguide__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 120px;
+  color: var(--text-3);
+  font-size: var(--font-size-0);
+}
+
+/* ── Right pane: TokenDetailPane ──────────────────────────────────────── */
+
+.sigil-token-editor__detail {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.sigil-token-editor__no-selection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-3);
+  font-size: var(--font-size-0);
+  padding: var(--size-3);
+  text-align: center;
+}
+
+.sigil-token-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2);
+  padding: var(--size-3);
+}
+
+.sigil-token-detail-pane__header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2);
+  flex-wrap: wrap;
+}
+
+.sigil-token-detail-pane__name {
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  color: var(--text-1);
+  margin: 0;
+  word-break: break-all;
+}
+
+.sigil-token-detail-pane__type-badge {
+  font-size: var(--font-size-00);
+  color: var(--text-3);
+  background: var(--surface-3);
+  padding: var(--size-0) var(--size-1);
+  border-radius: var(--button-radius);
+  white-space: nowrap;
+}
+
+/* ── Preview blocks ────────────────────────────────────────────────────── */
+
+.sigil-token-detail-pane__preview {
+  border-radius: var(--input-radius);
+  overflow: hidden;
+}
+
+.sigil-token-detail-pane__preview--color {
+  border: 1px solid var(--border-1);
+}
+
+.sigil-token-detail-pane__preview--spacing {
+  background: var(--surface-3);
+  display: flex;
+  align-items: flex-end;
+}
+
+.sigil-token-detail-pane__spacing-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: var(--input-radius);
+}
+
+.sigil-token-detail-pane__preview--typo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-3);
+  background: var(--surface-3);
+  color: var(--text-1);
+  min-height: 64px;
+}
+
+.sigil-token-detail-pane__preview--shadow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--size-4);
+  background: var(--surface-3);
+}
+
+.sigil-token-detail-pane__shadow-box {
+  width: 48px;
+  height: 48px;
+  background: var(--surface-1);
+  border-radius: var(--input-radius);
+}
+
+/* ── Reference sections ────────────────────────────────────────────────── */
+
+.sigil-token-detail-pane__refs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+}
+
+.sigil-token-detail-pane__refs-label {
+  font-size: var(--font-size-00);
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sigil-token-detail-pane__ref-link {
+  font-size: var(--font-size-0);
+  color: var(--accent);
+  cursor: pointer;
+  text-decoration: underline;
+  word-break: break-all;
+}
+
+.sigil-token-detail-pane__ref-link:hover {
+  color: var(--accent-hover);
+}
+
+.sigil-token-detail-pane__ref-link:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Action buttons ────────────────────────────────────────────────────── */
+
+.sigil-token-detail-pane__actions {
+  display: flex;
+  gap: var(--size-1);
+  margin-top: var(--size-2);
+  border-top: 1px solid var(--border-1);
+  padding-top: var(--size-2);
+}
+
+.sigil-token-detail-pane__action-button {
+  flex: 1;
+  height: var(--input-height);
+  padding: 0 var(--size-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sigil-token-detail-pane__action-button:hover {
+  color: var(--text-1);
+  border-color: var(--border-2);
+}
+
+.sigil-token-detail-pane__action-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-detail-pane__action-button--danger {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.sigil-token-detail-pane__action-button--danger:hover {
+  background: var(--danger);
+  color: var(--text-on-accent);
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-detail-pane__ref-link,
+  .sigil-token-detail-pane__action-button {
+    transition: none;
+  }
+}

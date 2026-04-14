@@ -11,7 +11,7 @@ import { AnnounceProvider } from "./shell/AnnounceProvider";
 import { TabRegion } from "./panels/TabRegion";
 import { registerDefaultPanels } from "./panels/register-panels";
 import { TokenEditorProvider } from "./panels/token-editor-context";
-import { TokenEditorWindow } from "./panels/TokenEditorWindow";
+import { TokenEditor } from "./panels/token-editor/TokenEditor";
 import "./App.css";
 
 /**
@@ -74,7 +74,7 @@ const AppShell: Component = () => {
                 {announcement()}
               </div>
             </div>
-            <TokenEditorWindow
+            <TokenEditor
               isOpen={tokenEditorOpen()}
               onClose={() => setTokenEditorOpen(false)}
             />
