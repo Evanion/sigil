@@ -1,3 +1,4 @@
+pub mod color_convert;
 pub mod errors;
 pub mod expression;
 pub mod parser;
