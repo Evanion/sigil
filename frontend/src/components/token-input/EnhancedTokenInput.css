@@ -78,6 +78,13 @@
   font-size: var(--font-size-00);
 }
 
+/* Muted "info" style for errors shown while user is still typing */
+.sigil-token-input__info-msg {
+  color: var(--text-3);
+  font-size: var(--font-size-00);
+  font-style: italic;
+}
+
 .sigil-token-input__resolved {
   color: var(--text-3);
   font-size: var(--font-size-00);

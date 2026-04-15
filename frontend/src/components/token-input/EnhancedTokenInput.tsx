@@ -159,6 +159,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
   // ── Internal state ─────────────────────────────────────────────────
 
   const [confirmedValue, setConfirmedValue] = createSignal(props.value);
+  const [liveText, setLiveText] = createSignal(props.value);
   const [isFocused, setIsFocused] = createSignal(false);
 
   // Autocomplete state
@@ -182,9 +183,9 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     return filterFunctionSuggestions(q, MAX_AUTOCOMPLETE_RESULTS);
   });
 
-  /** Parse + evaluate the current text for status display. */
+  /** Parse + evaluate the live text for real-time error/resolved display. */
   const evalResult = createMemo<{ error: string | null; resolved: string | null }>(() => {
-    const text = confirmedValue();
+    const text = liveText();
     if (text.trim().length === 0) return { error: null, resolved: null };
 
     const parsed = parseExpression(text);
@@ -317,6 +318,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     closeAutocomplete();
 
     // RF-006: commit the value after inserting a suggestion
+    setLiveText(newText);
     setConfirmedValue(newText);
     props.onChange(newText);
   }
@@ -333,6 +335,9 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
       renderHighlighted(current, false);
       return;
     }
+
+    // Update live text for real-time error/resolved display
+    setLiveText(text);
 
     // RF-011: compute cursor offset ONCE and pass to both functions
     const cursor = inputRef ? getCursorOffset(inputRef) : 0;
@@ -489,6 +494,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
   createEffect(() => {
     const externalValue = props.value;
     if (!isFocused()) {
+      setLiveText(externalValue);
       setConfirmedValue(externalValue);
       renderHighlighted(externalValue, false);
     }
@@ -607,10 +613,14 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
         </Index>
       </div>
 
-      {/* Status area */}
+      {/* Status area — errors show as info (muted) while focused, red after blur/commit */}
       <div id={statusId} class="sigil-token-input__status" aria-live="polite">
         <Show when={evalResult().error !== null}>
-          <span class="sigil-token-input__error-msg">{evalResult().error}</span>
+          <span
+            class={isFocused() ? "sigil-token-input__info-msg" : "sigil-token-input__error-msg"}
+          >
+            {evalResult().error}
+          </span>
         </Show>
         <Show when={evalResult().error === null && evalResult().resolved !== null}>
           <span class="sigil-token-input__resolved">= {evalResult().resolved}</span>
