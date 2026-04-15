@@ -50,207 +50,222 @@ export { FUNCTION_REGISTRY_NAMES };
 // the sorted array directly without a per-call spread+sort.
 const BUILTIN_FUNCTIONS: readonly FunctionSuggestion[] = ((): readonly FunctionSuggestion[] => {
   const unsorted: FunctionSuggestion[] = [
-  // Math (7)
-  {
-    type: "function",
-    name: "round",
-    signature: "round(n)",
-    description: "Round to nearest integer",
-  },
-  {
-    type: "function",
-    name: "ceil",
-    signature: "ceil(n)",
-    description: "Round up to nearest integer",
-  },
-  {
-    type: "function",
-    name: "floor",
-    signature: "floor(n)",
-    description: "Round down to nearest integer",
-  },
-  { type: "function", name: "abs", signature: "abs(n)", description: "Absolute value" },
-  {
-    type: "function",
-    name: "min",
-    signature: "min(a, b)",
-    description: "Return the smaller value",
-  },
-  { type: "function", name: "max", signature: "max(a, b)", description: "Return the larger value" },
-  {
-    type: "function",
-    name: "clamp",
-    signature: "clamp(min, val, max)",
-    description: "Clamp value to range",
-  },
+    // Math (7)
+    {
+      type: "function",
+      name: "round",
+      signature: "round(n)",
+      description: "Round to nearest integer",
+    },
+    {
+      type: "function",
+      name: "ceil",
+      signature: "ceil(n)",
+      description: "Round up to nearest integer",
+    },
+    {
+      type: "function",
+      name: "floor",
+      signature: "floor(n)",
+      description: "Round down to nearest integer",
+    },
+    { type: "function", name: "abs", signature: "abs(n)", description: "Absolute value" },
+    {
+      type: "function",
+      name: "min",
+      signature: "min(a, b)",
+      description: "Return the smaller value",
+    },
+    {
+      type: "function",
+      name: "max",
+      signature: "max(a, b)",
+      description: "Return the larger value",
+    },
+    {
+      type: "function",
+      name: "clamp",
+      signature: "clamp(min, val, max)",
+      description: "Clamp value to range",
+    },
 
-  // Size (3)
-  { type: "function", name: "rem", signature: "rem(n)", description: "Convert to rem units" },
-  { type: "function", name: "em", signature: "em(n)", description: "Convert to em units" },
-  { type: "function", name: "px", signature: "px(n)", description: "Convert to pixel units" },
+    // Size (3)
+    { type: "function", name: "rem", signature: "rem(n)", description: "Convert to rem units" },
+    { type: "function", name: "em", signature: "em(n)", description: "Convert to em units" },
+    { type: "function", name: "px", signature: "px(n)", description: "Convert to pixel units" },
 
-  // Color manipulation (9)
-  {
-    type: "function",
-    name: "lighten",
-    signature: "lighten(color, amount)",
-    description: "Lighten a color",
-  },
-  {
-    type: "function",
-    name: "darken",
-    signature: "darken(color, amount)",
-    description: "Darken a color",
-  },
-  {
-    type: "function",
-    name: "saturate",
-    signature: "saturate(color, amount)",
-    description: "Increase color saturation",
-  },
-  {
-    type: "function",
-    name: "desaturate",
-    signature: "desaturate(color, amount)",
-    description: "Decrease color saturation",
-  },
-  {
-    type: "function",
-    name: "alpha",
-    signature: "alpha(color, amount)",
-    description: "Set color alpha",
-  },
-  {
-    type: "function",
-    name: "mix",
-    signature: "mix(color1, color2, weight)",
-    description: "Mix two colors",
-  },
-  {
-    type: "function",
-    name: "contrast",
-    signature: "contrast(color)",
-    description: "Get contrast color (black or white)",
-  },
-  {
-    type: "function",
-    name: "complement",
-    signature: "complement(color)",
-    description: "Get complementary color",
-  },
-  { type: "function", name: "hue", signature: "hue(color, degrees)", description: "Set color hue" },
+    // Color manipulation (9)
+    {
+      type: "function",
+      name: "lighten",
+      signature: "lighten(color, amount)",
+      description: "Lighten a color",
+    },
+    {
+      type: "function",
+      name: "darken",
+      signature: "darken(color, amount)",
+      description: "Darken a color",
+    },
+    {
+      type: "function",
+      name: "saturate",
+      signature: "saturate(color, amount)",
+      description: "Increase color saturation",
+    },
+    {
+      type: "function",
+      name: "desaturate",
+      signature: "desaturate(color, amount)",
+      description: "Decrease color saturation",
+    },
+    {
+      type: "function",
+      name: "alpha",
+      signature: "alpha(color, amount)",
+      description: "Set color alpha",
+    },
+    {
+      type: "function",
+      name: "mix",
+      signature: "mix(color1, color2, weight)",
+      description: "Mix two colors",
+    },
+    {
+      type: "function",
+      name: "contrast",
+      signature: "contrast(color)",
+      description: "Get contrast color (black or white)",
+    },
+    {
+      type: "function",
+      name: "complement",
+      signature: "complement(color)",
+      description: "Get complementary color",
+    },
+    {
+      type: "function",
+      name: "hue",
+      signature: "hue(color, degrees)",
+      description: "Set color hue",
+    },
 
-  // Channel setters (6)
-  {
-    type: "function",
-    name: "setRed",
-    signature: "setRed(color, value)",
-    description: "Set red channel",
-  },
-  {
-    type: "function",
-    name: "setGreen",
-    signature: "setGreen(color, value)",
-    description: "Set green channel",
-  },
-  {
-    type: "function",
-    name: "setBlue",
-    signature: "setBlue(color, value)",
-    description: "Set blue channel",
-  },
-  {
-    type: "function",
-    name: "setHue",
-    signature: "setHue(color, degrees)",
-    description: "Set hue in HSL",
-  },
-  {
-    type: "function",
-    name: "setSaturation",
-    signature: "setSaturation(color, value)",
-    description: "Set saturation in HSL",
-  },
-  {
-    type: "function",
-    name: "setLightness",
-    signature: "setLightness(color, value)",
-    description: "Set lightness in HSL",
-  },
+    // Channel setters (6)
+    {
+      type: "function",
+      name: "setRed",
+      signature: "setRed(color, value)",
+      description: "Set red channel",
+    },
+    {
+      type: "function",
+      name: "setGreen",
+      signature: "setGreen(color, value)",
+      description: "Set green channel",
+    },
+    {
+      type: "function",
+      name: "setBlue",
+      signature: "setBlue(color, value)",
+      description: "Set blue channel",
+    },
+    {
+      type: "function",
+      name: "setHue",
+      signature: "setHue(color, degrees)",
+      description: "Set hue in HSL",
+    },
+    {
+      type: "function",
+      name: "setSaturation",
+      signature: "setSaturation(color, value)",
+      description: "Set saturation in HSL",
+    },
+    {
+      type: "function",
+      name: "setLightness",
+      signature: "setLightness(color, value)",
+      description: "Set lightness in HSL",
+    },
 
-  // Channel adjusters (6)
-  {
-    type: "function",
-    name: "adjustRed",
-    signature: "adjustRed(color, delta)",
-    description: "Adjust red channel",
-  },
-  {
-    type: "function",
-    name: "adjustGreen",
-    signature: "adjustGreen(color, delta)",
-    description: "Adjust green channel",
-  },
-  {
-    type: "function",
-    name: "adjustBlue",
-    signature: "adjustBlue(color, delta)",
-    description: "Adjust blue channel",
-  },
-  {
-    type: "function",
-    name: "adjustHue",
-    signature: "adjustHue(color, delta)",
-    description: "Adjust hue by offset",
-  },
-  {
-    type: "function",
-    name: "adjustSaturation",
-    signature: "adjustSaturation(color, delta)",
-    description: "Adjust saturation",
-  },
-  {
-    type: "function",
-    name: "adjustLightness",
-    signature: "adjustLightness(color, delta)",
-    description: "Adjust lightness",
-  },
+    // Channel adjusters (6)
+    {
+      type: "function",
+      name: "adjustRed",
+      signature: "adjustRed(color, delta)",
+      description: "Adjust red channel",
+    },
+    {
+      type: "function",
+      name: "adjustGreen",
+      signature: "adjustGreen(color, delta)",
+      description: "Adjust green channel",
+    },
+    {
+      type: "function",
+      name: "adjustBlue",
+      signature: "adjustBlue(color, delta)",
+      description: "Adjust blue channel",
+    },
+    {
+      type: "function",
+      name: "adjustHue",
+      signature: "adjustHue(color, delta)",
+      description: "Adjust hue by offset",
+    },
+    {
+      type: "function",
+      name: "adjustSaturation",
+      signature: "adjustSaturation(color, delta)",
+      description: "Adjust saturation",
+    },
+    {
+      type: "function",
+      name: "adjustLightness",
+      signature: "adjustLightness(color, delta)",
+      description: "Adjust lightness",
+    },
 
-  // Channel extractors (6)
-  { type: "function", name: "red", signature: "red(color)", description: "Extract red channel" },
-  {
-    type: "function",
-    name: "green",
-    signature: "green(color)",
-    description: "Extract green channel",
-  },
-  { type: "function", name: "blue", signature: "blue(color)", description: "Extract blue channel" },
-  {
-    type: "function",
-    name: "hueOf",
-    signature: "hueOf(color)",
-    description: "Extract hue from color",
-  },
-  {
-    type: "function",
-    name: "saturationOf",
-    signature: "saturationOf(color)",
-    description: "Extract saturation from color",
-  },
-  {
-    type: "function",
-    name: "lightnessOf",
-    signature: "lightnessOf(color)",
-    description: "Extract lightness from color",
-  },
+    // Channel extractors (6)
+    { type: "function", name: "red", signature: "red(color)", description: "Extract red channel" },
+    {
+      type: "function",
+      name: "green",
+      signature: "green(color)",
+      description: "Extract green channel",
+    },
+    {
+      type: "function",
+      name: "blue",
+      signature: "blue(color)",
+      description: "Extract blue channel",
+    },
+    {
+      type: "function",
+      name: "hueOf",
+      signature: "hueOf(color)",
+      description: "Extract hue from color",
+    },
+    {
+      type: "function",
+      name: "saturationOf",
+      signature: "saturationOf(color)",
+      description: "Extract saturation from color",
+    },
+    {
+      type: "function",
+      name: "lightnessOf",
+      signature: "lightnessOf(color)",
+      description: "Extract lightness from color",
+    },
 
-  // Blend (1)
-  {
-    type: "function",
-    name: "blend",
-    signature: "blend(base, overlay, mode)",
-    description: "Blend two colors with blend mode",
-  },
+    // Blend (1)
+    {
+      type: "function",
+      name: "blend",
+      signature: "blend(base, overlay, mode)",
+      description: "Blend two colors with blend mode",
+    },
   ];
   // Sort once at module init — filterFunctionSuggestions iterates in-order (RF-024).
   return unsorted.sort((a, b) => a.name.localeCompare(b.name));

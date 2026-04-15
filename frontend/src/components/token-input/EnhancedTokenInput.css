@@ -26,8 +26,10 @@
   outline-offset: var(--focus-offset);
 }
 
+/* RF-029: allow text selection when disabled instead of blocking pointer events */
 .sigil-token-input--disabled {
-  pointer-events: none;
+  cursor: not-allowed;
+  user-select: text;
   opacity: var(--opacity-hidden);
 }
 
@@ -99,7 +101,8 @@
   max-height: 200px;
   overflow-y: auto;
   z-index: var(--z-dropdown);
-  box-shadow: var(--shadow-3, 0 4px 12px rgba(0, 0, 0, 0.3));
+  /* RF-023: removed hardcoded CSS fallback */
+  box-shadow: var(--shadow-3);
 }
 
 .sigil-token-input__ac-item {
@@ -138,6 +141,21 @@
   font-size: var(--font-size-00);
   white-space: nowrap;
   flex: 0 0 auto;
+}
+
+/* ── Screen reader only (visually hidden, accessible to AT) ────────── */
+/* RF-010 */
+
+.sigil-token-input__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ── Reduced motion ─────────────────────────────────────────────────── */

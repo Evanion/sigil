@@ -169,6 +169,7 @@
     "ungrouped": "Ungrouped",
     "expressionError": "Expression error",
     "expressionResolved": "Resolved: {{value}}",
-    "autocompleteHint": "Type { for tokens, or start typing a function name"
+    "autocompleteHint": "Type { for tokens, or start typing a function name",
+    "emptyExpression": "Expression cannot be empty"
   }
 }

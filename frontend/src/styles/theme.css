@@ -88,7 +88,8 @@
 
   /* Token input syntax highlighting */
   --token-input-function: #e09944;
-  --token-input-number: #e5a855;
+  /* RF-014: teal-green for numbers, visually distinct from amber function color */
+  --token-input-number: #6ec9a8;
 
   /* Color picker widget tokens */
   --color-picker-radius: var(--radius-2);

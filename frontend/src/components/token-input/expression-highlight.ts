@@ -6,6 +6,8 @@
  * NOT the full expression parser (see store/expression-eval.ts for that).
  */
 
+import { MAX_EXPRESSION_LENGTH } from "../../store/expression-eval";
+
 // ── Segment types ──────────────────────────────────────────────────────
 
 export interface HighlightSegment {
@@ -53,6 +55,11 @@ function isWhitespace(ch: string): boolean {
 export function highlightExpression(input: string): readonly HighlightSegment[] {
   if (input.length === 0) {
     return [];
+  }
+
+  // RF-002: reject oversized input to avoid expensive tokenization
+  if (input.length > MAX_EXPRESSION_LENGTH) {
+    return [{ text: input.slice(0, 50) + "\u2026", type: "error" }];
   }
 
   const segments: HighlightSegment[] = [];

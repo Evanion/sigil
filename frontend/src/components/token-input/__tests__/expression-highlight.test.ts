@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { highlightExpression, type HighlightSegment } from "../expression-highlight";
+import { MAX_EXPRESSION_LENGTH } from "../../../store/expression-eval";
 
 describe("highlightExpression", () => {
   it("should return empty array for empty string", () => {
@@ -172,5 +173,23 @@ describe("highlightExpression", () => {
     const result = highlightExpression("{valid} + {broken");
     expect(result[0]).toEqual({ text: "{valid}", type: "tokenRef" });
     expect(result[result.length - 1].type).toBe("error");
+  });
+
+  // RF-002: MAX_EXPRESSION_LENGTH enforcement test
+  it("should return error segment for input exceeding MAX_EXPRESSION_LENGTH", () => {
+    const longInput = "a".repeat(MAX_EXPRESSION_LENGTH + 1);
+    const result = highlightExpression(longInput);
+    expect(result).toHaveLength(1);
+    expect(result[0].type).toBe("error");
+    // Should be truncated to 50 chars + ellipsis
+    expect(result[0].text).toHaveLength(51);
+    expect(result[0].text.endsWith("\u2026")).toBe(true);
+  });
+
+  it("should allow input at exactly MAX_EXPRESSION_LENGTH", () => {
+    const exactInput = "1".repeat(MAX_EXPRESSION_LENGTH);
+    const result = highlightExpression(exactInput);
+    // Should NOT return an error — should tokenize normally
+    expect(result.every((s: HighlightSegment) => s.type !== "error")).toBe(true);
   });
 });

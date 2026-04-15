@@ -5,11 +5,16 @@
  * Uses a contentEditable div (single-line, monospace) that re-renders colored
  * <span> elements on every input, preserving cursor position across re-renders.
  *
+ * Note: spec §4.1 defines `mode` and `onModeChange` props. These are omitted
+ * because the component auto-detects mode from content (bare {name} = reference,
+ * operators/functions = expression). Mode switching is handled by the parent
+ * (TokenDetailEditor) which shows different editors per mode. (RF-025)
+ *
  * CLAUDE.md rules applied:
  * - stopPropagation on all keyDown events (overlay-mode keyboard rule)
  * - No `any` types
  * - Number.isFinite() on numeric eval results
- * - aria-label, role="textbox", keyboard navigable
+ * - aria-label, role="combobox", keyboard navigable
  * - onCleanup not called inside event handlers
  * - @media (prefers-reduced-motion: reduce) in CSS
  */
@@ -18,10 +23,10 @@ import {
   createSignal,
   createEffect,
   createMemo,
+  createUniqueId,
   onMount,
   Show,
   Index,
-  splitProps,
   type Component,
 } from "solid-js";
 import type { Token, TokenType } from "../../types/document";
@@ -30,8 +35,7 @@ import {
   parseExpression,
   evaluateExpression,
   isEvalError,
-  type EvalValue,
-  type EvalError,
+  MAX_EXPRESSION_LENGTH,
 } from "../../store/expression-eval";
 import {
   filterTokenSuggestions,
@@ -41,6 +45,13 @@ import {
   type TokenSuggestion,
   type FunctionSuggestion,
 } from "./token-autocomplete";
+import {
+  getCursorOffset,
+  setCursorOffset,
+  formatEvalError,
+  formatEvalValue,
+  insertPlainTextAtCursor,
+} from "./input-helpers";
 import "./EnhancedTokenInput.css";
 
 // ── Props ──────────────────────────────────────────────────────────────
@@ -67,100 +78,8 @@ const SEGMENT_CLASS_MAP: Record<HighlightSegment["type"], string> = {
   error: "sigil-token-input__error-segment",
 };
 
-// ── Cursor position helpers ────────────────────────────────────────────
-
-/**
- * Get the cursor offset (character count) within a contentEditable element.
- * Returns the offset from the start of the element's text content.
- */
-function getCursorOffset(el: HTMLElement): number {
-  const sel = window.getSelection();
-  if (!sel || sel.rangeCount === 0) return 0;
-  const range = sel.getRangeAt(0);
-  const preRange = document.createRange();
-  preRange.selectNodeContents(el);
-  preRange.setEnd(range.startContainer, range.startOffset);
-  return preRange.toString().length;
-}
-
-/**
- * Set the cursor to a specific character offset within a contentEditable element.
- * Walks through text nodes to find the correct position.
- */
-function setCursorOffset(el: HTMLElement, offset: number): void {
-  const sel = window.getSelection();
-  if (!sel) return;
-  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-  let currentOffset = 0;
-  let node: Text | null = null;
-  while (walker.nextNode()) {
-    node = walker.currentNode as Text;
-    if (currentOffset + node.length >= offset) {
-      const range = document.createRange();
-      range.setStart(node, offset - currentOffset);
-      range.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(range);
-      return;
-    }
-    currentOffset += node.length;
-  }
-  // If offset exceeds content length, place cursor at end
-  if (node) {
-    const range = document.createRange();
-    range.setStart(node, node.length);
-    range.collapse(true);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-}
-
-// ── Error formatting ───────────────────────────────────────────────────
-
-function formatEvalError(err: EvalError): string {
-  switch (err.type) {
-    case "parse":
-      return `Parse error: ${err.message}`;
-    case "unknownFunction":
-      return `Unknown function: ${err.name}`;
-    case "arityError":
-      return `${err.name}() expects ${String(err.expected)} args, got ${String(err.got)}`;
-    case "typeError":
-      return `Type error: expected ${err.expected}, got ${err.got}`;
-    case "referenceNotFound":
-      return `Unknown token: ${err.name}`;
-    case "depthExceeded":
-      return "Expression too deeply nested";
-    case "divisionByZero":
-      return "Division by zero";
-    case "domainError":
-      return `Domain error: ${err.message}`;
-  }
-}
-
-function formatEvalValue(val: EvalValue): string {
-  switch (val.type) {
-    case "number": {
-      if (!Number.isFinite(val.value)) return "—";
-      return String(val.value);
-    }
-    case "color": {
-      const c = val.value;
-      switch (c.space) {
-        case "srgb":
-        case "display_p3":
-          return `rgba(${String(c.r)}, ${String(c.g)}, ${String(c.b)}, ${String(c.a)})`;
-        case "oklch":
-          return `oklch(${String(c.l)} ${String(c.c)} ${String(c.h)} / ${String(c.a)})`;
-        case "oklab":
-          return `oklab(${String(c.l)} ${String(c.a)} ${String(c.b)} / ${String(c.alpha)})`;
-      }
-      break;
-    }
-    case "string":
-      return val.value;
-  }
-}
+/** Default placeholder text when none is provided via props. (RF-013) */
+const DEFAULT_PLACEHOLDER = "Type { for tokens, or an expression";
 
 // ── Autocomplete context extraction ────────────────────────────────────
 
@@ -225,25 +144,21 @@ function getAutocompleteContext(text: string, cursorPos: number): AutocompleteCo
 
 // ── Component ──────────────────────────────────────────────────────────
 
+// RF-022: props are accessed directly — splitProps is unnecessary here because
+// all props are consumed by this component (no pass-through to a child element).
 const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
-  const [local] = splitProps(props, [
-    "value",
-    "onChange",
-    "tokens",
-    "tokenType",
-    "placeholder",
-    "disabled",
-    "aria-label",
-  ]);
-
   // eslint-disable-next-line no-unassigned-vars
   let inputRef: HTMLDivElement | undefined;
-  const statusId = `sigil-token-input-status-${Math.random().toString(36).slice(2, 8)}`;
-  const listboxId = `sigil-token-input-listbox-${Math.random().toString(36).slice(2, 8)}`;
+
+  // RF-027: use Solid's createUniqueId instead of Math.random()
+  const uniqueId = createUniqueId();
+  const statusId = `sigil-token-input-status-${uniqueId}`;
+  const listboxId = `sigil-token-input-listbox-${uniqueId}`;
+  const srAnnouncementId = `sigil-token-input-sr-${uniqueId}`;
 
   // ── Internal state ─────────────────────────────────────────────────
 
-  const [confirmedValue, setConfirmedValue] = createSignal(local.value);
+  const [confirmedValue, setConfirmedValue] = createSignal(props.value);
   const [isFocused, setIsFocused] = createSignal(false);
 
   // Autocomplete state
@@ -262,7 +177,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     if (!autocompleteOpen()) return [];
     const q = autocompleteQuery();
     if (autocompleteMode() === "token") {
-      return filterTokenSuggestions(local.tokens, q, local.tokenType, MAX_AUTOCOMPLETE_RESULTS);
+      return filterTokenSuggestions(props.tokens, q, props.tokenType, MAX_AUTOCOMPLETE_RESULTS);
     }
     return filterFunctionSuggestions(q, MAX_AUTOCOMPLETE_RESULTS);
   });
@@ -277,7 +192,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
       return { error: formatEvalError(parsed), resolved: null };
     }
 
-    const result = evaluateExpression(parsed, local.tokens);
+    const result = evaluateExpression(parsed, props.tokens);
     if (isEvalError(result)) {
       return { error: formatEvalError(result), resolved: null };
     }
@@ -290,11 +205,18 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
   /**
    * Re-render the contentEditable content with syntax-highlighted spans.
    * Preserves cursor position across the DOM rewrite.
+   *
+   * RF-011: accepts an optional pre-computed cursorOffset to avoid
+   * double computation when the caller already measured it.
    */
-  function renderHighlighted(text: string, preserveCursor: boolean): void {
+  function renderHighlighted(
+    text: string,
+    preserveCursor: boolean,
+    cachedCursorOffset?: number,
+  ): void {
     if (!inputRef) return;
 
-    const cursorOffset = preserveCursor ? getCursorOffset(inputRef) : 0;
+    const cursorOffset = preserveCursor ? (cachedCursorOffset ?? getCursorOffset(inputRef)) : 0;
 
     const segments = highlightExpression(text);
 
@@ -331,10 +253,11 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
 
   // ── Autocomplete helpers ───────────────────────────────────────────
 
-  function updateAutocomplete(): void {
+  /** RF-011: accepts pre-computed cursor offset to avoid recalculation. */
+  function updateAutocomplete(cachedCursor?: number): void {
     if (!inputRef) return;
     const text = getInputText();
-    const cursor = getCursorOffset(inputRef);
+    const cursor = cachedCursor ?? getCursorOffset(inputRef);
     const ctx = getAutocompleteContext(text, cursor);
 
     if (ctx) {
@@ -384,14 +307,29 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     renderHighlighted(newText, false);
     setCursorOffset(inputRef, newCursor);
     closeAutocomplete();
+
+    // RF-006: commit the value after inserting a suggestion
+    setConfirmedValue(newText);
+    props.onChange(newText);
   }
 
   // ── Event handlers ─────────────────────────────────────────────────
 
   function handleInput(): void {
     const text = getInputText();
-    renderHighlighted(text, true);
-    updateAutocomplete();
+
+    // RF-002: enforce MAX_EXPRESSION_LENGTH — don't re-highlight oversized input
+    if (text.length > MAX_EXPRESSION_LENGTH) {
+      // Restore to the confirmed value to reject the input
+      const current = confirmedValue();
+      renderHighlighted(current, false);
+      return;
+    }
+
+    // RF-011: compute cursor offset ONCE and pass to both functions
+    const cursor = inputRef ? getCursorOffset(inputRef) : 0;
+    renderHighlighted(text, true, cursor);
+    updateAutocomplete(cursor);
   }
 
   function handleKeyDown(e: KeyboardEvent): void {
@@ -446,7 +384,7 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
           e.preventDefault();
           const text = getInputText();
           setConfirmedValue(text);
-          local.onChange(text);
+          props.onChange(text);
           return;
         }
         case "Escape": {
@@ -466,6 +404,14 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
 
   function handleBlur(): void {
     setIsFocused(false);
+
+    // RF-008: commit uncommitted changes on blur
+    const currentText = getInputText();
+    if (currentText !== confirmedValue()) {
+      setConfirmedValue(currentText);
+      props.onChange(currentText);
+    }
+
     closeAutocomplete();
   }
 
@@ -474,8 +420,18 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     e.preventDefault();
     const text = e.clipboardData?.getData("text/plain") ?? "";
     // Remove newlines for single-line behavior
-    const singleLine = text.replace(/[\r\n]/g, " ");
-    document.execCommand("insertText", false, singleLine);
+    let singleLine = text.replace(/[\r\n]/g, " ");
+
+    // RF-003: enforce MAX_EXPRESSION_LENGTH on paste
+    const currentText = getInputText();
+    const remaining = MAX_EXPRESSION_LENGTH - currentText.length;
+    if (remaining <= 0) return;
+    if (singleLine.length > remaining) {
+      singleLine = singleLine.slice(0, remaining);
+    }
+
+    // RF-020: use DOM manipulation instead of deprecated execCommand
+    insertPlainTextAtCursor(singleLine);
   }
 
   function handleAutocompleteItemClick(suggestion: AutocompleteSuggestion): void {
@@ -487,16 +443,17 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
 
   onMount(() => {
     if (inputRef) {
-      renderHighlighted(local.value, false);
+      renderHighlighted(props.value, false);
     }
   });
 
   // Sync external value changes
+  // RF-007: only update confirmedValue when input is not focused,
+  // so Escape reverts to the value at focus-time, not the latest external value
   createEffect(() => {
-    const externalValue = local.value;
-    setConfirmedValue(externalValue);
-    // Only re-render if the input is not focused (avoid clobbering user edits)
+    const externalValue = props.value;
     if (!isFocused()) {
+      setConfirmedValue(externalValue);
       renderHighlighted(externalValue, false);
     }
   });
@@ -536,24 +493,27 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
 
   return (
     <div class="sigil-token-input__wrapper">
+      {/* RF-001: role="combobox" with aria-haspopup and always-present aria-expanded */}
       <div
         ref={inputRef}
         class="sigil-token-input"
-        classList={{ "sigil-token-input--disabled": local.disabled === true }}
-        role="textbox"
-        contentEditable={local.disabled !== true}
-        aria-label={local["aria-label"] ?? "Token expression"}
+        classList={{ "sigil-token-input--disabled": props.disabled === true }}
+        role="combobox"
+        contentEditable={props.disabled !== true}
+        aria-label={props["aria-label"] ?? "Token expression"}
         aria-describedby={statusId}
-        aria-autocomplete={autocompleteOpen() ? "list" : undefined}
-        aria-expanded={autocompleteOpen() ? true : undefined}
+        aria-haspopup="listbox"
+        aria-autocomplete="list"
+        aria-expanded={autocompleteOpen()}
+        aria-disabled={props.disabled === true || undefined}
         aria-activedescendant={
           autocompleteOpen() && suggestions().length > 0
             ? `sigil-ac-option-${String(highlightedIndex())}`
             : undefined
         }
-        aria-controls={autocompleteOpen() ? listboxId : undefined}
-        data-placeholder={local.placeholder}
-        tabIndex={local.disabled ? -1 : 0}
+        aria-controls={listboxId}
+        data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
+        tabIndex={props.disabled ? -1 : 0}
         onInput={handleInput}
         onKeyDown={handleKeyDown}
         onFocus={handleFocus}
@@ -561,39 +521,55 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
         onPaste={handlePaste}
       />
 
-      {/* Autocomplete dropdown */}
-      <Show when={autocompleteOpen() && suggestions().length > 0}>
-        <div
-          id={listboxId}
-          class="sigil-token-input__autocomplete"
-          role="listbox"
-          aria-label="Suggestions"
-        >
-          <Index each={suggestions()}>
-            {(suggestion, index) => {
-              const item = (): AutocompleteSuggestion => suggestion();
-              return (
-                <div
-                  id={`sigil-ac-option-${String(index)}`}
-                  class="sigil-token-input__ac-item"
-                  classList={{
-                    "sigil-token-input__ac-item--highlighted": highlightedIndex() === index,
-                  }}
-                  role="option"
-                  aria-selected={highlightedIndex() === index}
-                  onMouseDown={(e) => {
-                    // Prevent blur on input before we handle the click
-                    e.preventDefault();
-                  }}
-                  onClick={() => handleAutocompleteItemClick(item())}
-                >
-                  <SuggestionContent item={item} />
-                </div>
-              );
-            }}
-          </Index>
-        </div>
-      </Show>
+      {/* RF-010: SR announcement for autocomplete suggestion count */}
+      <span
+        id={srAnnouncementId}
+        class="sigil-token-input__sr-only"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        {autocompleteOpen() && suggestions().length > 0
+          ? `${String(suggestions().length)} suggestions available`
+          : autocompleteOpen()
+            ? "No suggestions"
+            : ""}
+      </span>
+
+      {/* RF-028: always render listbox in DOM so aria-controls references a valid element */}
+      <div
+        id={listboxId}
+        class="sigil-token-input__autocomplete"
+        role="listbox"
+        aria-label="Suggestions"
+        style={{
+          display: autocompleteOpen() && suggestions().length > 0 ? "block" : "none",
+        }}
+      >
+        <Index each={suggestions()}>
+          {(suggestion, index) => {
+            const item = (): AutocompleteSuggestion => suggestion();
+            return (
+              <div
+                id={`sigil-ac-option-${String(index)}`}
+                class="sigil-token-input__ac-item"
+                classList={{
+                  "sigil-token-input__ac-item--highlighted": highlightedIndex() === index,
+                }}
+                role="option"
+                aria-selected={highlightedIndex() === index}
+                onMouseDown={(e) => {
+                  // Prevent blur on input before we handle the click
+                  e.preventDefault();
+                }}
+                onClick={() => handleAutocompleteItemClick(item())}
+              >
+                <SuggestionContent item={item} />
+              </div>
+            );
+          }}
+        </Index>
+      </div>
 
       {/* Status area */}
       <div id={statusId} class="sigil-token-input__status" aria-live="polite">
