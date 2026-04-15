@@ -10,14 +10,7 @@
 
 export interface HighlightSegment {
   readonly text: string;
-  readonly type:
-    | "tokenRef"
-    | "function"
-    | "number"
-    | "operator"
-    | "paren"
-    | "text"
-    | "error";
+  readonly type: "tokenRef" | "function" | "number" | "operator" | "paren" | "text" | "error";
 }
 
 // ── Character classification helpers ───────────────────────────────────

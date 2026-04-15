@@ -48,9 +48,7 @@ function makeToken(name: string, tokenType: TokenType): Token {
   }
 }
 
-function makeTokenMap(
-  ...entries: Array<[string, TokenType]>
-): Record<string, Token> {
+function makeTokenMap(...entries: Array<[string, TokenType]>): Record<string, Token> {
   const map: Record<string, Token> = {};
   for (const [name, type] of entries) {
     map[name] = makeToken(name, type);
@@ -62,10 +60,7 @@ function makeTokenMap(
 
 describe("filterTokenSuggestions", () => {
   it("should filter tokens by substring match", () => {
-    const tokens = makeTokenMap(
-      ["brand.primary", "color"],
-      ["spacing.md", "dimension"],
-    );
+    const tokens = makeTokenMap(["brand.primary", "color"], ["spacing.md", "dimension"]);
     const result = filterTokenSuggestions(tokens, "brand");
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("brand.primary");
@@ -79,10 +74,7 @@ describe("filterTokenSuggestions", () => {
   });
 
   it("should filter tokens by type", () => {
-    const tokens = makeTokenMap(
-      ["brand.primary", "color"],
-      ["spacing.md", "dimension"],
-    );
+    const tokens = makeTokenMap(["brand.primary", "color"], ["spacing.md", "dimension"]);
     const result = filterTokenSuggestions(tokens, "", "color");
     expect(result).toHaveLength(1);
     expect(result[0].name).toBe("brand.primary");
@@ -96,10 +88,7 @@ describe("filterTokenSuggestions", () => {
     );
     const result = filterTokenSuggestions(tokens, "brand", "color");
     expect(result).toHaveLength(2);
-    expect(result.map((s) => s.name)).toEqual([
-      "brand.primary",
-      "brand.secondary",
-    ]);
+    expect(result.map((s) => s.name)).toEqual(["brand.primary", "brand.secondary"]);
   });
 
   it("should return empty array when no match", () => {
@@ -119,11 +108,7 @@ describe("filterTokenSuggestions", () => {
   });
 
   it("should respect custom maxResults", () => {
-    const tokens = makeTokenMap(
-      ["a", "number"],
-      ["b", "number"],
-      ["c", "number"],
-    );
+    const tokens = makeTokenMap(["a", "number"], ["b", "number"], ["c", "number"]);
     const result = filterTokenSuggestions(tokens, "", undefined, 2);
     expect(result).toHaveLength(2);
   });
@@ -135,11 +120,7 @@ describe("filterTokenSuggestions", () => {
       ["b.token", "number"],
     );
     const result = filterTokenSuggestions(tokens, "");
-    expect(result.map((s) => s.name)).toEqual([
-      "a.token",
-      "b.token",
-      "c.token",
-    ]);
+    expect(result.map((s) => s.name)).toEqual(["a.token", "b.token", "c.token"]);
   });
 
   it("should include correct type and preview", () => {

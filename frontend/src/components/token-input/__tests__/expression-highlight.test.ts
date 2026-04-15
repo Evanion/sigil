@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  highlightExpression,
-  type HighlightSegment,
-} from "../expression-highlight";
+import { highlightExpression, type HighlightSegment } from "../expression-highlight";
 
 describe("highlightExpression", () => {
   it("should return empty array for empty string", () => {
@@ -10,27 +7,19 @@ describe("highlightExpression", () => {
   });
 
   it("should highlight number literal", () => {
-    expect(highlightExpression("42")).toEqual([
-      { text: "42", type: "number" },
-    ]);
+    expect(highlightExpression("42")).toEqual([{ text: "42", type: "number" }]);
   });
 
   it("should highlight decimal number", () => {
-    expect(highlightExpression("3.14")).toEqual([
-      { text: "3.14", type: "number" },
-    ]);
+    expect(highlightExpression("3.14")).toEqual([{ text: "3.14", type: "number" }]);
   });
 
   it("should highlight percentage", () => {
-    expect(highlightExpression("20%")).toEqual([
-      { text: "20%", type: "number" },
-    ]);
+    expect(highlightExpression("20%")).toEqual([{ text: "20%", type: "number" }]);
   });
 
   it("should highlight decimal percentage", () => {
-    expect(highlightExpression("12.5%")).toEqual([
-      { text: "12.5%", type: "number" },
-    ]);
+    expect(highlightExpression("12.5%")).toEqual([{ text: "12.5%", type: "number" }]);
   });
 
   it("should highlight token reference", () => {

@@ -178,10 +178,7 @@ interface AutocompleteContext {
  * Token mode: triggered by `{` — extracts query from `{` to cursor.
  * Function mode: triggered by typing an identifier prefix not inside `{}`.
  */
-function getAutocompleteContext(
-  text: string,
-  cursorPos: number,
-): AutocompleteContext | null {
+function getAutocompleteContext(text: string, cursorPos: number): AutocompleteContext | null {
   // Look backwards from cursor for an unclosed `{`
   let braceDepth = 0;
   for (let i = cursorPos - 1; i >= 0; i--) {
@@ -254,7 +251,9 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
   const [autocompleteQuery, setAutocompleteQuery] = createSignal("");
   const [highlightedIndex, setHighlightedIndex] = createSignal(0);
   const [autocompleteMode, setAutocompleteMode] = createSignal<"token" | "function">("token");
-  const [autocompleteContext, setAutocompleteContext] = createSignal<AutocompleteContext | null>(null);
+  const [autocompleteContext, setAutocompleteContext] = createSignal<AutocompleteContext | null>(
+    null,
+  );
 
   // ── Derived values ─────────────────────────────────────────────────
 
