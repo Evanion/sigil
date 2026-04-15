@@ -191,7 +191,9 @@ impl<'a> Parser<'a> {
         self.skip_whitespace();
         if self.peek() == Some('-') {
             self.advance();
+            self.enter_depth()?;
             let inner = self.factor()?;
+            self.leave_depth();
             return Ok(TokenExpression::UnaryNeg(Box::new(inner)));
         }
         self.atom()

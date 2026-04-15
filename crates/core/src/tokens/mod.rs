@@ -1,4 +1,4 @@
-pub mod color_convert;
+pub(crate) mod color_convert;
 pub mod errors;
 pub mod evaluator;
 pub mod expression;

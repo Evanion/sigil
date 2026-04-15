@@ -6,6 +6,7 @@
 //! Token references are resolved via a `TokenContext`, with depth
 //! tracking for cycle prevention.
 
+use crate::error::CoreError;
 use crate::node::Color;
 use crate::validate::MAX_ALIAS_CHAIN_DEPTH;
 
@@ -54,7 +55,7 @@ pub fn evaluate(
     }
 
     match expr {
-        TokenExpression::Literal(lit) => Ok(evaluate_literal(lit)),
+        TokenExpression::Literal(lit) => evaluate_literal(lit),
         TokenExpression::TokenRef(name) => evaluate_token_ref(name, context, depth),
         TokenExpression::BinaryOp { left, op, right } => {
             evaluate_binary_op(left, *op, right, context, depth)
@@ -71,32 +72,47 @@ pub fn evaluate(
 }
 
 /// Evaluate a literal expression node.
-fn evaluate_literal(lit: &ExprLiteral) -> EvalValue {
+fn evaluate_literal(lit: &ExprLiteral) -> Result<EvalValue, ExprError> {
     match lit {
-        // Percentage is stored as the raw value (e.g., 10% = 10.0).
-        // For arithmetic purposes it is treated as a number.
-        ExprLiteral::Number(n) | ExprLiteral::Percentage(n) => EvalValue::Number(*n),
-        ExprLiteral::Color(c) => EvalValue::Color(*c),
-        ExprLiteral::Str(s) => EvalValue::Str(s.clone()),
+        ExprLiteral::Number(n) => {
+            if !n.is_finite() {
+                return Err(ExprError::DomainError(
+                    "non-finite number literal".to_string(),
+                ));
+            }
+            Ok(EvalValue::Number(*n))
+        }
+        ExprLiteral::Percentage(n) => {
+            if !n.is_finite() {
+                return Err(ExprError::DomainError(
+                    "non-finite percentage literal".to_string(),
+                ));
+            }
+            Ok(EvalValue::Number(*n))
+        }
+        ExprLiteral::Color(c) => Ok(EvalValue::Color(*c)),
+        ExprLiteral::Str(s) => Ok(EvalValue::Str(s.clone())),
     }
 }
 
 /// Resolve a token reference and convert to `EvalValue`.
+///
+/// `depth` is accepted for future use: `context.resolve()` has its own
+/// depth tracking for alias chains, so the evaluator depth is currently
+/// not forwarded. If expression-valued tokens are added, the depth must
+/// be integrated.
 fn evaluate_token_ref(
     name: &str,
     context: &TokenContext,
-    _depth: usize,
+    depth: usize,
 ) -> Result<EvalValue, ExprError> {
-    let resolved = context.resolve(name).map_err(|core_err| {
-        // Map CoreError variants to ExprError
-        let msg = core_err.to_string();
-        if msg.contains("not found") {
-            ExprError::ReferenceNotFound(name.to_string())
-        } else if msg.contains("cycle") || msg.contains("depth exceeded") {
-            ExprError::CycleDetected(name.to_string())
-        } else {
-            ExprError::ReferenceNotFound(name.to_string())
-        }
+    // `depth` reserved for future expression-valued token support.
+    let _ = depth;
+
+    let resolved = context.resolve(name).map_err(|e| match e {
+        CoreError::TokenNotFound(token_name) => ExprError::ReferenceNotFound(token_name),
+        CoreError::TokenCycleDetected(token_name) => ExprError::CycleDetected(token_name),
+        other => ExprError::ReferenceNotFound(format!("{other}")),
     })?;
 
     token_value_to_eval(resolved, name)
@@ -164,6 +180,12 @@ fn evaluate_binary_op(
             lhs / rhs
         }
     };
+
+    if !result.is_finite() {
+        return Err(ExprError::DomainError(
+            "arithmetic produced non-finite result".to_string(),
+        ));
+    }
 
     Ok(EvalValue::Number(result))
 }
@@ -582,5 +604,42 @@ mod tests {
         let expr = parse_expression("max(10, 20)").expect("should parse");
         let result = evaluate(&expr, &ctx, 0).expect("should evaluate");
         assert_eq!(result, EvalValue::Number(20.0));
+    }
+
+    #[test]
+    fn test_eval_literal_nan_returns_domain_error() {
+        let ctx = test_context();
+        let expr = TokenExpression::Literal(ExprLiteral::Number(f64::NAN));
+        let result = evaluate(&expr, &ctx, 0);
+        assert!(matches!(result, Err(ExprError::DomainError(_))));
+    }
+
+    #[test]
+    fn test_eval_literal_infinity_returns_domain_error() {
+        let ctx = test_context();
+        let expr = TokenExpression::Literal(ExprLiteral::Number(f64::INFINITY));
+        let result = evaluate(&expr, &ctx, 0);
+        assert!(matches!(result, Err(ExprError::DomainError(_))));
+    }
+
+    #[test]
+    fn test_eval_literal_percentage_nan_returns_domain_error() {
+        let ctx = test_context();
+        let expr = TokenExpression::Literal(ExprLiteral::Percentage(f64::NAN));
+        let result = evaluate(&expr, &ctx, 0);
+        assert!(matches!(result, Err(ExprError::DomainError(_))));
+    }
+
+    #[test]
+    fn test_eval_binary_arithmetic_producing_non_finite_returns_error() {
+        let ctx = test_context();
+        // f64::MAX + f64::MAX overflows to infinity
+        let expr = TokenExpression::BinaryOp {
+            left: Box::new(TokenExpression::Literal(ExprLiteral::Number(f64::MAX))),
+            op: BinaryOperator::Add,
+            right: Box::new(TokenExpression::Literal(ExprLiteral::Number(f64::MAX))),
+        };
+        let result = evaluate(&expr, &ctx, 0);
+        assert!(matches!(result, Err(ExprError::DomainError(_))));
     }
 }

@@ -6,43 +6,7 @@
 
 use crate::tokens::errors::ExprError;
 use crate::tokens::evaluator::EvalValue;
-
-/// Extract a finite `f64` from `args[index]`, or return a typed error.
-fn require_number(args: &[EvalValue], index: usize, fn_name: &str) -> Result<f64, ExprError> {
-    match args.get(index) {
-        Some(EvalValue::Number(n)) => {
-            if n.is_finite() {
-                Ok(*n)
-            } else {
-                Err(ExprError::DomainError(format!(
-                    "{fn_name}: argument {index} is non-finite"
-                )))
-            }
-        }
-        Some(other) => Err(ExprError::TypeError {
-            expected: "number".to_string(),
-            got: other.type_name().to_string(),
-        }),
-        None => Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected: index + 1,
-            got: args.len(),
-        }),
-    }
-}
-
-/// Check that `args` has exactly `expected` elements.
-fn check_arity(args: &[EvalValue], expected: usize, fn_name: &str) -> Result<(), ExprError> {
-    if args.len() == expected {
-        Ok(())
-    } else {
-        Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected,
-            got: args.len(),
-        })
-    }
-}
+use crate::tokens::functions::helpers::{check_arity, require_number};
 
 /// `round(n)` -- round to nearest integer.
 ///

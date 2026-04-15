@@ -9,6 +9,7 @@ pub mod blend;
 // Color math uses standard single-char channel names: r, g, b, h, s, l, a.
 #[allow(clippy::many_single_char_names)]
 pub mod color;
+pub(crate) mod helpers;
 pub mod math;
 pub mod size;
 

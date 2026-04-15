@@ -5,63 +5,10 @@
 //! Provides 27 color functions: manipulation (9), channel setters (6),
 //! channel adjusters (6), and channel extractors (6).
 
-use crate::node::Color;
 use crate::tokens::color_convert::{color_to_srgb, hsl_to_srgb, srgb_to_color, srgb_to_hsl};
 use crate::tokens::errors::ExprError;
 use crate::tokens::evaluator::EvalValue;
-
-/// Extract a `Color` from `args[index]`, or return a typed error.
-fn require_color(args: &[EvalValue], index: usize, fn_name: &str) -> Result<Color, ExprError> {
-    match args.get(index) {
-        Some(EvalValue::Color(c)) => Ok(*c),
-        Some(other) => Err(ExprError::TypeError {
-            expected: "color".to_string(),
-            got: other.type_name().to_string(),
-        }),
-        None => Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected: index + 1,
-            got: args.len(),
-        }),
-    }
-}
-
-/// Extract a finite `f64` from `args[index]`, or return a typed error.
-fn require_number(args: &[EvalValue], index: usize, fn_name: &str) -> Result<f64, ExprError> {
-    match args.get(index) {
-        Some(EvalValue::Number(n)) => {
-            if n.is_finite() {
-                Ok(*n)
-            } else {
-                Err(ExprError::DomainError(format!(
-                    "{fn_name}: argument {index} is non-finite"
-                )))
-            }
-        }
-        Some(other) => Err(ExprError::TypeError {
-            expected: "number".to_string(),
-            got: other.type_name().to_string(),
-        }),
-        None => Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected: index + 1,
-            got: args.len(),
-        }),
-    }
-}
-
-/// Check that `args` has exactly `expected` elements.
-fn check_arity(args: &[EvalValue], expected: usize, fn_name: &str) -> Result<(), ExprError> {
-    if args.len() == expected {
-        Ok(())
-    } else {
-        Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected,
-            got: args.len(),
-        })
-    }
-}
+use crate::tokens::functions::helpers::{check_arity, require_color, require_number};
 
 /// Dispatch a color function call by name.
 ///
@@ -112,7 +59,7 @@ fn fn_lighten(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "lighten")?;
     let color = require_color(args, 0, "lighten")?;
     let amount = require_number(args, 1, "lighten")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_l = (l + amount).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, s, new_l);
@@ -124,7 +71,7 @@ fn fn_darken(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "darken")?;
     let color = require_color(args, 0, "darken")?;
     let amount = require_number(args, 1, "darken")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_l = (l - amount).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, s, new_l);
@@ -136,7 +83,7 @@ fn fn_saturate(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "saturate")?;
     let color = require_color(args, 0, "saturate")?;
     let amount = require_number(args, 1, "saturate")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_s = (s + amount).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, new_s, l);
@@ -148,7 +95,7 @@ fn fn_desaturate(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "desaturate")?;
     let color = require_color(args, 0, "desaturate")?;
     let amount = require_number(args, 1, "desaturate")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_s = (s - amount).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, new_s, l);
@@ -160,7 +107,7 @@ fn fn_alpha(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "alpha")?;
     let color = require_color(args, 0, "alpha")?;
     let amount = require_number(args, 1, "alpha")?;
-    let (r, g, b, _) = color_to_srgb(&color);
+    let (r, g, b, _) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r, g, b, amount)))
 }
 
@@ -172,8 +119,8 @@ fn fn_mix(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     let c1 = require_color(args, 0, "mix")?;
     let c2 = require_color(args, 1, "mix")?;
     let weight = require_number(args, 2, "mix")?;
-    let (r1, g1, b1, a1) = color_to_srgb(&c1);
-    let (r2, g2, b2, a2) = color_to_srgb(&c2);
+    let (r1, g1, b1, a1) = color_to_srgb(&c1)?;
+    let (r2, g2, b2, a2) = color_to_srgb(&c2)?;
     let w = weight.clamp(0.0, 1.0);
     let inv = 1.0 - w;
     Ok(EvalValue::Color(srgb_to_color(
@@ -186,15 +133,26 @@ fn fn_mix(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 
 /// `contrast(color)` -- return black or white based on relative luminance.
 ///
-/// Uses W3C relative luminance formula. Returns black if luminance > 0.5,
+/// Uses W3C relative luminance formula with sRGB linearization.
+/// Returns black if luminance > 0.179 (W3C threshold for 4.5:1 contrast),
 /// white otherwise.
 fn fn_contrast(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
+    // sRGB linearization per W3C WCAG 2.0 relative luminance definition
+    fn linearize(c: f64) -> f64 {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            // Domain guard: (c + 0.055) / 1.055 is always >= 0 for valid sRGB
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
     check_arity(args, 1, "contrast")?;
     let color = require_color(args, 0, "contrast")?;
-    let (r, g, b, _) = color_to_srgb(&color);
-    // Approximate relative luminance using sRGB weights
-    let luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    if luminance > 0.5 {
+    let (r, g, b, _) = color_to_srgb(&color)?;
+
+    let luminance = 0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b);
+    if luminance > 0.179 {
         // Light color -> return black for contrast
         Ok(EvalValue::Color(srgb_to_color(0.0, 0.0, 0.0, 1.0)))
     } else {
@@ -207,7 +165,7 @@ fn fn_contrast(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_complement(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "complement")?;
     let color = require_color(args, 0, "complement")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_h = (h + 180.0) % 360.0;
     let (nr, ng, nb) = hsl_to_srgb(new_h, s, l);
@@ -219,7 +177,7 @@ fn fn_hue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "hue")?;
     let color = require_color(args, 0, "hue")?;
     let degrees = require_number(args, 1, "hue")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (_, s, l) = srgb_to_hsl(r, g, b);
     let new_h = degrees.rem_euclid(360.0);
     let (nr, ng, nb) = hsl_to_srgb(new_h, s, l);
@@ -233,7 +191,7 @@ fn fn_set_red(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setRed")?;
     let color = require_color(args, 0, "setRed")?;
     let value = require_number(args, 1, "setRed")?;
-    let (_, g, b, a) = color_to_srgb(&color);
+    let (_, g, b, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(value / 255.0, g, b, a)))
 }
 
@@ -242,7 +200,7 @@ fn fn_set_green(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setGreen")?;
     let color = require_color(args, 0, "setGreen")?;
     let value = require_number(args, 1, "setGreen")?;
-    let (r, _, b, a) = color_to_srgb(&color);
+    let (r, _, b, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r, value / 255.0, b, a)))
 }
 
@@ -251,7 +209,7 @@ fn fn_set_blue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setBlue")?;
     let color = require_color(args, 0, "setBlue")?;
     let value = require_number(args, 1, "setBlue")?;
-    let (r, g, _, a) = color_to_srgb(&color);
+    let (r, g, _, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r, g, value / 255.0, a)))
 }
 
@@ -260,7 +218,7 @@ fn fn_set_hue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setHue")?;
     let color = require_color(args, 0, "setHue")?;
     let degrees = require_number(args, 1, "setHue")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (_, s, l) = srgb_to_hsl(r, g, b);
     let new_h = degrees.rem_euclid(360.0);
     let (nr, ng, nb) = hsl_to_srgb(new_h, s, l);
@@ -272,7 +230,7 @@ fn fn_set_saturation(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setSaturation")?;
     let color = require_color(args, 0, "setSaturation")?;
     let pct = require_number(args, 1, "setSaturation")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, _, l) = srgb_to_hsl(r, g, b);
     let new_s = (pct / 100.0).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, new_s, l);
@@ -284,7 +242,7 @@ fn fn_set_lightness(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "setLightness")?;
     let color = require_color(args, 0, "setLightness")?;
     let pct = require_number(args, 1, "setLightness")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, _) = srgb_to_hsl(r, g, b);
     let new_l = (pct / 100.0).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, s, new_l);
@@ -298,7 +256,7 @@ fn fn_adjust_red(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustRed")?;
     let color = require_color(args, 0, "adjustRed")?;
     let delta = require_number(args, 1, "adjustRed")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r + delta / 255.0, g, b, a)))
 }
 
@@ -307,7 +265,7 @@ fn fn_adjust_green(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustGreen")?;
     let color = require_color(args, 0, "adjustGreen")?;
     let delta = require_number(args, 1, "adjustGreen")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r, g + delta / 255.0, b, a)))
 }
 
@@ -316,7 +274,7 @@ fn fn_adjust_blue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustBlue")?;
     let color = require_color(args, 0, "adjustBlue")?;
     let delta = require_number(args, 1, "adjustBlue")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     Ok(EvalValue::Color(srgb_to_color(r, g, b + delta / 255.0, a)))
 }
 
@@ -325,7 +283,7 @@ fn fn_adjust_hue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustHue")?;
     let color = require_color(args, 0, "adjustHue")?;
     let delta = require_number(args, 1, "adjustHue")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_h = (h + delta).rem_euclid(360.0);
     let (nr, ng, nb) = hsl_to_srgb(new_h, s, l);
@@ -337,7 +295,7 @@ fn fn_adjust_saturation(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustSaturation")?;
     let color = require_color(args, 0, "adjustSaturation")?;
     let delta = require_number(args, 1, "adjustSaturation")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_s = (s + delta / 100.0).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, new_s, l);
@@ -349,7 +307,7 @@ fn fn_adjust_lightness(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 2, "adjustLightness")?;
     let color = require_color(args, 0, "adjustLightness")?;
     let delta = require_number(args, 1, "adjustLightness")?;
-    let (r, g, b, a) = color_to_srgb(&color);
+    let (r, g, b, a) = color_to_srgb(&color)?;
     let (h, s, l) = srgb_to_hsl(r, g, b);
     let new_l = (l + delta / 100.0).clamp(0.0, 1.0);
     let (nr, ng, nb) = hsl_to_srgb(h, s, new_l);
@@ -362,7 +320,7 @@ fn fn_adjust_lightness(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_red(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "red")?;
     let color = require_color(args, 0, "red")?;
-    let (r, _, _, _) = color_to_srgb(&color);
+    let (r, _, _, _) = color_to_srgb(&color)?;
     Ok(EvalValue::Number(r * 255.0))
 }
 
@@ -370,7 +328,7 @@ fn fn_red(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_green(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "green")?;
     let color = require_color(args, 0, "green")?;
-    let (_, g, _, _) = color_to_srgb(&color);
+    let (_, g, _, _) = color_to_srgb(&color)?;
     Ok(EvalValue::Number(g * 255.0))
 }
 
@@ -378,7 +336,7 @@ fn fn_green(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_blue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "blue")?;
     let color = require_color(args, 0, "blue")?;
-    let (_, _, b, _) = color_to_srgb(&color);
+    let (_, _, b, _) = color_to_srgb(&color)?;
     Ok(EvalValue::Number(b * 255.0))
 }
 
@@ -386,7 +344,7 @@ fn fn_blue(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_hue_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "hueOf")?;
     let color = require_color(args, 0, "hueOf")?;
-    let (r, g, b, _) = color_to_srgb(&color);
+    let (r, g, b, _) = color_to_srgb(&color)?;
     let (h, _, _) = srgb_to_hsl(r, g, b);
     Ok(EvalValue::Number(h))
 }
@@ -395,7 +353,7 @@ fn fn_hue_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_saturation_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "saturationOf")?;
     let color = require_color(args, 0, "saturationOf")?;
-    let (r, g, b, _) = color_to_srgb(&color);
+    let (r, g, b, _) = color_to_srgb(&color)?;
     let (_, s, _) = srgb_to_hsl(r, g, b);
     Ok(EvalValue::Number(s * 100.0))
 }
@@ -404,7 +362,7 @@ fn fn_saturation_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 fn fn_lightness_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
     check_arity(args, 1, "lightnessOf")?;
     let color = require_color(args, 0, "lightnessOf")?;
-    let (r, g, b, _) = color_to_srgb(&color);
+    let (r, g, b, _) = color_to_srgb(&color)?;
     let (_, _, l) = srgb_to_hsl(r, g, b);
     Ok(EvalValue::Number(l * 100.0))
 }
@@ -412,6 +370,7 @@ fn fn_lightness_of(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::Color;
 
     /// Tolerance for floating-point comparison.
     const EPSILON: f64 = 1e-6;
@@ -443,7 +402,7 @@ mod tests {
     /// Extract sRGB channels from an `EvalValue::Color`.
     fn unwrap_color(v: &EvalValue) -> (f64, f64, f64, f64) {
         match v {
-            EvalValue::Color(c) => color_to_srgb(c),
+            EvalValue::Color(c) => color_to_srgb(c).expect("test color should be sRGB"),
             other => panic!("expected Color, got {other:?}"),
         }
     }

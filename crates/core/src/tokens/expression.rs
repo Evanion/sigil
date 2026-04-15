@@ -5,7 +5,7 @@
 //! These types represent the parsed form of token expressions such as
 //! `{color.primary}`, `darken({color.bg}, 10%)`, or `{spacing.base} * 2`.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::node::Color;
 
@@ -13,7 +13,11 @@ use crate::node::Color;
 ///
 /// Expressions can be literal values, references to other tokens,
 /// binary arithmetic operations, unary negation, or function calls.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// These types are only constructed via the parser — `Deserialize` is
+/// intentionally omitted to prevent untrusted input from bypassing
+/// parser validation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum TokenExpression {
     /// A literal value (number, percentage, color, or string).
     Literal(ExprLiteral),
@@ -40,11 +44,11 @@ pub enum TokenExpression {
 }
 
 /// A literal value within an expression.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ExprLiteral {
     /// A numeric literal (e.g., `42`, `3.14`).
     Number(f64),
-    /// A percentage literal (e.g., `10%`, stored as `10.0`).
+    /// A percentage literal (e.g., `10%`, stored as 0.1 (the fractional form)).
     Percentage(f64),
     /// A color literal.
     Color(Color),
@@ -53,7 +57,7 @@ pub enum ExprLiteral {
 }
 
 /// Binary arithmetic operators supported in expressions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum BinaryOperator {
     /// Addition (`+`).
     Add,
@@ -70,82 +74,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_token_expression_literal_number_serde_round_trip() {
+    fn test_token_expression_literal_number_serializes() {
         let expr = TokenExpression::Literal(ExprLiteral::Number(42.0));
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(json.contains("42"), "JSON should contain the number");
     }
 
     #[test]
-    fn test_token_expression_literal_percentage_serde_round_trip() {
-        let expr = TokenExpression::Literal(ExprLiteral::Percentage(10.0));
+    fn test_token_expression_literal_percentage_serializes() {
+        let expr = TokenExpression::Literal(ExprLiteral::Percentage(0.1));
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(
+            json.contains("Percentage"),
+            "JSON should contain variant name"
+        );
     }
 
     #[test]
-    fn test_token_expression_literal_color_serde_round_trip() {
+    fn test_token_expression_literal_color_serializes() {
         let expr = TokenExpression::Literal(ExprLiteral::Color(Color::default()));
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(!json.is_empty(), "JSON should not be empty");
     }
 
     #[test]
-    fn test_token_expression_literal_str_serde_round_trip() {
+    fn test_token_expression_literal_str_serializes() {
         let expr = TokenExpression::Literal(ExprLiteral::Str("hello".to_string()));
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(json.contains("hello"), "JSON should contain the string");
     }
 
     #[test]
-    fn test_token_expression_token_ref_serde_round_trip() {
+    fn test_token_expression_token_ref_serializes() {
         let expr = TokenExpression::TokenRef("color.primary".to_string());
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(
+            json.contains("color.primary"),
+            "JSON should contain the ref"
+        );
     }
 
     #[test]
-    fn test_token_expression_binary_op_serde_round_trip() {
+    fn test_token_expression_binary_op_serializes() {
         let expr = TokenExpression::BinaryOp {
             left: Box::new(TokenExpression::TokenRef("spacing.base".to_string())),
             op: BinaryOperator::Mul,
             right: Box::new(TokenExpression::Literal(ExprLiteral::Number(2.0))),
         };
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(json.contains("Mul"), "JSON should contain operator");
     }
 
     #[test]
-    fn test_token_expression_unary_neg_serde_round_trip() {
+    fn test_token_expression_unary_neg_serializes() {
         let expr =
             TokenExpression::UnaryNeg(Box::new(TokenExpression::Literal(ExprLiteral::Number(5.0))));
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(
+            json.contains("UnaryNeg"),
+            "JSON should contain variant name"
+        );
     }
 
     #[test]
-    fn test_token_expression_function_call_serde_round_trip() {
+    fn test_token_expression_function_call_serializes() {
         let expr = TokenExpression::FunctionCall {
             name: "darken".to_string(),
             args: vec![
                 TokenExpression::TokenRef("color.bg".to_string()),
-                TokenExpression::Literal(ExprLiteral::Percentage(10.0)),
+                TokenExpression::Literal(ExprLiteral::Percentage(0.1)),
             ],
         };
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(json.contains("darken"), "JSON should contain function name");
     }
 
     #[test]
-    fn test_binary_operator_all_variants_serde() {
+    fn test_binary_operator_all_variants_serialize() {
         let ops = [
             BinaryOperator::Add,
             BinaryOperator::Sub,
@@ -154,13 +159,12 @@ mod tests {
         ];
         for op in ops {
             let json = serde_json::to_string(&op).expect("serialize");
-            let deserialized: BinaryOperator = serde_json::from_str(&json).expect("deserialize");
-            assert_eq!(op, deserialized);
+            assert!(!json.is_empty(), "JSON should not be empty for {op:?}");
         }
     }
 
     #[test]
-    fn test_token_expression_nested_binary_op() {
+    fn test_token_expression_nested_binary_op_serializes() {
         // (a + b) * c
         let expr = TokenExpression::BinaryOp {
             left: Box::new(TokenExpression::BinaryOp {
@@ -172,7 +176,6 @@ mod tests {
             right: Box::new(TokenExpression::Literal(ExprLiteral::Number(3.0))),
         };
         let json = serde_json::to_string(&expr).expect("serialize");
-        let deserialized: TokenExpression = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(expr, deserialized);
+        assert!(json.contains("BinaryOp"), "JSON should contain variant");
     }
 }

@@ -11,6 +11,7 @@
 //! user-input validation boundaries.
 
 use crate::node::Color;
+use crate::tokens::errors::ExprError;
 
 /// Replace non-finite f64 values with 0.0.
 ///
@@ -38,7 +39,8 @@ pub fn srgb_to_hsl(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
 
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);
-    let l = f64::midpoint(max, min);
+    #[allow(clippy::manual_midpoint)] // RF-012: explicit for clarity; values in 0-1 range
+    let l = (max + min) / 2.0;
     let delta = max - min;
 
     if delta < f64::EPSILON {
@@ -63,12 +65,7 @@ pub fn srgb_to_hsl(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     h *= 60.0;
 
     // Ensure h is in [0, 360)
-    if h < 0.0 {
-        h += 360.0;
-    }
-    if h >= 360.0 {
-        h -= 360.0;
-    }
+    h = h.rem_euclid(360.0);
 
     (h, s, l)
 }
@@ -98,7 +95,7 @@ pub fn hsl_to_srgb(h: f64, s: f64, l: f64) -> (f64, f64, f64) {
     let p = 2.0 * l - q;
 
     // Normalize hue to [0, 1]
-    let h_norm = (h % 360.0) / 360.0;
+    let h_norm = h.rem_euclid(360.0) / 360.0;
 
     let r = hue_to_rgb(p, q, h_norm + 1.0 / 3.0);
     let g = hue_to_rgb(p, q, h_norm);
@@ -129,42 +126,30 @@ fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
 
 /// Extract sRGB channels from a `Color` enum.
 ///
-/// Non-sRGB color spaces are NOT converted; their channels are returned as-is,
-/// treating them as an sRGB approximation.
+/// Supports `Srgb` and `DisplayP3` (same channel structure, reasonable
+/// approximation). Returns an error for `Oklch` and `Oklab` because
+/// proper conversion is not yet implemented and treating their channels
+/// as sRGB produces incorrect results.
 ///
-/// Returns `(r, g, b, a)` with all values guarded against NaN/Infinity.
-#[must_use]
-pub fn color_to_srgb(color: &Color) -> (f64, f64, f64, f64) {
+/// Returns `Ok((r, g, b, a))` with all values guarded against NaN/Infinity.
+///
+/// # Errors
+///
+/// Returns `ExprError::DomainError` for `Oklch` and `Oklab` color spaces.
+pub fn color_to_srgb(color: &Color) -> Result<(f64, f64, f64, f64), ExprError> {
     match color {
-        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => (
+        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => Ok((
             finite_or_zero(*r),
             finite_or_zero(*g),
             finite_or_zero(*b),
             finite_or_zero(*a),
-        ),
-        Color::Oklch { l, c, h, a } => {
-            // Treat Oklch channels as-is (sRGB approximation)
-            (
-                finite_or_zero(*l),
-                finite_or_zero(*c),
-                finite_or_zero(*h),
-                finite_or_zero(*a),
-            )
-        }
-        Color::Oklab {
-            l,
-            a: a_ch,
-            b,
-            alpha,
-        } => {
-            // Treat Oklab channels as-is (sRGB approximation)
-            (
-                finite_or_zero(*l),
-                finite_or_zero(*a_ch),
-                finite_or_zero(*b),
-                finite_or_zero(*alpha),
-            )
-        }
+        )),
+        Color::Oklch { .. } => Err(ExprError::DomainError(
+            "color function requires sRGB color; Oklch conversion not yet implemented".to_string(),
+        )),
+        Color::Oklab { .. } => Err(ExprError::DomainError(
+            "color function requires sRGB color; Oklab conversion not yet implemented".to_string(),
+        )),
     }
 }
 
@@ -362,7 +347,7 @@ mod tests {
             b: 0.6,
             a: 0.8,
         };
-        let (r, g, b, a) = color_to_srgb(&color);
+        let (r, g, b, a) = color_to_srgb(&color).expect("sRGB should succeed");
         assert_approx(r, 0.2, "r");
         assert_approx(g, 0.4, "g");
         assert_approx(b, 0.6, "b");
@@ -377,7 +362,7 @@ mod tests {
             b: 0.5,
             a: 1.0,
         };
-        let (r, g, b, a) = color_to_srgb(&color);
+        let (r, g, b, a) = color_to_srgb(&color).expect("DisplayP3 should succeed");
         assert_approx(r, 0.1, "r");
         assert_approx(g, 0.3, "g");
         assert_approx(b, 0.5, "b");
@@ -392,11 +377,35 @@ mod tests {
             b: f64::INFINITY,
             a: 1.0,
         };
-        let (r, g, b, a) = color_to_srgb(&color);
-        assert_approx(r, 0.0, "NaN r → 0");
+        let (r, g, b, a) = color_to_srgb(&color).expect("sRGB should succeed");
+        assert_approx(r, 0.0, "NaN r -> 0");
         assert_approx(g, 0.5, "g unchanged");
-        assert_approx(b, 0.0, "Inf b → 0");
+        assert_approx(b, 0.0, "Inf b -> 0");
         assert_approx(a, 1.0, "a unchanged");
+    }
+
+    #[test]
+    fn test_color_to_srgb_rejects_oklch() {
+        let color = Color::Oklch {
+            l: 0.5,
+            c: 0.1,
+            h: 120.0,
+            a: 1.0,
+        };
+        let result = color_to_srgb(&color);
+        assert!(result.is_err(), "Oklch should be rejected");
+    }
+
+    #[test]
+    fn test_color_to_srgb_rejects_oklab() {
+        let color = Color::Oklab {
+            l: 0.5,
+            a: 0.1,
+            b: 0.2,
+            alpha: 1.0,
+        };
+        let result = color_to_srgb(&color);
+        assert!(result.is_err(), "Oklab should be rejected");
     }
 
     // ── srgb_to_color tests ──────────────────────────────────────────

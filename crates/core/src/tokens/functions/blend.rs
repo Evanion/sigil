@@ -4,46 +4,10 @@
 //!
 //! Provides: `blend(c1, c2, mode_string)` with 11 blend modes.
 
-use crate::node::Color;
 use crate::tokens::color_convert::{color_to_srgb, srgb_to_color};
 use crate::tokens::errors::ExprError;
 use crate::tokens::evaluator::EvalValue;
-
-/// Extract a `Color` from `args[index]`, or return a typed error.
-fn require_color(args: &[EvalValue], index: usize, fn_name: &str) -> Result<Color, ExprError> {
-    match args.get(index) {
-        Some(EvalValue::Color(c)) => Ok(*c),
-        Some(other) => Err(ExprError::TypeError {
-            expected: "color".to_string(),
-            got: other.type_name().to_string(),
-        }),
-        None => Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected: index + 1,
-            got: args.len(),
-        }),
-    }
-}
-
-/// Extract a `&str` from `args[index]`, or return a typed error.
-fn require_str<'a>(
-    args: &'a [EvalValue],
-    index: usize,
-    fn_name: &str,
-) -> Result<&'a str, ExprError> {
-    match args.get(index) {
-        Some(EvalValue::Str(s)) => Ok(s.as_str()),
-        Some(other) => Err(ExprError::TypeError {
-            expected: "string".to_string(),
-            got: other.type_name().to_string(),
-        }),
-        None => Err(ExprError::ArityError {
-            name: fn_name.to_string(),
-            expected: index + 1,
-            got: args.len(),
-        }),
-    }
-}
+use crate::tokens::functions::helpers::{require_color, require_str};
 
 /// `blend(c1, c2, mode)` -- blend two colors using the given mode.
 ///
@@ -88,8 +52,8 @@ pub fn fn_blend(args: &[EvalValue]) -> Result<EvalValue, ExprError> {
         }
     };
 
-    let (r1, g1, b1, a1) = color_to_srgb(&c1);
-    let (r2, g2, b2, a2) = color_to_srgb(&c2);
+    let (r1, g1, b1, a1) = color_to_srgb(&c1)?;
+    let (r2, g2, b2, a2) = color_to_srgb(&c2)?;
 
     // Apply per-channel blend
     let br = blend_fn(r1, r2);
@@ -172,7 +136,7 @@ fn blend_hard_light(a: f64, b: f64) -> f64 {
     }
 }
 
-/// `soft-light`: W3C compositing spec formula.
+/// `soft-light`: Photoshop-compatible soft-light formula (simplified from W3C spec).
 ///
 /// if b <= 0.5: a - (1-2b)*a*(1-a)
 /// else: a + (2b-1)*(sqrt(a)-a)
@@ -203,6 +167,7 @@ fn blend_exclusion(a: f64, b: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::node::Color;
 
     /// Tolerance for floating-point comparison.
     const EPSILON: f64 = 1e-6;
@@ -225,7 +190,7 @@ mod tests {
 
     fn unwrap_color(v: &EvalValue) -> (f64, f64, f64, f64) {
         match v {
-            EvalValue::Color(c) => color_to_srgb(c),
+            EvalValue::Color(c) => color_to_srgb(c).expect("test color should be sRGB"),
             other => panic!("expected Color, got {other:?}"),
         }
     }
