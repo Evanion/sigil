@@ -5,7 +5,7 @@
  * Auto-saves changes via store.updateToken on each field change.
  */
 
-import { Show, For, splitProps, createSignal, createEffect, type Component } from "solid-js";
+import { Show, For, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../components/number-input/NumberInput";
 import { ColorPicker } from "../components/color-picker/ColorPicker";
@@ -14,7 +14,6 @@ import EnhancedTokenInput from "../components/token-input/EnhancedTokenInput";
 import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
-import { defaultTokenValue } from "./token-helpers";
 import "./TokenDetailEditor.css";
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -106,39 +105,9 @@ const FONT_WEIGHT_OPTIONS: readonly SelectOption[] = [
 
 // ── Component ───────────────────────────────────────────────────────────
 
-export type ValueMode = "literal" | "reference" | "expression";
-
-/** Determine the current value mode from the token's value type. */
-function valueModeFromToken(value: TokenValue): ValueMode {
-  if (value.type === "alias") return "reference";
-  if (value.type === "expression") return "expression";
-  return "literal";
-}
-
 export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) => {
   const [props] = splitProps(rawProps, ["token", "tokens", "onUpdate", "onDelete"]);
   const [t] = useTransContext();
-
-  // ── Value mode toggle ─────────────────────────────────────────────
-  const [valueMode, setValueMode] = createSignal<ValueMode>(valueModeFromToken(props.token.value));
-
-  // Sync mode when token changes (e.g. user selects a different token)
-  createEffect(() => {
-    setValueMode(valueModeFromToken(props.token.value));
-  });
-
-  /** Switch to a different value mode, converting the value as needed. */
-  function switchMode(mode: ValueMode): void {
-    if (mode === valueMode()) return;
-    setValueMode(mode);
-
-    // When switching TO reference/expression, don't change the stored value yet —
-    // the EnhancedTokenInput will show empty and the user types the new value.
-    // When switching back TO literal, restore a default literal value for the type.
-    if (mode === "literal") {
-      updateValue(defaultTokenValue(props.token.token_type));
-    }
-  }
 
   // ── Description editor ──────────────────────────────────────────────
 
@@ -634,89 +603,23 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
       role="form"
       aria-label={t("panels:tokens.editTokenForm", { name: props.token.name })}
     >
-      {/* Value mode toggle: 123 (literal) / {} (reference) / f(x) (expression) */}
-      <div
-        class="sigil-token-detail__mode-toggle"
-        role="radiogroup"
-        aria-label={t("panels:tokens.value")}
-      >
-        <button
-          type="button"
-          class="sigil-token-detail__mode-btn"
-          classList={{ "sigil-token-detail__mode-btn--active": valueMode() === "literal" }}
-          onClick={() => switchMode("literal")}
-          aria-checked={valueMode() === "literal"}
-          role="radio"
-          title="Literal value"
-        >
-          123
-        </button>
-        <button
-          type="button"
-          class="sigil-token-detail__mode-btn"
-          classList={{ "sigil-token-detail__mode-btn--active": valueMode() === "reference" }}
-          onClick={() => switchMode("reference")}
-          aria-checked={valueMode() === "reference"}
-          role="radio"
-          title="Token reference"
-        >
-          {"{ }"}
-        </button>
-        <button
-          type="button"
-          class="sigil-token-detail__mode-btn"
-          classList={{ "sigil-token-detail__mode-btn--active": valueMode() === "expression" }}
-          onClick={() => switchMode("expression")}
-          aria-checked={valueMode() === "expression"}
-          role="radio"
-          title="Expression"
-        >
-          f(x)
-        </button>
-      </div>
-
-      {/* Literal mode: type-specific editors */}
-      <Show when={valueMode() === "literal"}>
-        {/* Color editor is rendered via Show to preserve DOM across reactive
-            updates — an imperative renderColorEditor() call would re-create the
-            ColorPicker on every store update, losing pointer capture during drag. */}
-        <Show when={props.token.value.type === "color" ? props.token.value : null}>
-          {(colorVal) => (
-            <div class="sigil-token-detail__field">
-              <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
-              <ColorPicker
-                color={colorVal().value}
-                onColorChange={(c) => updateValue({ type: "color", value: c })}
-              />
-            </div>
-          )}
-        </Show>
-        <Show when={props.token.value.type !== "color"}>{renderValueEditor()}</Show>
+      {/* Color editor is rendered via Show to preserve DOM across reactive
+          updates — an imperative renderColorEditor() call would re-create the
+          ColorPicker on every store update, losing pointer capture during drag.
+          Other types use the imperative renderValueEditor() since they don't
+          have continuous drag interactions. */}
+      <Show when={props.token.value.type === "color" ? props.token.value : null}>
+        {(colorVal) => (
+          <div class="sigil-token-detail__field">
+            <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
+            <ColorPicker
+              color={colorVal().value}
+              onColorChange={(c) => updateValue({ type: "color", value: c })}
+            />
+          </div>
+        )}
       </Show>
-
-      {/* Reference / Expression mode: EnhancedTokenInput */}
-      <Show when={valueMode() === "reference" || valueMode() === "expression"}>
-        <div class="sigil-token-detail__field">
-          <label class="sigil-token-detail__field-label">
-            {valueMode() === "reference"
-              ? t("panels:tokens.typeAlias")
-              : t("panels:tokens.typeExpression")}
-          </label>
-          <EnhancedTokenInput
-            value={
-              props.token.value.type === "alias"
-                ? `{${props.token.value.name}}`
-                : props.token.value.type === "expression"
-                  ? props.token.value.expr
-                  : ""
-            }
-            onChange={handleExpressionChange}
-            tokens={props.tokens}
-            tokenType={props.token.token_type}
-            aria-label={valueMode() === "reference" ? "Token reference" : "Expression"}
-          />
-        </div>
-      </Show>
+      <Show when={props.token.value.type !== "color"}>{renderValueEditor()}</Show>
 
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.description")}</label>

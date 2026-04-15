@@ -92,45 +92,6 @@
   gap: var(--size-2);
 }
 
-/* ── Value mode toggle ────────────────────────────────────────────── */
-
-.sigil-token-detail__mode-toggle {
-  display: flex;
-  gap: 2px;
-  background: var(--surface-3);
-  border-radius: var(--input-radius);
-  padding: 2px;
-}
-
-.sigil-token-detail__mode-btn {
-  flex: 1;
-  padding: var(--size-0) var(--size-1);
-  background: transparent;
-  border: none;
-  border-radius: calc(var(--input-radius) - 2px);
-  color: var(--text-3);
-  font-size: var(--font-size-00);
-  font-family: var(--font-mono, monospace);
-  cursor: pointer;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.sigil-token-detail__mode-btn:hover {
-  color: var(--text-1);
-}
-
-.sigil-token-detail__mode-btn--active {
-  background: var(--surface-1);
-  color: var(--text-1);
-  font-weight: 600;
-}
-
-.sigil-token-detail__mode-btn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
 /* ── Delete button ────────────────────────────────────────────────── */
 
 .sigil-token-detail__delete-button {
