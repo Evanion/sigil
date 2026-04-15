@@ -71,6 +71,7 @@ function createMockStore(
     createToken: () => {},
     updateToken: () => {},
     deleteToken: () => {},
+    renameToken: () => {},
     resolveToken: () => null,
     destroy: () => {},
   } as DocumentStoreAPI;

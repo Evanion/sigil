@@ -65,12 +65,9 @@ export const TokenEditor: Component<TokenEditorProps> = (rawProps) => {
   }
 
   function handleRenameToken(oldName: string, newName: string): void {
-    const token = store.state.tokens[oldName];
-    if (!token) return;
+    if (!store.state.tokens[oldName]) return;
 
-    // Atomic rename: create new + delete old
-    store.createToken(newName, token.token_type, token.value, token.description ?? undefined);
-    store.deleteToken(oldName);
+    store.renameToken(oldName, newName);
     announce(t("panels:tokens.tokenUpdated", { name: newName }));
     setSelectedTokenName(newName);
   }

@@ -63,6 +63,7 @@ function createMockStore(
     createToken: vi.fn(),
     updateToken: vi.fn(),
     deleteToken: vi.fn(),
+    renameToken: vi.fn(),
     resolveToken: () => null,
     destroy: vi.fn(),
   } as DocumentStoreAPI;

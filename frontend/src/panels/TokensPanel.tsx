@@ -137,8 +137,7 @@ export const TokensPanel: Component = () => {
       return;
     }
 
-    const token = store.state.tokens[oldName];
-    if (!token) return;
+    if (!store.state.tokens[oldName]) return;
 
     // Check for duplicate name (not the same token)
     if (oldName !== newName && store.state.tokens[newName] !== undefined) {
@@ -146,10 +145,8 @@ export const TokensPanel: Component = () => {
       return;
     }
 
-    // F-02: Atomic rename — create new + delete old in a single store batch.
-    // Both operations share a single snapshot and rollback path.
-    store.createToken(newName, token.token_type, token.value, token.description ?? undefined);
-    store.deleteToken(oldName);
+    // Atomic rename via single store operation
+    store.renameToken(oldName, newName);
 
     // F-10: Announce rename commit
     announce(t("panels:tokens.tokenUpdated", { name: newName }));

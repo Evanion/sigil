@@ -20,6 +20,7 @@ import type {
   CreateTokenValue,
   UpdateTokenValue,
   DeleteTokenSnapshot,
+  RenameTokenValue,
   Transaction,
 } from "./types";
 
@@ -195,6 +196,19 @@ export function createUpdateTokenOp(
  */
 export function createDeleteTokenOp(userId: string, tokenSnapshot: DeleteTokenSnapshot): Operation {
   return makeOp(userId, tokenSnapshot.name, "delete_token", "", null, tokenSnapshot);
+}
+
+/**
+ * Create a rename_token operation.
+ * `value` contains the forward rename data (old→new), `previousValue` contains
+ * the reverse (new→old) for undo. Both use the same RenameTokenValue schema.
+ */
+export function createRenameTokenOp(
+  userId: string,
+  value: RenameTokenValue,
+  previousValue: RenameTokenValue,
+): Operation {
+  return makeOp(userId, value.old_name, "rename_token", "", value, previousValue);
 }
 
 /**

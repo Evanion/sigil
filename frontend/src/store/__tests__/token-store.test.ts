@@ -44,6 +44,8 @@ const makeToken = (id: string, name: string, value: TokenValue): Token => ({
         return "typography";
       case "alias":
         return "color"; // alias token_type is resolved at runtime
+      case "expression":
+        return "number"; // expression token_type is resolved at runtime
     }
   })(),
   description: null,

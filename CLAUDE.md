@@ -391,3 +391,14 @@ When a list can be mutated (items added, removed, or reordered), the array index
 ### Math Helpers Must Guard Their Domain
 
 Any function that wraps a standard math operation with a constrained domain (`Math.pow`, `Math.sqrt`, `Math.log`, `Math.asin`, `Math.acos`) MUST validate that its input falls within the function's valid domain before calling it. Do not rely on callers to have pre-validated inputs — a helper function receives values from multiple call sites, and one caller passing an out-of-range value produces NaN that propagates silently through the entire computation chain. Required guards: `Math.sqrt(x)` requires `x >= 0`; `Math.pow(x, p)` with a fractional exponent requires `x >= 0`; `Math.log(x)` requires `x > 0`; `Math.asin(x)` and `Math.acos(x)` require `-1 <= x <= 1`. Return 0, clamp to the valid range, or throw — but do not allow NaN to escape the function. Document the choice in a comment.
+
+### Parallel Implementations Must Have Parity Tests
+
+When the same algorithm, function set, or computation is implemented in both Rust (`crates/core/`) and TypeScript (`frontend/`), the PR that introduces the second implementation MUST include cross-language parity tests. For each function or behavior implemented in both languages:
+1. Define a shared test vector file (JSON) in `tests/fixtures/parity/` containing input-output pairs.
+2. The Rust test suite must load the vectors and assert the Rust implementation produces the expected outputs.
+3. The TypeScript test suite must load the same vectors and assert the TypeScript implementation produces the expected outputs.
+
+Test vectors must cover: (a) normal inputs, (b) boundary values (0, 1, max), (c) the specific semantics most likely to diverge (scale/range of numeric values, argument order, naming conventions, edge case behavior). If a function intentionally differs between Rust and TypeScript (e.g., because the frontend uses a simplified approximation), document the divergence in a comment in both implementations and exclude it from parity vectors with a rationale.
+
+This rule exists because PR #55 (Spec 13d) shipped 6 Critical/High bugs where the TypeScript expression evaluator diverged from the Rust evaluator on function semantics — inverted size functions, different channel scales, different blend mode naming, and missing alpha compositing.

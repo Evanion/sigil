@@ -398,6 +398,21 @@ impl SigilMcpServer {
             .map_err(|e| e.to_mcp_error())
     }
 
+    /// Atomically renames a design token from `old_name` to `new_name`.
+    #[tool(
+        name = "rename_token",
+        description = "Atomically rename a design token. Preserves the token's ID, value, type, \
+                        and description. Fails if old_name does not exist or new_name is already taken."
+    )]
+    fn rename_token(
+        &self,
+        Parameters(input): Parameters<crate::types::RenameTokenInput>,
+    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
+        crate::tools::tokens::rename_token_impl(&self.state, &input.old_name, &input.new_name)
+            .map(Json)
+            .map_err(|e| e.to_mcp_error())
+    }
+
     /// Deletes a design token by name.
     #[tool(name = "delete_token", description = "Delete a design token by name")]
     fn delete_token(

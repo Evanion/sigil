@@ -75,6 +75,7 @@ const VALID_TOKEN_VALUE_TYPES: ReadonlySet<string> = new Set([
   "gradient",
   "typography",
   "alias",
+  "expression",
 ]);
 
 /**

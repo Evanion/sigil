@@ -20,7 +20,8 @@ export type OperationType =
   | "reorder_page"
   | "create_token"
   | "update_token"
-  | "delete_token";
+  | "delete_token"
+  | "rename_token";
 
 /**
  * A single field-level mutation.
@@ -44,9 +45,18 @@ export interface Operation {
    * value/previousValue to carry structured payloads).
    */
   readonly path: string;
-  /** New value (full node data for create_node). */
+  /**
+   * New value (full node data for create_node).
+   * TODO (RF-019): Replace `unknown` with a discriminated union based on `type`.
+   * Each OperationType has a specific value shape (e.g., ReparentValue, ReorderValue,
+   * CreatePageValue). A discriminated union would provide compile-time type safety
+   * and eliminate unsafe casts at call sites.
+   */
   readonly value: unknown;
-  /** Old value (full node snapshot for delete_node). */
+  /**
+   * Old value (full node snapshot for delete_node).
+   * TODO (RF-019): Same typing gap as `value` — should be a discriminated union.
+   */
   readonly previousValue: unknown;
   // INTENTIONAL: mutable — server assigns seq after creation
   seq: number;
@@ -175,6 +185,22 @@ export interface UpdateTokenValue {
  */
 export interface DeleteTokenSnapshot {
   readonly name: string;
+  readonly token_type: string;
+  readonly value: unknown;
+  readonly description: string | null;
+  readonly id: string;
+}
+
+/**
+ * Rename token operation value payload.
+ * Stored in Operation.value for type="rename_token".
+ * The same schema is used for previousValue (with names swapped) so that
+ * createInverse produces a valid rename operation in the opposite direction.
+ */
+export interface RenameTokenValue {
+  readonly old_name: string;
+  readonly new_name: string;
+  /** Full token snapshot for undo — preserved so rollback can restore. */
   readonly token_type: string;
   readonly value: unknown;
   readonly description: string | null;

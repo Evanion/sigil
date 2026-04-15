@@ -315,6 +315,15 @@ pub struct DeleteTokenInput {
     pub name: String,
 }
 
+/// Input for atomically renaming a design token.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RenameTokenInput {
+    /// Current name of the token to rename (e.g. "color.primary").
+    pub old_name: String,
+    /// Desired new name for the token (e.g. "color.brand").
+    pub new_name: String,
+}
+
 /// Input for setting a node's opacity.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetOpacityInput {
