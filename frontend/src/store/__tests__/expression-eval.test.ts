@@ -485,17 +485,20 @@ describe("math functions", () => {
 describe("size functions", () => {
   const tokens: Record<string, Token> = {};
 
-  it("should evaluate rem (base 16)", () => {
-    expectNumber(resolveExpression("rem(1)", tokens), 16);
-    expectNumber(resolveExpression("rem(1.5)", tokens), 24);
+  it("should evaluate rem — converts px to rem by dividing by 16", () => {
+    expectNumber(resolveExpression("rem(32)", tokens), 2);
+    expectNumber(resolveExpression("rem(24)", tokens), 1.5);
+    expectNumber(resolveExpression("rem(16)", tokens), 1);
   });
 
-  it("should evaluate em (base 16)", () => {
-    expectNumber(resolveExpression("em(2)", tokens), 32);
+  it("should evaluate em — converts px to em by dividing by 16", () => {
+    expectNumber(resolveExpression("em(32)", tokens), 2);
+    expectNumber(resolveExpression("em(16)", tokens), 1);
   });
 
-  it("should evaluate px (identity)", () => {
-    expectNumber(resolveExpression("px(16)", tokens), 16);
+  it("should evaluate px — converts rem/em to px by multiplying by 16", () => {
+    expectNumber(resolveExpression("px(2)", tokens), 32);
+    expectNumber(resolveExpression("px(1)", tokens), 16);
   });
 });
 
@@ -572,10 +575,26 @@ describe("color manipulation functions", () => {
     }
   });
 
-  it("should compute contrast ratio", () => {
-    const result = resolveExpression("contrast(black, white)", tokens);
-    // WCAG contrast between black and white is 21:1
-    expectNumber(result, 21, 0.1);
+  it("should return black for light colors (contrast)", () => {
+    const result = resolveExpression("contrast(white)", tokens);
+    const color = expectColor(result);
+    // White is light → returns black for readable text
+    if (color.space === "srgb") {
+      expect(color.r).toBeCloseTo(0);
+      expect(color.g).toBeCloseTo(0);
+      expect(color.b).toBeCloseTo(0);
+    }
+  });
+
+  it("should return white for dark colors (contrast)", () => {
+    const result = resolveExpression("contrast(black)", tokens);
+    const color = expectColor(result);
+    // Black is dark → returns white for readable text
+    if (color.space === "srgb") {
+      expect(color.r).toBeCloseTo(1);
+      expect(color.g).toBeCloseTo(1);
+      expect(color.b).toBeCloseTo(1);
+    }
   });
 
   it("should compute complement of red", () => {
@@ -607,33 +626,33 @@ describe("channel setter functions", () => {
     black: makeToken("black", { type: "color", value: BLACK }),
   };
 
-  it("should set red channel", () => {
-    const result = resolveExpression("setRed(black, 0.5)", tokens);
+  it("should set red channel (0-255 scale)", () => {
+    const result = resolveExpression("setRed(black, 128)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
-      expect(color.r).toBeCloseTo(0.5);
+      expect(color.r).toBeCloseTo(128 / 255, 2);
       expect(color.g).toBeCloseTo(0);
       expect(color.b).toBeCloseTo(0);
     }
   });
 
-  it("should set green channel", () => {
-    const result = resolveExpression("setGreen(black, 0.7)", tokens);
+  it("should set green channel (0-255 scale)", () => {
+    const result = resolveExpression("setGreen(black, 255)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
-      expect(color.g).toBeCloseTo(0.7);
+      expect(color.g).toBeCloseTo(1);
     }
   });
 
-  it("should set blue channel", () => {
-    const result = resolveExpression("setBlue(black, 1)", tokens);
+  it("should set blue channel (0-255 scale)", () => {
+    const result = resolveExpression("setBlue(black, 255)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
       expect(color.b).toBeCloseTo(1);
     }
   });
 
-  it("should set hue via setHue", () => {
+  it("should set hue via setHue (degrees)", () => {
     const result = resolveExpression("setHue(red, 240)", tokens);
     const color = expectColor(result);
     // Hue 240 = blue
@@ -642,14 +661,18 @@ describe("channel setter functions", () => {
     }
   });
 
-  it("should set saturation", () => {
-    const result = resolveExpression("setSaturation(red, 0.5)", tokens);
+  it("should set saturation (0-100 scale)", () => {
+    const result = resolveExpression("setSaturation(red, 50)", tokens);
     const color = expectColor(result);
     expect(color.space).toBe("srgb");
+    // setSaturation(red, 50) → internal saturation 0.5
+    const srgb = color as { space: "srgb"; r: number; g: number; b: number; a: number };
+    // Red with 50% saturation should have r > g (still reddish) but not fully saturated
+    expect(srgb.r).toBeGreaterThan(srgb.g);
   });
 
-  it("should set lightness", () => {
-    const result = resolveExpression("setLightness(red, 0.75)", tokens);
+  it("should set lightness (0-100 scale)", () => {
+    const result = resolveExpression("setLightness(red, 75)", tokens);
     const color = expectColor(result);
     expect(color.space).toBe("srgb");
   });
@@ -660,24 +683,27 @@ describe("channel adjuster functions", () => {
     gray: makeToken("gray", { type: "color", value: MID_GRAY }),
   };
 
-  it("should adjust red channel", () => {
-    const result = resolveExpression("adjustRed(gray, 0.2)", tokens);
+  it("should adjust red channel (0-255 scale delta)", () => {
+    // gray r=0.5 (128/255 approx), adjust by 51 (51/255 = 0.2)
+    const result = resolveExpression("adjustRed(gray, 51)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
-      expect(color.r).toBeCloseTo(0.7);
+      expect(color.r).toBeCloseTo(0.5 + 51 / 255, 2);
     }
   });
 
-  it("should adjust green channel negatively", () => {
-    const result = resolveExpression("adjustGreen(gray, -0.3)", tokens);
+  it("should adjust green channel negatively (0-255 scale delta)", () => {
+    // gray g=0.5, adjust by -76.5 (76.5/255 = 0.3)
+    const result = resolveExpression("adjustGreen(gray, -76.5)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
-      expect(color.g).toBeCloseTo(0.2);
+      expect(color.g).toBeCloseTo(0.2, 1);
     }
   });
 
-  it("should adjust blue channel", () => {
-    const result = resolveExpression("adjustBlue(gray, 0.5)", tokens);
+  it("should adjust blue channel (0-255 scale delta)", () => {
+    // gray b=0.5, adjust by 127.5 (127.5/255 = 0.5)
+    const result = resolveExpression("adjustBlue(gray, 127.5)", tokens);
     const color = expectColor(result);
     if (color.space === "srgb") {
       expect(color.b).toBeCloseTo(1.0);
@@ -690,14 +716,14 @@ describe("channel adjuster functions", () => {
     expect((result as EvalValue).type).toBe("color");
   });
 
-  it("should adjust saturation", () => {
-    const result = resolveExpression("adjustSaturation(gray, 0.3)", tokens);
+  it("should adjust saturation (0-100 scale delta)", () => {
+    const result = resolveExpression("adjustSaturation(gray, 30)", tokens);
     expect(isEvalError(result)).toBe(false);
     expect((result as EvalValue).type).toBe("color");
   });
 
-  it("should adjust lightness", () => {
-    const result = resolveExpression("adjustLightness(gray, 0.2)", tokens);
+  it("should adjust lightness (0-100 scale delta)", () => {
+    const result = resolveExpression("adjustLightness(gray, 20)", tokens);
     expect(isEvalError(result)).toBe(false);
     expect((result as EvalValue).type).toBe("color");
   });
@@ -710,36 +736,36 @@ describe("channel extractor functions", () => {
     blue: makeToken("blue", { type: "color", value: BLUE }),
   };
 
-  it("should extract red channel", () => {
-    expectNumber(resolveExpression("red(red)", tokens), 1);
+  it("should extract red channel (0-255 scale)", () => {
+    expectNumber(resolveExpression("red(red)", tokens), 255);
     expectNumber(resolveExpression("red(green)", tokens), 0);
   });
 
-  it("should extract green channel", () => {
-    expectNumber(resolveExpression("green(green)", tokens), 1);
+  it("should extract green channel (0-255 scale)", () => {
+    expectNumber(resolveExpression("green(green)", tokens), 255);
     expectNumber(resolveExpression("green(red)", tokens), 0);
   });
 
-  it("should extract blue channel", () => {
-    expectNumber(resolveExpression("blue(blue)", tokens), 1);
+  it("should extract blue channel (0-255 scale)", () => {
+    expectNumber(resolveExpression("blue(blue)", tokens), 255);
     expectNumber(resolveExpression("blue(red)", tokens), 0);
   });
 
-  it("should extract hue", () => {
+  it("should extract hue (degrees)", () => {
     // Red hue = 0, green hue = 120, blue hue = 240
     expectNumber(resolveExpression("hueOf(red)", tokens), 0);
     expectNumber(resolveExpression("hueOf(green)", tokens), 120);
     expectNumber(resolveExpression("hueOf(blue)", tokens), 240);
   });
 
-  it("should extract saturation", () => {
-    // Pure red has saturation 1
-    expectNumber(resolveExpression("saturationOf(red)", tokens), 1);
+  it("should extract saturation (0-100 scale)", () => {
+    // Pure red has saturation 100%
+    expectNumber(resolveExpression("saturationOf(red)", tokens), 100);
   });
 
-  it("should extract lightness", () => {
-    // Pure red has lightness 0.5
-    expectNumber(resolveExpression("lightnessOf(red)", tokens), 0.5);
+  it("should extract lightness (0-100 scale)", () => {
+    // Pure red has lightness 50%
+    expectNumber(resolveExpression("lightnessOf(red)", tokens), 50);
   });
 });
 

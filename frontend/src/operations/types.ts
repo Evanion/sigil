@@ -45,9 +45,18 @@ export interface Operation {
    * value/previousValue to carry structured payloads).
    */
   readonly path: string;
-  /** New value (full node data for create_node). */
+  /**
+   * New value (full node data for create_node).
+   * TODO (RF-019): Replace `unknown` with a discriminated union based on `type`.
+   * Each OperationType has a specific value shape (e.g., ReparentValue, ReorderValue,
+   * CreatePageValue). A discriminated union would provide compile-time type safety
+   * and eliminate unsafe casts at call sites.
+   */
   readonly value: unknown;
-  /** Old value (full node snapshot for delete_node). */
+  /**
+   * Old value (full node snapshot for delete_node).
+   * TODO (RF-019): Same typing gap as `value` — should be a discriminated union.
+   */
   readonly previousValue: unknown;
   // INTENTIONAL: mutable — server assigns seq after creation
   seq: number;

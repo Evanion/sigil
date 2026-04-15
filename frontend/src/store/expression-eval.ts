@@ -6,6 +6,9 @@
  *
  * All numeric outputs are guarded with Number.isFinite() per CLAUDE.md section 11
  * Floating-Point Validation rules.
+ *
+ * TODO (RF-024): Split this file into parser, evaluator, and functions modules
+ * when it grows further. Currently ~1400 lines.
  */
 
 import type { Token, Color, ColorSrgb } from "../types/document";
@@ -61,37 +64,26 @@ export type EvalError =
 
 // ── Type guards ───────────────────────────────────────────────────────
 
-export function isEvalError(v: EvalValue | EvalError): v is EvalError {
-  return (
-    v.type === "parse" ||
-    v.type === "unknownFunction" ||
-    v.type === "arityError" ||
-    v.type === "typeError" ||
-    v.type === "referenceNotFound" ||
-    v.type === "depthExceeded" ||
-    v.type === "divisionByZero" ||
-    v.type === "domainError"
-  );
-}
+/** Set of all EvalError type discriminants, used by the type guard. */
+const EVAL_ERROR_TYPES: ReadonlySet<string> = new Set([
+  "parse",
+  "unknownFunction",
+  "arityError",
+  "typeError",
+  "referenceNotFound",
+  "depthExceeded",
+  "divisionByZero",
+  "domainError",
+]);
 
 /**
- * Type guard for use inside the parser, where the result union is
- * `TokenExpression | EvalError` rather than `EvalValue | EvalError`.
- * `TokenExpression` and `EvalError` share no `type` discriminants, so
- * the same set of checks applies — this overload exists solely to
- * satisfy the TypeScript type checker without unsafe casts.
+ * Type guard that identifies EvalError values within unions.
+ * Works with `EvalValue | EvalError`, `TokenExpression | EvalError`, or any
+ * union whose members have a `type` string discriminant — the guard checks
+ * against the known set of error type strings.
  */
-function isParseResultError(v: TokenExpression | EvalError): v is EvalError {
-  return (
-    v.type === "parse" ||
-    v.type === "unknownFunction" ||
-    v.type === "arityError" ||
-    v.type === "typeError" ||
-    v.type === "referenceNotFound" ||
-    v.type === "depthExceeded" ||
-    v.type === "divisionByZero" ||
-    v.type === "domainError"
-  );
+export function isEvalError(v: { type: string }): v is EvalError {
+  return EVAL_ERROR_TYPES.has(v.type);
 }
 
 // ── Parser ────────────────────────────────────────────────────────────
@@ -128,7 +120,7 @@ function isIdentChar(ch: string): boolean {
 }
 
 function isTokenRefChar(ch: string): boolean {
-  return isIdentChar(ch) || ch === "." || ch === "-";
+  return isIdentChar(ch) || ch === ".";
 }
 
 /**
@@ -333,7 +325,7 @@ function parseAtom(state: ParserState): TokenExpression | EvalError {
       // Parse arguments
       if (state.pos < state.input.length && state.input[state.pos] !== ")") {
         const firstArg = parseExpression_internal(state);
-        if (isParseResultError(firstArg)) {
+        if (isEvalError(firstArg)) {
           return firstArg;
         }
         args.push(firstArg);
@@ -344,7 +336,7 @@ function parseAtom(state: ParserState): TokenExpression | EvalError {
             return makeParseError(`Too many function arguments (max ${MAX_FUNCTION_ARGS})`);
           }
           const arg = parseExpression_internal(state);
-          if (isParseResultError(arg)) {
+          if (isEvalError(arg)) {
             return arg;
           }
           args.push(arg);
@@ -388,7 +380,7 @@ function parseFactor(state: ParserState): TokenExpression | EvalError {
     }
     const inner = parseFactor(state);
     state.depth--;
-    if (isParseResultError(inner)) {
+    if (isEvalError(inner)) {
       return inner;
     }
     return { type: "unaryNeg", inner };
@@ -405,7 +397,7 @@ function parseFactor(state: ParserState): TokenExpression | EvalError {
  */
 function parseTerm(state: ParserState): TokenExpression | EvalError {
   let left = parseFactor(state);
-  if (isParseResultError(left)) {
+  if (isEvalError(left)) {
     return left;
   }
 
@@ -424,7 +416,7 @@ function parseTerm(state: ParserState): TokenExpression | EvalError {
 
     state.pos++;
     const right = parseFactor(state);
-    if (isParseResultError(right)) {
+    if (isEvalError(right)) {
       return right;
     }
     left = { type: "binaryOp", left, op, right };
@@ -442,7 +434,7 @@ function parseTerm(state: ParserState): TokenExpression | EvalError {
  */
 function parseExpression_internal(state: ParserState): TokenExpression | EvalError {
   let left = parseTerm(state);
-  if (isParseResultError(left)) {
+  if (isEvalError(left)) {
     return left;
   }
 
@@ -461,7 +453,7 @@ function parseExpression_internal(state: ParserState): TokenExpression | EvalErr
 
     state.pos++;
     const right = parseTerm(state);
-    if (isParseResultError(right)) {
+    if (isEvalError(right)) {
       return right;
     }
     left = { type: "binaryOp", left, op, right };
@@ -492,7 +484,7 @@ export function parseExpression(input: string): TokenExpression | EvalError {
   const state: ParserState = { input: trimmed, pos: 0, depth: 0 };
   const result = parseExpression_internal(state);
 
-  if (isParseResultError(result)) {
+  if (isEvalError(result)) {
     return result;
   }
 
@@ -539,9 +531,10 @@ function toSrgb(color: Color): ColorSrgb {
  * Returns [h (0-360), s (0-1), l (0-1)].
  */
 function srgbToHsl(c: ColorSrgb): [number, number, number] {
-  const r = c.r;
-  const g = c.g;
-  const b = c.b;
+  // Guard: reject non-finite inputs per CLAUDE.md Floating-Point Validation
+  const r = Number.isFinite(c.r) ? c.r : 0;
+  const g = Number.isFinite(c.g) ? c.g : 0;
+  const b = Number.isFinite(c.b) ? c.b : 0;
 
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -571,16 +564,21 @@ function srgbToHsl(c: ColorSrgb): [number, number, number] {
  * h: 0-360, s: 0-1, l: 0-1, a: 0-1.
  */
 function hslToSrgb(h: number, s: number, l: number, a: number): ColorSrgb {
+  // Guard: reject non-finite inputs per CLAUDE.md Floating-Point Validation
+  const hSafe = Number.isFinite(h) ? h : 0;
+  const sSafe = Number.isFinite(s) ? s : 0;
+  const lSafe = Number.isFinite(l) ? l : 0;
+  const aSafe = Number.isFinite(a) ? a : 0;
   // Normalize h to 0-360
-  const hNorm = ((h % 360) + 360) % 360;
+  const hNorm = ((hSafe % 360) + 360) % 360;
   const hFrac = hNorm / 360;
 
-  if (s === 0) {
-    return { space: "srgb", r: l, g: l, b: l, a };
+  if (sSafe === 0) {
+    return { space: "srgb", r: lSafe, g: lSafe, b: lSafe, a: aSafe };
   }
 
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
+  const q = lSafe < 0.5 ? lSafe * (1 + sSafe) : lSafe + sSafe - lSafe * sSafe;
+  const p = 2 * lSafe - q;
 
   const hueToRgb = (t: number): number => {
     let tNorm = t;
@@ -596,7 +594,7 @@ function hslToSrgb(h: number, s: number, l: number, a: number): ColorSrgb {
   const g = hueToRgb(hFrac);
   const b = hueToRgb(hFrac - 1 / 3);
 
-  return { space: "srgb", r, g, b, a };
+  return { space: "srgb", r, g, b, a: aSafe };
 }
 
 /**
@@ -631,6 +629,14 @@ function requireColor(v: EvalValue): Color | EvalError {
     return { type: "typeError", expected: "color", got: v.type };
   }
   return v.value;
+}
+
+/**
+ * Type guard to distinguish EvalError from Color in requireColor results.
+ * Color always has a `space` property; EvalError never does.
+ */
+function isColorError(v: Color | EvalError): v is EvalError {
+  return !("space" in v);
 }
 
 /**
@@ -761,7 +767,8 @@ const SIZE_BASE = 16;
 function fnRem(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
-  const result = n * SIZE_BASE;
+  // Convert px to rem: divide by base font size (16px = 1rem)
+  const result = n / SIZE_BASE;
   if (!Number.isFinite(result))
     return { type: "domainError", message: "rem produced non-finite result" };
   return { type: "number", value: result };
@@ -770,7 +777,8 @@ function fnRem(args: EvalValue[]): EvalValue | EvalError {
 function fnEm(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
-  const result = n * SIZE_BASE;
+  // Convert px to em: divide by base font size (16px = 1em)
+  const result = n / SIZE_BASE;
   if (!Number.isFinite(result))
     return { type: "domainError", message: "em produced non-finite result" };
   return { type: "number", value: result };
@@ -779,19 +787,22 @@ function fnEm(args: EvalValue[]): EvalValue | EvalError {
 function fnPx(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
-  // px is already in pixels — identity function
-  return { type: "number", value: n };
+  // Convert rem/em to px: multiply by base font size (1rem * 16 = 16px)
+  const result = n * SIZE_BASE;
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "px produced non-finite result" };
+  return { type: "number", value: result };
 }
 
 // Color manipulation functions
 
 function fnLighten(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const amount = requireNumber(args[1]);
   if (typeof amount !== "number") return amount;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   const newL = clamp01(l + amount);
   const result = hslToSrgb(h, s, newL, srgb.a);
@@ -800,11 +811,11 @@ function fnLighten(args: EvalValue[]): EvalValue | EvalError {
 
 function fnDarken(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const amount = requireNumber(args[1]);
   if (typeof amount !== "number") return amount;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   const newL = clamp01(l - amount);
   const result = hslToSrgb(h, s, newL, srgb.a);
@@ -813,11 +824,11 @@ function fnDarken(args: EvalValue[]): EvalValue | EvalError {
 
 function fnSaturate(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const amount = requireNumber(args[1]);
   if (typeof amount !== "number") return amount;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   const newS = clamp01(s + amount);
   const result = hslToSrgb(h, newS, l, srgb.a);
@@ -826,11 +837,11 @@ function fnSaturate(args: EvalValue[]): EvalValue | EvalError {
 
 function fnDesaturate(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const amount = requireNumber(args[1]);
   if (typeof amount !== "number") return amount;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   const newS = clamp01(s - amount);
   const result = hslToSrgb(h, newS, l, srgb.a);
@@ -839,25 +850,25 @@ function fnDesaturate(args: EvalValue[]): EvalValue | EvalError {
 
 function fnAlpha(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const alpha = requireNumber(args[1]);
   if (typeof alpha !== "number") return alpha;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const result: ColorSrgb = { space: "srgb", r: srgb.r, g: srgb.g, b: srgb.b, a: clamp01(alpha) };
   return { type: "color", value: result };
 }
 
 function fnMix(args: EvalValue[]): EvalValue | EvalError {
   const c1 = requireColor(args[0]);
-  if ("type" in c1 && (c1 as EvalError).type === "typeError") return c1 as EvalError;
+  if (isColorError(c1)) return c1;
   const c2 = requireColor(args[1]);
-  if ("type" in c2 && (c2 as EvalError).type === "typeError") return c2 as EvalError;
+  if (isColorError(c2)) return c2;
   const ratio = requireNumber(args[2]);
   if (typeof ratio !== "number") return ratio;
 
-  const s1 = toSrgb(c1 as Color);
-  const s2 = toSrgb(c2 as Color);
+  const s1 = toSrgb(c1);
+  const s2 = toSrgb(c2);
   const t = clamp01(ratio);
 
   const result: ColorSrgb = {
@@ -870,45 +881,33 @@ function fnMix(args: EvalValue[]): EvalValue | EvalError {
   return { type: "color", value: result };
 }
 
-/**
- * Compute relative luminance (WCAG 2.x definition).
- * sRGB channel values are linearized then weighted.
- */
-function relativeLuminance(c: ColorSrgb): number {
-  const linearize = (v: number): number => {
-    // Guard: domain is [0,1] for sRGB channels
-    const clamped = clamp01(v);
-    return clamped <= 0.03928 ? clamped / 12.92 : Math.pow((clamped + 0.055) / 1.055, 2.4);
-  };
-  return 0.2126 * linearize(c.r) + 0.7152 * linearize(c.g) + 0.0722 * linearize(c.b);
-}
-
 function fnContrast(args: EvalValue[]): EvalValue | EvalError {
-  const c1 = requireColor(args[0]);
-  if ("type" in c1 && (c1 as EvalError).type === "typeError") return c1 as EvalError;
-  const c2 = requireColor(args[1]);
-  if ("type" in c2 && (c2 as EvalError).type === "typeError") return c2 as EvalError;
+  const c = requireColor(args[0]);
+  if (isColorError(c)) return c;
 
-  const s1 = toSrgb(c1 as Color);
-  const s2 = toSrgb(c2 as Color);
-  const l1 = relativeLuminance(s1);
-  const l2 = relativeLuminance(s2);
+  const srgb = toSrgb(c);
+  // Linearize before computing luminance (sRGB to linear RGB)
+  const lin = (v: number): number => {
+    const clamped = clamp01(v);
+    return clamped <= 0.04045 ? clamped / 12.92 : Math.pow((clamped + 0.055) / 1.055, 2.4);
+  };
+  const luminance = 0.2126 * lin(srgb.r) + 0.7152 * lin(srgb.g) + 0.0722 * lin(srgb.b);
 
-  const lighter = Math.max(l1, l2);
-  const darker = Math.min(l1, l2);
-  const ratio = (lighter + 0.05) / (darker + 0.05);
-
-  if (!Number.isFinite(ratio)) {
-    return { type: "domainError", message: "contrast ratio produced non-finite result" };
-  }
-  return { type: "number", value: ratio };
+  // Return black for light colors, white for dark colors (matching Rust)
+  return {
+    type: "color",
+    value:
+      luminance > 0.179
+        ? { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 } // black
+        : { space: "srgb" as const, r: 1, g: 1, b: 1, a: 1 }, // white
+  };
 }
 
 function fnComplement(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   const result = hslToSrgb((h + 180) % 360, s, l, srgb.a);
   return { type: "color", value: result };
@@ -916,11 +915,11 @@ function fnComplement(args: EvalValue[]): EvalValue | EvalError {
 
 function fnHue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const hue = requireNumber(args[1]);
   if (typeof hue !== "number") return hue;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [, s, l] = srgbToHsl(srgb);
   const result = hslToSrgb(hue, s, l, srgb.a);
   return { type: "color", value: result };
@@ -930,195 +929,212 @@ function fnHue(args: EvalValue[]): EvalValue | EvalError {
 
 function fnSetRed(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Input is 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: clamp01(v), g: srgb.g, b: srgb.b, a: srgb.a },
+    value: { space: "srgb", r: clamp01(v / 255), g: srgb.g, b: srgb.b, a: srgb.a },
   };
 }
 
 function fnSetGreen(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Input is 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: srgb.r, g: clamp01(v), b: srgb.b, a: srgb.a },
+    value: { space: "srgb", r: srgb.r, g: clamp01(v / 255), b: srgb.b, a: srgb.a },
   };
 }
 
 function fnSetBlue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Input is 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(v), a: srgb.a },
+    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(v / 255), a: srgb.a },
   };
 }
 
 function fnSetHue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  // Hue is already in degrees (absolute), no conversion needed
+  const srgb = toSrgb(color);
   const [, s, l] = srgbToHsl(srgb);
   return { type: "color", value: hslToSrgb(v, s, l, srgb.a) };
 }
 
 function fnSetSaturation(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, , l] = srgbToHsl(srgb);
-  return { type: "color", value: hslToSrgb(h, clamp01(v), l, srgb.a) };
+  // Input is 0-100 scale, internal is 0-1
+  return { type: "color", value: hslToSrgb(h, clamp01(v / 100), l, srgb.a) };
 }
 
 function fnSetLightness(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s] = srgbToHsl(srgb);
-  return { type: "color", value: hslToSrgb(h, s, clamp01(v), srgb.a) };
+  // Input is 0-100 scale, internal is 0-1
+  return { type: "color", value: hslToSrgb(h, s, clamp01(v / 100), srgb.a) };
 }
 
 // Channel adjusters
 
 function fnAdjustRed(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Delta is on 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: clamp01(srgb.r + v), g: srgb.g, b: srgb.b, a: srgb.a },
+    value: { space: "srgb", r: clamp01(srgb.r + v / 255), g: srgb.g, b: srgb.b, a: srgb.a },
   };
 }
 
 function fnAdjustGreen(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Delta is on 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: srgb.r, g: clamp01(srgb.g + v), b: srgb.b, a: srgb.a },
+    value: { space: "srgb", r: srgb.r, g: clamp01(srgb.g + v / 255), b: srgb.b, a: srgb.a },
   };
 }
 
 function fnAdjustBlue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
+  // Delta is on 0-255 scale, internal is 0-1
   return {
     type: "color",
-    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(srgb.b + v), a: srgb.a },
+    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(srgb.b + v / 255), a: srgb.a },
   };
 }
 
 function fnAdjustHue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
   return { type: "color", value: hslToSrgb(h + v, s, l, srgb.a) };
 }
 
 function fnAdjustSaturation(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
-  return { type: "color", value: hslToSrgb(h, clamp01(s + v), l, srgb.a) };
+  // Delta is on 0-100 scale, internal is 0-1
+  return { type: "color", value: hslToSrgb(h, clamp01(s + v / 100), l, srgb.a) };
 }
 
 function fnAdjustLightness(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
+  if (isColorError(color)) return color;
   const v = requireNumber(args[1]);
   if (typeof v !== "number") return v;
 
-  const srgb = toSrgb(color as Color);
+  const srgb = toSrgb(color);
   const [h, s, l] = srgbToHsl(srgb);
-  return { type: "color", value: hslToSrgb(h, s, clamp01(l + v), srgb.a) };
+  // Delta is on 0-100 scale, internal is 0-1
+  return { type: "color", value: hslToSrgb(h, s, clamp01(l + v / 100), srgb.a) };
 }
 
 // Channel extractors
 
 function fnRed(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
-  return { type: "number", value: srgb.r };
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
+  // Return on 0-255 scale (internal is 0-1)
+  return { type: "number", value: srgb.r * 255 };
 }
 
 function fnGreen(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
-  return { type: "number", value: srgb.g };
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
+  // Return on 0-255 scale (internal is 0-1)
+  return { type: "number", value: srgb.g * 255 };
 }
 
 function fnBlue(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
-  return { type: "number", value: srgb.b };
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
+  // Return on 0-255 scale (internal is 0-1)
+  return { type: "number", value: srgb.b * 255 };
 }
 
 function fnHueOf(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
   const [h] = srgbToHsl(srgb);
+  // Already in degrees, no conversion needed
   return { type: "number", value: h };
 }
 
 function fnSaturationOf(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
   const [, s] = srgbToHsl(srgb);
-  return { type: "number", value: s };
+  // Return on 0-100 scale (internal is 0-1)
+  return { type: "number", value: s * 100 };
 }
 
 function fnLightnessOf(args: EvalValue[]): EvalValue | EvalError {
   const color = requireColor(args[0]);
-  if ("type" in color && (color as EvalError).type === "typeError") return color as EvalError;
-  const srgb = toSrgb(color as Color);
+  if (isColorError(color)) return color;
+  const srgb = toSrgb(color);
   const [, , l] = srgbToHsl(srgb);
-  return { type: "number", value: l };
+  // Return on 0-100 scale (internal is 0-1)
+  return { type: "number", value: l * 100 };
 }
 
 // Blend function with 11 modes
@@ -1132,10 +1148,10 @@ const BLEND_MODES: Record<string, BlendModeFn> = {
   overlay: (a, b) => (a < 0.5 ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b)),
   darken: (a, b) => Math.min(a, b),
   lighten: (a, b) => Math.max(a, b),
-  color_dodge: (a, b) => (b >= 1 ? 1 : Math.min(1, a / (1 - b))),
-  color_burn: (a, b) => (b <= 0 ? 0 : Math.max(0, 1 - (1 - a) / b)),
-  hard_light: (a, b) => (b < 0.5 ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b)),
-  soft_light: (a, b) => {
+  "color-dodge": (a, b) => (b >= 1 ? 1 : Math.min(1, a / (1 - b))),
+  "color-burn": (a, b) => (b <= 0 ? 0 : Math.max(0, 1 - (1 - a) / b)),
+  "hard-light": (a, b) => (b < 0.5 ? 2 * a * b : 1 - 2 * (1 - a) * (1 - b)),
+  "soft-light": (a, b) => {
     if (b <= 0.5) {
       return a - (1 - 2 * b) * a * (1 - a);
     }
@@ -1149,9 +1165,9 @@ const BLEND_MODES: Record<string, BlendModeFn> = {
 
 function fnBlend(args: EvalValue[]): EvalValue | EvalError {
   const c1 = requireColor(args[0]);
-  if ("type" in c1 && (c1 as EvalError).type === "typeError") return c1 as EvalError;
+  if (isColorError(c1)) return c1;
   const c2 = requireColor(args[1]);
-  if ("type" in c2 && (c2 as EvalError).type === "typeError") return c2 as EvalError;
+  if (isColorError(c2)) return c2;
 
   if (args[2].type !== "string") {
     return { type: "typeError", expected: "string", got: args[2].type };
@@ -1162,17 +1178,26 @@ function fnBlend(args: EvalValue[]): EvalValue | EvalError {
     return { type: "domainError", message: `Unknown blend mode: '${modeName}'` };
   }
 
-  const s1 = toSrgb(c1 as Color);
-  const s2 = toSrgb(c2 as Color);
+  const s1 = toSrgb(c1);
+  const s2 = toSrgb(c2);
 
-  const r = clamp01(modeFn(s1.r, s2.r));
-  const g = clamp01(modeFn(s1.g, s2.g));
-  const b = clamp01(modeFn(s1.b, s2.b));
+  // Proper alpha compositing matching Rust implementation
+  const a1 = s1.a;
+  const a2 = s2.a;
+  const outA = a2 + a1 * (1 - a2);
+  if (outA < 1e-10) {
+    return { type: "color", value: { space: "srgb", r: 0, g: 0, b: 0, a: 0 } };
+  }
 
-  // Alpha: use source-over compositing
-  const a = clamp01(s1.a + s2.a * (1 - s1.a));
+  const blendR = modeFn(s1.r, s2.r);
+  const blendG = modeFn(s1.g, s2.g);
+  const blendB = modeFn(s1.b, s2.b);
 
-  const result: ColorSrgb = { space: "srgb", r, g, b, a };
+  const r = clamp01((a2 * blendR + a1 * (1 - a2) * s1.r) / outA);
+  const g = clamp01((a2 * blendG + a1 * (1 - a2) * s1.g) / outA);
+  const b = clamp01((a2 * blendB + a1 * (1 - a2) * s1.b) / outA);
+
+  const result: ColorSrgb = { space: "srgb", r, g, b, a: clamp01(outA) };
   return { type: "color", value: result };
 }
 
@@ -1200,7 +1225,7 @@ const FUNCTION_REGISTRY: Record<string, FnDef> = {
   desaturate: { arity: 2, call: fnDesaturate },
   alpha: { arity: 2, call: fnAlpha },
   mix: { arity: 3, call: fnMix },
-  contrast: { arity: 2, call: fnContrast },
+  contrast: { arity: 1, call: fnContrast },
   complement: { arity: 1, call: fnComplement },
   hue: { arity: 2, call: fnHue },
 
@@ -1280,7 +1305,7 @@ export function evaluateExpression(
       // If the resolved value is an expression, recursively evaluate it
       if (resolved.type === "expression") {
         const parsed = parseExpression(resolved.expr);
-        if (isParseResultError(parsed)) {
+        if (isEvalError(parsed)) {
           return parsed;
         }
         return evaluateExpression(parsed, tokens, depth + 1);
