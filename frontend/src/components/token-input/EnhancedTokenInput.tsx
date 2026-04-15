@@ -307,9 +307,10 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     const newText = text.slice(0, replaceStart) + insertText + text.slice(replaceEnd);
     // For tokens: cursor after closing `}` (ready to type operator)
     // For functions: cursor between `()` (ready to type first argument)
-    const newCursor = suggestion.type === "token"
-      ? replaceStart + insertText.length
-      : replaceStart + insertText.length - 1; // before the closing `)`
+    const newCursor =
+      suggestion.type === "token"
+        ? replaceStart + insertText.length
+        : replaceStart + insertText.length - 1; // before the closing `)`
 
     renderHighlighted(newText, false);
     setCursorOffset(inputRef, newCursor);
