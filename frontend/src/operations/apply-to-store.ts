@@ -21,6 +21,7 @@ import type {
   ReorderPageValue,
   CreateTokenValue,
   UpdateTokenValue,
+  RenameTokenValue,
 } from "./types";
 
 /** Minimal setter interface matching Solid's SetStoreFunction signature. */
@@ -81,6 +82,9 @@ export function applyOperationToStore(
       break;
     case "delete_token":
       applyDeleteTokenOp(op, setState);
+      break;
+    case "rename_token":
+      applyRenameTokenOp(op, setState);
       break;
   }
 }
@@ -436,6 +440,33 @@ function applyDeleteTokenOp(op: Operation, setState: StoreStateSetter): void {
   setState(
     produce((s: Record<string, Record<string, unknown>>) => {
       Reflect.deleteProperty(s["tokens"], tokenName);
+    }),
+  );
+}
+
+function applyRenameTokenOp(op: Operation, setState: StoreStateSetter): void {
+  const renameData = op.value as RenameTokenValue;
+  if (!renameData || !renameData.old_name || !renameData.new_name) {
+    console.warn("applyRenameTokenOp: missing rename data");
+    return;
+  }
+
+  // No-op if names are the same
+  if (renameData.old_name === renameData.new_name) {
+    return;
+  }
+
+  setState(
+    produce((s: Record<string, Record<string, unknown>>) => {
+      const tokens = s["tokens"] as Record<string, unknown>;
+      const existing = tokens[renameData.old_name] as Record<string, unknown> | undefined;
+      if (!existing) {
+        console.warn(`applyRenameTokenOp: token "${renameData.old_name}" not found`);
+        return;
+      }
+      // Move token to new key with updated name
+      tokens[renameData.new_name] = { ...existing, name: renameData.new_name };
+      Reflect.deleteProperty(tokens, renameData.old_name);
     }),
   );
 }

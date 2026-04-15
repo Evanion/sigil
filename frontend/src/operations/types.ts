@@ -20,7 +20,8 @@ export type OperationType =
   | "reorder_page"
   | "create_token"
   | "update_token"
-  | "delete_token";
+  | "delete_token"
+  | "rename_token";
 
 /**
  * A single field-level mutation.
@@ -175,6 +176,22 @@ export interface UpdateTokenValue {
  */
 export interface DeleteTokenSnapshot {
   readonly name: string;
+  readonly token_type: string;
+  readonly value: unknown;
+  readonly description: string | null;
+  readonly id: string;
+}
+
+/**
+ * Rename token operation value payload.
+ * Stored in Operation.value for type="rename_token".
+ * The same schema is used for previousValue (with names swapped) so that
+ * createInverse produces a valid rename operation in the opposite direction.
+ */
+export interface RenameTokenValue {
+  readonly old_name: string;
+  readonly new_name: string;
+  /** Full token snapshot for undo — preserved so rollback can restore. */
   readonly token_type: string;
   readonly value: unknown;
   readonly description: string | null;

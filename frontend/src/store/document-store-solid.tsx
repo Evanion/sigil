@@ -38,6 +38,7 @@ import {
   createCreateTokenOp,
   createUpdateTokenOp,
   createDeleteTokenOp,
+  createRenameTokenOp,
 } from "../operations/operation-helpers";
 import type { TextStylePatch } from "./document-store-types";
 import { resolveToken as resolveTokenPure } from "./token-store";
@@ -136,6 +137,7 @@ export interface DocumentStoreAPI {
   createToken(name: string, tokenType: TokenType, value: TokenValue, description?: string): void;
   updateToken(name: string, value: TokenValue, description?: string): void;
   deleteToken(name: string): void;
+  renameToken(oldName: string, newName: string): void;
   resolveToken(name: string): TokenValue | null;
 
   // Page mutations
@@ -483,6 +485,15 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
           name: op.nodeUuid,
         },
       };
+    case "rename_token": {
+      const renameData = op.value as { old_name: string; new_name: string };
+      return {
+        renameToken: {
+          oldName: renameData.old_name,
+          newName: renameData.new_name,
+        },
+      };
+    }
   }
 }
 
@@ -1766,6 +1777,122 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       });
   }
 
+  function renameToken(oldName: string, newName: string): void {
+    // No-op if names are the same
+    if (oldName === newName) {
+      return;
+    }
+
+    // Validate new name
+    const nameError = validateTokenName(newName);
+    if (nameError !== null) {
+      announceError(`renameToken: ${nameError}`);
+      return;
+    }
+
+    // Validate source token exists
+    const existingToken = state.tokens[oldName];
+    if (existingToken === undefined) {
+      announceError(`renameToken: token "${oldName}" not found`);
+      return;
+    }
+
+    // Reject if new name is already taken
+    if (state.tokens[newName] !== undefined) {
+      announceError(`renameToken: token "${newName}" already exists`);
+      return;
+    }
+
+    // Capture snapshot BEFORE mutation (CLAUDE.md: capture snapshots before mutations)
+    // JSON clone: Solid proxy not structuredClone-safe
+    let tokenSnapshot: Token;
+    try {
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
+    } catch (err: unknown) {
+      console.error("renameToken: failed to snapshot token", err);
+      return;
+    }
+
+    // Apply optimistically: move token to new key
+    setState(
+      produce((s) => {
+        const token = s.tokens[oldName];
+        if (token) {
+          s.tokens[newName] = { ...token, name: newName };
+          Reflect.deleteProperty(s.tokens, oldName);
+        }
+      }),
+    );
+
+    // Track for undo/redo: forward = old→new, inverse = new→old
+    interceptor.trackStructural(
+      createRenameTokenOp(
+        clientSessionId,
+        {
+          old_name: oldName,
+          new_name: newName,
+          token_type: tokenSnapshot.token_type,
+          value: tokenSnapshot.value,
+          description: tokenSnapshot.description,
+          id: tokenSnapshot.id,
+        },
+        {
+          old_name: newName,
+          new_name: oldName,
+          token_type: tokenSnapshot.token_type,
+          value: tokenSnapshot.value,
+          description: tokenSnapshot.description,
+          id: tokenSnapshot.id,
+        },
+      ),
+    );
+    syncHistorySignals();
+
+    // Send to server
+    client
+      .mutation(gql(APPLY_OPERATIONS_MUTATION), {
+        operations: [{ renameToken: { oldName, newName } }],
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("renameToken server error:", r.error.message);
+          announceError(`Failed to rename token "${oldName}": ${r.error.message}`);
+          // Surgical rollback: move back to old name
+          setState(
+            produce((s) => {
+              const token = s.tokens[newName];
+              if (token) {
+                s.tokens[oldName] = { ...token, name: oldName };
+                Reflect.deleteProperty(s.tokens, newName);
+              } else {
+                // Fallback: restore from snapshot
+                s.tokens[oldName] = tokenSnapshot;
+              }
+            }),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("renameToken exception:", err);
+        announceError(`Failed to rename token "${oldName}"`);
+        // Surgical rollback: move back to old name
+        setState(
+          produce((s) => {
+            const token = s.tokens[newName];
+            if (token) {
+              s.tokens[oldName] = { ...token, name: oldName };
+              Reflect.deleteProperty(s.tokens, newName);
+            } else {
+              // Fallback: restore from snapshot
+              s.tokens[oldName] = tokenSnapshot;
+            }
+          }),
+        );
+      });
+  }
+
   function resolveTokenLocal(name: string): TokenValue | null {
     return resolveTokenPure(state.tokens, name);
   }
@@ -2136,6 +2263,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     createToken,
     updateToken,
     deleteToken,
+    renameToken,
     resolveToken: resolveTokenLocal,
     createPage,
     deletePage,

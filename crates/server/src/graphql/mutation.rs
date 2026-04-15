@@ -28,7 +28,9 @@ use agent_designer_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
 use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
-use agent_designer_core::commands::token_commands::{AddToken, RemoveToken, UpdateToken};
+use agent_designer_core::commands::token_commands::{
+    AddToken, RemoveToken, RenameToken, UpdateToken,
+};
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
 use agent_designer_core::id::TokenId;
 use agent_designer_core::node::{
@@ -46,8 +48,9 @@ use crate::state::ServerState;
 
 use super::types::{
     AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput,
-    DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, ReorderInput,
-    ReorderPageInput, ReparentInput, SetFieldInput, UpdateTokenInput, parse_token_type,
+    DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, RenameTokenInput,
+    ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput, UpdateTokenInput,
+    parse_token_type,
 };
 
 pub struct MutationRoot;
@@ -111,6 +114,7 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
         OperationInput::AddToken(at) => parse_add_token(at),
         OperationInput::UpdateToken(ut) => parse_update_token(ut),
         OperationInput::RemoveToken(rt) => parse_remove_token(rt),
+        OperationInput::RenameToken(rt) => parse_rename_token(rt),
     }
 }
 
@@ -1073,6 +1077,34 @@ fn parse_remove_token(input: &RemoveTokenInput) -> Result<ParsedOp> {
     })
 }
 
+/// Parses a `RenameToken` input.
+#[allow(clippy::unnecessary_wraps)]
+fn parse_rename_token(input: &RenameTokenInput) -> Result<ParsedOp> {
+    let old_name = input.old_name.clone();
+    let new_name = input.new_name.clone();
+
+    // Build broadcast payload eagerly (CLAUDE.md: broadcast payload shape contract).
+    // The token's stable UUID is resolved inside the builder closure after lock acquisition,
+    // so we construct the broadcast here with old_name/new_name and patch the id in the builder.
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: String::new(),
+        op_type: "rename_token".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({
+            "old_name": &old_name,
+            "new_name": &new_name,
+        })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(RenameToken { old_name, new_name }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
 #[Object]
 #[allow(clippy::unused_async)]
 impl MutationRoot {
@@ -1123,7 +1155,9 @@ impl MutationRoot {
                 MutationEventKind::PageUpdated
             }
             OperationInput::AddToken(_) => MutationEventKind::TokenCreated,
-            OperationInput::UpdateToken(_) => MutationEventKind::TokenUpdated,
+            OperationInput::UpdateToken(_) | OperationInput::RenameToken(_) => {
+                MutationEventKind::TokenUpdated
+            }
             OperationInput::RemoveToken(_) => MutationEventKind::TokenDeleted,
         };
 

@@ -36,6 +36,8 @@ pub enum OperationInput {
     UpdateToken(UpdateTokenInput),
     /// Remove a design token from the document.
     RemoveToken(RemoveTokenInput),
+    /// Atomically rename a design token.
+    RenameToken(RenameTokenInput),
 }
 
 /// Input for creating a new page.
@@ -103,6 +105,15 @@ pub struct UpdateTokenInput {
 pub struct RemoveTokenInput {
     /// Name of the token to remove.
     pub name: String,
+}
+
+/// Input for atomically renaming a design token.
+#[derive(InputObject)]
+pub struct RenameTokenInput {
+    /// Current name of the token to rename.
+    pub old_name: String,
+    /// Desired new name for the token.
+    pub new_name: String,
 }
 
 /// GraphQL representation of a design token.

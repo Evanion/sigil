@@ -193,6 +193,9 @@ function applyRemoteOperation(
     case "delete_token":
       applyDeleteToken(op.value, setState);
       break;
+    case "rename_token":
+      applyRenameToken(op.value, setState);
+      break;
     default:
       console.warn(`Unknown remote operation type: ${op.type}`);
   }
@@ -776,6 +779,42 @@ function applyDeleteToken(value: unknown, setState: SetStoreFunction<StoreState>
   setState(
     produce((s) => {
       Reflect.deleteProperty(s.tokens, tokenName);
+    }),
+  );
+}
+
+// ── Internal: rename_token ───────────────────────────────────────────
+
+function applyRenameToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote rename_token: missing or invalid payload");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const oldName = raw["old_name"];
+  const newName = raw["new_name"];
+
+  if (typeof oldName !== "string" || typeof newName !== "string") {
+    console.warn("Remote rename_token: missing old_name or new_name");
+    return;
+  }
+
+  // No-op if names are the same
+  if (oldName === newName) {
+    return;
+  }
+
+  setState(
+    produce((s) => {
+      const existing = s.tokens[oldName];
+      if (!existing) {
+        console.warn(`Remote rename_token: token "${oldName}" not found in store, skipping`);
+        return;
+      }
+      // Move token to new key with updated name
+      s.tokens[newName] = { ...existing, name: newName };
+      Reflect.deleteProperty(s.tokens, oldName);
     }),
   );
 }

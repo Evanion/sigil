@@ -58,6 +58,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     createToken: () => {},
     updateToken: () => {},
     deleteToken: () => {},
+    renameToken: () => {},
     resolveToken: () => null,
     destroy: () => {},
     ...overrides,
