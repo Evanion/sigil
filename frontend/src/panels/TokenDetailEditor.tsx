@@ -10,6 +10,8 @@ import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../components/number-input/NumberInput";
 import { ColorPicker } from "../components/color-picker/ColorPicker";
 import { Select, type SelectOption } from "../components/select/Select";
+import EnhancedTokenInput from "../components/token-input/EnhancedTokenInput";
+import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
 import "./TokenDetailEditor.css";
@@ -73,6 +75,7 @@ const MAX_LETTER_SPACING = 100;
 
 export interface TokenDetailEditorProps {
   readonly token: Token;
+  readonly tokens: Record<string, Token>;
   readonly onUpdate: (name: string, value: TokenValue, description?: string) => void;
   readonly onDelete?: (name: string) => void;
 }
@@ -103,7 +106,7 @@ const FONT_WEIGHT_OPTIONS: readonly SelectOption[] = [
 // ── Component ───────────────────────────────────────────────────────────
 
 export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) => {
-  const [props] = splitProps(rawProps, ["token", "onUpdate", "onDelete"]);
+  const [props] = splitProps(rawProps, ["token", "tokens", "onUpdate", "onDelete"]);
   const [t] = useTransContext();
 
   // ── Description editor ──────────────────────────────────────────────
@@ -184,10 +187,15 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
 
   function renderFontFamilyEditor(families: readonly string[]): ReturnType<Component> {
     const joined = () => families.join(", ");
+    // RF-018: id links the <label for> to the <input> for accessible label association.
+    const inputId = "token-detail-font-family";
     return (
       <div class="sigil-token-detail__field">
-        <label class="sigil-token-detail__field-label">{t("panels:tokens.typeFontFamily")}</label>
+        <label class="sigil-token-detail__field-label" for={inputId}>
+          {t("panels:tokens.typeFontFamily")}
+        </label>
         <input
+          id={inputId}
           class="sigil-token-detail__text-input"
           type="text"
           value={joined()}
@@ -396,10 +404,12 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
         {(typo) => (
           <div class="sigil-token-detail__typography-grid">
             <div class="sigil-token-detail__field">
-              <label class="sigil-token-detail__field-label">
+              {/* RF-018: for/id association links label to input for screen readers. */}
+              <label class="sigil-token-detail__field-label" for="token-detail-typo-font-family">
                 {t("panels:tokens.typeFontFamily")}
               </label>
               <input
+                id="token-detail-typo-font-family"
                 class="sigil-token-detail__text-input"
                 type="text"
                 value={typo().font_family}
@@ -480,21 +490,48 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     );
   }
 
+  /**
+   * Parse an expression/alias string from EnhancedTokenInput and store
+   * the appropriate TokenValue variant.
+   *
+   * If the string is a bare token reference `{name}` with no operators,
+   * store as alias. Otherwise store as expression.
+   *
+   * Extracted per CLAUDE.md: "Business Logic Must Not Live in Inline JSX Handlers".
+   */
+  function handleExpressionChange(rawValue: string): void {
+    const trimmed = rawValue.trim();
+    // RF-019: show error on empty expression instead of silently returning
+    if (!trimmed) {
+      showToast({
+        title: t("panels:tokens.emptyExpression") || "Expression cannot be empty",
+        variant: "error",
+      });
+      return;
+    }
+
+    // Check if it's a bare token reference: {token.name} with no operators
+    const bareRefMatch = trimmed.match(/^\{([a-zA-Z][a-zA-Z0-9._-]*)\}$/);
+    if (bareRefMatch) {
+      // Store as alias
+      updateValue({ type: "alias", name: bareRefMatch[1] });
+      return;
+    }
+
+    // Otherwise store as expression
+    updateValue({ type: "expression", expr: trimmed });
+  }
+
   function renderAliasEditor(name: string): ReturnType<Component> {
     return (
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.typeAlias")}</label>
-        <input
-          class="sigil-token-detail__text-input"
-          type="text"
-          value={name}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const val = e.currentTarget.value.trim();
-            if (val.length > 0) {
-              updateValue({ type: "alias", name: val });
-            }
-          }}
+        <EnhancedTokenInput
+          value={`{${name}}`}
+          onChange={handleExpressionChange}
+          tokens={props.tokens}
+          tokenType={props.token.token_type}
+          aria-label={t("panels:tokens.typeAlias")}
         />
       </div>
     );
@@ -537,9 +574,20 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
       case "alias":
         return renderAliasEditor(value.name);
       case "expression":
-        // Expression tokens display a read-only view of the expression string.
-        // Full expression editing UI is deferred to a later spec.
-        return renderAliasEditor(value.expr);
+        return (
+          <div class="sigil-token-detail__field">
+            <label class="sigil-token-detail__field-label">
+              {t("panels:tokens.typeExpression")}
+            </label>
+            <EnhancedTokenInput
+              value={value.expr}
+              onChange={handleExpressionChange}
+              tokens={props.tokens}
+              tokenType={props.token.token_type}
+              aria-label="Expression"
+            />
+          </div>
+        );
       default: {
         const _exhaustive: never = value;
         void _exhaustive;

@@ -134,6 +134,7 @@
     "typeGradient": "Degradado",
     "typeTypography": "Tipografía",
     "typeAlias": "Alias",
+    "typeExpression": "Expresion",
     "tokenCreated": "Token {{name}} creado",
     "tokenUpdated": "Token {{name}} actualizado",
     "tokenDeleted": "Token {{name}} eliminado",
@@ -165,6 +166,10 @@
     "duplicate": "Duplicar",
     "noSelection": "Selecciona un token para editar",
     "tokenCount": "{{count}} tokens",
-    "ungrouped": "Sin grupo"
+    "ungrouped": "Sin grupo",
+    "expressionError": "Error de expresion",
+    "expressionResolved": "Resuelto: {{value}}",
+    "autocompleteHint": "Escribe { para tokens, o comienza a escribir un nombre de funcion",
+    "emptyExpression": "La expresion no puede estar vacia"
   }
 }

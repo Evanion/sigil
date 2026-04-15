@@ -291,7 +291,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
       {renderPreview()}
 
       {/* Value editor */}
-      <TokenDetailEditor token={props.token} onUpdate={props.onUpdate} />
+      <TokenDetailEditor token={props.token} tokens={props.tokens} onUpdate={props.onUpdate} />
 
       {/* Depends on section */}
       <Show when={dependsOn().length > 0}>

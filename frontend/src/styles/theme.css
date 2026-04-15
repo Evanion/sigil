@@ -24,6 +24,11 @@
   --danger-hover: #f87171;
   --success: #22c55e;
   --warning: #f59e0b;
+  --error: var(--danger);
+
+  /* Brand aliases (map to accent for consistency) */
+  --brand: var(--accent);
+  --brand-bg: rgba(13, 153, 255, 0.15);
 
   /* Borders */
   --border-1: #3a3a3a;
@@ -80,6 +85,11 @@
   --z-popover: 60;
   --z-toast: 80;
   --z-tooltip: 100;
+
+  /* Token input syntax highlighting */
+  --token-input-function: #e09944;
+  /* RF-014: teal-green for numbers, visually distinct from amber function color */
+  --token-input-number: #6ec9a8;
 
   /* Color picker widget tokens */
   --color-picker-radius: var(--radius-2);
