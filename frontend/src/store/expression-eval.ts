@@ -341,9 +341,7 @@ function parseAtom(state: ParserState): TokenExpression | EvalError {
         while (state.pos < state.input.length && state.input[state.pos] === ",") {
           state.pos++; // skip ','
           if (args.length >= MAX_FUNCTION_ARGS) {
-            return makeParseError(
-              `Too many function arguments (max ${MAX_FUNCTION_ARGS})`,
-            );
+            return makeParseError(`Too many function arguments (max ${MAX_FUNCTION_ARGS})`);
           }
           const arg = parseExpression_internal(state);
           if (isParseResultError(arg)) {
@@ -638,7 +636,9 @@ function requireColor(v: EvalValue): Color | EvalError {
 /**
  * Convert a TokenValue to an EvalValue.
  */
-function tokenValueToEvalValue(tv: Exclude<import("../types/document").TokenValue, { type: "alias" } | { type: "expression" }>): EvalValue {
+function tokenValueToEvalValue(
+  tv: Exclude<import("../types/document").TokenValue, { type: "alias" } | { type: "expression" }>,
+): EvalValue {
   switch (tv.type) {
     case "color":
       return { type: "color", value: tv.value };
@@ -672,7 +672,11 @@ interface FnDef {
 /**
  * Validate arity for a function call.
  */
-function checkArity(name: string, args: EvalValue[], expected: number | [number, number]): EvalError | null {
+function checkArity(
+  name: string,
+  args: EvalValue[],
+  expected: number | [number, number],
+): EvalError | null {
   if (typeof expected === "number") {
     if (args.length !== expected) {
       return { type: "arityError", name, expected, got: args.length };
@@ -692,7 +696,8 @@ function fnRound(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = Math.round(n);
-  if (!Number.isFinite(result)) return { type: "domainError", message: "round produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "round produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -700,7 +705,8 @@ function fnCeil(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = Math.ceil(n);
-  if (!Number.isFinite(result)) return { type: "domainError", message: "ceil produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "ceil produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -708,7 +714,8 @@ function fnFloor(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = Math.floor(n);
-  if (!Number.isFinite(result)) return { type: "domainError", message: "floor produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "floor produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -716,7 +723,8 @@ function fnAbs(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = Math.abs(n);
-  if (!Number.isFinite(result)) return { type: "domainError", message: "abs produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "abs produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -754,7 +762,8 @@ function fnRem(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = n * SIZE_BASE;
-  if (!Number.isFinite(result)) return { type: "domainError", message: "rem produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "rem produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -762,7 +771,8 @@ function fnEm(args: EvalValue[]): EvalValue | EvalError {
   const n = requireNumber(args[0]);
   if (typeof n !== "number") return n;
   const result = n * SIZE_BASE;
-  if (!Number.isFinite(result)) return { type: "domainError", message: "em produced non-finite result" };
+  if (!Number.isFinite(result))
+    return { type: "domainError", message: "em produced non-finite result" };
   return { type: "number", value: result };
 }
 
@@ -925,7 +935,10 @@ function fnSetRed(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: clamp01(v), g: srgb.g, b: srgb.b, a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: clamp01(v), g: srgb.g, b: srgb.b, a: srgb.a },
+  };
 }
 
 function fnSetGreen(args: EvalValue[]): EvalValue | EvalError {
@@ -935,7 +948,10 @@ function fnSetGreen(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: srgb.r, g: clamp01(v), b: srgb.b, a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: srgb.r, g: clamp01(v), b: srgb.b, a: srgb.a },
+  };
 }
 
 function fnSetBlue(args: EvalValue[]): EvalValue | EvalError {
@@ -945,7 +961,10 @@ function fnSetBlue(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(v), a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(v), a: srgb.a },
+  };
 }
 
 function fnSetHue(args: EvalValue[]): EvalValue | EvalError {
@@ -990,7 +1009,10 @@ function fnAdjustRed(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: clamp01(srgb.r + v), g: srgb.g, b: srgb.b, a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: clamp01(srgb.r + v), g: srgb.g, b: srgb.b, a: srgb.a },
+  };
 }
 
 function fnAdjustGreen(args: EvalValue[]): EvalValue | EvalError {
@@ -1000,7 +1022,10 @@ function fnAdjustGreen(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: srgb.r, g: clamp01(srgb.g + v), b: srgb.b, a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: srgb.r, g: clamp01(srgb.g + v), b: srgb.b, a: srgb.a },
+  };
 }
 
 function fnAdjustBlue(args: EvalValue[]): EvalValue | EvalError {
@@ -1010,7 +1035,10 @@ function fnAdjustBlue(args: EvalValue[]): EvalValue | EvalError {
   if (typeof v !== "number") return v;
 
   const srgb = toSrgb(color as Color);
-  return { type: "color", value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(srgb.b + v), a: srgb.a } };
+  return {
+    type: "color",
+    value: { space: "srgb", r: srgb.r, g: srgb.g, b: clamp01(srgb.b + v), a: srgb.a },
+  };
 }
 
 function fnAdjustHue(args: EvalValue[]): EvalValue | EvalError {

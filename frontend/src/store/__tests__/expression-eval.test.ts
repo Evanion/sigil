@@ -9,11 +9,7 @@ import {
   MAX_FUNCTION_ARGS,
   MAX_EVAL_DEPTH,
 } from "../expression-eval";
-import type {
-  TokenExpression,
-  EvalValue,
-  EvalError,
-} from "../expression-eval";
+import type { TokenExpression, EvalValue, EvalError } from "../expression-eval";
 import type { Token, TokenValue, Color } from "../../types/document";
 
 // ── Test helpers ──────────────────────────────────────────────────────
@@ -60,7 +56,11 @@ const WHITE: Color = { space: "srgb", r: 1, g: 1, b: 1, a: 1 };
 const BLACK: Color = { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
 const MID_GRAY: Color = { space: "srgb", r: 0.5, g: 0.5, b: 0.5, a: 1 };
 
-function expectNumber(result: EvalValue | EvalError, expected: number, tolerance: number = 1e-6): void {
+function expectNumber(
+  result: EvalValue | EvalError,
+  expected: number,
+  tolerance: number = 1e-6,
+): void {
   expect(isEvalError(result)).toBe(false);
   const val = result as EvalValue;
   expect(val.type).toBe("number");
@@ -860,9 +860,9 @@ describe("resolveExpression integration", () => {
 
   it("should resolve nested expression tokens", () => {
     const tokens: Record<string, Token> = {
-      "base": makeToken("base", { type: "number", value: 4 }),
-      "double": makeToken("double", { type: "expression", expr: "{base} * 2" }),
-      "quad": makeToken("quad", { type: "expression", expr: "{double} * 2" }),
+      base: makeToken("base", { type: "number", value: 4 }),
+      double: makeToken("double", { type: "expression", expr: "{base} * 2" }),
+      quad: makeToken("quad", { type: "expression", expr: "{double} * 2" }),
     };
     const result = resolveExpression("{quad}", tokens);
     expectNumber(result, 16);
