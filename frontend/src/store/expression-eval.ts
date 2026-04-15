@@ -74,6 +74,26 @@ export function isEvalError(v: EvalValue | EvalError): v is EvalError {
   );
 }
 
+/**
+ * Type guard for use inside the parser, where the result union is
+ * `TokenExpression | EvalError` rather than `EvalValue | EvalError`.
+ * `TokenExpression` and `EvalError` share no `type` discriminants, so
+ * the same set of checks applies — this overload exists solely to
+ * satisfy the TypeScript type checker without unsafe casts.
+ */
+function isParseResultError(v: TokenExpression | EvalError): v is EvalError {
+  return (
+    v.type === "parse" ||
+    v.type === "unknownFunction" ||
+    v.type === "arityError" ||
+    v.type === "typeError" ||
+    v.type === "referenceNotFound" ||
+    v.type === "depthExceeded" ||
+    v.type === "divisionByZero" ||
+    v.type === "domainError"
+  );
+}
+
 // ── Parser ────────────────────────────────────────────────────────────
 
 /**
@@ -313,7 +333,7 @@ function parseAtom(state: ParserState): TokenExpression | EvalError {
       // Parse arguments
       if (state.pos < state.input.length && state.input[state.pos] !== ")") {
         const firstArg = parseExpression_internal(state);
-        if (isEvalError(firstArg as EvalValue | EvalError)) {
+        if (isParseResultError(firstArg)) {
           return firstArg;
         }
         args.push(firstArg);
@@ -326,7 +346,7 @@ function parseAtom(state: ParserState): TokenExpression | EvalError {
             );
           }
           const arg = parseExpression_internal(state);
-          if (isEvalError(arg as EvalValue | EvalError)) {
+          if (isParseResultError(arg)) {
             return arg;
           }
           args.push(arg);
@@ -370,7 +390,7 @@ function parseFactor(state: ParserState): TokenExpression | EvalError {
     }
     const inner = parseFactor(state);
     state.depth--;
-    if (isEvalError(inner as EvalValue | EvalError)) {
+    if (isParseResultError(inner)) {
       return inner;
     }
     return { type: "unaryNeg", inner };
@@ -387,7 +407,7 @@ function parseFactor(state: ParserState): TokenExpression | EvalError {
  */
 function parseTerm(state: ParserState): TokenExpression | EvalError {
   let left = parseFactor(state);
-  if (isEvalError(left as EvalValue | EvalError)) {
+  if (isParseResultError(left)) {
     return left;
   }
 
@@ -406,7 +426,7 @@ function parseTerm(state: ParserState): TokenExpression | EvalError {
 
     state.pos++;
     const right = parseFactor(state);
-    if (isEvalError(right as EvalValue | EvalError)) {
+    if (isParseResultError(right)) {
       return right;
     }
     left = { type: "binaryOp", left, op, right };
@@ -424,7 +444,7 @@ function parseTerm(state: ParserState): TokenExpression | EvalError {
  */
 function parseExpression_internal(state: ParserState): TokenExpression | EvalError {
   let left = parseTerm(state);
-  if (isEvalError(left as EvalValue | EvalError)) {
+  if (isParseResultError(left)) {
     return left;
   }
 
@@ -443,7 +463,7 @@ function parseExpression_internal(state: ParserState): TokenExpression | EvalErr
 
     state.pos++;
     const right = parseTerm(state);
-    if (isEvalError(right as EvalValue | EvalError)) {
+    if (isParseResultError(right)) {
       return right;
     }
     left = { type: "binaryOp", left, op, right };
@@ -474,7 +494,7 @@ export function parseExpression(input: string): TokenExpression | EvalError {
   const state: ParserState = { input: trimmed, pos: 0, depth: 0 };
   const result = parseExpression_internal(state);
 
-  if (isEvalError(result as EvalValue | EvalError)) {
+  if (isParseResultError(result)) {
     return result;
   }
 
@@ -1232,10 +1252,18 @@ export function evaluateExpression(
       // If the resolved value is an expression, recursively evaluate it
       if (resolved.type === "expression") {
         const parsed = parseExpression(resolved.expr);
-        if (isEvalError(parsed as EvalValue | EvalError)) {
-          return parsed as EvalError;
+        if (isParseResultError(parsed)) {
+          return parsed;
         }
-        return evaluateExpression(parsed as TokenExpression, tokens, depth + 1);
+        return evaluateExpression(parsed, tokens, depth + 1);
+      }
+      // resolveToken follows alias chains and never returns an "alias" type —
+      // it only returns concrete non-alias, non-expression values. The "alias"
+      // variant is included in TokenValue but resolveToken resolves through it.
+      // Cast to the Exclude type that tokenValueToEvalValue expects.
+      if (resolved.type === "alias") {
+        // This path is unreachable: resolveToken always follows aliases.
+        return { type: "referenceNotFound", name: expr.name };
       }
       return tokenValueToEvalValue(resolved);
     }
