@@ -8,53 +8,58 @@
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-001 | A11y, UX, Arch | `role="textbox"` → `role="combobox"` for autocomplete pattern | `EnhancedTokenInput.tsx` | open |
+| RF-001 | A11y, UX, Arch | role="textbox" → role="combobox" | `EnhancedTokenInput.tsx` | resolved |
 
 ## High
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-002 | Security | No input length enforcement in highlighter | `EnhancedTokenInput.tsx` | open |
-| RF-003 | Security | Paste handler no length limit | `EnhancedTokenInput.tsx` | open |
-| RF-004 | FE, Arch | `formatEvalValue` color channels not Number.isFinite guarded | `EnhancedTokenInput.tsx` | open |
-| RF-005 | FE, Arch | `formatEvalValue` can return undefined | `EnhancedTokenInput.tsx` | open |
-| RF-006 | FE, Arch, Logic | `insertSuggestion` doesn't update confirmedValue | `EnhancedTokenInput.tsx` | open |
-| RF-007 | Logic | Escape revert target overwritten during edit by external prop | `EnhancedTokenInput.tsx` | open |
+| RF-002 | Security | Input length enforcement in highlighter | `expression-highlight.ts` | resolved |
+| RF-003 | Security | Paste handler length limit | `EnhancedTokenInput.tsx` | resolved |
+| RF-004 | FE, Arch | formatEvalValue NaN guards on color channels | `input-helpers.ts` | resolved |
+| RF-005 | FE, Arch | formatEvalValue exhaustive return | `input-helpers.ts` | resolved |
+| RF-006 | FE, Arch, Logic | insertSuggestion updates confirmedValue + onChange | `EnhancedTokenInput.tsx` | resolved |
+| RF-007 | Logic | Escape revert inside isFocused guard | `EnhancedTokenInput.tsx` | resolved |
 
 ## Major
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-008 | Arch, Logic | handleBlur doesn't commit — edits lost on click-away | `EnhancedTokenInput.tsx` | open |
-| RF-009 | A11y | aria-autocomplete conditionally set | `EnhancedTokenInput.tsx` | open |
-| RF-010 | A11y | No SR announcement on autocomplete open/close | `EnhancedTokenInput.tsx` | open |
-| RF-011 | Data | Double cursor computation + full DOM rebuild per keystroke | `EnhancedTokenInput.tsx` | open |
-| RF-012 | Data | filterTokenSuggestions sorts O(n log n) per keystroke | `token-autocomplete.ts` | open |
-| RF-013 | UX | No visual hint that { triggers autocomplete | `EnhancedTokenInput.tsx` | open |
-| RF-014 | UX | Function/number highlight colors indistinguishable | `EnhancedTokenInput.css` | open |
-| RF-015 | UX | Color preview raw 0-1 floats, no swatch | `EnhancedTokenInput.tsx` | open |
-| RF-016 | Arch | Duplicated function registry | `token-autocomplete.ts` | open |
-| RF-017 | A11y | Missing aria-disabled | `EnhancedTokenInput.tsx` | open |
-| RF-018 | A11y | Label/input association broken | `TokenDetailEditor.tsx` | open |
+| RF-008 | Arch, Logic | handleBlur commits value | `EnhancedTokenInput.tsx` | resolved |
+| RF-009 | A11y | aria-autocomplete static "list" | `EnhancedTokenInput.tsx` | resolved |
+| RF-010 | A11y | SR announcement on autocomplete open/close | `EnhancedTokenInput.tsx` | resolved |
+| RF-011 | Data | Cache cursor offset, single computation | `EnhancedTokenInput.tsx` | resolved |
+| RF-012 | Data | Sort only filtered results | `token-autocomplete.ts` | resolved |
+| RF-013 | UX | Default placeholder hint | `EnhancedTokenInput.tsx` | resolved |
+| RF-014 | UX | Number color changed to teal-green | `theme.css` | resolved |
+| RF-015 | UX | Color preview as hex with swatch | `input-helpers.ts` | resolved |
+| RF-016 | Arch | Function metadata exported from expression-eval | `token-autocomplete.ts` | resolved |
+| RF-017 | A11y | aria-disabled added | `EnhancedTokenInput.tsx` | resolved |
+| RF-018 | A11y | Label/input association fixed | `TokenDetailEditor.tsx` | resolved |
 
 ## Medium
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-019 | Logic | handleExpressionChange silently discards empty | `TokenDetailEditor.tsx` | open |
-| RF-020 | FE | Deprecated document.execCommand | `EnhancedTokenInput.tsx` | open |
-| RF-021 | UX | Function autocomplete too aggressive (1 char) | `token-autocomplete.ts` | open |
-| RF-022 | FE | Unnecessary splitProps | `EnhancedTokenInput.tsx` | open |
-| RF-023 | FE | CSS hardcoded rgba fallback | `EnhancedTokenInput.css` | open |
-| RF-024 | Data | BUILTIN_FUNCTIONS re-sorted every call | `token-autocomplete.ts` | open |
-| RF-025 | Arch | mode/onModeChange props omitted from spec | `EnhancedTokenInput.tsx` | open |
+| RF-019 | Logic | Empty expression shows error | `TokenDetailEditor.tsx` | resolved |
+| RF-020 | FE | Replaced execCommand with direct DOM | `input-helpers.ts` | resolved |
+| RF-021 | UX | Function autocomplete threshold 2 chars | `token-autocomplete.ts` | resolved |
+| RF-022 | FE | splitProps documented | `EnhancedTokenInput.tsx` | resolved |
+| RF-023 | FE | CSS fallback removed | `EnhancedTokenInput.css` | resolved |
+| RF-024 | Data | BUILTIN_FUNCTIONS pre-sorted at module level | `token-autocomplete.ts` | resolved |
+| RF-025 | Arch | mode prop omission documented | `EnhancedTokenInput.tsx` | resolved |
 
 ## Minor/Low
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-026 | Arch | 612-line component — extract helpers | `EnhancedTokenInput.tsx` | open |
-| RF-027 | Data | Math.random ID — use createUniqueId | `EnhancedTokenInput.tsx` | open |
-| RF-028 | A11y | aria-controls references conditionally rendered element | `EnhancedTokenInput.tsx` | open |
-| RF-029 | UX | Disabled blocks text selection | `EnhancedTokenInput.css` | open |
-| RF-030 | UX | No function category grouping | `token-autocomplete.ts` | deferred-followup |
+| RF-026 | Arch | Extracted helpers to input-helpers.ts | `input-helpers.ts` | resolved |
+| RF-027 | Data | createUniqueId from Solid.js | `EnhancedTokenInput.tsx` | resolved |
+| RF-028 | A11y | Listbox always in DOM (display:none when closed) | `EnhancedTokenInput.tsx` | resolved |
+| RF-029 | UX | Disabled allows text selection | `EnhancedTokenInput.css` | resolved |
+| RF-030 | UX | Function category grouping | `token-autocomplete.ts` | deferred-followup |
+
+## Resolution Summary
+
+- **Resolved:** 29 findings
+- **Deferred:** 1 finding (RF-030 function category grouping — UX enhancement)
