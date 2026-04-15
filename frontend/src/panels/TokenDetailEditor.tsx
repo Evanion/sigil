@@ -536,6 +536,10 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
         return renderTypographyEditor();
       case "alias":
         return renderAliasEditor(value.name);
+      case "expression":
+        // Expression tokens display a read-only view of the expression string.
+        // Full expression editing UI is deferred to a later spec.
+        return renderAliasEditor(value.expr);
       default: {
         const _exhaustive: never = value;
         void _exhaustive;

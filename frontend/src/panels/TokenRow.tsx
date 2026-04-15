@@ -121,6 +121,9 @@ export function buildValuePreview(value: TokenValue): string {
     case "alias":
       return `\u2192 ${value.name}`;
 
+    case "expression":
+      return `= ${value.expr}`;
+
     case "duration": {
       const s = Number.isFinite(value.seconds) ? value.seconds : 0;
       return `${s}s`;
@@ -170,6 +173,7 @@ const TypeIcon: Component<TypeIconProps> = (props) => {
     duration: "\u23F1",
     cubic_bezier: "\u2312",
     alias: "\u2192",
+    expression: "=",
   };
 
   const swatchColor = (): string | null => {

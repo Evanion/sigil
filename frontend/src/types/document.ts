@@ -531,7 +531,8 @@ export type TokenValue =
   | { readonly type: "shadow"; readonly value: ShadowValue }
   | { readonly type: "gradient"; readonly gradient: GradientDef }
   | { readonly type: "typography"; readonly value: TypographyValue }
-  | { readonly type: "alias"; readonly name: string };
+  | { readonly type: "alias"; readonly name: string }
+  | { readonly type: "expression"; readonly expr: string };
 
 export interface Token {
   readonly id: TokenId;

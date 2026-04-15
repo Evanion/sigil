@@ -54,6 +54,10 @@ export function resolveToken(tokens: Record<string, Token>, name: string): Token
       // Follow the alias
       current = value.name;
       depth += 1;
+    } else if (value.type === "expression") {
+      // Expression values are returned as-is for the expression evaluator to handle.
+      // The caller (expression-eval.ts) is responsible for parsing and evaluating.
+      return value;
     } else {
       // Concrete value found
       return value;
