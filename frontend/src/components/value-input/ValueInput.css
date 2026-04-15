@@ -18,6 +18,11 @@
   /* Single line: prevent wrapping */
   word-break: keep-all;
   overflow-wrap: normal;
+  /* Smooth border color transition for mode changes */
+  transition: border-color 0.15s ease;
+  /* When inside a swatch row, fill available width */
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .sigil-token-input:focus-visible {
@@ -37,6 +42,83 @@
   content: attr(data-placeholder);
   color: var(--text-3);
   pointer-events: none;
+}
+
+/* ── Border mode indicators ────────────────────────────────────────────── */
+
+.sigil-token-input--mode-reference {
+  border-color: var(--accent-border, #3b82f6);
+}
+
+.sigil-token-input--mode-expression {
+  border-color: var(--expression-border, #8b5cf6);
+}
+
+/* Preserve mode border on focus — override focus-visible border-color */
+.sigil-token-input--mode-reference:focus-visible {
+  border-color: var(--accent-border, #3b82f6);
+}
+
+.sigil-token-input--mode-expression:focus-visible {
+  border-color: var(--expression-border, #8b5cf6);
+}
+
+/* ── Input row (swatch + contentEditable) ──────────────────────────────── */
+
+.sigil-token-input__input-row {
+  display: flex;
+  align-items: center;
+}
+
+.sigil-token-input__input-row--has-swatch {
+  gap: 6px;
+}
+
+/* ── Color swatch button ───────────────────────────────────────────────── */
+
+.sigil-token-input__swatch-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border-muted, #444);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  /* Checkerboard background for transparent colors */
+  background-image:
+    linear-gradient(45deg, #808080 25%, transparent 25%),
+    linear-gradient(-45deg, #808080 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #808080 75%),
+    linear-gradient(-45deg, transparent 75%, #808080 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+  /* The actual swatch color is set via inline style background-color,
+     which will layer on top of the checkerboard. */
+  background-blend-mode: normal;
+}
+
+.sigil-token-input__swatch-btn:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Color picker popover ──────────────────────────────────────────────── */
+
+.sigil-token-input__color-popover {
+  border: 1px solid var(--border-1);
+  border-radius: var(--input-radius);
+  background: var(--surface-3);
+  box-shadow: var(--shadow-3);
+  padding: var(--size-2);
+  /* Fallback positioning for browsers without CSS Anchor Positioning support.
+     position-anchor + position-area are set via inline style from JSX; this
+     block ensures the popover still appears near the swatch if the browser
+     ignores those properties. inset-inline-start + margin-top places the
+     popover at the left edge of the wrapper, slightly below the swatch row. */
+  inset-inline-start: 0;
+  inset-block-start: calc(var(--input-height, 32px) + var(--size-1, 4px));
+  inset-inline-end: auto;
+  inset-block-end: auto;
 }
 
 /* ── Syntax highlight spans ─────────────────────────────────────────── */
@@ -168,6 +250,10 @@
 /* ── Reduced motion ─────────────────────────────────────────────────── */
 
 @media (prefers-reduced-motion: reduce) {
+  .sigil-token-input {
+    transition: none;
+  }
+
   .sigil-token-input__autocomplete {
     /* No animations to disable at present, but guard for future additions */
     transition: none;

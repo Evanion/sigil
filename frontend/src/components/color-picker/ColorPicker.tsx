@@ -35,6 +35,12 @@ import "./ColorPicker.css";
 export interface ColorPickerProps {
   readonly color: Color;
   readonly onColorChange: (color: Color) => void;
+  /**
+   * Called on discrete gesture-end events (pointerup on area/strip, blur, Enter
+   * on hex input).  Use for history-tracked mutations.  `onColorChange` fires on
+   * every drag tick for visual preview.
+   */
+  readonly onColorCommit?: () => void;
 }
 
 interface InternalState {
@@ -128,6 +134,7 @@ export function ColorPicker(props: ColorPickerProps) {
     setCommittedColor(
       `Color: ${srgbToHex(state.r, state.g, state.b)} opacity ${Math.round(state.alpha * 100)}%`,
     );
+    props.onColorCommit?.();
   }
 
   // Initialize the committed color from the incoming prop.

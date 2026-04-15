@@ -17,6 +17,7 @@
  * - aria-label, role="combobox", keyboard navigable
  * - onCleanup not called inside event handlers
  * - @media (prefers-reduced-motion: reduce) in CSS
+ * - Native HTML popover for color picker overlay (not Kobalte)
  */
 
 import {
@@ -25,11 +26,12 @@ import {
   createMemo,
   createUniqueId,
   onMount,
+  onCleanup,
   Show,
   Index,
   type Component,
 } from "solid-js";
-import type { Token, TokenType } from "../../types/document";
+import type { Token, TokenType, Color, ColorSrgb } from "../../types/document";
 import { highlightExpression, type HighlightSegment } from "./expression-highlight";
 import {
   parseExpression,
@@ -52,6 +54,10 @@ import {
   formatEvalValue,
   insertPlainTextAtCursor,
 } from "./input-helpers";
+import { detectValueMode, type ValueType, type DetectedMode } from "./value-detect";
+import { parseHexColor, colorToHex } from "./color-parse";
+import type { FontProvider } from "./font-provider";
+import { ColorPicker } from "../color-picker/ColorPicker";
 import "./ValueInput.css";
 
 // ── Props ──────────────────────────────────────────────────────────────
@@ -59,8 +65,19 @@ import "./ValueInput.css";
 export interface ValueInputProps {
   readonly value: string;
   readonly onChange: (value: string) => void;
+  /**
+   * Called on discrete commit events (blur, Enter, popover close) — use for
+   * history-tracked mutations.  `onChange` fires on every intermediate change
+   * (including color-picker drag ticks) for visual preview only.
+   */
+  readonly onCommit?: (value: string) => void;
   readonly tokens: Record<string, Token>;
+  /** @deprecated Use `acceptedTypes` instead. Retained for backward compatibility. */
   readonly tokenType?: TokenType;
+  /** The value types this field accepts. When omitted, falls back to tokenType mapping. */
+  readonly acceptedTypes?: readonly ValueType[];
+  /** Font provider for font_family autocomplete (future Task 4). */
+  readonly fontProvider?: FontProvider;
   readonly placeholder?: string;
   readonly disabled?: boolean;
   readonly "aria-label"?: string;
@@ -80,6 +97,107 @@ const SEGMENT_CLASS_MAP: Record<HighlightSegment["type"], string> = {
 
 /** Default placeholder text when none is provided via props. (RF-013) */
 const DEFAULT_PLACEHOLDER = "Type { for tokens, or an expression";
+
+// ── Type mapping helpers ────────────────────────────────────────────────
+
+/**
+ * Map acceptedTypes to the TokenType used for autocomplete filtering.
+ * Returns undefined (no filter) if "string" is accepted or no mapping is possible.
+ */
+export function resolveTokenTypeFilter(
+  acceptedTypes: readonly ValueType[] | undefined,
+  legacyTokenType: TokenType | undefined,
+): TokenType | undefined {
+  // Prefer acceptedTypes over legacy tokenType
+  if (acceptedTypes !== undefined && acceptedTypes.length > 0) {
+    // "string" accepts all token types
+    if (acceptedTypes.includes("string")) return undefined;
+
+    // Map the first matching value type to a token type
+    for (const vt of acceptedTypes) {
+      switch (vt) {
+        case "color":
+          return "color";
+        case "number":
+          return "number";
+        case "dimension":
+          return "dimension";
+        case "font_family":
+          return "font_family";
+        // "string" handled above
+      }
+    }
+    return undefined;
+  }
+
+  // Fall back to legacy tokenType prop
+  return legacyTokenType;
+}
+
+/**
+ * Resolve a color from the current input value.
+ * Returns a ColorSrgb if the value is a hex literal or a single token ref
+ * that resolves to a color token. Returns null otherwise.
+ */
+export function resolveSwatchColor(
+  value: string,
+  tokens: Record<string, Token>,
+): ColorSrgb | null {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+
+  // Hex literal: parse directly
+  if (trimmed.startsWith("#")) {
+    return parseHexColor(trimmed);
+  }
+
+  // Single token reference: {name} — resolve from tokens
+  const tokenRefMatch = /^\{([^{}]+)\}$/.exec(trimmed);
+  if (tokenRefMatch !== null && tokenRefMatch[1] !== undefined) {
+    const tokenName = tokenRefMatch[1];
+    const token = tokens[tokenName];
+    if (token !== undefined && token.value.type === "color") {
+      const c = token.value.value;
+      if (c.space === "srgb") {
+        return c;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Determine type validation message when the detected mode doesn't match
+ * acceptedTypes. Returns null if the value is valid for the field.
+ */
+export function getTypeValidationMessage(
+  mode: DetectedMode,
+  acceptedTypes: readonly ValueType[],
+): string | null {
+  // Token references and expressions are always accepted — type check at eval time
+  if (mode === "reference" || mode === "expression" || mode === "unknown") {
+    return null;
+  }
+
+  if (mode === "literal-color" && !acceptedTypes.includes("color")) {
+    return "Color values not accepted in this field";
+  }
+
+  if (
+    mode === "literal-number" &&
+    !acceptedTypes.includes("number") &&
+    !acceptedTypes.includes("dimension")
+  ) {
+    return "Number values not accepted in this field";
+  }
+
+  if (mode === "literal-font" && !acceptedTypes.includes("font_family")) {
+    return "Font values not accepted in this field";
+  }
+
+  return null;
+}
 
 // ── Autocomplete context extraction ────────────────────────────────────
 
@@ -149,18 +267,26 @@ function getAutocompleteContext(text: string, cursorPos: number): AutocompleteCo
 const ValueInput: Component<ValueInputProps> = (props) => {
   // eslint-disable-next-line no-unassigned-vars
   let inputRef: HTMLDivElement | undefined;
+  // eslint-disable-next-line no-unassigned-vars
+  let popoverRef: HTMLDivElement | undefined;
 
   // RF-027: use Solid's createUniqueId instead of Math.random()
   const uniqueId = createUniqueId();
   const statusId = `sigil-token-input-status-${uniqueId}`;
   const listboxId = `sigil-token-input-listbox-${uniqueId}`;
   const srAnnouncementId = `sigil-token-input-sr-${uniqueId}`;
+  const popoverId = `sigil-token-input-popover-${uniqueId}`;
 
   // ── Internal state ─────────────────────────────────────────────────
 
   const [confirmedValue, setConfirmedValue] = createSignal(props.value);
   const [liveText, setLiveText] = createSignal(props.value);
   const [isFocused, setIsFocused] = createSignal(false);
+  const [colorPickerOpen, setColorPickerOpen] = createSignal(false);
+
+  // SR-only committed status — updated only on discrete events (blur, Enter,
+  // popover close) so the aria-live region does not fire on every keystroke.
+  const [committedStatus, setCommittedStatus] = createSignal("");
 
   // Autocomplete state
   const [autocompleteOpen, setAutocompleteOpen] = createSignal(false);
@@ -173,12 +299,82 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
   // ── Derived values ─────────────────────────────────────────────────
 
+  /** Effective acceptedTypes — derived from props or legacy tokenType. */
+  const effectiveAcceptedTypes = createMemo<readonly ValueType[]>(() => {
+    if (props.acceptedTypes !== undefined && props.acceptedTypes.length > 0) {
+      return props.acceptedTypes;
+    }
+    // Derive from legacy tokenType if provided
+    if (props.tokenType !== undefined) {
+      switch (props.tokenType) {
+        case "color":
+          return ["color"] as const;
+        case "number":
+          return ["number"] as const;
+        case "dimension":
+          return ["dimension"] as const;
+        case "font_family":
+          return ["font_family"] as const;
+        default:
+          return ["string"] as const;
+      }
+    }
+    return ["string"] as const;
+  });
+
+  /** Whether this field accepts colors (controls swatch visibility). */
+  const acceptsColor = createMemo<boolean>(() => effectiveAcceptedTypes().includes("color"));
+
+  /** Resolve the token type filter for autocomplete. */
+  const tokenTypeFilter = createMemo<TokenType | undefined>(() =>
+    resolveTokenTypeFilter(props.acceptedTypes, props.tokenType),
+  );
+
+  /** Detect the current value mode for border coloring and validation. */
+  const detectedMode = createMemo<DetectedMode>(() =>
+    detectValueMode(liveText(), effectiveAcceptedTypes()),
+  );
+
+  /** CSS class for the detected mode — controls border coloring. */
+  const modeClass = createMemo<string>(() => {
+    const mode = detectedMode();
+    switch (mode) {
+      case "reference":
+        return "sigil-token-input--mode-reference";
+      case "expression":
+        return "sigil-token-input--mode-expression";
+      default:
+        return "";
+    }
+  });
+
+  /** Resolve the swatch color from the current value. */
+  const swatchColor = createMemo<ColorSrgb | null>(() => {
+    if (!acceptsColor()) return null;
+    return resolveSwatchColor(liveText(), props.tokens);
+  });
+
+  /** CSS background-color string for the swatch. */
+  const swatchBgStyle = createMemo<string>(() => {
+    const color = swatchColor();
+    if (color === null) return "transparent";
+    // Guard all channels with Number.isFinite before CSS interpolation
+    const r = Math.round(color.r * 255);
+    const g = Math.round(color.g * 255);
+    const b = Math.round(color.b * 255);
+    const a = color.a;
+    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b) || !Number.isFinite(a)) {
+      return "transparent";
+    }
+    return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(a)})`;
+  });
+
   /** Compute autocomplete suggestions. */
   const suggestions = createMemo<readonly AutocompleteSuggestion[]>(() => {
     if (!autocompleteOpen()) return [];
     const q = autocompleteQuery();
     if (autocompleteMode() === "token") {
-      return filterTokenSuggestions(props.tokens, q, props.tokenType, MAX_AUTOCOMPLETE_RESULTS);
+      return filterTokenSuggestions(props.tokens, q, tokenTypeFilter(), MAX_AUTOCOMPLETE_RESULTS);
     }
     return filterFunctionSuggestions(q, MAX_AUTOCOMPLETE_RESULTS);
   });
@@ -200,6 +396,33 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
     return { error: null, resolved: formatEvalValue(result) };
   });
+
+  /** Type validation message — shown when literal mode doesn't match accepted types. */
+  const typeValidationMsg = createMemo<string | null>(() =>
+    getTypeValidationMessage(detectedMode(), effectiveAcceptedTypes()),
+  );
+
+  /**
+   * Build a status string from the current eval/validation state and push it
+   * to the SR announcement signal.  Called only on discrete commit events.
+   */
+  function announceStatus(): void {
+    const typeMsg = typeValidationMsg();
+    if (typeMsg !== null) {
+      setCommittedStatus(typeMsg);
+      return;
+    }
+    const ev = evalResult();
+    if (ev.error !== null) {
+      setCommittedStatus(ev.error);
+      return;
+    }
+    if (ev.resolved !== null) {
+      setCommittedStatus(`Resolved: ${ev.resolved}`);
+      return;
+    }
+    setCommittedStatus("");
+  }
 
   // ── Rendering helpers ──────────────────────────────────────────────
 
@@ -321,6 +544,52 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     setLiveText(newText);
     setConfirmedValue(newText);
     props.onChange(newText);
+    props.onCommit?.(newText);
+    announceStatus();
+  }
+
+  // ── Color picker helpers ────────────────────────────────────────────
+
+  function handleSwatchClick(): void {
+    if (popoverRef) {
+      popoverRef.togglePopover();
+      setColorPickerOpen((prev) => !prev);
+    }
+  }
+
+  function handleColorPickerChange(color: Color): void {
+    if (color.space !== "srgb") return;
+    const hex = colorToHex(color);
+    if (hex === "") return;
+    // During drag: preview only — no confirmed value update, no onCommit.
+    // The commit happens when the popover closes (handlePopoverToggle).
+    setLiveText(hex);
+    renderHighlighted(hex, false);
+    props.onChange(hex);
+  }
+
+  /** Called when a sub-component drag ends inside the picker. */
+  function handleColorPickerCommit(): void {
+    // Flush the current live text as the confirmed value and notify parent.
+    const hex = liveText();
+    setConfirmedValue(hex);
+    props.onCommit?.(hex);
+    announceStatus();
+  }
+
+  // Close color picker when popover is dismissed (light dismiss)
+  function handlePopoverToggle(e: Event): void {
+    const toggleEvent = e as ToggleEvent;
+    if (toggleEvent.newState === "closed") {
+      setColorPickerOpen(false);
+      // Treat popover close as a commit point for the color value.
+      const hex = liveText();
+      if (hex !== confirmedValue()) {
+        setConfirmedValue(hex);
+        props.onCommit?.(hex);
+        announceStatus();
+      }
+    }
   }
 
   // ── Event handlers ─────────────────────────────────────────────────
@@ -426,6 +695,8 @@ const ValueInput: Component<ValueInputProps> = (props) => {
           const text = getInputText();
           setConfirmedValue(text);
           props.onChange(text);
+          props.onCommit?.(text);
+          announceStatus();
           return;
         }
         case "Escape": {
@@ -451,7 +722,11 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     if (currentText !== confirmedValue()) {
       setConfirmedValue(currentText);
       props.onChange(currentText);
+      props.onCommit?.(currentText);
     }
+
+    // Announce status to SR on blur (discrete event)
+    announceStatus();
 
     closeAutocomplete();
   }
@@ -485,6 +760,18 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   onMount(() => {
     if (inputRef) {
       renderHighlighted(props.value, false);
+    }
+
+    // Register popover toggle event listener for light-dismiss tracking
+    if (popoverRef) {
+      popoverRef.addEventListener("toggle", handlePopoverToggle);
+    }
+  });
+
+  // Cleanup popover toggle listener (registered synchronously during setup)
+  onCleanup(() => {
+    if (popoverRef) {
+      popoverRef.removeEventListener("toggle", handlePopoverToggle);
     }
   });
 
@@ -531,39 +818,110 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     );
   }
 
+  // ── Color for ColorPicker ──────────────────────────────────────────
+
+  /** The color to pass to ColorPicker — defaults to black when no color is resolved. */
+  const pickerColor = createMemo<Color>(() => {
+    const c = swatchColor();
+    if (c !== null) return c;
+    return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
+  });
+
   // ── Render ─────────────────────────────────────────────────────────
+
+  // CSS Anchor Positioning: each instance gets a unique anchor name so
+  // multiple ValueInputs on the same page don't conflict.
+  const swatchAnchorName = `--sigil-swatch-anchor-${uniqueId}`;
 
   return (
     <div class="sigil-token-input__wrapper">
-      {/* RF-001: role="combobox" with aria-haspopup and always-present aria-expanded */}
       <div
-        ref={inputRef}
-        class="sigil-token-input"
-        classList={{ "sigil-token-input--disabled": props.disabled === true }}
-        role="combobox"
-        contentEditable={props.disabled !== true}
-        aria-label={props["aria-label"] ?? "Token expression"}
-        aria-describedby={statusId}
-        aria-haspopup="listbox"
-        aria-autocomplete="list"
-        aria-expanded={autocompleteOpen()}
-        aria-disabled={props.disabled === true || undefined}
-        aria-activedescendant={
-          autocompleteOpen() && suggestions().length > 0
-            ? `sigil-ac-option-${String(highlightedIndex())}`
-            : undefined
-        }
-        aria-controls={listboxId}
-        data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
-        tabIndex={props.disabled ? -1 : 0}
-        onInput={handleInput}
-        onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={handleBlur}
-        onPaste={handlePaste}
-      />
+        class="sigil-token-input__input-row"
+        classList={{
+          "sigil-token-input__input-row--has-swatch": acceptsColor(),
+        }}
+      >
+        {/* Color swatch prefix — only when field accepts colors */}
+        <Show when={acceptsColor()}>
+          <button
+            type="button"
+            class="sigil-token-input__swatch-btn"
+            style={{
+              "background-color": swatchBgStyle(),
+              // CSS Anchor Positioning: give this button a unique anchor name
+              // so the popover can position itself relative to it.
+              "anchor-name": swatchAnchorName,
+            }}
+            aria-label="Color preview, click to edit"
+            aria-haspopup="dialog"
+            aria-expanded={colorPickerOpen()}
+            aria-controls={popoverId}
+            tabIndex={0}
+            onClick={handleSwatchClick}
+            onMouseDown={(e) => {
+              // Prevent blur on the input when clicking the swatch
+              e.preventDefault();
+            }}
+          />
+          {/* Color picker popover — native HTML popover with CSS Anchor Positioning.
+              position-anchor ties the popover to the swatch button anchor above.
+              position-area: bottom span-right places it below and aligned to the right.
+              position-try-fallbacks: flip-block flips to above if viewport clips it.
+              The margin-top fallback in CSS handles browsers without anchor positioning. */}
+          <div
+            ref={popoverRef}
+            id={popoverId}
+            popover="auto"
+            class="sigil-token-input__color-popover"
+            style={{
+              "position-anchor": swatchAnchorName,
+              "position-area": "bottom span-right",
+              "position-try-fallbacks": "flip-block",
+            }}
+          >
+            <ColorPicker
+              color={pickerColor()}
+              onColorChange={handleColorPickerChange}
+              onColorCommit={handleColorPickerCommit}
+            />
+          </div>
+        </Show>
 
-      {/* RF-010: SR announcement for autocomplete suggestion count */}
+        {/* RF-001: role="combobox" with aria-haspopup and always-present aria-expanded */}
+        <div
+          ref={inputRef}
+          class="sigil-token-input"
+          classList={{
+            "sigil-token-input--disabled": props.disabled === true,
+            [modeClass()]: modeClass() !== "",
+          }}
+          role="combobox"
+          contentEditable={props.disabled !== true}
+          aria-label={props["aria-label"] ?? "Token expression"}
+          aria-describedby={statusId}
+          aria-haspopup="listbox"
+          aria-autocomplete="list"
+          aria-expanded={autocompleteOpen()}
+          aria-disabled={props.disabled === true || undefined}
+          aria-activedescendant={
+            autocompleteOpen() && suggestions().length > 0
+              ? `sigil-ac-option-${String(highlightedIndex())}`
+              : undefined
+          }
+          aria-controls={listboxId}
+          data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
+          tabIndex={props.disabled ? -1 : 0}
+          onInput={handleInput}
+          onKeyDown={handleKeyDown}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          onPaste={handlePaste}
+        />
+      </div>
+
+      {/* RF-010: SR announcement for autocomplete suggestion count + committed status.
+          Updated only on discrete events (blur, Enter, popover close, suggestion insert)
+          so aria-live does not flood the screen reader on every keystroke. */}
       <span
         id={srAnnouncementId}
         class="sigil-token-input__sr-only"
@@ -575,7 +933,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
           ? `${String(suggestions().length)} suggestions available`
           : autocompleteOpen()
             ? "No suggestions"
-            : ""}
+            : committedStatus()}
       </span>
 
       {/* RF-028: always render listbox in DOM so aria-controls references a valid element */}
@@ -613,16 +971,28 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         </Index>
       </div>
 
-      {/* Status area — errors show as info (muted) while focused, red after blur/commit */}
-      <div id={statusId} class="sigil-token-input__status" aria-live="polite">
-        <Show when={evalResult().error !== null}>
+      {/* Status area — type validation, errors, and resolved values.
+          No aria-live here: visual updates happen on every keystroke which would
+          flood screen readers.  SR announcements go through srAnnouncementId above,
+          updated only on discrete commit events. */}
+      <div id={statusId} class="sigil-token-input__status">
+        <Show when={typeValidationMsg() !== null}>
+          <span class="sigil-token-input__info-msg">{typeValidationMsg()}</span>
+        </Show>
+        <Show when={typeValidationMsg() === null && evalResult().error !== null}>
           <span
             class={isFocused() ? "sigil-token-input__info-msg" : "sigil-token-input__error-msg"}
           >
             {evalResult().error}
           </span>
         </Show>
-        <Show when={evalResult().error === null && evalResult().resolved !== null}>
+        <Show
+          when={
+            typeValidationMsg() === null &&
+            evalResult().error === null &&
+            evalResult().resolved !== null
+          }
+        >
           <span class="sigil-token-input__resolved">= {evalResult().resolved}</span>
         </Show>
       </div>
