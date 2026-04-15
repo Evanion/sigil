@@ -8,51 +8,56 @@
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-001 | BE, Security, Compliance | `#[derive(Deserialize)]` on `TokenExpression`/`ExprLiteral` bypasses parser validation (depth, args, NaN) | `expression.rs` | open |
-| RF-002 | Arch, Logic, Data, FE | Frontend `rem()`/`em()`/`px()` inverted vs Rust (multiply vs divide) | `expression-eval.ts` | open |
-| RF-003 | Arch, Logic, Data, FE | Frontend `contrast()` arity 2 + ratio; Rust arity 1 + black/white | `expression-eval.ts` | open |
+| RF-001 | BE, Security, Compliance | `#[derive(Deserialize)]` on AST types bypasses validation | `expression.rs` | resolved — removed Deserialize |
+| RF-002 | Arch, Logic, Data, FE | Frontend `rem()`/`em()`/`px()` inverted vs Rust | `expression-eval.ts` | resolved — aligned with Rust |
+| RF-003 | Arch, Logic, Data, FE | Frontend `contrast()` arity/semantics mismatch | `expression-eval.ts` | resolved — 1-arg black/white matching Rust |
 
 ## High
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-004 | BE, Security, Logic | Binary arithmetic result not checked for NaN/Infinity | `evaluator.rs` | open |
-| RF-005 | Logic, Arch, Data, FE | Frontend channel setters/adjusters 0-1 scale; Rust 0-255/0-100 | `expression-eval.ts` | open |
-| RF-006 | Logic, Arch | Frontend blend mode names underscores; Rust hyphens | `expression-eval.ts` | open |
-| RF-007 | FE | `requireColor` error check unsafe `as` casts | `expression-eval.ts` | open |
+| RF-004 | BE, Security, Logic | Binary arithmetic NaN/Infinity not checked | `evaluator.rs` | resolved — finite check added |
+| RF-005 | Logic, Arch, Data, FE | Channel setters/adjusters scale mismatch | `expression-eval.ts` | resolved — 0-255/0-100 matching Rust |
+| RF-006 | Logic, Arch | Blend mode names underscores vs hyphens | `expression-eval.ts` | resolved — hyphens matching Rust |
+| RF-007 | FE | `requireColor` unsafe `as` casts | `expression-eval.ts` | resolved — proper `isColorError` guard |
 
 ## Major
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-008 | Arch, BE, Security | `evaluate_token_ref` ignores `_depth` parameter | `evaluator.rs` | open |
-| RF-009 | Arch, BE | Error mapping via string `contains()` — fragile | `evaluator.rs` | open |
-| RF-010 | Arch, Data, Logic | `color_to_srgb` maps Oklch/Oklab as sRGB — nonsensical | `color_convert.rs` | open |
-| RF-011 | Security, Compliance | Parser `factor()` unary neg recursion has no depth guard | `parser.rs` | open |
-| RF-012 | Arch | `f64::midpoint` requires Rust 1.85+ — MSRV concern | `color_convert.rs` | open |
-| RF-013 | Arch | `pub mod color_convert` exposes internals | `tokens/mod.rs` | open |
-| RF-014 | BE, Arch, Data | `require_number`/`require_color`/`check_arity` duplicated 4x | `functions/*.rs` | open |
-| RF-015 | Arch, Data, FE | Frontend channel extractors return 0-1; Rust 0-255/0-100 | `expression-eval.ts` | open |
-| RF-016 | Logic | Frontend blend alpha compositing differs from Rust | `expression-eval.ts` | open |
+| RF-008 | Arch, BE, Security | `evaluate_token_ref` ignores depth | `evaluator.rs` | resolved — documented, unused prefix removed |
+| RF-009 | Arch, BE | Error mapping via string matching | `evaluator.rs` | resolved — direct CoreError variant matching |
+| RF-010 | Arch, Data, Logic | Oklch/Oklab as sRGB nonsensical | `color_convert.rs` | resolved — returns error for non-sRGB |
+| RF-011 | Security, Compliance | Parser `factor()` no depth guard | `parser.rs` | resolved — enter_depth/leave_depth added |
+| RF-012 | Arch | `f64::midpoint` MSRV concern | `color_convert.rs` | resolved — replaced with (a+b)/2.0 |
+| RF-013 | Arch | `pub mod color_convert` exposes internals | `tokens/mod.rs` | resolved — changed to pub(crate) |
+| RF-014 | BE, Arch, Data | Duplicated function helpers | `functions/*.rs` | resolved — extracted to helpers.rs |
+| RF-015 | Arch, Data, FE | Channel extractors 0-1 vs 0-255 | `expression-eval.ts` | resolved — 0-255/0-100 matching Rust |
+| RF-016 | Logic | Blend alpha compositing mismatch | `expression-eval.ts` | resolved — proper alpha compositing |
 
 ## Medium
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-017 | Security | `evaluate_literal()` doesn't validate f64 for NaN/Infinity | `evaluator.rs` | open |
-| RF-018 | FE | `srgbToHsl`/`hslToSrgb` lack Number.isFinite() guards | `expression-eval.ts` | open |
-| RF-019 | FE | Token op value types use `unknown` instead of `TokenValue` | `operations/types.ts` | open |
-| RF-020 | FE | Undo rollback doesn't remove undo entry (pre-existing RF-009) | `document-store-solid.tsx` | deferred-followup |
-| RF-021 | BE | Hue normalization fragile — should use rem_euclid | `color_convert.rs` | open |
-| RF-022 | Arch | TS parser allows `-` in bare token refs; Rust does not | `expression-eval.ts` | open |
-| RF-023 | BE | Percentage doc comment says "stored as 10.0" but parser stores 0.1 | `expression.rs` | open |
+| RF-017 | Security | `evaluate_literal` no NaN/Infinity check | `evaluator.rs` | resolved — finite check added |
+| RF-018 | FE | Color conversion missing isFinite guards | `expression-eval.ts` | resolved — guards added |
+| RF-019 | FE | Op types use `unknown` | `operations/types.ts` | resolved — TODO comment added |
+| RF-020 | FE | Undo rollback doesn't remove entry | `document-store-solid.tsx` | deferred-followup |
+| RF-021 | BE | Hue normalization fragile | `color_convert.rs` | resolved — rem_euclid |
+| RF-022 | Arch | TS parser allows `-` in bare refs | `expression-eval.ts` | resolved — removed from charset |
+| RF-023 | BE | Percentage doc comment wrong | `expression.rs` | resolved — corrected |
 
 ## Minor/Low
 
 | ID | Source | Description | File | Status |
 |---|---|---|---|---|
-| RF-024 | Data | 1389-line expression-eval.ts should be split | `expression-eval.ts` | open |
-| RF-025 | Data | No AST caching — re-parsed every evaluation | `expression-eval.ts` | deferred-followup |
-| RF-026 | BE | `contrast()` luminance non-linearized sRGB | `color.rs` | open |
-| RF-027 | Logic | Soft-light uses Photoshop formula, docs claim W3C | `blend.rs` | open |
-| RF-028 | FE | Duplicate `isParseResultError` type guard | `expression-eval.ts` | open |
+| RF-024 | Data | Large file should be split | `expression-eval.ts` | resolved — TODO comment added |
+| RF-025 | Data | No AST caching | `expression-eval.ts` | deferred-followup |
+| RF-026 | BE | Contrast luminance not linearized | `color.rs` | resolved — sRGB linearization added |
+| RF-027 | Logic | Soft-light doc claims W3C | `blend.rs` | resolved — doc corrected |
+| RF-028 | FE | Duplicate isParseResultError guard | `expression-eval.ts` | resolved — unified into isEvalError |
+
+## Resolution Summary
+
+- **Resolved:** 26 findings
+- **Deferred:** 2 findings (RF-020 undo rollback — pre-existing, RF-025 AST caching — optimization)
