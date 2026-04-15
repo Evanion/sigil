@@ -69,6 +69,12 @@ These findings are not blocked by a specific spec and can be picked up independe
 | RF-033 | Minor | `nodeUuid` field used for token name -- semantic mismatch in GraphQL schema | Multiple | Consider renaming to `tokenName` or `entityId` |
 | RF-034 | Minor | "Open full editor" link not pinned to bottom of detail pane | `TokenDetailPane.tsx` | CSS layout fix |
 
+### Expression Engine Performance
+
+| ID | Severity | Description | File | Notes |
+|---|---|---|---|---|
+| RF-025 | Minor | No AST caching for expression evaluation -- re-parses expression strings on every call | `expression-eval.ts` | Optimization: add LRU cache keyed by expression string. Not a correctness issue. From Spec 13d review (2026-04-15). |
+
 ### Accessibility
 
 | ID | Severity | Description | File | Notes |
