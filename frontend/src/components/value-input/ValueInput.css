@@ -1,4 +1,4 @@
-/* EnhancedTokenInput — contentEditable expression editor with syntax highlighting */
+/* ValueInput — contentEditable expression editor with syntax highlighting */
 
 .sigil-token-input {
   min-height: var(--input-height);

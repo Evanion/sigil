@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { createSignal } from "solid-js";
-import { default as EnhancedTokenInput } from "./EnhancedTokenInput";
+import { default as ValueInput } from "./ValueInput";
 import type { Token } from "../../types/document";
 
 // ── Mock data ─────────────────────────────────────────────────────────
@@ -60,9 +60,9 @@ const EMPTY_TOKENS: Record<string, Token> = {};
 
 // ── Meta ──────────────────────────────────────────────────────────────
 
-const meta: Meta<typeof EnhancedTokenInput> = {
-  title: "Components/EnhancedTokenInput",
-  component: EnhancedTokenInput,
+const meta: Meta<typeof ValueInput> = {
+  title: "Components/ValueInput",
+  component: ValueInput,
   tags: ["autodocs"],
   argTypes: {
     value: { control: "text" },
@@ -72,7 +72,7 @@ const meta: Meta<typeof EnhancedTokenInput> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof EnhancedTokenInput>;
+type Story = StoryObj<typeof ValueInput>;
 
 // ── Stories ───────────────────────────────────────────────────────────
 
@@ -137,7 +137,7 @@ export const WithTokens: Story = {
     const [value, setValue] = createSignal("");
     return (
       <div style={{ display: "flex", "flex-direction": "column", gap: "8px", width: "300px" }}>
-        <EnhancedTokenInput
+        <ValueInput
           value={value()}
           onChange={setValue}
           tokens={MOCK_TOKENS}

@@ -1,5 +1,5 @@
 /**
- * EnhancedTokenInput — contentEditable expression editor with syntax highlighting
+ * ValueInput — contentEditable expression editor with syntax highlighting
  * and autocomplete for token references and built-in functions.
  *
  * Uses a contentEditable div (single-line, monospace) that re-renders colored
@@ -52,11 +52,11 @@ import {
   formatEvalValue,
   insertPlainTextAtCursor,
 } from "./input-helpers";
-import "./EnhancedTokenInput.css";
+import "./ValueInput.css";
 
 // ── Props ──────────────────────────────────────────────────────────────
 
-export interface EnhancedTokenInputProps {
+export interface ValueInputProps {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly tokens: Record<string, Token>;
@@ -146,7 +146,7 @@ function getAutocompleteContext(text: string, cursorPos: number): AutocompleteCo
 
 // RF-022: props are accessed directly — splitProps is unnecessary here because
 // all props are consumed by this component (no pass-through to a child element).
-const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
+const ValueInput: Component<ValueInputProps> = (props) => {
   // eslint-disable-next-line no-unassigned-vars
   let inputRef: HTMLDivElement | undefined;
 
@@ -630,4 +630,4 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
   );
 };
 
-export default EnhancedTokenInput;
+export default ValueInput;

@@ -126,9 +126,12 @@ export function resolveStyleValueColor(
   if (sv.type === "literal") {
     return sv.value;
   }
-  // sv.type === "token_ref"
-  const resolved = resolveColorToken(tokens, sv.name);
-  return resolved !== null ? resolved : fallback;
+  if (sv.type === "token_ref") {
+    const resolved = resolveColorToken(tokens, sv.name);
+    return resolved !== null ? resolved : fallback;
+  }
+  // sv.type === "expression" — expression evaluation is deferred; return fallback
+  return fallback;
 }
 
 /**
@@ -146,7 +149,10 @@ export function resolveStyleValueNumber(
     // Guard: reject NaN/Infinity from literal values per CLAUDE.md §11.
     return Number.isFinite(sv.value) ? sv.value : fallback;
   }
-  // sv.type === "token_ref"
-  const resolved = resolveNumberToken(tokens, sv.name);
-  return resolved !== null ? resolved : fallback;
+  if (sv.type === "token_ref") {
+    const resolved = resolveNumberToken(tokens, sv.name);
+    return resolved !== null ? resolved : fallback;
+  }
+  // sv.type === "expression" — expression evaluation is deferred; return fallback
+  return fallback;
 }

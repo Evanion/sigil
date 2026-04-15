@@ -10,7 +10,7 @@ import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../components/number-input/NumberInput";
 import { ColorPicker } from "../components/color-picker/ColorPicker";
 import { Select, type SelectOption } from "../components/select/Select";
-import EnhancedTokenInput from "../components/token-input/EnhancedTokenInput";
+import ValueInput from "../components/value-input/ValueInput";
 import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
@@ -491,7 +491,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
   }
 
   /**
-   * Parse an expression/alias string from EnhancedTokenInput and store
+   * Parse an expression/alias string from ValueInput and store
    * the appropriate TokenValue variant.
    *
    * If the string is a bare token reference `{name}` with no operators,
@@ -526,7 +526,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     return (
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.typeAlias")}</label>
-        <EnhancedTokenInput
+        <ValueInput
           value={`{${name}}`}
           onChange={handleExpressionChange}
           tokens={props.tokens}
@@ -579,7 +579,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
             <label class="sigil-token-detail__field-label">
               {t("panels:tokens.typeExpression")}
             </label>
-            <EnhancedTokenInput
+            <ValueInput
               value={value.expr}
               onChange={handleExpressionChange}
               tokens={props.tokens}

@@ -1,12 +1,8 @@
 /**
  * StyleValue formatting and parsing utilities for the ValueInput component.
  *
- * Bridges between the canonical `StyleValue<T>` type (literal or token_ref)
- * and the raw string representation shown in the input field.
- *
- * Also defines `StyleValueExpression` (the future "expression" variant that
- * will be added to StyleValue in Task 2). It is defined here first so that
- * Task 2 can move it to document.ts without touching this file's logic.
+ * Bridges between the canonical `StyleValue<T>` type (literal, token_ref, or
+ * expression) and the raw string representation shown in the input field.
  *
  * All numeric parsing is guarded with Number.isFinite() per CLAUDE.md
  * Floating-Point Validation rules.
@@ -15,27 +11,6 @@
 import type { Color, StyleValue, StyleValueTokenRef } from "../../types/document";
 import { parseHexColor } from "./color-parse";
 import { hasOperatorOutsideBraces, hasFunctionCall } from "./char-helpers";
-
-// ── Expression variant (future StyleValue member) ─────────────────────
-
-/**
- * An expression that produces a value at runtime by combining token
- * references and/or arithmetic operations.
- *
- * This variant will move to `types/document.ts` in Task 2 as part of
- * extending `StyleValue<T>`.
- */
-export interface StyleValueExpression {
-  readonly type: "expression";
-  readonly expr: string;
-}
-
-/**
- * Extended `StyleValue<T>` that includes the future `expression` variant.
- * Consumers that need to handle expressions should use this type instead
- * of the base `StyleValue<T>` until Task 2 promotes it to document.ts.
- */
-export type ExtendedStyleValue<T> = StyleValue<T> | StyleValueExpression;
 
 // ── Token reference extraction ─────────────────────────────────────────
 
@@ -104,7 +79,7 @@ export function containsExpression(raw: string): boolean {
 // ── formatStyleValue ──────────────────────────────────────────────────
 
 /**
- * Format an `ExtendedStyleValue<T>` as a display string.
+ * Format a `StyleValue<T>` as a display string.
  *
  * - `literal` → applies the provided `formatter` to the literal value
  * - `token_ref` → returns `{name}` (formatter is not called)
@@ -115,7 +90,7 @@ export function containsExpression(raw: string): boolean {
  *   NaN or infinity when operating on numeric values.
  */
 export function formatStyleValue<T>(
-  sv: ExtendedStyleValue<T>,
+  sv: StyleValue<T>,
   formatter: (v: T) => string,
 ): string {
   switch (sv.type) {
@@ -131,7 +106,7 @@ export function formatStyleValue<T>(
 // ── parseColorInput ───────────────────────────────────────────────────
 
 /**
- * Parse a raw string input as a color-typed `ExtendedStyleValue<Color>`.
+ * Parse a raw string input as a color-typed `StyleValue<Color>` (including the expression variant).
  *
  * Recognized patterns:
  * - `#RGB`, `#RRGGBB`, `#RRGGBBAA` → `{ type: "literal", value: ColorSrgb }`
@@ -141,7 +116,7 @@ export function formatStyleValue<T>(
  *
  * Returns `null` for empty strings and unrecognized inputs (no silent coercion).
  */
-export function parseColorInput(raw: string): ExtendedStyleValue<Color> | null {
+export function parseColorInput(raw: string): StyleValue<Color> | null {
   if (raw.length === 0) {
     return null;
   }
@@ -174,7 +149,7 @@ export function parseColorInput(raw: string): ExtendedStyleValue<Color> | null {
 // ── parseNumberInput ──────────────────────────────────────────────────
 
 /**
- * Parse a raw string input as a number-typed `ExtendedStyleValue<number>`.
+ * Parse a raw string input as a number-typed `StyleValue<number>` (including the expression variant).
  *
  * Recognized patterns:
  * - Numeric strings (integer or decimal, optionally negative, optionally
@@ -186,7 +161,7 @@ export function parseColorInput(raw: string): ExtendedStyleValue<Color> | null {
  *
  * Returns `null` for unrecognized inputs (no silent coercion).
  */
-export function parseNumberInput(raw: string): ExtendedStyleValue<number> | null {
+export function parseNumberInput(raw: string): StyleValue<number> | null {
   if (raw.length === 0) {
     return null;
   }

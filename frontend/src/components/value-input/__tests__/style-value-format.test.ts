@@ -5,9 +5,14 @@ import {
   parseNumberInput,
   containsExpression,
 } from "../style-value-format";
-import type { ExtendedStyleValue, StyleValueExpression } from "../style-value-format";
-import type { Color, ColorSrgb } from "../../../types/document";
-import type { StyleValueLiteral, StyleValueTokenRef } from "../../../types/document";
+import type {
+  Color,
+  ColorSrgb,
+  StyleValue,
+  StyleValueExpression,
+  StyleValueLiteral,
+  StyleValueTokenRef,
+} from "../../../types/document";
 
 // ── formatStyleValue ──────────────────────────────────────────────────
 
@@ -293,25 +298,25 @@ describe("containsExpression", () => {
   });
 });
 
-// ── ExtendedStyleValue type — ensure correct narrowing ────────────────
+// ── StyleValue type — ensure correct narrowing ────────────────
 
-describe("ExtendedStyleValue type narrowing", () => {
+describe("StyleValue type narrowing", () => {
   it("should narrow to StyleValueLiteral<number>", () => {
-    const sv: ExtendedStyleValue<number> = { type: "literal", value: 42 };
+    const sv: StyleValue<number> = { type: "literal", value: 42 };
     if (sv.type === "literal") {
       expect(sv.value).toBe(42);
     }
   });
 
   it("should narrow to StyleValueTokenRef", () => {
-    const sv: ExtendedStyleValue<number> = { type: "token_ref", name: "x" };
+    const sv: StyleValue<number> = { type: "token_ref", name: "x" };
     if (sv.type === "token_ref") {
       expect(sv.name).toBe("x");
     }
   });
 
   it("should narrow to StyleValueExpression", () => {
-    const sv: ExtendedStyleValue<number> = { type: "expression", expr: "{a} + 1" };
+    const sv: StyleValue<number> = { type: "expression", expr: "{a} + 1" };
     if (sv.type === "expression") {
       expect(sv.expr).toBe("{a} + 1");
     }
