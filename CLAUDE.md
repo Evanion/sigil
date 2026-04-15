@@ -14,6 +14,19 @@ These principles are the governing rules of this project. They explain the _why_
 - Prefer small, focused files with clear interfaces over large files that do too much.
 - CI builds must be fully reproducible — pin all tool versions to exact, immutable references (commit SHAs for Actions, version files for toolchains). No `latest` tags.
 
+### Design Decision Criteria
+
+When a design choice has multiple valid options — particularly when external convention and internal simplicity point in different directions — apply these criteria in order:
+
+1. **Correctness** — does the design produce correct behavior in all cases? Reject options with known edge-case failures regardless of convention or simplicity.
+2. **Robustness** — does the design minimize the surface area for bugs? Fewer code paths, fewer special cases, and fewer states mean fewer failure modes. Prefer the option that is hardest to use incorrectly.
+3. **Simplicity** — does the design produce simpler code? Simpler parsing, simpler validation, simpler testing. Code that is easier to understand is easier to maintain and easier to verify.
+4. **Convention** — does the design follow established external conventions? Convention reduces surprise for users and contributors. But convention is the tiebreaker, not the primary criterion — it applies only when the options above do not distinguish the candidates.
+
+When a design deviates from an external convention, the deviation MUST be documented in the spec or ADR with: (a) what the convention is and who uses it, (b) why the chosen design scores higher on correctness, robustness, or simplicity, and (c) what user-facing impact the deviation has (if any). A deviation without documentation is an unforced error — future contributors will "fix" it back to the convention without understanding why it was changed.
+
+This principle does NOT apply to user-facing interaction patterns (keyboard shortcuts, selection behavior, tool switching) where the user's muscle memory is the dominant concern. For interaction patterns, "follow Figma/Penpot conventions" remains the default — override only with strong usability evidence.
+
 ### Testing Standards
 
 - TDD is the default — write the failing test first, then implement.
