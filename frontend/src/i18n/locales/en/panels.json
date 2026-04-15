@@ -134,6 +134,7 @@
     "typeGradient": "Gradient",
     "typeTypography": "Typography",
     "typeAlias": "Alias",
+    "typeExpression": "Expression",
     "tokenCreated": "Token {{name}} created",
     "tokenUpdated": "Token {{name}} updated",
     "tokenDeleted": "Token {{name}} deleted",
@@ -165,6 +166,9 @@
     "duplicate": "Duplicate",
     "noSelection": "Select a token to edit",
     "tokenCount": "{{count}} tokens",
-    "ungrouped": "Ungrouped"
+    "ungrouped": "Ungrouped",
+    "expressionError": "Expression error",
+    "expressionResolved": "Resolved: {{value}}",
+    "autocompleteHint": "Type { for tokens, or start typing a function name"
   }
 }

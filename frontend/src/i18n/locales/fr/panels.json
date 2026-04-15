@@ -134,6 +134,7 @@
     "typeGradient": "Dégradé",
     "typeTypography": "Typographie",
     "typeAlias": "Alias",
+    "typeExpression": "Expression",
     "tokenCreated": "Jeton {{name}} créé",
     "tokenUpdated": "Jeton {{name}} mis à jour",
     "tokenDeleted": "Jeton {{name}} supprimé",
@@ -165,6 +166,9 @@
     "duplicate": "Dupliquer",
     "noSelection": "Selectionnez un jeton pour le modifier",
     "tokenCount": "{{count}} jetons",
-    "ungrouped": "Non groupe"
+    "ungrouped": "Non groupe",
+    "expressionError": "Erreur d'expression",
+    "expressionResolved": "Resolu : {{value}}",
+    "autocompleteHint": "Tapez { pour les jetons, ou commencez a taper un nom de fonction"
   }
 }
