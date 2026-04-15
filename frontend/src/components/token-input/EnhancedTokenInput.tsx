@@ -290,19 +290,26 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
     let replaceEnd: number;
 
     if (suggestion.type === "token") {
-      // Replace from `{` through current query with `{name}`
+      // Replace from `{` through query and closing `}` with `{name}`
       replaceStart = ctx.triggerStart;
-      replaceEnd = ctx.triggerStart + 1 + ctx.query.length; // `{` + query
+      // Check if there's a closing `}` after the query (from auto-pairing)
+      const afterQuery = ctx.triggerStart + 1 + ctx.query.length;
+      const hasClosingBrace = text[afterQuery] === "}";
+      replaceEnd = hasClosingBrace ? afterQuery + 1 : afterQuery;
       insertText = `{${suggestion.name}}`;
     } else {
-      // Replace the function prefix with the function name + `(`
+      // Replace the function prefix with the function name + `()`
       replaceStart = ctx.triggerStart;
       replaceEnd = ctx.triggerStart + ctx.query.length;
-      insertText = `${suggestion.name}(`;
+      insertText = `${suggestion.name}()`;
     }
 
     const newText = text.slice(0, replaceStart) + insertText + text.slice(replaceEnd);
-    const newCursor = replaceStart + insertText.length;
+    // For tokens: cursor after closing `}` (ready to type operator)
+    // For functions: cursor between `()` (ready to type first argument)
+    const newCursor = suggestion.type === "token"
+      ? replaceStart + insertText.length
+      : replaceStart + insertText.length - 1; // before the closing `)`
 
     renderHighlighted(newText, false);
     setCursorOffset(inputRef, newCursor);
@@ -377,7 +384,35 @@ const EnhancedTokenInput: Component<EnhancedTokenInputProps> = (props) => {
         }
       }
       // For other keys, fall through to normal handling
-    } else {
+    }
+
+    // ── Auto-pairing for { and ( ──────────────────────────────────────
+    // Typing `{` inserts `{}` with cursor between them, then opens autocomplete.
+    // Typing `(` inserts `()` with cursor between them.
+    if (e.key === "{" && !autocompleteOpen()) {
+      e.preventDefault();
+      if (!inputRef) return;
+      const text = getInputText();
+      const cursor = getCursorOffset(inputRef);
+      const newText = text.slice(0, cursor) + "{}" + text.slice(cursor);
+      renderHighlighted(newText, false);
+      setCursorOffset(inputRef, cursor + 1); // cursor between { and }
+      updateAutocomplete(cursor + 1);
+      return;
+    }
+
+    if (e.key === "(") {
+      e.preventDefault();
+      if (!inputRef) return;
+      const text = getInputText();
+      const cursor = getCursorOffset(inputRef);
+      const newText = text.slice(0, cursor) + "()" + text.slice(cursor);
+      renderHighlighted(newText, false);
+      setCursorOffset(inputRef, cursor + 1); // cursor between ( and )
+      return;
+    }
+
+    if (!autocompleteOpen()) {
       // Not in autocomplete mode
       switch (e.key) {
         case "Enter": {
