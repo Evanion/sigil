@@ -1257,6 +1257,18 @@ const FUNCTION_REGISTRY: Record<string, FnDef> = {
   blend: { arity: 3, call: fnBlend },
 };
 
+/**
+ * Sorted list of all built-in function names registered in FUNCTION_REGISTRY.
+ * Exported so that token-autocomplete.ts can verify its BUILTIN_FUNCTIONS list
+ * stays in sync with the evaluator without maintaining a separate copy of names.
+ *
+ * RF-016: Single source of truth for function names — autocomplete imports this
+ * instead of duplicating the name list.
+ */
+export const FUNCTION_REGISTRY_NAMES: readonly string[] = Object.keys(FUNCTION_REGISTRY).sort(
+  (a, b) => a.localeCompare(b),
+);
+
 // ── Evaluator implementation ──────────────────────────────────────────
 
 /**

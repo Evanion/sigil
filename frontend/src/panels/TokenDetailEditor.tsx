@@ -11,6 +11,7 @@ import { NumberInput } from "../components/number-input/NumberInput";
 import { ColorPicker } from "../components/color-picker/ColorPicker";
 import { Select, type SelectOption } from "../components/select/Select";
 import EnhancedTokenInput from "../components/token-input/EnhancedTokenInput";
+import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
 import "./TokenDetailEditor.css";
@@ -186,10 +187,15 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
 
   function renderFontFamilyEditor(families: readonly string[]): ReturnType<Component> {
     const joined = () => families.join(", ");
+    // RF-018: id links the <label for> to the <input> for accessible label association.
+    const inputId = "token-detail-font-family";
     return (
       <div class="sigil-token-detail__field">
-        <label class="sigil-token-detail__field-label">{t("panels:tokens.typeFontFamily")}</label>
+        <label class="sigil-token-detail__field-label" for={inputId}>
+          {t("panels:tokens.typeFontFamily")}
+        </label>
         <input
+          id={inputId}
           class="sigil-token-detail__text-input"
           type="text"
           value={joined()}
@@ -398,10 +404,12 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
         {(typo) => (
           <div class="sigil-token-detail__typography-grid">
             <div class="sigil-token-detail__field">
-              <label class="sigil-token-detail__field-label">
+              {/* RF-018: for/id association links label to input for screen readers. */}
+              <label class="sigil-token-detail__field-label" for="token-detail-typo-font-family">
                 {t("panels:tokens.typeFontFamily")}
               </label>
               <input
+                id="token-detail-typo-font-family"
                 class="sigil-token-detail__text-input"
                 type="text"
                 value={typo().font_family}
@@ -493,7 +501,14 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
    */
   function handleExpressionChange(rawValue: string): void {
     const trimmed = rawValue.trim();
-    if (!trimmed) return;
+    // RF-019: show error on empty expression instead of silently returning
+    if (!trimmed) {
+      showToast({
+        title: t("panels:tokens.emptyExpression") || "Expression cannot be empty",
+        variant: "error",
+      });
+      return;
+    }
 
     // Check if it's a bare token reference: {token.name} with no operators
     const bareRefMatch = trimmed.match(/^\{([a-zA-Z][a-zA-Z0-9._-]*)\}$/);

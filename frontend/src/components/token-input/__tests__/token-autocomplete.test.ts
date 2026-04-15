@@ -4,7 +4,10 @@ import {
   filterTokenSuggestions,
   filterFunctionSuggestions,
   MAX_AUTOCOMPLETE_RESULTS,
+  MIN_FUNCTION_QUERY_LENGTH,
+  FUNCTION_REGISTRY_NAMES,
 } from "../token-autocomplete";
+import { FUNCTION_REGISTRY_NAMES as EVAL_FUNCTION_NAMES } from "../../../store/expression-eval";
 
 // ── Test helpers ───────────────────────────────────────────────────────
 
@@ -221,5 +224,42 @@ describe("MAX_AUTOCOMPLETE_RESULTS enforcement", () => {
     // With empty query, all 38 functions match; should be limited
     const result = filterFunctionSuggestions("");
     expect(result).toHaveLength(MAX_AUTOCOMPLETE_RESULTS);
+  });
+});
+
+// ── RF-016: BUILTIN_FUNCTIONS parity with FUNCTION_REGISTRY ────────────
+
+describe("BUILTIN_FUNCTIONS names should match FUNCTION_REGISTRY_NAMES", () => {
+  it("should export the same function names as the evaluator registry (RF-016)", () => {
+    // FUNCTION_REGISTRY_NAMES re-exported from token-autocomplete must equal
+    // the canonical list from expression-eval.ts.
+    expect([...FUNCTION_REGISTRY_NAMES].sort()).toEqual([...EVAL_FUNCTION_NAMES].sort());
+  });
+});
+
+// ── RF-021: MIN_FUNCTION_QUERY_LENGTH threshold enforcement ────────────
+
+describe("MIN_FUNCTION_QUERY_LENGTH enforcement (RF-021)", () => {
+  it("should return empty results for a single-character query", () => {
+    // Single char is below the 2-char threshold — must return nothing.
+    const result = filterFunctionSuggestions("r");
+    expect(result).toHaveLength(0);
+  });
+
+  it("should return results for a two-character query", () => {
+    // Two chars meets the threshold — 'ro' matches 'round'.
+    const result = filterFunctionSuggestions("ro");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("should return results for empty query (show-all mode)", () => {
+    // Empty query bypasses the threshold — used to show the full list when
+    // the user opens the autocomplete without typing.
+    const result = filterFunctionSuggestions("");
+    expect(result.length).toBeGreaterThan(0);
+  });
+
+  it("MIN_FUNCTION_QUERY_LENGTH should equal 2", () => {
+    expect(MIN_FUNCTION_QUERY_LENGTH).toBe(2);
   });
 });
