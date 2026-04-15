@@ -27,9 +27,9 @@ A scalar token holds a single typed value. Types: `color`, `number`, `string`, `
 The value is stored in one of three modes:
 - **Literal** — a direct value (`#0066FF`, `16`, `"Inter"`, `true`)
 - **Reference** — an alias to another token (`{brand.primary}`)
-- **Expression** — a computed value (`{spacing.md * 2}`, `{lighten(brand.primary, 20%)}`)
+- **Expression** — a computed value (`{spacing.md} * 2`, `lighten({brand.primary}, 20%)`)
 
-All three modes use `{...}` syntax in the stored/displayed representation. A bare literal has no braces. A reference is `{token.name}`. An expression is `{token.name * 2}` or `{funcName(token.name, arg)}`. The parser determines which by inspecting the content — a single valid token name with no operators is a reference; anything else is an expression. A reference is the degenerate case of an expression with no operators.
+Token references always use `{...}` braces, regardless of context. In a standalone reference, the entire value is `{brand.primary}`. In an expression, each token reference is individually braced: `{spacing.md} * 2`, `lighten({brand.primary}, 20%)`. This convention was chosen over wrapping the entire expression in outer braces because inner braces provide an unambiguous, context-free signal for the parser and syntax highlighter — `{...}` always means "token reference" with no lookahead or context needed. The parser determines the value mode: a single `{token.name}` with no surrounding operators is a reference (alias); anything with operators or functions is an expression.
 
 ### 1.2 Composite Tokens
 
@@ -105,11 +105,9 @@ token_ref      = TOKEN_PATH
 TOKEN_PATH     = IDENT ('.' IDENT)*
 ```
 
-When parsed as a standalone value (the content between outer `{...}` delimiters), a bare `TOKEN_PATH` like `spacing.md` is a token reference. When a token reference appears inside a larger expression, it uses `{...}` braces to delimit it from surrounding operators: `{spacing.md} * 2`. The parser handles both forms — the braces are optional for a standalone reference but required within expressions to disambiguate `spacing.md` (token ref) from a potential function name.
+Token references always use `{...}` braces as delimiters: `{spacing.md}`, `{brand.primary}`. Within an expression, each token reference is individually braced: `{spacing.md} * 2`, `lighten({brand.primary}, 20%)`. The braces provide an unambiguous, context-free signal — the parser does not need lookahead to distinguish token references from function names or other identifiers.
 
-Token values are stored with outer `{...}` braces as delimiters (e.g. `{spacing.md * 2}`). When evaluating, the outer braces are stripped and the inner content is parsed. Within an expression, token references use `{...}` braces to distinguish them from function names and literals: `lighten({brand.primary}, 20%)` — `{brand.primary}` is a token reference, `20%` is a percentage literal.
-
-A value that is just `{spacing.md}` (a bare token reference with no operators) is parsed as a single `TokenRef` node — functionally identical to the existing alias/reference behavior.
+A value that is just `{spacing.md}` (a single token reference with no surrounding operators) is parsed as a `TokenRef` node — functionally identical to the existing alias/reference behavior. Any value containing operators or function calls outside the braces is parsed as an expression.
 
 ### 2.2 AST Types (Core Crate)
 
