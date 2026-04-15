@@ -6,14 +6,28 @@
  * in later tasks without changing the consumer API.
  */
 
+import { validateCssIdentifier } from "../../validation/css-identifiers";
+
 // ── Types ──────────────────────────────────────────────────────────────
 
 /** Metadata for a single font family. */
 export interface FontInfo {
   /** The font family name as it would appear in CSS. */
   readonly name: string;
-  /** Where the font originates from. */
-  readonly source: "system" | "workspace" | "plugin";
+  /**
+   * Where the font originates from.
+   * - `"generic"` — CSS generic family keyword (serif, sans-serif, etc.)
+   * - `"system"` — font installed on the user's operating system
+   * - `"workspace"` — font uploaded to the current workspace
+   * - `"plugin"` — font provided by a plugin
+   *
+   * IMPORTANT: Implementors MUST return names that pass `validateCssIdentifier`
+   * from `frontend/src/validation/css-identifiers.ts`. Names failing this check
+   * will be rendered without a font-family preview style (falling back to
+   * sans-serif) per CLAUDE.md "CSS-Rendered String Fields Must Reject
+   * CSS-Significant Characters".
+   */
+  readonly source: "generic" | "system" | "workspace" | "plugin";
 }
 
 /** Interface for objects that can enumerate available fonts. */
@@ -29,16 +43,16 @@ export interface FontProvider {
  * These always resolve on any platform and are safe to use as fallbacks.
  */
 export const GENERIC_FAMILIES: readonly FontInfo[] = [
-  { name: "serif", source: "system" },
-  { name: "sans-serif", source: "system" },
-  { name: "monospace", source: "system" },
-  { name: "cursive", source: "system" },
-  { name: "fantasy", source: "system" },
-  { name: "system-ui", source: "system" },
-  { name: "ui-serif", source: "system" },
-  { name: "ui-sans-serif", source: "system" },
-  { name: "ui-monospace", source: "system" },
-  { name: "ui-rounded", source: "system" },
+  { name: "serif", source: "generic" },
+  { name: "sans-serif", source: "generic" },
+  { name: "monospace", source: "generic" },
+  { name: "cursive", source: "generic" },
+  { name: "fantasy", source: "generic" },
+  { name: "system-ui", source: "generic" },
+  { name: "ui-serif", source: "generic" },
+  { name: "ui-sans-serif", source: "generic" },
+  { name: "ui-monospace", source: "generic" },
+  { name: "ui-rounded", source: "generic" },
 ] as const;
 
 // ── Common system fonts ────────────────────────────────────────────────
@@ -117,11 +131,18 @@ export class SystemFontProvider implements FontProvider {
     // Combine system fonts with generic families.
     // System fonts come first (more specific), generic families last.
     // Deduplicate by name to prevent duplicates if lists overlap.
+    // Debug-time filter: exclude any font whose name fails CSS identifier
+    // validation to prevent injection via future dynamic font sources.
     const seen = new Set<string>();
     const combined: FontInfo[] = [];
 
     for (const font of SYSTEM_FONTS) {
       if (!seen.has(font.name)) {
+        if (!validateCssIdentifier(font.name)) {
+          // Debug warning: curated list should never contain invalid names
+          console.warn(`[FontProvider] Skipping font with invalid name: ${JSON.stringify(font.name)}`);
+          continue;
+        }
         seen.add(font.name);
         combined.push(font);
       }
@@ -129,6 +150,11 @@ export class SystemFontProvider implements FontProvider {
 
     for (const font of GENERIC_FAMILIES) {
       if (!seen.has(font.name)) {
+        if (!validateCssIdentifier(font.name)) {
+          // Debug warning: generic families should always be valid
+          console.warn(`[FontProvider] Skipping generic family with invalid name: ${JSON.stringify(font.name)}`);
+          continue;
+        }
         seen.add(font.name);
         combined.push(font);
       }

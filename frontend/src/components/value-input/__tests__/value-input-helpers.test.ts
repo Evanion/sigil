@@ -4,8 +4,8 @@ import {
   resolveSwatchColor,
   getTypeValidationMessage,
 } from "../ValueInput";
-import type { ValueType, DetectedMode } from "../value-detect";
-import type { Token, TokenType } from "../../../types/document";
+import { getAutocompleteContext } from "../autocomplete-context";
+import type { Token } from "../../../types/document";
 
 // ── resolveTokenTypeFilter ─────────────────────────────────────────────
 
@@ -255,6 +255,122 @@ describe("getTypeValidationMessage — multiple accepted types", () => {
 
   it("should return null when mode='literal-color' and acceptedTypes includes 'color' and 'number'", () => {
     const result = getTypeValidationMessage("literal-color", ["color", "number"]);
+    expect(result).toBeNull();
+  });
+});
+
+// ── getAutocompleteContext ─────────────────────────────────────────────
+
+describe("getAutocompleteContext — token mode", () => {
+  it("should return token mode when cursor is inside {}", () => {
+    const result = getAutocompleteContext("{primary", 8);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("token");
+    expect(result?.query).toBe("primary");
+    expect(result?.triggerStart).toBe(0);
+  });
+
+  it("should return token mode with empty query when cursor is directly after {", () => {
+    const result = getAutocompleteContext("{", 1);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("token");
+    expect(result?.query).toBe("");
+  });
+
+  it("should return token mode with partial query", () => {
+    const result = getAutocompleteContext("{col", 4);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("token");
+    expect(result?.query).toBe("col");
+  });
+
+  it("should return token mode inside nested expression context", () => {
+    // Text: "lighten({primary", cursor at end
+    const text = "lighten({primary";
+    const result = getAutocompleteContext(text, text.length);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("token");
+    expect(result?.query).toBe("primary");
+  });
+});
+
+describe("getAutocompleteContext — function mode", () => {
+  it("should return function mode for identifier prefix outside braces in non-font field", () => {
+    // "li" typed outside braces — non-font field → function mode
+    const result = getAutocompleteContext("li", 2, false);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("function");
+    expect(result?.query).toBe("li");
+  });
+
+  it("should return function mode with longer identifier", () => {
+    const result = getAutocompleteContext("lighten", 7, false);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("function");
+    expect(result?.query).toBe("lighten");
+  });
+
+  it("should return function mode when isFontField is undefined (not a font field)", () => {
+    const result = getAutocompleteContext("ro", 2);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("function");
+    expect(result?.query).toBe("ro");
+  });
+});
+
+describe("getAutocompleteContext — font mode", () => {
+  it("should return font mode for identifier chars in a font field", () => {
+    const result = getAutocompleteContext("Rob", 3, true);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("font");
+    expect(result?.query).toBe("Rob");
+  });
+
+  it("should return font mode after comma in a font field", () => {
+    // "Roboto, Hel" cursor at end — query is "Hel"
+    const text = "Roboto, Hel";
+    const result = getAutocompleteContext(text, text.length, true);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("font");
+    expect(result?.query).toBe("Hel");
+  });
+
+  it("should return font mode with a single character in a font field", () => {
+    const result = getAutocompleteContext("A", 1, true);
+    expect(result).not.toBeNull();
+    expect(result?.mode).toBe("font");
+    expect(result?.query).toBe("A");
+  });
+});
+
+describe("getAutocompleteContext — null cases", () => {
+  it("should return null for empty string", () => {
+    const result = getAutocompleteContext("", 0);
+    expect(result).toBeNull();
+  });
+
+  it("should return null when cursor is at position 0 with non-empty text", () => {
+    // Cursor at 0 means nothing has been typed yet — no identifier behind cursor.
+    const result = getAutocompleteContext("lighten({primary})", 0);
+    expect(result).toBeNull();
+  });
+
+  it("should return null when cursor is after a closed brace (not inside a ref)", () => {
+    // "{primary}" is a complete token ref — cursor after } is not inside braces.
+    const text = "{primary}";
+    const result = getAutocompleteContext(text, text.length);
+    // Cursor after "}" — no unclosed "{", and no identifier chars outside braces
+    expect(result).toBeNull();
+  });
+
+  it("should return null for a single space in a non-font field (no identifier chars)", () => {
+    const result = getAutocompleteContext(" ", 1, false);
+    expect(result).toBeNull();
+  });
+
+  it("should return null in a font field when nothing is typed after a comma (empty segment)", () => {
+    // "Arial, " — empty query in font field → null (query.length < 1)
+    const result = getAutocompleteContext("Arial, ", 7, true);
     expect(result).toBeNull();
   });
 });

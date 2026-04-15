@@ -42,10 +42,13 @@ import {
 import {
   filterTokenSuggestions,
   filterFunctionSuggestions,
+  filterFontSuggestions,
+  isGenericFamily,
   MAX_AUTOCOMPLETE_RESULTS,
   type AutocompleteSuggestion,
   type TokenSuggestion,
   type FunctionSuggestion,
+  type FontSuggestion,
 } from "./token-autocomplete";
 import {
   getCursorOffset,
@@ -57,6 +60,9 @@ import {
 import { detectValueMode, type ValueType, type DetectedMode } from "./value-detect";
 import { parseHexColor, colorToHex } from "./color-parse";
 import type { FontProvider } from "./font-provider";
+import { validateCssIdentifier } from "../../validation/css-identifiers";
+import { getAutocompleteContext } from "./autocomplete-context";
+import type { AutocompleteContext } from "./autocomplete-context";
 import { ColorPicker } from "../color-picker/ColorPicker";
 import "./ValueInput.css";
 
@@ -199,67 +205,6 @@ export function getTypeValidationMessage(
   return null;
 }
 
-// ── Autocomplete context extraction ────────────────────────────────────
-
-interface AutocompleteContext {
-  readonly mode: "token" | "function";
-  readonly query: string;
-  /** Character index where the trigger starts (e.g., position of `{`). */
-  readonly triggerStart: number;
-}
-
-/**
- * Determine if autocomplete should activate based on the text and cursor position.
- * Returns null if autocomplete should not be open.
- *
- * Token mode: triggered by `{` — extracts query from `{` to cursor.
- * Function mode: triggered by typing an identifier prefix not inside `{}`.
- */
-function getAutocompleteContext(text: string, cursorPos: number): AutocompleteContext | null {
-  // Look backwards from cursor for an unclosed `{`
-  let braceDepth = 0;
-  for (let i = cursorPos - 1; i >= 0; i--) {
-    if (text[i] === "}") {
-      braceDepth++;
-    } else if (text[i] === "{") {
-      if (braceDepth > 0) {
-        braceDepth--;
-      } else {
-        // Found unclosed `{` — we are inside a token reference
-        const query = text.slice(i + 1, cursorPos);
-        return { mode: "token", query, triggerStart: i };
-      }
-    }
-  }
-
-  // Not inside braces — check for function name prefix
-  // Walk backwards from cursor to find the start of the current identifier
-  let identStart = cursorPos;
-  while (identStart > 0) {
-    const ch = text[identStart - 1];
-    if (
-      (ch >= "a" && ch <= "z") ||
-      (ch >= "A" && ch <= "Z") ||
-      (ch >= "0" && ch <= "9") ||
-      ch === "_"
-    ) {
-      identStart--;
-    } else {
-      break;
-    }
-  }
-
-  if (identStart < cursorPos) {
-    const query = text.slice(identStart, cursorPos);
-    // Only trigger function autocomplete if we have at least 1 character
-    if (query.length >= 1) {
-      return { mode: "function", query, triggerStart: identStart };
-    }
-  }
-
-  return null;
-}
-
 // ── Component ──────────────────────────────────────────────────────────
 
 // RF-022: props are accessed directly — splitProps is unnecessary here because
@@ -292,7 +237,9 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   const [autocompleteOpen, setAutocompleteOpen] = createSignal(false);
   const [autocompleteQuery, setAutocompleteQuery] = createSignal("");
   const [highlightedIndex, setHighlightedIndex] = createSignal(0);
-  const [autocompleteMode, setAutocompleteMode] = createSignal<"token" | "function">("token");
+  const [autocompleteMode, setAutocompleteMode] = createSignal<"token" | "function" | "font">(
+    "token",
+  );
   const [autocompleteContext, setAutocompleteContext] = createSignal<AutocompleteContext | null>(
     null,
   );
@@ -324,6 +271,11 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
   /** Whether this field accepts colors (controls swatch visibility). */
   const acceptsColor = createMemo<boolean>(() => effectiveAcceptedTypes().includes("color"));
+
+  /** Whether this field accepts font_family values (controls font autocomplete). */
+  const isFontField = createMemo<boolean>(() =>
+    effectiveAcceptedTypes().includes("font_family"),
+  );
 
   /** Resolve the token type filter for autocomplete. */
   const tokenTypeFilter = createMemo<TokenType | undefined>(() =>
@@ -373,8 +325,14 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   const suggestions = createMemo<readonly AutocompleteSuggestion[]>(() => {
     if (!autocompleteOpen()) return [];
     const q = autocompleteQuery();
-    if (autocompleteMode() === "token") {
+    const mode = autocompleteMode();
+    if (mode === "token") {
       return filterTokenSuggestions(props.tokens, q, tokenTypeFilter(), MAX_AUTOCOMPLETE_RESULTS);
+    }
+    if (mode === "font") {
+      const provider = props.fontProvider;
+      if (provider === undefined) return [];
+      return filterFontSuggestions(provider, q, MAX_AUTOCOMPLETE_RESULTS);
     }
     return filterFunctionSuggestions(q, MAX_AUTOCOMPLETE_RESULTS);
   });
@@ -482,9 +440,14 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     if (!inputRef) return;
     const text = getInputText();
     const cursor = cachedCursor ?? getCursorOffset(inputRef);
-    const ctx = getAutocompleteContext(text, cursor);
+    const ctx = getAutocompleteContext(text, cursor, isFontField());
 
     if (ctx) {
+      // For font mode, only activate if a fontProvider is available.
+      if (ctx.mode === "font" && props.fontProvider === undefined) {
+        closeAutocomplete();
+        return;
+      }
       setAutocompleteContext(ctx);
       setAutocompleteMode(ctx.mode);
       setAutocompleteQuery(ctx.query);
@@ -512,6 +475,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     let insertText: string;
     let replaceStart: number;
     let replaceEnd: number;
+    let newCursor: number;
 
     if (suggestion.type === "token") {
       // Replace from `{` through query and closing `}` with `{name}`
@@ -521,20 +485,27 @@ const ValueInput: Component<ValueInputProps> = (props) => {
       const hasClosingBrace = text[afterQuery] === "}";
       replaceEnd = hasClosingBrace ? afterQuery + 1 : afterQuery;
       insertText = `{${suggestion.name}}`;
+      newCursor = replaceStart + insertText.length; // cursor after closing `}`
+    } else if (suggestion.type === "font") {
+      // Replace only the current font segment (after the last comma).
+      // For non-generic fonts, append ", " to encourage adding fallbacks.
+      // Use frozen context (triggerStart + query.length) for consistency with
+      // token and function branches — avoids a live DOM read that could race
+      // with cursor movement between context capture and insertion. (Fix I1)
+      replaceStart = ctx.triggerStart;
+      replaceEnd = ctx.triggerStart + ctx.query.length;
+      const generic = isGenericFamily(suggestion.name);
+      insertText = generic ? suggestion.name : `${suggestion.name}, `;
+      newCursor = replaceStart + insertText.length;
     } else {
       // Replace the function prefix with the function name + `()`
       replaceStart = ctx.triggerStart;
       replaceEnd = ctx.triggerStart + ctx.query.length;
       insertText = `${suggestion.name}()`;
+      newCursor = replaceStart + insertText.length - 1; // between `(` and `)`
     }
 
     const newText = text.slice(0, replaceStart) + insertText + text.slice(replaceEnd);
-    // For tokens: cursor after closing `}` (ready to type operator)
-    // For functions: cursor between `()` (ready to type first argument)
-    const newCursor =
-      suggestion.type === "token"
-        ? replaceStart + insertText.length
-        : replaceStart + insertText.length - 1; // before the closing `)`
 
     renderHighlighted(newText, false);
     setCursorOffset(inputRef, newCursor);
@@ -795,6 +766,8 @@ const ValueInput: Component<ValueInputProps> = (props) => {
       scProps.item().type === "token" ? (scProps.item() as TokenSuggestion) : false;
     const asFn = (): FunctionSuggestion | false =>
       scProps.item().type === "function" ? (scProps.item() as FunctionSuggestion) : false;
+    const asFont = (): FontSuggestion | false =>
+      scProps.item().type === "font" ? (scProps.item() as FontSuggestion) : false;
 
     return (
       <>
@@ -811,6 +784,35 @@ const ValueInput: Component<ValueInputProps> = (props) => {
             <>
               <span class="sigil-token-input__ac-name">{fn.signature}</span>
               <span class="sigil-token-input__ac-desc">{fn.description}</span>
+            </>
+          )}
+        </Show>
+        <Show when={asFont()} keyed>
+          {(font) => (
+            <>
+              {/* Render font name in its own face for preview.
+                  CSS-Rendered String: validateCssIdentifier is called at output use
+                  per CLAUDE.md "CSS-Rendered String Fields Must Reject CSS-Significant
+                  Characters" — defense in depth even if the provider already validates. */}
+              <span
+                class="sigil-token-input__ac-name sigil-token-input__ac-font-preview"
+                style={
+                  validateCssIdentifier(font.name)
+                    ? { "font-family": font.name }
+                    : { "font-family": "sans-serif" }
+                }
+              >
+                {font.name}
+              </span>
+              <span class="sigil-token-input__ac-desc sigil-token-input__ac-font-source">
+                {font.source === "generic"
+                  ? "Generic"
+                  : font.source === "system"
+                    ? "System"
+                    : font.source === "workspace"
+                      ? "Workspace"
+                      : "Plugin"}
+              </span>
             </>
           )}
         </Show>

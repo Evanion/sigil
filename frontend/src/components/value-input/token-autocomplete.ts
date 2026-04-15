@@ -12,6 +12,8 @@ import { buildValuePreview } from "../../panels/TokenRow";
 // BUILTIN_FUNCTIONS stays in sync with FUNCTION_REGISTRY. The coupling test in
 // __tests__/token-autocomplete.test.ts verifies parity at test time.
 import { FUNCTION_REGISTRY_NAMES } from "../../store/expression-eval";
+import type { FontProvider } from "./font-provider";
+import { GENERIC_FAMILIES } from "./font-provider";
 
 // ── Suggestion types ───────────────────────────────────────────────────
 
@@ -29,7 +31,13 @@ export interface FunctionSuggestion {
   readonly description: string;
 }
 
-export type AutocompleteSuggestion = TokenSuggestion | FunctionSuggestion;
+export interface FontSuggestion {
+  readonly type: "font";
+  readonly name: string;
+  readonly source: "system" | "workspace" | "plugin";
+}
+
+export type AutocompleteSuggestion = TokenSuggestion | FunctionSuggestion | FontSuggestion;
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -364,4 +372,96 @@ export function filterFunctionSuggestions(
   }
 
   return filtered;
+}
+
+// ── Font suggestion helpers ────────────────────────────────────────────
+
+/** Pre-computed set of generic family names for O(1) lookup. */
+const GENERIC_FAMILY_NAMES: ReadonlySet<string> = new Set(
+  GENERIC_FAMILIES.map((f) => f.name.toLowerCase()),
+);
+
+/**
+ * Returns true if the given font name is a CSS generic family
+ * (e.g. "serif", "sans-serif"). Generic families do not get a trailing
+ * comma appended when inserted because they are typically used as
+ * final fallbacks in a font stack.
+ */
+export function isGenericFamily(name: string): boolean {
+  return GENERIC_FAMILY_NAMES.has(name.toLowerCase());
+}
+
+/**
+ * Extract the font query from the text after the last comma.
+ * Used to support comma-separated font fallback stacks.
+ *
+ * Examples:
+ *   "Roboto, Hel"  → "Hel"   (query is text after last comma, trimmed)
+ *   "Inter"        → "Inter" (no comma — query is the whole text)
+ *   "Arial, "      → ""      (nothing typed after comma)
+ *
+ * @param text - The full input text up to the cursor position.
+ * @returns The query string for the current font segment.
+ */
+export function extractFontQuery(text: string): string {
+  const lastComma = text.lastIndexOf(",");
+  if (lastComma === -1) {
+    return text.trim();
+  }
+  return text.slice(lastComma + 1).trim();
+}
+
+/**
+ * Filter font suggestions matching a query.
+ * Case-insensitive substring match on font name.
+ * Generic families are ALWAYS appended after the matching provider fonts,
+ * regardless of whether they match the query — they are always available as
+ * fallback suggestions. Duplicates (a generic that also matched from the
+ * provider list) are excluded from the appended set.
+ * Results are sorted alphabetically within each group (provider matches first,
+ * then generics), then the combined list is sliced to the limit.
+ *
+ * @param provider - FontProvider to enumerate available fonts.
+ * @param query - Query string to match against font names.
+ * @param maxResults - Maximum number of results (defaults to MAX_AUTOCOMPLETE_RESULTS).
+ */
+export function filterFontSuggestions(
+  provider: FontProvider,
+  query: string,
+  maxResults?: number,
+): readonly FontSuggestion[] {
+  const limit = maxResults ?? MAX_AUTOCOMPLETE_RESULTS;
+  const lowerQuery = query.toLowerCase();
+
+  // Collect ALL matching provider fonts first, then sort, then slice.
+  // RF-004: Do NOT break early — the early break would cap results before
+  // sorting, so the alphabetically-first N matches might not all be returned.
+  const matched: FontSuggestion[] = [];
+
+  for (const font of provider.listFonts()) {
+    // Case-insensitive substring match on font name
+    if (lowerQuery.length > 0 && !font.name.toLowerCase().includes(lowerQuery)) {
+      continue;
+    }
+
+    matched.push({
+      type: "font",
+      name: font.name,
+      source: font.source,
+    });
+  }
+
+  // Sort alphabetically within the matched set.
+  matched.sort((a, b) => a.name.localeCompare(b.name));
+
+  // Build a set of names already in the matched list for dedup.
+  const matchedNames = new Set(matched.map((f) => f.name.toLowerCase()));
+
+  // Always append generic families not already present in the matched set.
+  const generics: FontSuggestion[] = GENERIC_FAMILIES.filter(
+    (g) => !matchedNames.has(g.name.toLowerCase()),
+  ).map((g) => ({ type: "font" as const, name: g.name, source: g.source }));
+  generics.sort((a, b) => a.name.localeCompare(b.name));
+
+  return [...matched, ...generics].slice(0, limit);
 }

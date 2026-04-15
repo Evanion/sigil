@@ -24,9 +24,9 @@ describe("GENERIC_FAMILIES", () => {
     expect(GENERIC_FAMILIES.length).toBe(10);
   });
 
-  it("should have source='system' for all entries", () => {
+  it("should have source='generic' for all entries", () => {
     for (const f of GENERIC_FAMILIES) {
-      expect(f.source).toBe("system");
+      expect(f.source).toBe("generic");
     }
   });
 
@@ -81,11 +81,16 @@ describe("SystemFontProvider", () => {
     expect(names).toContain("Courier New");
   });
 
-  it("should have source='system' for all entries", () => {
+  it("should have source='system' for non-generic system font entries", () => {
     const provider = new SystemFontProvider();
     const fonts = provider.listFonts();
+    const genericNames = new Set(GENERIC_FAMILIES.map((f) => f.name));
     for (const f of fonts) {
-      expect(f.source).toBe("system");
+      if (genericNames.has(f.name)) {
+        expect(f.source).toBe("generic");
+      } else {
+        expect(f.source).toBe("system");
+      }
     }
   });
 
