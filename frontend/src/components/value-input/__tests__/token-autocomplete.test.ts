@@ -338,7 +338,9 @@ describe("isGenericFamily", () => {
 // ── filterFontSuggestions ──────────────────────────────────────────────
 
 /** Minimal FontProvider for testing that returns a fixed font list. */
-function makeTestFontProvider(fonts: Array<{ name: string; source: FontInfo["source"] }>): FontProvider {
+function makeTestFontProvider(
+  fonts: Array<{ name: string; source: FontInfo["source"] }>,
+): FontProvider {
   return {
     listFonts(): readonly FontInfo[] {
       return fonts.map((f) => ({ name: f.name, source: f.source }));
@@ -406,9 +408,7 @@ describe("filterFontSuggestions", () => {
   });
 
   it("should produce FontSuggestion with correct type and source", () => {
-    const provider = makeTestFontProvider([
-      { name: "Roboto", source: "workspace" },
-    ]);
+    const provider = makeTestFontProvider([{ name: "Roboto", source: "workspace" }]);
     const result = filterFontSuggestions(provider, "rob");
     expect(result[0].type).toBe("font");
     expect(result[0].name).toBe("Roboto");
@@ -417,9 +417,7 @@ describe("filterFontSuggestions", () => {
 
   it("should always include generic families even when no provider fonts match query", () => {
     // "zzz" matches nothing from the provider, but generics are always included.
-    const provider = makeTestFontProvider([
-      { name: "Arial", source: "system" },
-    ]);
+    const provider = makeTestFontProvider([{ name: "Arial", source: "system" }]);
     const result = filterFontSuggestions(provider, "zzz");
     // All 10 GENERIC_FAMILIES are appended regardless of the query.
     expect(result.length).toBe(10);
@@ -559,8 +557,18 @@ describe("trailing comma logic — isGenericFamily drives the insertSuggestion r
 
   it("should return true for all CSS generic families (no trailing comma)", () => {
     // Generics are final fallbacks → no trailing comma → stack terminates.
-    const generics = ["serif", "sans-serif", "monospace", "cursive", "fantasy",
-      "system-ui", "ui-serif", "ui-sans-serif", "ui-monospace", "ui-rounded"];
+    const generics = [
+      "serif",
+      "sans-serif",
+      "monospace",
+      "cursive",
+      "fantasy",
+      "system-ui",
+      "ui-serif",
+      "ui-sans-serif",
+      "ui-monospace",
+      "ui-rounded",
+    ];
     for (const name of generics) {
       expect(isGenericFamily(name)).toBe(true);
     }

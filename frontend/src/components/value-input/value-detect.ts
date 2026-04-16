@@ -65,10 +65,7 @@ function isHexColorString(input: string): boolean {
  * @param input - The raw string from the input field (may be empty).
  * @param acceptedTypes - The value types the field accepts.
  */
-export function detectValueMode(
-  input: string,
-  acceptedTypes: readonly ValueType[],
-): DetectedMode {
+export function detectValueMode(input: string, acceptedTypes: readonly ValueType[]): DetectedMode {
   if (input.length === 0 || input.trim().length === 0) {
     return "unknown";
   }
@@ -113,16 +110,14 @@ export function detectValueMode(
   const secondChar = input.length > 1 ? input[1] : undefined;
 
   if (isDigit(firstChar)) {
-    const acceptsNumber =
-      acceptedTypes.includes("number") || acceptedTypes.includes("dimension");
+    const acceptsNumber = acceptedTypes.includes("number") || acceptedTypes.includes("dimension");
     if (acceptsNumber) {
       return "literal-number";
     }
   }
 
   if (firstChar === "-" && secondChar !== undefined && isDigit(secondChar)) {
-    const acceptsNumber =
-      acceptedTypes.includes("number") || acceptedTypes.includes("dimension");
+    const acceptsNumber = acceptedTypes.includes("number") || acceptedTypes.includes("dimension");
     if (acceptsNumber) {
       return "literal-number";
     }

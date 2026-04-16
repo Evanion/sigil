@@ -89,10 +89,7 @@ export function containsExpression(raw: string): boolean {
  * @param formatter - Called only for `literal` variants. Must not produce
  *   NaN or infinity when operating on numeric values.
  */
-export function formatStyleValue<T>(
-  sv: StyleValue<T>,
-  formatter: (v: T) => string,
-): string {
+export function formatStyleValue<T>(sv: StyleValue<T>, formatter: (v: T) => string): string {
   switch (sv.type) {
     case "literal":
       return formatter(sv.value);

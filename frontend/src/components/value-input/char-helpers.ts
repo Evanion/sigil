@@ -11,11 +11,7 @@
 
 /** Returns true if `ch` is a valid hexadecimal digit [0-9a-fA-F]. */
 export function isHexChar(ch: string): boolean {
-  return (
-    (ch >= "0" && ch <= "9") ||
-    (ch >= "a" && ch <= "f") ||
-    (ch >= "A" && ch <= "F")
-  );
+  return (ch >= "0" && ch <= "9") || (ch >= "a" && ch <= "f") || (ch >= "A" && ch <= "F");
 }
 
 /** Returns true if `ch` is a decimal digit [0-9]. */

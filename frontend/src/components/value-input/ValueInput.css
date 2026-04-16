@@ -91,7 +91,11 @@
     linear-gradient(45deg, transparent 75%, #808080 75%),
     linear-gradient(-45deg, transparent 75%, #808080 75%);
   background-size: 8px 8px;
-  background-position: 0 0, 0 4px, 4px -4px, -4px 0;
+  background-position:
+    0 0,
+    0 4px,
+    4px -4px,
+    -4px 0;
   /* The actual swatch color is set via inline style background-color,
      which will layer on top of the checkerboard. */
   background-blend-mode: normal;

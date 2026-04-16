@@ -140,7 +140,9 @@ export class SystemFontProvider implements FontProvider {
       if (!seen.has(font.name)) {
         if (!validateCssIdentifier(font.name)) {
           // Debug warning: curated list should never contain invalid names
-          console.warn(`[FontProvider] Skipping font with invalid name: ${JSON.stringify(font.name)}`);
+          console.warn(
+            `[FontProvider] Skipping font with invalid name: ${JSON.stringify(font.name)}`,
+          );
           continue;
         }
         seen.add(font.name);
@@ -152,7 +154,9 @@ export class SystemFontProvider implements FontProvider {
       if (!seen.has(font.name)) {
         if (!validateCssIdentifier(font.name)) {
           // Debug warning: generic families should always be valid
-          console.warn(`[FontProvider] Skipping generic family with invalid name: ${JSON.stringify(font.name)}`);
+          console.warn(
+            `[FontProvider] Skipping generic family with invalid name: ${JSON.stringify(font.name)}`,
+          );
           continue;
         }
         seen.add(font.name);
