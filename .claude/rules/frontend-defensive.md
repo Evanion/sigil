@@ -30,6 +30,22 @@ Every `setTimeout`, `setInterval`, `requestAnimationFrame`, `addEventListener`, 
 
 Any UI control that fires change events at high frequency during a single user gesture (color picker during drag, slider during drag, canvas transform during drag, numeric scrub) MUST coalesce those events into a single history/undo entry. The pattern: capture the pre-gesture snapshot on gesture start (pointerdown, focus), apply intermediate values to the store without creating history entries, and commit a single history entry on gesture end (pointerup, blur, dialog close). Creating a discrete undo entry per intermediate value floods the undo stack — the user must press Ctrl+Z dozens of times to undo a single drag. This obligation applies to both the client-side history manager and server-side mutations. If the control does not expose gesture start/end events, the implementer must add them or wrap the control to provide them before wiring it to a tracked mutation.
 
+### Effects That Call Helper Functions Inherit the Helper's Reactive Reads
+
+Solid's `createEffect` tracks every reactive read that occurs during the effect's execution, including reads inside functions called transitively. An effect written as `createEffect(() => { const _ = props.value; helperFn(); })` does NOT track only `props.value` — if `helperFn()` reads signals or store fields, the effect subscribes to those too and re-runs whenever any of them change. This silently breaks intended "run only when X changes" semantics.
+
+Specifically, never call a function from inside an effect when the function:
+1. Reads signals, stores, or memos that are NOT the intended trigger for the effect, AND
+2. Fires external side effects (callback props, event emission, network calls, history commits).
+
+The correct pattern is to separate the two concerns:
+- One function reads only non-reactive state or the intended trigger and performs state mirroring (e.g., `announceCommit()` — updates an internal signal for SR announcements).
+- A second function performs the external side effect (e.g., `commitColor()` — calls `props.onCommit`).
+
+The effect calls only the first. The second is invoked exclusively from explicit user-event handlers (pointerup, blur, Enter). This keeps the side-effect path under the caller's control and out of the reactive graph.
+
+If a helper function must be called from both an effect and a user-event handler, factor the reactive reads into a pre-computed argument that the caller passes in, so the helper body contains no reactive reads.
+
 ### Imperative Canvas Classes Must Expose a `destroy()` Method
 
 Every class in `frontend/` that lives outside Solid's component tree and registers DOM event listeners, `requestAnimationFrame` loops, or timers MUST expose a `destroy()` method that cancels all rAF handles, removes all event listeners, clears all timers, and sets internal state to a destroyed sentinel. The Solid component that owns the class MUST call `destroy()` in `onCleanup()`.
