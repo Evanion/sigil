@@ -14,7 +14,11 @@ import ValueInput from "../components/value-input/ValueInput";
 import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
 import type { Token, TokenValue, TokenType } from "../types/document";
-import { tokenValueToString, parseTokenValueChange, acceptedTypesForToken } from "./token-detail-helpers";
+import {
+  tokenValueToString,
+  parseTokenValueChange,
+  acceptedTypesForToken,
+} from "./token-detail-helpers";
 import "./TokenDetailEditor.css";
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -186,9 +190,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     const displayValue = () => tokenValueToString(props.token.value);
     return (
       <div class="sigil-token-detail__field">
-        <label class="sigil-token-detail__field-label">
-          {t("panels:tokens.typeFontFamily")}
-        </label>
+        <label class="sigil-token-detail__field-label">{t("panels:tokens.typeFontFamily")}</label>
         <ValueInput
           value={displayValue()}
           onChange={(raw) => handleSimpleValueChange(raw, "font_family")}

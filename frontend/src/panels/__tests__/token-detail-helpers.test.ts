@@ -6,7 +6,12 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { tokenValueToString, parseTokenValueChange, parseDimensionString, acceptedTypesForToken } from "../token-detail-helpers";
+import {
+  tokenValueToString,
+  parseTokenValueChange,
+  parseDimensionString,
+  acceptedTypesForToken,
+} from "../token-detail-helpers";
 import type { TokenValue } from "../../types/document";
 
 // ── parseDimensionString ───────────────────────────────────────────────
@@ -119,13 +124,24 @@ describe("tokenValueToString", () => {
   it("composite types → empty string", () => {
     const shadow: TokenValue = {
       type: "shadow",
-      value: { color: { space: "srgb", r: 0, g: 0, b: 0, a: 0.25 }, offset: { x: 0, y: 4 }, blur: 8, spread: 0 },
+      value: {
+        color: { space: "srgb", r: 0, g: 0, b: 0, a: 0.25 },
+        offset: { x: 0, y: 4 },
+        blur: 8,
+        spread: 0,
+      },
     };
     expect(tokenValueToString(shadow)).toBe("");
 
     const typo: TokenValue = {
       type: "typography",
-      value: { font_family: "Inter", font_size: 16, font_weight: 400, line_height: 1.5, letter_spacing: 0 },
+      value: {
+        font_family: "Inter",
+        font_size: 16,
+        font_weight: 400,
+        line_height: 1.5,
+        letter_spacing: 0,
+      },
     };
     expect(tokenValueToString(typo)).toBe("");
   });

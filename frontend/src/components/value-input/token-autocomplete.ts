@@ -34,7 +34,7 @@ export interface FunctionSuggestion {
 export interface FontSuggestion {
   readonly type: "font";
   readonly name: string;
-  readonly source: "system" | "workspace" | "plugin";
+  readonly source: "generic" | "system" | "workspace" | "plugin";
 }
 
 export type AutocompleteSuggestion = TokenSuggestion | FunctionSuggestion | FontSuggestion;
