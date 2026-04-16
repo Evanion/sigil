@@ -126,24 +126,49 @@ export function ColorPicker(props: ColorPickerProps) {
   }
 
   // ── Committed color for aria-live (RF-002) ──────────────────────────────
-  // Only updated on discrete events (pointerup, blur, Enter, space change)
-  // so that the aria-live region does not flood the screen reader at 60Hz.
+  // The aria-live announcement ("announce") is separate from the history
+  // commit ("commit") on purpose — see RF-003.
+  //
+  // RF-003 (Critical): `props.color` updates on every drag tick because the
+  // parent writes the live value into the store during drag. If the prop-sync
+  // effect called the full `commitColor()` path, `props.onColorCommit?.()`
+  // would fire on every tick and flood the parent's history manager with one
+  // undo entry per sub-millisecond pointer event.
+  //
+  // Split the concerns:
+  //   - `announceCommit()` — updates the visually-hidden aria-live region
+  //     only. Safe to call from the prop-sync effect; the region's content is
+  //     a human-readable string whose next update simply queues one more
+  //     screen-reader announcement (and the aria-live guidance in
+  //     `.claude/rules/a11y-rules.md` already permits this because
+  //     announcements are throttled by the user agent).
+  //   - `commitColor()` — announces AND calls `props.onColorCommit?.()`.
+  //     Must only run on discrete gesture-end events: pointerup on
+  //     ColorArea/HueStrip/AlphaStrip, blur/Enter on HexInput, and
+  //     NumberInput changes in ColorValueFields.
   const [committedColor, setCommittedColor] = createSignal("");
 
-  function commitColor() {
+  function announceCommit() {
     setCommittedColor(
       `Color: ${srgbToHex(state.r, state.g, state.b)} opacity ${Math.round(state.alpha * 100)}%`,
     );
+  }
+
+  function commitColor() {
+    announceCommit();
     props.onColorCommit?.();
   }
 
-  // Initialize the committed color from the incoming prop.
+  // Initialize/update the aria-live announcement from the incoming prop.
+  // This effect re-runs on every `props.color` change (including per-tick
+  // drag updates), so it MUST NOT call `commitColor()` — it calls the
+  // announce-only path. The discrete gesture-end handlers below call the
+  // full `commitColor()` path.
   createEffect(() => {
-    // Re-read props.color to track it reactively; this fires on prop changes
-    // (which are discrete events, not drag events).
+    // Re-read props.color to track it reactively.
     const _color = props.color;
     void _color;
-    commitColor();
+    announceCommit();
   });
 
   // ── ColorArea background render (RF-004) ─────────────────────────────
@@ -210,7 +235,33 @@ export function ColorPicker(props: ColorPickerProps) {
     emit(state.r, state.g, state.b, alpha);
   }
 
+  // Tolerance for round-tripped sRGB channel comparison. ColorValueFields
+  // renders sRGB channels as 0–255 integers; the round-trip back to [0, 1]
+  // divides by 255, introducing a quantisation step of 1/255 ≈ 0.00392. A
+  // tolerance of 1/256 allows equality detection to ignore the echo-induced
+  // delta while still recognising a user change of a single integer unit.
+  const CHANNEL_ECHO_TOLERANCE = 1 / 256;
+
+  function isEcho(r: number, g: number, b: number, alpha: number | null = null): boolean {
+    if (Math.abs(r - state.r) > CHANNEL_ECHO_TOLERANCE) return false;
+    if (Math.abs(g - state.g) > CHANNEL_ECHO_TOLERANCE) return false;
+    if (Math.abs(b - state.b) > CHANNEL_ECHO_TOLERANCE) return false;
+    if (alpha !== null && Math.abs(alpha - state.alpha) > CHANNEL_ECHO_TOLERANCE) return false;
+    return true;
+  }
+
   // ── ColorValueFields change handler ───────────────────────────────────
+  //
+  // RF-003: Kobalte's NumberField fires `onRawValueChange` when its `rawValue`
+  // prop changes from outside — not only on user input. When the parent
+  // pushes a new `props.color` (which it does on every drag tick), our
+  // prop-sync effect updates `state.{r,g,b,alpha}`, which re-renders
+  // ColorValueFields with new channel values, which causes Kobalte to echo
+  // `onRawValueChange` for each of the four fields. Without an echo gate
+  // those echoes would each call `commitColor()` and produce a history entry
+  // per drag tick. `isEcho()` detects round-tripped values (within the
+  // quantisation tolerance for 0–255 sRGB channels) and suppresses the
+  // commit in that case.
   function handleFieldsChange(r: number, g: number, b: number, alpha: number) {
     if (
       !Number.isFinite(r) ||
@@ -219,23 +270,32 @@ export function ColorPicker(props: ColorPickerProps) {
       !Number.isFinite(alpha)
     )
       return;
+    const echo = isEcho(r, g, b, alpha);
     // Derive hue from HSV — preserve previous hue for achromatic colors
     const [derivedH, derivedS] = srgbToHsv(r, g, b);
     const h = derivedS > 0.001 ? derivedH : state.hue;
     setState({ r, g, b, alpha, hue: h });
     emit(r, g, b, alpha);
-    commitColor();
+    if (!echo) commitColor();
   }
 
   // ── HexInput change handler ────────────────────────────────────────────
+  //
+  // RF-003: HexInput only fires `onChange` on blur or Enter — both discrete
+  // commit points — so we do not expect echo behaviour here. However, the
+  // hex string is reconstructed from `props.{r,g,b}` inside HexInput, and a
+  // blur that occurs after a prop-echo (e.g. the user focused then clicked
+  // out without editing) could produce the same round-tripped value. Apply
+  // the same echo gate for safety.
   function handleHexChange(r: number, g: number, b: number) {
     if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return;
+    const echo = isEcho(r, g, b);
     // Derive hue from HSV — preserve previous hue for achromatic colors
     const [derivedH, derivedS] = srgbToHsv(r, g, b);
     const h = derivedS > 0.001 ? derivedH : state.hue;
     setState({ r, g, b, hue: h });
     emit(r, g, b, state.alpha);
-    commitColor();
+    if (!echo) commitColor();
   }
 
   // ── ColorSpace change handler ──────────────────────────────────────────
