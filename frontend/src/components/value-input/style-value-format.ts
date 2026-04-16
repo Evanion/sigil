@@ -15,8 +15,23 @@ import { hasOperatorOutsideBraces, hasFunctionCall } from "./char-helpers";
 // ── Token reference extraction ─────────────────────────────────────────
 
 /**
+ * Matches a valid token name: starts with a letter, followed by letters,
+ * digits, dots, hyphens, or underscores. Mirrors the validation pattern
+ * used in `token-detail-helpers.ts` so `parseColorInput("{foo}")` and
+ * `parseTokenValueChange("{foo}", …)` agree on what counts as a
+ * well-formed reference.
+ */
+const TOKEN_NAME_RE = /^[a-zA-Z][a-zA-Z0-9._-]*$/;
+
+/**
  * Extract the token name from a `{name}` string.
- * Returns null if the string does not match the `{...}` pattern exactly.
+ *
+ * Returns null when the input:
+ * - Does not start with `{` and end with `}`
+ * - Has an empty or whitespace-only inner segment (RF-029: previously
+ *   returned `""`, which produced invalid `{ type: "token_ref", name: "" }`)
+ * - Contains a nested `{` or `}`
+ * - Fails the `TOKEN_NAME_RE` pattern (e.g. starts with a digit, contains spaces)
  */
 function extractTokenRefName(raw: string): string | null {
   const trimmed = raw.trim();
@@ -24,11 +39,11 @@ function extractTokenRefName(raw: string): string | null {
     return null;
   }
   // Only a single complete token ref: must start with { and end with }
-  // and must not contain another { inside
-  const inner = trimmed.slice(1, -1);
-  if (inner.includes("{")) {
-    return null;
-  }
+  // and must not contain another { or } inside.
+  const inner = trimmed.slice(1, -1).trim();
+  if (inner.length === 0) return null;
+  if (inner.includes("{") || inner.includes("}")) return null;
+  if (!TOKEN_NAME_RE.test(inner)) return null;
   return inner;
 }
 

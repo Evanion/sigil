@@ -47,20 +47,20 @@
 /* ── Border mode indicators ────────────────────────────────────────────── */
 
 .sigil-token-input--mode-reference {
-  border-color: var(--accent-border, #3b82f6);
+  border-color: var(--accent-border);
 }
 
 .sigil-token-input--mode-expression {
-  border-color: var(--expression-border, #8b5cf6);
+  border-color: var(--expression-border);
 }
 
 /* Preserve mode border on focus — override focus-visible border-color */
 .sigil-token-input--mode-reference:focus-visible {
-  border-color: var(--accent-border, #3b82f6);
+  border-color: var(--accent-border);
 }
 
 .sigil-token-input--mode-expression:focus-visible {
-  border-color: var(--expression-border, #8b5cf6);
+  border-color: var(--expression-border);
 }
 
 /* ── Input row (swatch + contentEditable) ──────────────────────────────── */
@@ -79,17 +79,17 @@
 .sigil-token-input__swatch-btn {
   width: 28px;
   height: 28px;
-  border: 1px solid var(--border-muted, #444);
+  border: 1px solid var(--border-muted);
   border-radius: 4px;
   cursor: pointer;
   flex-shrink: 0;
   padding: 0;
-  /* Checkerboard background for transparent colors */
+  /* Checkerboard background for transparent colors (RF-023: tokenized) */
   background-image:
-    linear-gradient(45deg, #808080 25%, transparent 25%),
-    linear-gradient(-45deg, #808080 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #808080 75%),
-    linear-gradient(-45deg, transparent 75%, #808080 75%);
+    linear-gradient(45deg, var(--checkerboard-color) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--checkerboard-color) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checkerboard-color) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--checkerboard-color) 75%);
   background-size: 8px 8px;
   background-position:
     0 0,

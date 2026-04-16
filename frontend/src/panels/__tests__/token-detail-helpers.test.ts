@@ -260,6 +260,38 @@ describe("parseTokenValueChange", () => {
     expect(parseTokenValueChange("   ", "font_family")).toBeNull();
   });
 
+  // RF-031: CSS-significant characters must be rejected symmetrically with
+  // crates/core/src/validate.rs :: FONT_FAMILY_FORBIDDEN_CHARS. Without this,
+  // `parseTokenValueChange` produced a TokenValue the server rejected later,
+  // turning a synchronous invariant violation into an async broadcast error.
+  it("family with single quote → null", () => {
+    expect(parseTokenValueChange("Inter'; drop", "font_family")).toBeNull();
+  });
+
+  it("family with double quote → null", () => {
+    expect(parseTokenValueChange('Arial" ;', "font_family")).toBeNull();
+  });
+
+  it("family with semicolon → null", () => {
+    expect(parseTokenValueChange("Arial;", "font_family")).toBeNull();
+  });
+
+  it("family with curly brace → null", () => {
+    expect(parseTokenValueChange("Arial{}", "font_family")).toBeNull();
+  });
+
+  it("family with backslash → null", () => {
+    expect(parseTokenValueChange("Arial\\test", "font_family")).toBeNull();
+  });
+
+  it("family with control character → null", () => {
+    expect(parseTokenValueChange("Arial\u0001", "font_family")).toBeNull();
+  });
+
+  it("mixed valid + invalid in comma list → null (reject whole list)", () => {
+    expect(parseTokenValueChange("Inter, Arial'; drop", "font_family")).toBeNull();
+  });
+
   // ── Non-ValueInput types → null ──────────────────────────────────────
 
   it("font_weight type → null (handled by Select)", () => {

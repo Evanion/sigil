@@ -375,38 +375,67 @@ export function EffectCard(props: EffectCardProps) {
             TODO(spec-13c): Promote `Point` to `{ x: StyleValue<number>,
             y: StyleValue<number> }` to enable token binding on offsets.
           */}
-          <ValueInput
-            value={offsetXDisplay()}
-            onChange={handleOffsetX}
-            onCommit={handleOffsetXCommit}
-            tokens={{}}
-            acceptedTypes={["number"]}
-            aria-label="X offset"
-          />
-          <ValueInput
-            value={offsetYDisplay()}
-            onChange={handleOffsetY}
-            onCommit={handleOffsetYCommit}
-            tokens={{}}
-            acceptedTypes={["number"]}
-            aria-label="Y offset"
-          />
-          <ValueInput
-            value={blurDisplay()}
-            onChange={handleBlur}
-            onCommit={handleBlurCommit}
-            tokens={props.tokens ?? {}}
-            acceptedTypes={["number"]}
-            aria-label="Blur"
-          />
-          <ValueInput
-            value={spreadDisplay()}
-            onChange={handleSpread}
-            onCommit={handleSpreadCommit}
-            tokens={props.tokens ?? {}}
-            acceptedTypes={["number"]}
-            aria-label="Spread"
-          />
+          {/*
+            RF-013: Prefix labels (X / Y / B / S) give sighted users the same
+            field-identification affordance that the earlier NumberInput's
+            `prefix=` prop provided. `aria-hidden` on the prefix span prevents
+            the screen reader from double-announcing — the ValueInput's
+            `aria-label` already names the field. Prefix is a sibling (not a
+            descendant) of ValueInput so it does not interfere with the
+            combobox's own DOM structure.
+          */}
+          <div class="sigil-effect-card__field-with-prefix">
+            <span class="sigil-effect-card__field-prefix" aria-hidden="true">
+              X
+            </span>
+            <ValueInput
+              value={offsetXDisplay()}
+              onChange={handleOffsetX}
+              onCommit={handleOffsetXCommit}
+              tokens={{}}
+              acceptedTypes={["number"]}
+              aria-label="X offset"
+            />
+          </div>
+          <div class="sigil-effect-card__field-with-prefix">
+            <span class="sigil-effect-card__field-prefix" aria-hidden="true">
+              Y
+            </span>
+            <ValueInput
+              value={offsetYDisplay()}
+              onChange={handleOffsetY}
+              onCommit={handleOffsetYCommit}
+              tokens={{}}
+              acceptedTypes={["number"]}
+              aria-label="Y offset"
+            />
+          </div>
+          <div class="sigil-effect-card__field-with-prefix">
+            <span class="sigil-effect-card__field-prefix" aria-hidden="true">
+              B
+            </span>
+            <ValueInput
+              value={blurDisplay()}
+              onChange={handleBlur}
+              onCommit={handleBlurCommit}
+              tokens={props.tokens ?? {}}
+              acceptedTypes={["number"]}
+              aria-label="Blur"
+            />
+          </div>
+          <div class="sigil-effect-card__field-with-prefix">
+            <span class="sigil-effect-card__field-prefix" aria-hidden="true">
+              S
+            </span>
+            <ValueInput
+              value={spreadDisplay()}
+              onChange={handleSpread}
+              onCommit={handleSpreadCommit}
+              tokens={props.tokens ?? {}}
+              acceptedTypes={["number"]}
+              aria-label="Spread"
+            />
+          </div>
         </div>
       ) : (
         <div class="sigil-effect-card__fields sigil-effect-card__fields--single">

@@ -13,6 +13,7 @@ import { Select, type SelectOption } from "../components/select/Select";
 import ValueInput from "../components/value-input/ValueInput";
 import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
+import { validateCssIdentifier } from "../validation/css-identifiers";
 import type { Token, TokenValue, TokenType } from "../types/document";
 import {
   tokenValueToString,
@@ -54,8 +55,15 @@ const MAX_SHADOW_OFFSET = 10_000;
 
 /** Min typography font size. */
 const MIN_FONT_SIZE = 1;
-/** Max typography font size. */
-const MAX_FONT_SIZE = 1000;
+/**
+ * Max typography font size. RF-026: aligned to the Rust server constant
+ * `crates/core/src/validate.rs :: MAX_FONT_SIZE = 10_000.0`. Previously
+ * 1_000 — the frontend silently rejected values the server would accept,
+ * violating "Validation Must Be Symmetric Across All Transports" in
+ * CLAUDE.md §11. If we ever need a stricter UX bound, document the
+ * rationale and keep it below the Rust authoritative value.
+ */
+const MAX_FONT_SIZE = 10_000;
 
 /** Min line height / letter spacing. */
 const MIN_LINE_HEIGHT = 0;
@@ -403,12 +411,28 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
                 onKeyDown={(e) => e.stopPropagation()}
                 onChange={(e) => {
                   const fam = e.currentTarget.value.trim();
-                  if (fam.length > 0) {
-                    updateValue({
-                      type: "typography",
-                      value: { ...typo(), font_family: fam },
+                  if (fam.length === 0) return;
+                  // RF-030: gate typography font_family writes through the
+                  // same validation used everywhere else (matches
+                  // FONT_FAMILY_FORBIDDEN_CHARS in crates/core/src/validate.rs).
+                  // Without this gate a user could persist `'; drop-shadow"`
+                  // into a typography token and corrupt every canvas render
+                  // that interpolates the family into ctx.font / CSS strings.
+                  if (!validateCssIdentifier(fam)) {
+                    showToast({
+                      title: t("panels:typography.fontFamilyInvalid"),
+                      variant: "error",
                     });
+                    // Revert the DOM so the user sees their input rejected
+                    // rather than silently accepted visually but dropped
+                    // in the store.
+                    e.currentTarget.value = typo().font_family;
+                    return;
                   }
+                  updateValue({
+                    type: "typography",
+                    value: { ...typo(), font_family: fam },
+                  });
                 }}
               />
             </div>

@@ -33,6 +33,18 @@
   /* Borders */
   --border-1: #3a3a3a;
   --border-2: #4a4a4a;
+  /* RF-023: muted border alias — maps to --border-2 so component CSS can
+     reference a semantic name without hardcoding the palette slot. */
+  --border-muted: var(--border-2);
+  /* RF-023: accent border for "reference mode" inputs (blue tint) —
+     maps to --accent so mode borders track the brand palette. */
+  --accent-border: var(--accent);
+  /* RF-023: expression mode border (purple tint) — distinct from accent
+     so users can visually differentiate "token reference" vs "expression". */
+  --expression-border: #8b5cf6;
+  /* RF-023: checkerboard color for swatch transparency preview. Uses
+     semi-transparent gray so the swatch background-color shows through. */
+  --checkerboard-color: rgba(128, 128, 128, 0.5);
 
   /* Component-specific */
   --button-radius: var(--radius-2);

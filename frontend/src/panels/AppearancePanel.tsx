@@ -194,6 +194,18 @@ export const AppearancePanel: Component = () => {
     });
   }
 
+  // RF-033 (deferred): Fill and Stroke currently use their array index as
+  // identity for update/remove/reorder dispatch. Per CLAUDE.md §11 "Do Not
+  // Use Positional Index as Item Identity in Dynamic Lists", list items that
+  // support reorder should carry a stable UUID — array indices shift under
+  // concurrent edits (another client deletes item 0 while we edit item 2).
+  // Moving Fill/Stroke to stable IDs requires coordinated Rust changes
+  // (add `id: Uuid` to Fill/Stroke in crates/core/src/types.rs, serialize
+  // through the workfile format, update MCP tool payloads, migrate the
+  // GraphQL schema). That work is out of scope for Spec 13c (UI binding)
+  // and is tracked as a Rust-core follow-up. Within this panel we keep the
+  // index contract but only dispatch from the same render frame so the
+  // window for drift is a single render cycle.
   function handleFillUpdate(index: number, updated: Fill): void {
     const uuid = selectedUuid();
     if (!uuid) return;

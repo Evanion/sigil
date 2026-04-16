@@ -155,6 +155,42 @@ describe("parseColorInput — unrecognized input", () => {
   });
 });
 
+// RF-029: empty token-ref braces previously produced an invalid
+// { type: "token_ref", name: "" } payload.  These tests lock in rejection of
+// empty / whitespace-only / malformed inner segments across both color and
+// number parsers.
+describe("parseColorInput — empty or malformed token ref (RF-029)", () => {
+  it("should return null for empty braces '{}'", () => {
+    expect(parseColorInput("{}")).toBeNull();
+  });
+
+  it("should return null for whitespace-only inner '{   }'", () => {
+    expect(parseColorInput("{   }")).toBeNull();
+  });
+
+  it("should return null for an inner segment starting with a digit '{1abc}'", () => {
+    expect(parseColorInput("{1abc}")).toBeNull();
+  });
+
+  it("should return null for an inner segment with an embedded space '{foo bar}'", () => {
+    expect(parseColorInput("{foo bar}")).toBeNull();
+  });
+});
+
+describe("parseNumberInput — empty or malformed token ref (RF-029)", () => {
+  it("should return null for empty braces '{}'", () => {
+    expect(parseNumberInput("{}")).toBeNull();
+  });
+
+  it("should return null for whitespace-only inner '{ }'", () => {
+    expect(parseNumberInput("{ }")).toBeNull();
+  });
+
+  it("should return null for an inner segment starting with a digit", () => {
+    expect(parseNumberInput("{9lives}")).toBeNull();
+  });
+});
+
 // ── parseNumberInput ──────────────────────────────────────────────────
 
 describe("parseNumberInput — numeric literal", () => {

@@ -12,6 +12,7 @@
 import type { TokenValue, TokenType, Color, DimensionUnit } from "../types/document";
 import type { ValueType } from "../components/value-input/value-detect";
 import { parseHexColor, colorToHex } from "../components/value-input/color-parse";
+import { validateCssIdentifier } from "../validation/css-identifiers";
 
 // ── Dimension unit table ───────────────────────────────────────────────
 
@@ -240,6 +241,15 @@ export function parseTokenValueChange(raw: string, tokenType: TokenType): TokenV
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
       if (families.length === 0) return null;
+      // RF-031: reject any family name containing CSS-significant characters
+      // (quotes, semicolons, braces, backslash, C0 controls). Mirrors
+      // `FONT_FAMILY_FORBIDDEN_CHARS` in crates/core/src/validate.rs so a
+      // value accepted here round-trips through the Rust backend. Without
+      // this gate, `parseTokenValueChange("Inter'; drop", "font_family")`
+      // produced a TokenValue the server would reject silently later.
+      for (const fam of families) {
+        if (!validateCssIdentifier(fam)) return null;
+      }
       return { type: "font_family", families };
     }
 
