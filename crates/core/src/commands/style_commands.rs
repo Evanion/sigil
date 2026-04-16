@@ -5,7 +5,121 @@ use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::{BlendMode, Constraints, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
-use crate::validate::{MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE};
+use crate::validate::{
+    MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE,
+    validate_style_value_expression, validate_token_name,
+};
+
+/// Validates a `StyleValue<f64>` field: either literal finite, token ref valid name, or expression.
+fn validate_style_value_f64(field: &str, sv: &StyleValue<f64>) -> Result<(), CoreError> {
+    match sv {
+        StyleValue::Literal { value } => {
+            if !value.is_finite() {
+                return Err(CoreError::ValidationError(format!(
+                    "{field} must be finite (no NaN or infinity)"
+                )));
+            }
+        }
+        StyleValue::TokenRef { name } => validate_token_name(name)?,
+        StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
+    }
+    Ok(())
+}
+
+/// Validates a `StyleValue<Color>` field: either literal color channels finite, token ref, or expression.
+fn validate_style_value_color(
+    field: &str,
+    sv: &StyleValue<crate::node::Color>,
+) -> Result<(), CoreError> {
+    use crate::node::Color;
+    match sv {
+        StyleValue::Literal { value } => match value {
+            Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                if !r.is_finite() || !g.is_finite() || !b.is_finite() || !a.is_finite() {
+                    return Err(CoreError::ValidationError(format!(
+                        "{field} color channels must be finite"
+                    )));
+                }
+            }
+            Color::Oklch { l, c, h, a } => {
+                if !l.is_finite() || !c.is_finite() || !h.is_finite() || !a.is_finite() {
+                    return Err(CoreError::ValidationError(format!(
+                        "{field} color channels must be finite"
+                    )));
+                }
+            }
+            Color::Oklab { l, a, b, alpha } => {
+                if !l.is_finite() || !a.is_finite() || !b.is_finite() || !alpha.is_finite() {
+                    return Err(CoreError::ValidationError(format!(
+                        "{field} color channels must be finite"
+                    )));
+                }
+            }
+        },
+        StyleValue::TokenRef { name } => validate_token_name(name)?,
+        StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
+    }
+    Ok(())
+}
+
+/// Validates the `StyleValue` fields inside a single `Fill`.
+fn validate_fill(fill: &Fill) -> Result<(), CoreError> {
+    match fill {
+        Fill::Solid { color } => validate_style_value_color("fill.color", color),
+        Fill::LinearGradient { gradient } | Fill::RadialGradient { gradient } => {
+            for (i, stop) in gradient.stops.iter().enumerate() {
+                validate_style_value_color(
+                    &format!("fill.gradient.stops[{i}].color"),
+                    &stop.color,
+                )?;
+            }
+            Ok(())
+        }
+        Fill::ConicGradient { gradient } => {
+            for (i, stop) in gradient.stops.iter().enumerate() {
+                validate_style_value_color(
+                    &format!("fill.conic_gradient.stops[{i}].color"),
+                    &stop.color,
+                )?;
+            }
+            Ok(())
+        }
+        Fill::Image { .. } => Ok(()),
+    }
+}
+
+/// Validates the `StyleValue` fields inside a single `Stroke`.
+fn validate_stroke(stroke: &Stroke) -> Result<(), CoreError> {
+    validate_style_value_color("stroke.color", &stroke.color)?;
+    validate_style_value_f64("stroke.width", &stroke.width)?;
+    Ok(())
+}
+
+/// Validates the `StyleValue` fields inside a single `Effect`.
+fn validate_effect(effect: &Effect) -> Result<(), CoreError> {
+    match effect {
+        Effect::DropShadow {
+            color,
+            blur,
+            spread,
+            ..
+        }
+        | Effect::InnerShadow {
+            color,
+            blur,
+            spread,
+            ..
+        } => {
+            validate_style_value_color("effect.color", color)?;
+            validate_style_value_f64("effect.blur", blur)?;
+            validate_style_value_f64("effect.spread", spread)?;
+            Ok(())
+        }
+        Effect::LayerBlur { radius } | Effect::BackgroundBlur { radius } => {
+            validate_style_value_f64("effect.radius", radius)
+        }
+    }
+}
 
 /// Validates that all transform fields are finite and dimensions are non-negative.
 ///
@@ -72,6 +186,9 @@ impl FieldOperation for SetFills {
                 self.new_fills.len()
             )));
         }
+        for fill in &self.new_fills {
+            validate_fill(fill)?;
+        }
         doc.arena.get(self.node_id)?;
         Ok(())
     }
@@ -103,6 +220,9 @@ impl FieldOperation for SetStrokes {
                 self.new_strokes.len()
             )));
         }
+        for stroke in &self.new_strokes {
+            validate_stroke(stroke)?;
+        }
         doc.arena.get(self.node_id)?;
         Ok(())
     }
@@ -128,12 +248,17 @@ pub struct SetOpacity {
 
 impl FieldOperation for SetOpacity {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
-        if let StyleValue::Literal { value } = &self.new_opacity
-            && (!value.is_finite() || *value < 0.0 || *value > 1.0)
-        {
-            return Err(CoreError::ValidationError(format!(
-                "opacity must be in [0.0, 1.0], got {value}"
-            )));
+        // Expression variants defer semantic validation to evaluation time.
+        match &self.new_opacity {
+            StyleValue::Literal { value } => {
+                if !value.is_finite() || *value < 0.0 || *value > 1.0 {
+                    return Err(CoreError::ValidationError(format!(
+                        "opacity must be in [0.0, 1.0], got {value}"
+                    )));
+                }
+            }
+            StyleValue::TokenRef { name } => validate_token_name(name)?,
+            StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
         }
         doc.arena.get(self.node_id)?;
         Ok(())
@@ -182,6 +307,9 @@ impl FieldOperation for SetEffects {
                 "too many effects: {} (max {MAX_EFFECTS_PER_STYLE})",
                 self.new_effects.len()
             )));
+        }
+        for effect in &self.new_effects {
+            validate_effect(effect)?;
         }
         doc.arena.get(self.node_id)?;
         Ok(())
