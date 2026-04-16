@@ -48,7 +48,11 @@
     "shadowBlur": "Rayon de flou de l'ombre",
     "shadowColor": "Couleur de l'ombre",
     "opacity": "Opacité",
-    "blendMode": "Mode de fusion"
+    "blendMode": "Mode de fusion",
+    "fontFamilyInvalid": "La famille de polices contient des caractères non valides",
+    "fontFamilyNoTokenBinding": "La famille de polices ne prend pas encore en charge les liaisons de jetons",
+    "lineHeightOutOfRange": "La hauteur de ligne doit être comprise entre {{min}} et {{max}}",
+    "letterSpacingOutOfRange": "L'espacement des lettres doit être compris entre {{min}} et {{max}}"
   },
   "fontWeight": {
     "100": "Fin",

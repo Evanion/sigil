@@ -146,15 +146,35 @@ export function parseColorInput(raw: string): StyleValue<Color> | null {
 // ── parseNumberInput ──────────────────────────────────────────────────
 
 /**
- * Parse a raw string input as a number-typed `StyleValue<number>` (including the expression variant).
+ * Matches a pure numeric literal — digits only, optionally signed, optionally
+ * decimal. Anchored at both ends so trailing characters (unit suffixes, stray
+ * tokens) force the string out of the literal branch. RF-014: without the end
+ * anchor, `"16px"` silently parsed to `16` and the unit was lost.
+ */
+const PURE_NUMBER_RE = /^-?(\d+\.?\d*|\.\d+)$/;
+
+/**
+ * Matches a numeric literal followed by a CSS-like unit suffix (one or more
+ * ASCII letters, or `%`). Used to recognize inputs like `16px`, `1.5rem`,
+ * `50%` — these are emitted as expression variants so the evaluator can
+ * handle unit semantics, rather than silently discarding the suffix.
+ */
+const NUMBER_WITH_UNIT_RE = /^(-?(?:\d+\.?\d*|\.\d+))([a-zA-Z]+|%)$/;
+
+/**
+ * Parse a raw string input as a number-typed `StyleValue<number>` (including
+ * the expression variant).
  *
  * Recognized patterns:
- * - Numeric strings (integer or decimal, optionally negative, optionally
- *   with a unit suffix like `px`, `%`, `em`) → `{ type: "literal", value: number }`
- *   NOTE: Only the numeric portion is parsed; unit suffixes are stripped.
- * - `{name}` (single token ref, no operators outside braces) → `{ type: "token_ref", name }`
- * - Expressions → `{ type: "expression", expr }`
- * - Infinity, NaN, empty string → `null`
+ * - Pure numeric literal (`16`, `-8`, `3.14`) → `{ type: "literal", value }`
+ * - Numeric + recognized unit suffix (`16px`, `1.5rem`, `50%`) →
+ *   `{ type: "expression", expr }` — the expression evaluator is responsible
+ *   for interpreting the unit at render time. RF-014: we do NOT silently
+ *   strip the suffix and return a bare literal — that lost user intent.
+ * - `{name}` (single token ref, no operators outside braces) →
+ *   `{ type: "token_ref", name }`
+ * - Multi-ref / operator / function-call expressions → `{ type: "expression", expr }`
+ * - Infinity, NaN, empty string, or unrecognized garbage → `null`
  *
  * Returns `null` for unrecognized inputs (no silent coercion).
  */
@@ -175,22 +195,25 @@ export function parseNumberInput(raw: string): StyleValue<number> | null {
     return null;
   }
 
-  // Numeric literal: attempt first — this ensures strings starting with digits
-  // or a leading '-' followed by digits are handled before expression detection.
-  // `parseFloat` stops at the first non-numeric character (e.g., "16px" → 16).
-  // We require that the string actually starts with a numeric pattern.
-  const numericPattern = /^-?(\d+\.?\d*|\.\d+)/;
-  if (numericPattern.test(raw)) {
+  // Pure numeric literal — no trailing content at all.
+  if (PURE_NUMBER_RE.test(raw)) {
     const value = parseFloat(raw);
-    // Guard NaN and infinity — these are not valid numeric literals
     if (Number.isFinite(value)) {
       return { type: "literal", value };
     }
     return null;
   }
 
-  // Expression detection (after numeric check to avoid misclassifying negative
-  // number-like strings as expressions)
+  // Numeric + unit suffix (e.g. "16px", "50%"). Represent as expression so
+  // the evaluator can handle the unit. RF-014: previously the regex was
+  // start-anchored only, so `parseFloat("16px")` returned 16 and the suffix
+  // was silently dropped.
+  if (NUMBER_WITH_UNIT_RE.test(raw)) {
+    return { type: "expression", expr: raw };
+  }
+
+  // Expression detection (after numeric check to avoid misclassifying
+  // negative number-like strings as expressions).
   if (containsExpression(raw)) {
     return { type: "expression", expr: raw };
   }

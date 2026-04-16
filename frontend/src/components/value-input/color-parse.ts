@@ -146,16 +146,20 @@ export function parseHexColor(hex: string): ColorSrgb | null {
 // ── colorToHex ────────────────────────────────────────────────────────
 
 /**
- * Convert a `Color` value to a 6-character lowercase hex string (`#rrggbb`).
+ * Convert a `Color` value to a lowercase hex string.
  *
  * Only `ColorSrgb` (space = "srgb") is supported. For other color spaces,
  * returns an empty string rather than silently producing incorrect values.
  *
- * Alpha is omitted from the output (only RGB channels are encoded). Use
- * the 8-character format (#RRGGBBAA) if alpha is required — that is not
- * the default for most UX contexts (color swatches, hex inputs).
+ * The alpha channel is preserved:
+ * - `a >= 1` → 6-character `#rrggbb`
+ * - `a < 1`  → 8-character `#rrggbbaa`
  *
- * No silent clamping: returns empty string if any channel (r, g, b) is
+ * Preserving alpha on round-trip is required so that in-place alpha edits
+ * (ColorPicker alpha slider) survive the format/parse cycle. Dropping the
+ * alpha channel when a < 1 silently discarded user input (RF-006).
+ *
+ * No silent clamping: returns empty string if any channel (r, g, b, a) is
  * non-finite or outside [0, 1]. Per CLAUDE.md "No Silent Clamping of
  * Invalid Input" — callers that pass out-of-range values must be fixed,
  * not silently corrected here.
@@ -167,26 +171,26 @@ export function colorToHex(color: Color): string {
     return "";
   }
 
-  // Reject non-finite or out-of-range channels — no silent clamping.
-  if (
-    !Number.isFinite(color.r) ||
-    !Number.isFinite(color.g) ||
-    !Number.isFinite(color.b) ||
-    color.r < 0 ||
-    color.r > 1 ||
-    color.g < 0 ||
-    color.g > 1 ||
-    color.b < 0 ||
-    color.b > 1
-  ) {
-    return "";
-  }
+  const { r, g, b, a } = color;
 
-  const rByte = Math.round(color.r * 255);
-  const gByte = Math.round(color.g * 255);
-  const bByte = Math.round(color.b * 255);
+  // Reject non-finite or out-of-range channels — no silent clamping.
+  if (!Number.isFinite(r) || r < 0 || r > 1) return "";
+  if (!Number.isFinite(g) || g < 0 || g > 1) return "";
+  if (!Number.isFinite(b) || b < 0 || b > 1) return "";
+  if (!Number.isFinite(a) || a < 0 || a > 1) return "";
 
   const toHex = (byte: number): string => byte.toString(16).padStart(2, "0");
 
-  return `#${toHex(rByte)}${toHex(gByte)}${toHex(bByte)}`;
+  const rr = toHex(Math.round(r * 255));
+  const gg = toHex(Math.round(g * 255));
+  const bb = toHex(Math.round(b * 255));
+
+  // Full alpha → #rrggbb (shortest faithful representation).
+  if (a >= 1) {
+    return `#${rr}${gg}${bb}`;
+  }
+
+  // Partial alpha → #rrggbbaa so the alpha channel round-trips.
+  const aa = toHex(Math.round(a * 255));
+  return `#${rr}${gg}${bb}${aa}`;
 }

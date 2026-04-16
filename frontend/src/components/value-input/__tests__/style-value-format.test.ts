@@ -246,6 +246,81 @@ describe("parseNumberInput — expression", () => {
   });
 });
 
+// RF-014: unit suffixes must not be silently stripped. Previously a
+// start-anchored-only regex + parseFloat produced a literal number and
+// discarded the suffix — we now route "16px" through the expression variant.
+describe("parseNumberInput — numeric + unit suffix (RF-014)", () => {
+  it("should treat '16px' as an expression, not a bare literal 16", () => {
+    const result = parseNumberInput("16px");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("expression");
+    if (result.type === "expression") {
+      expect(result.expr).toBe("16px");
+    }
+  });
+
+  it("should treat '1.5rem' as an expression", () => {
+    const result = parseNumberInput("1.5rem");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("expression");
+    if (result.type === "expression") {
+      expect(result.expr).toBe("1.5rem");
+    }
+  });
+
+  it("should treat '50%' as an expression", () => {
+    const result = parseNumberInput("50%");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("expression");
+    if (result.type === "expression") {
+      expect(result.expr).toBe("50%");
+    }
+  });
+
+  it("should treat '-2em' as an expression (negative + unit)", () => {
+    const result = parseNumberInput("-2em");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("expression");
+  });
+
+  it("should still parse a bare '16' as a literal number", () => {
+    const result = parseNumberInput("16");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("literal");
+    if (result.type === "literal") {
+      expect(result.value).toBe(16);
+    }
+  });
+
+  it("should treat '12abc' as an expression (letters-only suffix passed to evaluator)", () => {
+    // We do not gatekeep on CSS unit names at this layer — the expression
+    // evaluator owns unit semantics. What matters is that the suffix is not
+    // silently stripped (RF-014). An evaluator rejection here is acceptable.
+    const result = parseNumberInput("12abc");
+    expect(result).not.toBeNull();
+    if (!result) throw new Error("expected non-null");
+    expect(result.type).toBe("expression");
+  });
+
+  it("should reject '16 px' with an internal space", () => {
+    // The unit-suffix pattern requires the suffix to immediately follow the
+    // number. A space breaks the pattern; there is no operator to trigger
+    // the expression branch either, so this falls through to null.
+    expect(parseNumberInput("16 px")).toBeNull();
+  });
+
+  it("should reject garbage trailing non-unit characters like '12_foo'", () => {
+    // Underscore is neither a valid CSS-unit letter nor an expression
+    // operator, so this falls through to null.
+    expect(parseNumberInput("12_foo")).toBeNull();
+  });
+});
+
 // ── containsExpression ────────────────────────────────────────────────
 
 describe("containsExpression", () => {

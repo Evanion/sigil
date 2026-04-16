@@ -3,7 +3,13 @@ import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
 import type { i18n } from "i18next";
-import { TypographySection } from "../TypographySection";
+import {
+  TypographySection,
+  MIN_LINE_HEIGHT,
+  MAX_LINE_HEIGHT,
+  MIN_LETTER_SPACING,
+  MAX_LETTER_SPACING,
+} from "../TypographySection";
 import { DocumentProvider } from "../../store/document-context";
 import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
@@ -638,6 +644,126 @@ describe("TypographySection", () => {
     const textColor = screen.getByRole("combobox", { name: "Text color" });
     fireEvent.keyDown(textColor, { key: "Enter" });
     expect(flushHistory).toHaveBeenCalled();
+  });
+
+  // ── RF-005: Line-height / letter-spacing range enforcement ──────────
+  //
+  // These tests verify that the `MIN_LINE_HEIGHT`, `MAX_LINE_HEIGHT`,
+  // `MIN_LETTER_SPACING`, and `MAX_LETTER_SPACING` constants are actually
+  // enforced by the handler — not just declared. A limit constant without an
+  // enforcement test is treated as a bug per CLAUDE.md "Constant Enforcement
+  // Tests".
+
+  /**
+   * Simulate typing into the ValueInput combobox by setting its textContent
+   * and firing an `input` event. This is the same mechanism ValueInput uses
+   * internally — `handleInput` reads `inputRef.textContent` and calls
+   * `props.onChange` with the result.
+   */
+  function typeIntoCombobox(el: HTMLElement, value: string): void {
+    el.textContent = value;
+    fireEvent.input(el);
+  }
+
+  it("test_min_line_height_enforced: should reject literal line height below MIN_LINE_HEIGHT", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    // Below min (0.05 < MIN_LINE_HEIGHT = 0.1) must not reach the store.
+    const belowMin = String(MIN_LINE_HEIGHT / 2);
+    typeIntoCombobox(lineHeight, belowMin);
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBe(0);
+  });
+
+  it("test_max_line_height_enforced: should reject literal line height above MAX_LINE_HEIGHT", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    // Above max (MAX_LINE_HEIGHT + 1 = 11) must not reach the store.
+    const aboveMax = String(MAX_LINE_HEIGHT + 1);
+    typeIntoCombobox(lineHeight, aboveMax);
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBe(0);
+  });
+
+  it("should accept a literal line height within [MIN_LINE_HEIGHT, MAX_LINE_HEIGHT]", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    typeIntoCombobox(lineHeight, "2");
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBeGreaterThan(0);
+  });
+
+  it("test_min_letter_spacing_enforced: should reject literal letter spacing below MIN_LETTER_SPACING", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ letter_spacing: 0 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const letterSpacing = screen.getByRole("combobox", { name: "Letter spacing" });
+    const belowMin = String(MIN_LETTER_SPACING - 1);
+    typeIntoCombobox(letterSpacing, belowMin);
+    const calls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "letter_spacing",
+    );
+    expect(calls.length).toBe(0);
+  });
+
+  it("test_max_letter_spacing_enforced: should reject literal letter spacing above MAX_LETTER_SPACING", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ letter_spacing: 0 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const letterSpacing = screen.getByRole("combobox", { name: "Letter spacing" });
+    const aboveMax = String(MAX_LETTER_SPACING + 1);
+    typeIntoCombobox(letterSpacing, aboveMax);
+    const calls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "letter_spacing",
+    );
+    expect(calls.length).toBe(0);
   });
 
   it("should reject shadow blur values above MAX_SHADOW_BLUR", () => {

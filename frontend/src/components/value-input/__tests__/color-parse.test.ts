@@ -203,6 +203,71 @@ describe("colorToHex — sRGB colors", () => {
   });
 });
 
+// RF-006: alpha channel must round-trip when partially transparent.
+describe("colorToHex — alpha channel preservation (RF-006)", () => {
+  it("should emit #rrggbb (no alpha) when a === 1 (full alpha)", () => {
+    const color: ColorSrgb = { space: "srgb", r: 1, g: 0, b: 0, a: 1 };
+    expect(colorToHex(color)).toBe("#ff0000");
+  });
+
+  it("should emit #rrggbbaa when a < 1", () => {
+    const color: ColorSrgb = { space: "srgb", r: 1, g: 0, b: 0, a: 0.5 };
+    // 0.5 * 255 = 127.5 → rounds to 128 → 0x80
+    expect(colorToHex(color)).toBe("#ff000080");
+  });
+
+  it("should emit #rrggbb00 when a === 0 (fully transparent)", () => {
+    const color: ColorSrgb = { space: "srgb", r: 1, g: 1, b: 1, a: 0 };
+    expect(colorToHex(color)).toBe("#ffffff00");
+  });
+
+  it("should round-trip a partial-alpha color through parseHexColor", () => {
+    // A 50%-alpha mid-blue that must survive the format → parse cycle.
+    const original: ColorSrgb = {
+      space: "srgb",
+      r: 13 / 255,
+      g: 153 / 255,
+      b: 1,
+      a: 128 / 255,
+    };
+    const hex = colorToHex(original);
+    // The hex must include alpha, otherwise the alpha is silently dropped.
+    expect(hex.length).toBe(9);
+    const parsed = parseHexColor(hex);
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error("expected non-null");
+    expect(approx(parsed.r, original.r, 1 / 255)).toBe(true);
+    expect(approx(parsed.g, original.g, 1 / 255)).toBe(true);
+    expect(approx(parsed.b, original.b, 1 / 255)).toBe(true);
+    expect(approx(parsed.a, original.a, 1 / 255)).toBe(true);
+  });
+
+  it("should round-trip a full-alpha color as 6-char hex", () => {
+    const original: ColorSrgb = { space: "srgb", r: 0.5, g: 0.5, b: 0.5, a: 1 };
+    const hex = colorToHex(original);
+    expect(hex.length).toBe(7); // "#" + 6 hex chars
+    const parsed = parseHexColor(hex);
+    expect(parsed).not.toBeNull();
+    if (!parsed) throw new Error("expected non-null");
+    expect(parsed.a).toBe(1);
+  });
+
+  it("should return empty string when alpha is NaN", () => {
+    const color: ColorSrgb = { space: "srgb", r: 0, g: 0, b: 0, a: NaN };
+    expect(colorToHex(color)).toBe("");
+  });
+
+  it("should return empty string when alpha is above 1", () => {
+    const color: ColorSrgb = { space: "srgb", r: 0, g: 0, b: 0, a: 1.5 };
+    expect(colorToHex(color)).toBe("");
+  });
+
+  it("should return empty string when alpha is below 0", () => {
+    const color: ColorSrgb = { space: "srgb", r: 0, g: 0, b: 0, a: -0.1 };
+    expect(colorToHex(color)).toBe("");
+  });
+});
+
 describe("colorToHex — non-sRGB colors return empty string", () => {
   it("should return empty string for OkLCH color", () => {
     const color: ColorOklch = { space: "oklch", l: 0.5, c: 0.1, h: 200, a: 1 };

@@ -32,10 +32,7 @@ function loadFixture(): Fixture {
   // Resolve relative to this test file, walking up to the workspace root.
   // __dirname is not available in ESM; use import.meta.url + fileURLToPath.
   const here = dirname(fileURLToPath(import.meta.url));
-  const fixturePath = resolve(
-    here,
-    "../../../../tests/fixtures/parity/style_value_encoding.json",
-  );
+  const fixturePath = resolve(here, "../../../../tests/fixtures/parity/style_value_encoding.json");
   const raw = readFileSync(fixturePath, "utf8");
   const parsed: unknown = JSON.parse(raw);
   if (

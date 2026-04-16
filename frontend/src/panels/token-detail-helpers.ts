@@ -223,6 +223,12 @@ export function parseTokenValueChange(raw: string, tokenType: TokenType): TokenV
     }
 
     case "number": {
+      // RF-014: reject inputs with trailing non-numeric characters (e.g.,
+      // "16px", "1.5rem", "42 units"). `parseFloat("16px")` silently returns
+      // 16, which dropped the unit suffix without informing the user.
+      // Require a pure numeric literal here — expressions with units are
+      // already captured by the `looksLikeExpression` check above.
+      if (!/^-?(\d+\.?\d*|\.\d+)$/.test(trimmed)) return null;
       const v = parseFloat(trimmed);
       if (!Number.isFinite(v)) return null;
       return { type: "number", value: v };
