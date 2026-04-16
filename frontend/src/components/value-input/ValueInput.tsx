@@ -87,6 +87,16 @@ export interface ValueInputProps {
   readonly placeholder?: string;
   readonly disabled?: boolean;
   readonly "aria-label"?: string;
+  /**
+   * RF-020: Lower numeric bound — when set and the detected mode is
+   * `literal-number`, surfaces via `aria-valuemin` so screen readers announce
+   * the input's numeric domain. Passing this does NOT clamp the value; it only
+   * exposes range semantics. Panels that accept numeric values should pass the
+   * matching domain constant when known.
+   */
+  readonly min?: number;
+  /** RF-020: Upper numeric bound — mirror of `min` for `aria-valuemax`. */
+  readonly max?: number;
 }
 
 // ── CSS class map for highlight segments ───────────────────────────────
@@ -101,43 +111,58 @@ const SEGMENT_CLASS_MAP: Record<HighlightSegment["type"], string> = {
   error: "sigil-token-input__error-segment",
 };
 
-/** Default placeholder text when none is provided via props. (RF-013) */
-const DEFAULT_PLACEHOLDER = "Type { for tokens, or an expression";
+/**
+ * Default placeholder text when none is provided via props. (RF-013, RF-032)
+ *
+ * Kept intentionally short — the ValueInput ships into narrow inspector
+ * columns (AppearancePanel opacity, EffectCard offsets) where the prior
+ * ~37-char hint truncated. Panels that need a domain-specific hint (hex
+ * vs number vs font) pass their own `placeholder` prop.
+ */
+const DEFAULT_PLACEHOLDER = "{ for tokens";
 
 // ── Type mapping helpers ────────────────────────────────────────────────
 
 /**
- * Map acceptedTypes to the TokenType used for autocomplete filtering.
- * Returns undefined (no filter) if "string" is accepted or no mapping is possible.
+ * Map acceptedTypes to the TokenType list used for autocomplete filtering.
+ * Returns `undefined` (no filter) when "string" is accepted or no mapping is possible.
+ *
+ * RF-021: returns the FULL set of matching TokenTypes rather than only the first.
+ * For `acceptedTypes: ["number", "dimension"]` this returns `["number", "dimension"]`
+ * so both numeric and dimension tokens surface in the autocomplete dropdown.
  */
 export function resolveTokenTypeFilter(
   acceptedTypes: readonly ValueType[] | undefined,
   legacyTokenType: TokenType | undefined,
-): TokenType | undefined {
+): readonly TokenType[] | undefined {
   // Prefer acceptedTypes over legacy tokenType
   if (acceptedTypes !== undefined && acceptedTypes.length > 0) {
     // "string" accepts all token types
     if (acceptedTypes.includes("string")) return undefined;
 
-    // Map the first matching value type to a token type
+    const result: TokenType[] = [];
     for (const vt of acceptedTypes) {
       switch (vt) {
         case "color":
-          return "color";
+          result.push("color");
+          break;
         case "number":
-          return "number";
+          result.push("number");
+          break;
         case "dimension":
-          return "dimension";
+          result.push("dimension");
+          break;
         case "font_family":
-          return "font_family";
+          result.push("font_family");
+          break;
         // "string" handled above
       }
     }
-    return undefined;
+    return result.length > 0 ? result : undefined;
   }
 
   // Fall back to legacy tokenType prop
-  return legacyTokenType;
+  return legacyTokenType !== undefined ? [legacyTokenType] : undefined;
 }
 
 /**
@@ -211,6 +236,9 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   let inputRef: HTMLDivElement | undefined;
   // eslint-disable-next-line no-unassigned-vars
   let popoverRef: HTMLDivElement | undefined;
+  // RF-018/019: swatch ref so we can restore focus to it after the popover closes.
+  // eslint-disable-next-line no-unassigned-vars
+  let swatchRef: HTMLButtonElement | undefined;
 
   // RF-027: use Solid's createUniqueId instead of Math.random()
   const uniqueId = createUniqueId();
@@ -272,8 +300,8 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   /** Whether this field accepts font_family values (controls font autocomplete). */
   const isFontField = createMemo<boolean>(() => effectiveAcceptedTypes().includes("font_family"));
 
-  /** Resolve the token type filter for autocomplete. */
-  const tokenTypeFilter = createMemo<TokenType | undefined>(() =>
+  /** Resolve the token type filter for autocomplete. RF-021: now a list. */
+  const tokenTypeFilter = createMemo<readonly TokenType[] | undefined>(() =>
     resolveTokenTypeFilter(props.acceptedTypes, props.tokenType),
   );
 
@@ -354,6 +382,36 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   const typeValidationMsg = createMemo<string | null>(() =>
     getTypeValidationMessage(detectedMode(), effectiveAcceptedTypes()),
   );
+
+  /**
+   * RF-020: When the input is in literal-number mode and the field accepts
+   * numeric values, expose ARIA numeric state so screen readers can announce
+   * the value and its range (the old NumberInput exposed `role="spinbutton"`;
+   * ValueInput preserves the semantics on the combobox via aria-valuenow/min/max).
+   * Returns null when the input is not in a numeric state — in which case the
+   * attributes are omitted from the DOM (undefined below) so they don't lie.
+   */
+  const numericAriaState = createMemo<{
+    valuenow: number;
+    valuemin: number | undefined;
+    valuemax: number | undefined;
+  } | null>(() => {
+    const mode = detectedMode();
+    if (mode !== "literal-number") return null;
+    // Only expose numeric semantics when the field actually accepts numbers.
+    const types = effectiveAcceptedTypes();
+    if (!types.includes("number") && !types.includes("dimension")) return null;
+    // Parse the current text. parseFloat tolerates trailing units (e.g. "12px").
+    const parsed = parseFloat(liveText());
+    if (!Number.isFinite(parsed)) return null;
+    const minProp = props.min;
+    const maxProp = props.max;
+    return {
+      valuenow: parsed,
+      valuemin: Number.isFinite(minProp) ? minProp : undefined,
+      valuemax: Number.isFinite(maxProp) ? maxProp : undefined,
+    };
+  });
 
   /**
    * Build a status string from the current eval/validation state and push it
@@ -520,6 +578,18 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     if (popoverRef) {
       popoverRef.togglePopover();
       setColorPickerOpen((prev) => !prev);
+      // RF-018: when opening, move focus into the dialog so keyboard users can
+      // immediately interact with the picker. Use queueMicrotask so the popover
+      // contents are mounted (the <Show> gate) before the focus attempt.
+      if (colorPickerOpen()) {
+        queueMicrotask(() => {
+          if (!popoverRef) return;
+          const target = popoverRef.querySelector<HTMLElement>(
+            "[tabindex='0'], button, [role='slider'], input",
+          );
+          target?.focus();
+        });
+      }
     }
   }
 
@@ -555,6 +625,9 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         props.onCommit?.(hex);
         announceStatus();
       }
+      // RF-019: restore focus to the swatch button so keyboard users land
+      // back where they triggered the popover rather than at document root.
+      swatchRef?.focus();
     }
   }
 
@@ -863,6 +936,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         {/* Color swatch prefix — only when field accepts colors */}
         <Show when={acceptsColor()}>
           <button
+            ref={swatchRef}
             type="button"
             class="sigil-token-input__swatch-btn"
             style={{
@@ -886,11 +960,15 @@ const ValueInput: Component<ValueInputProps> = (props) => {
               position-anchor ties the popover to the swatch button anchor above.
               position-area: bottom span-right places it below and aligned to the right.
               position-try-fallbacks: flip-block flips to above if viewport clips it.
-              The margin-top fallback in CSS handles browsers without anchor positioning. */}
+              The margin-top fallback in CSS handles browsers without anchor positioning.
+              RF-018: role="dialog" + aria-label honour the aria-haspopup="dialog" contract
+              on the swatch button, giving SR users an announced dialog boundary. */}
           <div
             ref={popoverRef}
             id={popoverId}
             popover="auto"
+            role="dialog"
+            aria-label="Color picker"
             class="sigil-token-input__color-popover"
             style={{
               "position-anchor": swatchAnchorName,
@@ -934,6 +1012,9 @@ const ValueInput: Component<ValueInputProps> = (props) => {
               : undefined
           }
           aria-controls={listboxId}
+          aria-valuenow={numericAriaState()?.valuenow}
+          aria-valuemin={numericAriaState()?.valuemin}
+          aria-valuemax={numericAriaState()?.valuemax}
           data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
           tabIndex={props.disabled ? -1 : 0}
           onInput={handleInput}
@@ -944,9 +1025,12 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         />
       </div>
 
-      {/* RF-010: SR announcement for autocomplete suggestion count + committed status.
-          Updated only on discrete events (blur, Enter, popover close, suggestion insert)
-          so aria-live does not flood the screen reader on every keystroke. */}
+      {/* RF-008: SR announcement for committed status only.
+          Autocomplete state (open/closed, item count) is already conveyed by
+          aria-expanded and aria-activedescendant on the combobox — a parallel
+          aria-live announcement duplicates that signal and floods the SR queue
+          on every keystroke. The live region is therefore scoped to discrete
+          commit events (blur, Enter, popover close, suggestion insert) only. */}
       <span
         id={srAnnouncementId}
         class="sigil-token-input__sr-only"
@@ -954,11 +1038,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         aria-live="polite"
         aria-atomic="true"
       >
-        {autocompleteOpen() && suggestions().length > 0
-          ? `${String(suggestions().length)} suggestions available`
-          : autocompleteOpen()
-            ? "No suggestions"
-            : committedStatus()}
+        {committedStatus()}
       </span>
 
       {/* RF-028: always render listbox in DOM so aria-controls references a valid element */}

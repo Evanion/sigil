@@ -10,24 +10,24 @@ import type { Token } from "../../../types/document";
 // ── resolveTokenTypeFilter ─────────────────────────────────────────────
 
 describe("resolveTokenTypeFilter — acceptedTypes mapping", () => {
-  it("should return 'color' for acceptedTypes=['color']", () => {
+  it("should return ['color'] for acceptedTypes=['color']", () => {
     const result = resolveTokenTypeFilter(["color"], undefined);
-    expect(result).toBe("color");
+    expect(result).toEqual(["color"]);
   });
 
-  it("should return 'number' for acceptedTypes=['number']", () => {
+  it("should return ['number'] for acceptedTypes=['number']", () => {
     const result = resolveTokenTypeFilter(["number"], undefined);
-    expect(result).toBe("number");
+    expect(result).toEqual(["number"]);
   });
 
-  it("should return 'dimension' for acceptedTypes=['dimension']", () => {
+  it("should return ['dimension'] for acceptedTypes=['dimension']", () => {
     const result = resolveTokenTypeFilter(["dimension"], undefined);
-    expect(result).toBe("dimension");
+    expect(result).toEqual(["dimension"]);
   });
 
-  it("should return 'font_family' for acceptedTypes=['font_family']", () => {
+  it("should return ['font_family'] for acceptedTypes=['font_family']", () => {
     const result = resolveTokenTypeFilter(["font_family"], undefined);
-    expect(result).toBe("font_family");
+    expect(result).toEqual(["font_family"]);
   });
 
   it("should return undefined for acceptedTypes=['string'] (all types accepted)", () => {
@@ -45,19 +45,19 @@ describe("resolveTokenTypeFilter — acceptedTypes mapping", () => {
     expect(result).toBeUndefined();
   });
 
-  it("should fall back to legacyTokenType when acceptedTypes is undefined", () => {
+  it("should fall back to legacyTokenType wrapped in an array when acceptedTypes is undefined", () => {
     const result = resolveTokenTypeFilter(undefined, "color");
-    expect(result).toBe("color");
+    expect(result).toEqual(["color"]);
   });
 
   it("should fall back to legacyTokenType when acceptedTypes is empty", () => {
     const result = resolveTokenTypeFilter([], "number");
-    expect(result).toBe("number");
+    expect(result).toEqual(["number"]);
   });
 
   it("should prefer acceptedTypes over legacyTokenType when both provided", () => {
     const result = resolveTokenTypeFilter(["dimension"], "color");
-    expect(result).toBe("dimension");
+    expect(result).toEqual(["dimension"]);
   });
 
   it("should return undefined when both acceptedTypes is undefined and legacyTokenType is undefined", () => {
@@ -65,10 +65,23 @@ describe("resolveTokenTypeFilter — acceptedTypes mapping", () => {
     expect(result).toBeUndefined();
   });
 
-  it("should map the first matching value type from a multi-type array", () => {
-    // ['number', 'dimension'] — first match is 'number'
+  it("RF-021: should return the full list for a multi-type array", () => {
+    // ['number', 'dimension'] — both map to a token type; return both so
+    // tokens of either type surface in the autocomplete.
     const result = resolveTokenTypeFilter(["number", "dimension"], undefined);
-    expect(result).toBe("number");
+    expect(result).toEqual(["number", "dimension"]);
+  });
+
+  it("RF-021: should preserve order of acceptedTypes in the returned list", () => {
+    const result = resolveTokenTypeFilter(["dimension", "number"], undefined);
+    expect(result).toEqual(["dimension", "number"]);
+  });
+
+  it("RF-021: should drop unknown value types silently (e.g. nothing to map)", () => {
+    // "string" is handled above — here we verify the fall-through returns undefined
+    // if no value type maps to a TokenType (hypothetical future ValueType).
+    const result = resolveTokenTypeFilter([], "font_family");
+    expect(result).toEqual(["font_family"]);
   });
 });
 

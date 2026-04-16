@@ -81,7 +81,7 @@ describe("filterTokenSuggestions", () => {
     expect(result[0].name).toBe("Brand.Primary");
   });
 
-  it("should filter tokens by type", () => {
+  it("should filter tokens by type (single TokenType argument)", () => {
     const tokens = makeTokenMap(["brand.primary", "color"], ["spacing.md", "dimension"]);
     const result = filterTokenSuggestions(tokens, "", "color");
     expect(result).toHaveLength(1);
@@ -97,6 +97,32 @@ describe("filterTokenSuggestions", () => {
     const result = filterTokenSuggestions(tokens, "brand", "color");
     expect(result).toHaveLength(2);
     expect(result.map((s) => s.name)).toEqual(["brand.primary", "brand.secondary"]);
+  });
+
+  // RF-021: multi-type filtering — fields that accept number+dimension (or
+  // color+...) must surface tokens of any accepted type.
+  it("RF-021: should filter tokens by an array of TokenTypes", () => {
+    const tokens = makeTokenMap(["num.a", "number"], ["dim.b", "dimension"], ["col.c", "color"]);
+    const result = filterTokenSuggestions(tokens, "", ["number", "dimension"]);
+    const names = result.map((s) => s.name).sort();
+    expect(names).toEqual(["dim.b", "num.a"]);
+  });
+
+  it("RF-021: empty array argument should act as 'no filter' (all tokens pass)", () => {
+    const tokens = makeTokenMap(["a", "number"], ["b", "color"]);
+    const result = filterTokenSuggestions(tokens, "", []);
+    expect(result).toHaveLength(2);
+  });
+
+  it("RF-021: array filter combined with query should behave like set-intersection", () => {
+    const tokens = makeTokenMap(
+      ["brand.primary", "color"],
+      ["brand.size", "dimension"],
+      ["other.size", "dimension"],
+    );
+    const result = filterTokenSuggestions(tokens, "brand", ["color", "dimension"]);
+    const names = result.map((s) => s.name).sort();
+    expect(names).toEqual(["brand.primary", "brand.size"]);
   });
 
   it("should return empty array when no match", () => {

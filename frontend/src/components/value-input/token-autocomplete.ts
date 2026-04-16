@@ -286,17 +286,31 @@ const BUILTIN_FUNCTIONS: readonly FunctionSuggestion[] = ((): readonly FunctionS
  *
  * @param tokens - Map of token names to Token objects.
  * @param query - Query string to match against token names.
- * @param tokenType - Optional filter to only show tokens of a specific type.
+ * @param tokenTypes - Optional filter: accept tokens whose `token_type` is in this list.
+ *   Accepts a single `TokenType`, an array of `TokenType`, or undefined (no filter).
+ *   RF-021: when a field accepts multiple value types (e.g. `["number", "dimension"]`),
+ *   the caller can pass the full array so tokens of any accepted type appear in the
+ *   autocomplete rather than only the first mapped type.
  * @param maxResults - Maximum number of results (defaults to MAX_AUTOCOMPLETE_RESULTS).
  */
 export function filterTokenSuggestions(
   tokens: Record<string, Token>,
   query: string,
-  tokenType?: TokenType,
+  tokenTypes?: TokenType | readonly TokenType[],
   maxResults?: number,
 ): readonly TokenSuggestion[] {
   const limit = maxResults ?? MAX_AUTOCOMPLETE_RESULTS;
   const lowerQuery = query.toLowerCase();
+
+  // Normalise the filter argument to an array | undefined for a single predicate.
+  const typeFilter: readonly TokenType[] | undefined =
+    tokenTypes === undefined
+      ? undefined
+      : Array.isArray(tokenTypes)
+        ? tokenTypes.length > 0
+          ? tokenTypes
+          : undefined
+        : [tokenTypes as TokenType];
 
   // RF-012: Filter on the full entry set first (no sort), then sort only the
   // matched subset. This avoids sorting the entire token map on every keystroke.
@@ -304,7 +318,7 @@ export function filterTokenSuggestions(
 
   for (const [name, token] of Object.entries(tokens)) {
     // Filter by token type if specified
-    if (tokenType !== undefined && token.token_type !== tokenType) {
+    if (typeFilter !== undefined && !typeFilter.includes(token.token_type)) {
       continue;
     }
 
