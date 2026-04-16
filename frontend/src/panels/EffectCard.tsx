@@ -26,6 +26,7 @@ import type {
 } from "../types/document";
 import { GripVertical } from "lucide-solid";
 import ValueInput from "../components/value-input/ValueInput";
+import { showToast } from "../components/toast/Toast";
 import {
   formatColorStyleValue,
   formatNumber,
@@ -184,42 +185,60 @@ export function EffectCard(props: EffectCardProps) {
     props.onUpdate(props.index, { ...props.effect, color: parsed });
   }
 
-  function handleColorCommit(raw: string): void {
-    handleColorChange(raw);
+  function handleColorCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    // onCommit only flushes history — do not re-dispatch the change.
     props.onCommit?.();
   }
 
   /**
-   * Offset handlers only accept literal numeric input — the `Point` data model
-   * stores plain numbers, not a `StyleValue<number>`. Token refs and
-   * expressions in X/Y are silently ignored; a future data-model change can
-   * lift this restriction.
+   * Offset handlers only accept literal numeric input — the `Point` data
+   * model stores plain numbers, not a `StyleValue<number>`. Non-literal
+   * input surfaces a toast (RF-015) rather than failing silently so the
+   * user understands why the input reverted.
+   *
+   * TODO(spec-13c): Promote `Point` to `{ x: StyleValue<number>, y:
+   * StyleValue<number> }` to enable token binding on shadow offsets.
    */
   function handleOffsetX(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
     const parsed = parseNumberInput(raw);
-    if (!parsed || parsed.type !== "literal") return;
+    if (!parsed) return;
+    if (parsed.type !== "literal") {
+      showToast({
+        title: "Shadow offsets do not yet support token bindings",
+        variant: "info",
+      });
+      return;
+    }
     const v = parsed.value;
     if (!Number.isFinite(v)) return;
     props.onUpdate(props.index, { ...props.effect, offset: { ...props.effect.offset, x: v } });
   }
 
-  function handleOffsetXCommit(raw: string): void {
-    handleOffsetX(raw);
+  function handleOffsetXCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     props.onCommit?.();
   }
 
   function handleOffsetY(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
     const parsed = parseNumberInput(raw);
-    if (!parsed || parsed.type !== "literal") return;
+    if (!parsed) return;
+    if (parsed.type !== "literal") {
+      showToast({
+        title: "Shadow offsets do not yet support token bindings",
+        variant: "info",
+      });
+      return;
+    }
     const v = parsed.value;
     if (!Number.isFinite(v)) return;
     props.onUpdate(props.index, { ...props.effect, offset: { ...props.effect.offset, y: v } });
   }
 
-  function handleOffsetYCommit(raw: string): void {
-    handleOffsetY(raw);
+  function handleOffsetYCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     props.onCommit?.();
   }
 
@@ -230,8 +249,8 @@ export function EffectCard(props: EffectCardProps) {
     props.onUpdate(props.index, { ...props.effect, blur: parsed });
   }
 
-  function handleBlurCommit(raw: string): void {
-    handleBlur(raw);
+  function handleBlurCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     props.onCommit?.();
   }
 
@@ -242,8 +261,8 @@ export function EffectCard(props: EffectCardProps) {
     props.onUpdate(props.index, { ...props.effect, spread: parsed });
   }
 
-  function handleSpreadCommit(raw: string): void {
-    handleSpread(raw);
+  function handleSpreadCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     props.onCommit?.();
   }
 
@@ -256,8 +275,8 @@ export function EffectCard(props: EffectCardProps) {
     props.onUpdate(props.index, { ...props.effect, radius: parsed });
   }
 
-  function handleRadiusCommit(raw: string): void {
-    handleRadius(raw);
+  function handleRadiusCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     props.onCommit?.();
   }
 

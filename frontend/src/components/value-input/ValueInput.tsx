@@ -574,6 +574,16 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     // Update live text for real-time error/resolved display
     setLiveText(text);
 
+    // RF-027: propagate intermediate edits through onChange so the canvas
+    // live-previews while typing. The parent panel's handler will parse the
+    // text and reject invalid input (e.g. partial hex codes) — only valid
+    // intermediate values reach the store. The confirmedValue signal stays
+    // at the last user-confirmed value until blur/Enter, so Escape still
+    // reverts correctly. Re-entrancy is safe: the parent's store update
+    // flows back as props.value, but the sync effect gates on !isFocused(),
+    // which is true during typing.
+    props.onChange(text);
+
     // RF-011: compute cursor offset ONCE and pass to both functions
     const cursor = inputRef ? getCursorOffset(inputRef) : 0;
     renderHighlighted(text, true, cursor);
@@ -667,9 +677,14 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         }
         case "Escape": {
           e.preventDefault();
-          // Revert to last confirmed value
+          // Revert to last confirmed value. With RF-027, handleInput
+          // propagates intermediate edits via onChange, so the store may
+          // now hold an unconfirmed value. Fire onChange(revertTo) to
+          // restore the store in lockstep with the DOM.
           const revertTo = confirmedValue();
           renderHighlighted(revertTo, false);
+          setLiveText(revertTo);
+          props.onChange(revertTo);
           return;
         }
       }
@@ -714,6 +729,13 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
     // RF-020: use DOM manipulation instead of deprecated execCommand
     insertPlainTextAtCursor(singleLine);
+
+    // RF-028: Manual DOM insertion does not fire the `input` event, so Solid's
+    // reactive state (liveText, highlighted spans, autocomplete) is stale.
+    // Invoke handleInput() to resync: it reads the current DOM text, updates
+    // liveText, propagates via onChange, re-renders highlighting, and reopens
+    // autocomplete as needed.
+    handleInput();
   }
 
   function handleAutocompleteItemClick(suggestion: AutocompleteSuggestion): void {

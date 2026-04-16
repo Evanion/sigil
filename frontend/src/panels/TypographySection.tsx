@@ -48,6 +48,7 @@ import { ToggleButton } from "../components/toggle-button/ToggleButton";
 import { ColorSwatch } from "../components/color-picker";
 import ValueInput from "../components/value-input/ValueInput";
 import { SystemFontProvider } from "../components/value-input/font-provider";
+import { showToast } from "../components/toast/Toast";
 import {
   AlignLeft,
   AlignCenter,
@@ -82,6 +83,24 @@ const MAX_SHADOW_OFFSET = 1000;
 
 /** RF-018: Minimum shadow offset value in pixels. */
 const MIN_SHADOW_OFFSET = -1000;
+
+// RF-005: Frontend UX bounds for text style numeric fields. The Rust server
+// only enforces `line_height > 0` and `letter_spacing finite` (see
+// crates/core/src/validate.rs :: validate_text_style_line_height /
+// validate_text_style_letter_spacing); these constants add a practical upper
+// bound for user feedback so absurdly large values are caught before they
+// hit the network. `MIN_LINE_HEIGHT` is a UX minimum — the server still
+// enforces `> 0` authoritatively, but `0.1` matches the old NumberInput
+// `min` and avoids unusably small line heights.
+
+/** Minimum line height multiplier (literal branch only). */
+export const MIN_LINE_HEIGHT = 0.1;
+/** Maximum line height multiplier (literal branch only). */
+export const MAX_LINE_HEIGHT = 10;
+/** Minimum letter spacing in pixels (literal branch only). */
+export const MIN_LETTER_SPACING = -100;
+/** Maximum letter spacing in pixels (literal branch only). */
+export const MAX_LETTER_SPACING = 100;
 
 /** Default text shadow values when toggling shadow on. */
 const DEFAULT_TEXT_SHADOW: TextShadow = {
@@ -242,19 +261,33 @@ export const TypographySection: Component = () => {
   function handleFontFamilyChange(value: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    // RF-006: Reject font families containing CSS-significant characters.
-    // Token refs ({name}) and expressions also fail this check and are
-    // intentionally rejected — the core `TextStylePatch["font_family"]`
-    // type is a plain `string`, not a `StyleValue<string>`, so the
-    // persistence layer cannot carry token bindings for this field.
-    // TODO(spec-13c): Promote TextStylePatch.font_family to
+    // RF-007: Surface a visible message when the user attempts to bind a
+    // token or write an expression in the font_family field. The core
+    // `TextStylePatch["font_family"]` type is still a plain `string`, not
+    // a `StyleValue<string>`, so token refs cannot be persisted here —
+    // silently rejecting them left the user with a DOM revert and no
+    // diagnostic. TODO(spec-13c): Promote TextStylePatch.font_family to
     // StyleValue<string> to enable token binding for font families.
-    if (!validateCssIdentifier(value)) return;
+    if (value.includes("{") || value.includes("}")) {
+      showToast({
+        title: t("panels:typography.fontFamilyNoTokenBinding"),
+        variant: "info",
+      });
+      return;
+    }
+    // RF-006: Reject font families containing CSS-significant characters.
+    if (!validateCssIdentifier(value)) {
+      showToast({
+        title: t("panels:typography.fontFamilyInvalid"),
+        variant: "error",
+      });
+      return;
+    }
     store.setTextStyle(uuid, { field: "font_family", value });
   }
 
-  function handleFontFamilyCommit(value: string): void {
-    handleFontFamilyChange(value);
+  function handleFontFamilyCommit(_value: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     store.flushHistory();
   }
 
@@ -273,8 +306,8 @@ export const TypographySection: Component = () => {
     store.setTextStyle(uuid, { field: "font_size", value: parsed });
   }
 
-  function handleFontSizeCommit(raw: string): void {
-    handleFontSizeChange(raw);
+  function handleFontSizeCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     store.flushHistory();
   }
 
@@ -300,12 +333,27 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const parsed = parseNumberInput(raw);
     if (!parsed) return;
-    if (parsed.type === "literal" && !Number.isFinite(parsed.value)) return;
+    if (parsed.type === "literal") {
+      if (!Number.isFinite(parsed.value)) return;
+      // RF-005: Reject literal values outside the UX-allowed range and
+      // surface a toast — do not silently drop, which revealed nothing to
+      // the user. Token refs and expressions are deferred to eval time.
+      if (parsed.value < MIN_LINE_HEIGHT || parsed.value > MAX_LINE_HEIGHT) {
+        showToast({
+          title: t("panels:typography.lineHeightOutOfRange", {
+            min: MIN_LINE_HEIGHT,
+            max: MAX_LINE_HEIGHT,
+          }),
+          variant: "error",
+        });
+        return;
+      }
+    }
     store.setTextStyle(uuid, { field: "line_height", value: parsed });
   }
 
-  function handleLineHeightCommit(raw: string): void {
-    handleLineHeightChange(raw);
+  function handleLineHeightCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     store.flushHistory();
   }
 
@@ -314,12 +362,26 @@ export const TypographySection: Component = () => {
     if (!uuid || !textKind()) return;
     const parsed = parseNumberInput(raw);
     if (!parsed) return;
-    if (parsed.type === "literal" && !Number.isFinite(parsed.value)) return;
+    if (parsed.type === "literal") {
+      if (!Number.isFinite(parsed.value)) return;
+      // RF-005: Same rationale as line_height — surface an out-of-range
+      // toast instead of a silent drop.
+      if (parsed.value < MIN_LETTER_SPACING || parsed.value > MAX_LETTER_SPACING) {
+        showToast({
+          title: t("panels:typography.letterSpacingOutOfRange", {
+            min: MIN_LETTER_SPACING,
+            max: MAX_LETTER_SPACING,
+          }),
+          variant: "error",
+        });
+        return;
+      }
+    }
     store.setTextStyle(uuid, { field: "letter_spacing", value: parsed });
   }
 
-  function handleLetterSpacingCommit(raw: string): void {
-    handleLetterSpacingChange(raw);
+  function handleLetterSpacingCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     store.flushHistory();
   }
 
@@ -347,8 +409,8 @@ export const TypographySection: Component = () => {
     store.setTextStyle(uuid, { field: "text_color", value: parsed });
   }
 
-  function handleTextColorCommit(raw: string): void {
-    handleTextColorChange(raw);
+  function handleTextColorCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     store.flushHistory();
   }
 

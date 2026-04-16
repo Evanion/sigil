@@ -7,6 +7,7 @@
  */
 
 import type { Token, TokenValue, Color, StyleValue } from "../types/document";
+import { parseExpression, evaluateExpression, isEvalError } from "./expression-eval";
 
 /**
  * Maximum alias chain depth before resolution is abandoned.
@@ -117,6 +118,8 @@ export function resolveNumberToken(tokens: Record<string, Token>, name: string):
  *
  * - Literal: return the embedded value directly.
  * - TokenRef: resolve via the token store; return fallback if missing or non-color.
+ * - Expression: parse and evaluate against the token store. Returns fallback
+ *   on parse error, evaluation error, or when the result is not a Color.
  */
 export function resolveStyleValueColor(
   sv: StyleValue<Color>,
@@ -130,7 +133,19 @@ export function resolveStyleValueColor(
     const resolved = resolveColorToken(tokens, sv.name);
     return resolved !== null ? resolved : fallback;
   }
-  // sv.type === "expression" — expression evaluation is deferred; return fallback
+  // sv.type === "expression"
+  const parsed = parseExpression(sv.expr);
+  if (isEvalError(parsed)) {
+    return fallback;
+  }
+  const result = evaluateExpression(parsed, tokens);
+  if (isEvalError(result)) {
+    return fallback;
+  }
+  // Narrow EvalValue union: only "color" variants are acceptable here.
+  if (result.type === "color") {
+    return result.value;
+  }
   return fallback;
 }
 
@@ -139,6 +154,8 @@ export function resolveStyleValueColor(
  *
  * - Literal: return the embedded value (guarded for finiteness).
  * - TokenRef: resolve via the token store; return fallback if missing or non-numeric.
+ * - Expression: parse and evaluate against the token store. Returns fallback
+ *   on parse error, evaluation error, or when the result is not a finite number.
  */
 export function resolveStyleValueNumber(
   sv: StyleValue<number>,
@@ -153,6 +170,20 @@ export function resolveStyleValueNumber(
     const resolved = resolveNumberToken(tokens, sv.name);
     return resolved !== null ? resolved : fallback;
   }
-  // sv.type === "expression" — expression evaluation is deferred; return fallback
+  // sv.type === "expression"
+  const parsed = parseExpression(sv.expr);
+  if (isEvalError(parsed)) {
+    return fallback;
+  }
+  const result = evaluateExpression(parsed, tokens);
+  if (isEvalError(result)) {
+    return fallback;
+  }
+  // Narrow EvalValue union: only finite numbers are acceptable here.
+  // Guard per CLAUDE.md §11 Floating-Point Validation — reject NaN/Infinity
+  // from expression evaluation at its entry point.
+  if (result.type === "number" && Number.isFinite(result.value)) {
+    return result.value;
+  }
   return fallback;
 }

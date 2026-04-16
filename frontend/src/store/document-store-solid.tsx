@@ -44,6 +44,8 @@ import {
 import type { TextStylePatch } from "./document-store-types";
 import { resolveToken as resolveTokenPure } from "./token-store";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
+import { isValidExpressionLength } from "./style-value-validate";
+import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -508,6 +510,30 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("sigil-announce-error", { detail: { message } }));
     }
+  }
+
+  /**
+   * RF-022: Validate MAX_EXPRESSION_LENGTH at the outbound transport boundary.
+   *
+   * Returns true and announces an error if any StyleValue<*> in `values`
+   * carries an expression longer than MAX_EXPRESSION_LENGTH. Callers should
+   * early-return when this helper returns true — the mutation is rejected.
+   *
+   * Per CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports",
+   * the store layer is a transport boundary and must match Rust-side limits
+   * (see `StyleValue::Expression` validation in `crates/core/src/types/`).
+   */
+  function rejectOversizedExpression(
+    fieldLabel: string,
+    ...values: ReadonlyArray<StyleValue<unknown> | null | undefined>
+  ): boolean {
+    for (const sv of values) {
+      if (sv && sv.type === "expression" && !isValidExpressionLength(sv.expr)) {
+        announceError(`${fieldLabel}: expression exceeds ${MAX_EXPRESSION_LENGTH} characters`);
+        return true;
+      }
+    }
+    return false;
   }
 
   // Client session ID for self-echo suppression (RF-004)
@@ -992,12 +1018,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   function setOpacity(uuid: string, opacity: StyleValue<number>): void {
     // Validate literal values: 0..=1 range and finite.
-    // Token refs and expressions are accepted unconditionally — their runtime
-    // value is validated by the renderer at evaluation time.
+    // Token refs accepted unconditionally — their runtime value is validated
+    // by the renderer at evaluation time. Expressions additionally bounded by
+    // MAX_EXPRESSION_LENGTH (RF-022).
     if (opacity.type === "literal") {
       const v = opacity.value;
       if (!Number.isFinite(v) || v < 0 || v > 1) return;
     }
+    if (rejectOversizedExpression("opacity", opacity)) return;
 
     const node = state.nodes[uuid];
     if (!node) return;
@@ -1032,6 +1060,23 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const node = state.nodes[uuid];
     if (!node) return;
 
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    // Validate every StyleValue embedded in each fill: solid `color`, and
+    // gradient stop `color` for gradient variants.
+    for (const fill of fills) {
+      if (fill.type === "solid") {
+        if (rejectOversizedExpression("fill color", fill.color)) return;
+      } else if (
+        fill.type === "linear_gradient" ||
+        fill.type === "radial_gradient" ||
+        fill.type === "conic_gradient"
+      ) {
+        for (const stop of fill.gradient.stops) {
+          if (rejectOversizedExpression("gradient stop color", stop.color)) return;
+        }
+      }
+    }
+
     let clonedFills: Fill[];
     try {
       clonedFills = deepClone(fills);
@@ -1055,6 +1100,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const node = state.nodes[uuid];
     if (!node) return;
 
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    for (const stroke of strokes) {
+      if (rejectOversizedExpression("stroke color/width", stroke.color, stroke.width)) return;
+    }
+
     let clonedStrokes: Stroke[];
     try {
       clonedStrokes = deepClone(strokes);
@@ -1077,6 +1127,24 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setEffects(uuid: string, effects: Effect[]): void {
     const node = state.nodes[uuid];
     if (!node) return;
+
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    for (const effect of effects) {
+      if (effect.type === "drop_shadow" || effect.type === "inner_shadow") {
+        if (
+          rejectOversizedExpression(
+            "shadow color/blur/spread",
+            effect.color,
+            effect.blur,
+            effect.spread,
+          )
+        ) {
+          return;
+        }
+      } else if (effect.type === "layer_blur" || effect.type === "background_blur") {
+        if (rejectOversizedExpression("blur radius", effect.radius)) return;
+      }
+    }
 
     let clonedEffects: Effect[];
     try {
@@ -1153,6 +1221,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setTextStyle(uuid: string, patch: TextStylePatch): void {
     const node = state.nodes[uuid];
     if (!node || node.kind.type !== "text") return;
+
+    // RF-022: Reject oversized expression strings at the transport boundary
+    // for the StyleValue-typed text style fields.
+    if (
+      patch.field === "font_size" ||
+      patch.field === "line_height" ||
+      patch.field === "letter_spacing" ||
+      patch.field === "text_color"
+    ) {
+      if (rejectOversizedExpression(`text ${patch.field}`, patch.value)) return;
+    }
 
     // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
     let previousKind: typeof node.kind;

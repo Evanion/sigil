@@ -211,8 +211,11 @@ export function FillRow(props: FillRowProps) {
     props.onUpdate(props.index, newFill);
   }
 
-  function handleColorCommit(raw: string): void {
-    handleColorChange(raw);
+  function handleColorCommit(_raw: string): void {
+    // RF-004: Value was already applied via onChange during the gesture.
+    // onCommit only signals the gesture boundary so the parent can flush
+    // buffered writes into a single history entry. Calling handleColorChange
+    // here would double-dispatch the store write.
     props.onCommit?.();
   }
 

@@ -152,8 +152,8 @@ export const AppearancePanel: Component = () => {
     store.setOpacity(uuid, sv);
   }
 
-  function handleOpacityCommit(raw: string): void {
-    handleOpacityChange(raw);
+  function handleOpacityCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
     // Flush any buffered intermediate writes into a single undo entry at the
     // gesture boundary (CLAUDE.md "Continuous-Value Controls Must Coalesce
     // History Entries").
