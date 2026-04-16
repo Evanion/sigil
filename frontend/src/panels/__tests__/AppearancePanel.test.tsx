@@ -466,6 +466,38 @@ describe("AppearancePanel", () => {
     expect(flushHistory).toHaveBeenCalled();
   });
 
+  // ── Opacity token binding ───────────────────────────────────────────
+  //
+  // Verifies the full wiring: combobox input containing a token-ref string
+  // → parseOpacityInput → store.setOpacity called with { type: "token_ref" }.
+  //
+  // jsdom does not support the Selection API used inside ValueInput's
+  // renderHighlighted/getCursorOffset helpers, so we set textContent directly
+  // on the contentEditable combobox element before firing the keydown event.
+  // This is the lightest feasible path that exercises the real parse → store
+  // dispatch chain without mocking internal ValueInput details.
+  it("should call setOpacity with a token_ref StyleValue when a token ref is entered and committed", () => {
+    const setOpacity = vi.fn();
+    const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 1 }) });
+    store.setOpacity = setOpacity;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
+    // Set the raw text directly on the contentEditable div so that
+    // ValueInput's getInputText() returns the token-ref string.
+    opacityInput.textContent = "{opacity.subtle}";
+    fireEvent.keyDown(opacityInput, { key: "Enter" });
+    expect(setOpacity).toHaveBeenCalledWith("node-1", {
+      type: "token_ref",
+      name: "opacity.subtle",
+    });
+  });
+
   it("test_max_strokes_enforced: should not add stroke when at maximum (32)", () => {
     const strokes = Array.from({ length: 32 }, () => ({
       ...solidStroke,

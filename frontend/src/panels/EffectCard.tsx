@@ -147,7 +147,6 @@ function coerceEffectType(prev: Effect, newType: EffectType): Effect {
   }
 }
 
-/** Compute a CSS background for the shadow color swatch. */
 // ── EffectCard component ─────────────────────────────────────────────────
 
 export function EffectCard(props: EffectCardProps) {
