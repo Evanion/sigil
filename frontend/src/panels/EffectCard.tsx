@@ -22,10 +22,17 @@ import type {
   EffectLayerBlur,
   EffectBackgroundBlur,
   StyleValue,
+  Token,
 } from "../types/document";
 import { GripVertical } from "lucide-solid";
-import { ColorSwatch } from "../components/color-picker";
-import { NumberInput } from "../components/number-input/NumberInput";
+import ValueInput from "../components/value-input/ValueInput";
+import {
+  formatColorStyleValue,
+  formatNumber,
+  formatNumberStyleValue,
+  parseColorInput,
+  parseNumberInput,
+} from "./panel-value-helpers";
 import "./EffectCard.css";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -35,6 +42,10 @@ export interface EffectCardProps {
   readonly index: number;
   readonly onUpdate: (index: number, effect: Effect) => void;
   readonly onRemove: (index: number) => void;
+  /** Token dictionary for ValueInput autocomplete. Defaults to empty. */
+  readonly tokens?: Record<string, Token>;
+  /** Called at gesture boundaries so the parent can flush its history buffer. */
+  readonly onCommit?: () => void;
 }
 
 type EffectType = Effect["type"];
@@ -52,26 +63,6 @@ const DEFAULT_SHADOW_COLOR: StyleValue<Color> = {
   type: "literal",
   value: { space: "srgb", r: 0, g: 0, b: 0, a: 0.3 },
 };
-
-/**
- * Extract the numeric value from a StyleValue<number> (0 if token_ref or non-finite).
- * Used for blur, spread, and radius fields.
- */
-function styleValueToNumber(sv: StyleValue<number>): number {
-  if (sv.type === "literal") {
-    const v = sv.value;
-    return Number.isFinite(v) ? v : 0;
-  }
-  return 0;
-}
-
-/** Extract the literal Color from a shadow color StyleValue (fallback black). */
-function shadowColorValue(sv: StyleValue<Color>): Color {
-  if (sv.type === "literal") {
-    return sv.value;
-  }
-  return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
-}
 
 /**
  * Build a new Effect of the requested type, preserving compatible fields
@@ -187,45 +178,88 @@ export function EffectCard(props: EffectCardProps) {
 
   // ── Shadow-specific callbacks ──────────────────────────────────────────
 
-  function handleColorChange(newColor: Color): void {
+  function handleColorChange(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
-    const newColorSv: StyleValue<Color> = { type: "literal", value: newColor };
-    props.onUpdate(props.index, { ...props.effect, color: newColorSv });
+    const parsed = parseColorInput(raw);
+    if (!parsed) return;
+    props.onUpdate(props.index, { ...props.effect, color: parsed });
   }
 
-  function handleOffsetX(v: number): void {
-    if (!Number.isFinite(v)) return;
+  function handleColorCommit(raw: string): void {
+    handleColorChange(raw);
+    props.onCommit?.();
+  }
+
+  /**
+   * Offset handlers only accept literal numeric input — the `Point` data model
+   * stores plain numbers, not a `StyleValue<number>`. Token refs and
+   * expressions in X/Y are silently ignored; a future data-model change can
+   * lift this restriction.
+   */
+  function handleOffsetX(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
+    const parsed = parseNumberInput(raw);
+    if (!parsed || parsed.type !== "literal") return;
+    const v = parsed.value;
+    if (!Number.isFinite(v)) return;
     props.onUpdate(props.index, { ...props.effect, offset: { ...props.effect.offset, x: v } });
   }
 
-  function handleOffsetY(v: number): void {
-    if (!Number.isFinite(v)) return;
+  function handleOffsetXCommit(raw: string): void {
+    handleOffsetX(raw);
+    props.onCommit?.();
+  }
+
+  function handleOffsetY(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
+    const parsed = parseNumberInput(raw);
+    if (!parsed || parsed.type !== "literal") return;
+    const v = parsed.value;
+    if (!Number.isFinite(v)) return;
     props.onUpdate(props.index, { ...props.effect, offset: { ...props.effect.offset, y: v } });
   }
 
-  function handleBlur(v: number): void {
-    if (!Number.isFinite(v)) return;
-    if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
-    const newBlur: StyleValue<number> = { type: "literal", value: v };
-    props.onUpdate(props.index, { ...props.effect, blur: newBlur });
+  function handleOffsetYCommit(raw: string): void {
+    handleOffsetY(raw);
+    props.onCommit?.();
   }
 
-  function handleSpread(v: number): void {
-    if (!Number.isFinite(v)) return;
+  function handleBlur(raw: string): void {
     if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
-    const newSpread: StyleValue<number> = { type: "literal", value: v };
-    props.onUpdate(props.index, { ...props.effect, spread: newSpread });
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    props.onUpdate(props.index, { ...props.effect, blur: parsed });
+  }
+
+  function handleBlurCommit(raw: string): void {
+    handleBlur(raw);
+    props.onCommit?.();
+  }
+
+  function handleSpread(raw: string): void {
+    if (props.effect.type !== "drop_shadow" && props.effect.type !== "inner_shadow") return;
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    props.onUpdate(props.index, { ...props.effect, spread: parsed });
+  }
+
+  function handleSpreadCommit(raw: string): void {
+    handleSpread(raw);
+    props.onCommit?.();
   }
 
   // ── Blur-specific callbacks ────────────────────────────────────────────
 
-  function handleRadius(v: number): void {
-    if (!Number.isFinite(v)) return;
+  function handleRadius(raw: string): void {
     if (props.effect.type !== "layer_blur" && props.effect.type !== "background_blur") return;
-    const newRadius: StyleValue<number> = { type: "literal", value: v };
-    props.onUpdate(props.index, { ...props.effect, radius: newRadius });
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    props.onUpdate(props.index, { ...props.effect, radius: parsed });
+  }
+
+  function handleRadiusCommit(raw: string): void {
+    handleRadius(raw);
+    props.onCommit?.();
   }
 
   // ── Derived values (computed inside render, not in createMemo to stay
@@ -235,39 +269,37 @@ export function EffectCard(props: EffectCardProps) {
     () => props.effect.type === "drop_shadow" || props.effect.type === "inner_shadow",
   );
 
-  const shadowColor = createMemo(() => {
-    if (!isShadow()) return { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
+  const shadowColorDisplay = createMemo(() => {
+    if (!isShadow()) return "";
     const s = props.effect as EffectDropShadow | EffectInnerShadow;
-    return shadowColorValue(s.color);
+    return formatColorStyleValue(s.color);
   });
 
-  // shadowBackground removed — ColorSwatch handles its own display
-
-  const offsetX = createMemo(() => {
-    if (!isShadow()) return 0;
+  const offsetXDisplay = createMemo(() => {
+    if (!isShadow()) return "";
     const v = (props.effect as EffectDropShadow).offset.x;
-    return Number.isFinite(v) ? v : 0;
+    return formatNumber(v);
   });
 
-  const offsetY = createMemo(() => {
-    if (!isShadow()) return 0;
+  const offsetYDisplay = createMemo(() => {
+    if (!isShadow()) return "";
     const v = (props.effect as EffectDropShadow).offset.y;
-    return Number.isFinite(v) ? v : 0;
+    return formatNumber(v);
   });
 
-  const blurVal = createMemo(() => {
-    if (!isShadow()) return 0;
-    return styleValueToNumber((props.effect as EffectDropShadow).blur);
+  const blurDisplay = createMemo(() => {
+    if (!isShadow()) return "";
+    return formatNumberStyleValue((props.effect as EffectDropShadow).blur);
   });
 
-  const spreadVal = createMemo(() => {
-    if (!isShadow()) return 0;
-    return styleValueToNumber((props.effect as EffectDropShadow).spread);
+  const spreadDisplay = createMemo(() => {
+    if (!isShadow()) return "";
+    return formatNumberStyleValue((props.effect as EffectDropShadow).spread);
   });
 
-  const radiusVal = createMemo(() => {
-    if (isShadow()) return 0;
-    return styleValueToNumber((props.effect as EffectLayerBlur).radius);
+  const radiusDisplay = createMemo(() => {
+    if (isShadow()) return "";
+    return formatNumberStyleValue((props.effect as EffectLayerBlur).radius);
   });
 
   return (
@@ -306,48 +338,67 @@ export function EffectCard(props: EffectCardProps) {
         <div class="sigil-effect-card__fields">
           {/* Color row spans full width */}
           <div class="sigil-effect-card__shadow-color-row">
-            <ColorSwatch color={shadowColor()} onColorChange={handleColorChange} />
+            <ValueInput
+              value={shadowColorDisplay()}
+              onChange={handleColorChange}
+              onCommit={handleColorCommit}
+              tokens={props.tokens ?? {}}
+              acceptedTypes={["color"]}
+              aria-label="Shadow color"
+            />
           </div>
 
-          <NumberInput
-            value={offsetX()}
-            onValueChange={handleOffsetX}
+          {/*
+            X/Y offsets bind to the `Point` data model which stores plain
+            numbers — token refs and expressions cannot be persisted here.
+            We pass `tokens={{}}` to suppress the `{` autocomplete dropdown
+            rather than offering a broken affordance; handleOffsetX/Y also
+            reject non-literal inputs defensively.
+            TODO(spec-13c): Promote `Point` to `{ x: StyleValue<number>,
+            y: StyleValue<number> }` to enable token binding on offsets.
+          */}
+          <ValueInput
+            value={offsetXDisplay()}
+            onChange={handleOffsetX}
+            onCommit={handleOffsetXCommit}
+            tokens={{}}
+            acceptedTypes={["number"]}
             aria-label="X offset"
-            prefix="X"
-            step={1}
           />
-          <NumberInput
-            value={offsetY()}
-            onValueChange={handleOffsetY}
+          <ValueInput
+            value={offsetYDisplay()}
+            onChange={handleOffsetY}
+            onCommit={handleOffsetYCommit}
+            tokens={{}}
+            acceptedTypes={["number"]}
             aria-label="Y offset"
-            prefix="Y"
-            step={1}
           />
-          <NumberInput
-            value={blurVal()}
-            onValueChange={handleBlur}
+          <ValueInput
+            value={blurDisplay()}
+            onChange={handleBlur}
+            onCommit={handleBlurCommit}
+            tokens={props.tokens ?? {}}
+            acceptedTypes={["number"]}
             aria-label="Blur"
-            prefix="B"
-            step={1}
-            min={0}
           />
-          <NumberInput
-            value={spreadVal()}
-            onValueChange={handleSpread}
+          <ValueInput
+            value={spreadDisplay()}
+            onChange={handleSpread}
+            onCommit={handleSpreadCommit}
+            tokens={props.tokens ?? {}}
+            acceptedTypes={["number"]}
             aria-label="Spread"
-            prefix="S"
-            step={1}
           />
         </div>
       ) : (
         <div class="sigil-effect-card__fields sigil-effect-card__fields--single">
-          <NumberInput
-            value={radiusVal()}
-            onValueChange={handleRadius}
+          <ValueInput
+            value={radiusDisplay()}
+            onChange={handleRadius}
+            onCommit={handleRadiusCommit}
+            tokens={props.tokens ?? {}}
+            acceptedTypes={["number"]}
             aria-label="Radius"
-            prefix="R"
-            step={1}
-            min={0}
           />
         </div>
       )}

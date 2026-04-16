@@ -177,8 +177,10 @@ export const EffectsPanel: Component = () => {
             <EffectCard
               effect={effect()}
               index={index}
+              tokens={store.state.tokens}
               onUpdate={handleUpdate}
               onRemove={handleRemove}
+              onCommit={() => store.flushHistory()}
             />
           </div>
         )}

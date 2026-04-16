@@ -12,6 +12,7 @@ import type {
   Stroke,
   Effect,
   BlendMode,
+  StyleValue,
   TextStyle,
   Token,
   TokenType,
@@ -112,7 +113,7 @@ export interface DocumentStoreAPI {
   setLocked(uuid: string, locked: boolean): void;
   reparentNode(uuid: string, newParentUuid: string, position: number): void;
   reorderChildren(uuid: string, newPosition: number): void;
-  setOpacity(uuid: string, opacity: number): void;
+  setOpacity(uuid: string, opacity: StyleValue<number>): void;
   setBlendMode(uuid: string, blendMode: BlendMode): void;
   setFills(uuid: string, fills: Fill[]): void;
   setStrokes(uuid: string, strokes: Stroke[]): void;
@@ -989,19 +990,25 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
-  function setOpacity(uuid: string, opacity: number): void {
-    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return;
+  function setOpacity(uuid: string, opacity: StyleValue<number>): void {
+    // Validate literal values: 0..=1 range and finite.
+    // Token refs and expressions are accepted unconditionally — their runtime
+    // value is validated by the renderer at evaluation time.
+    if (opacity.type === "literal") {
+      const v = opacity.value;
+      if (!Number.isFinite(v) || v < 0 || v > 1) return;
+    }
 
     const node = state.nodes[uuid];
     if (!node) return;
 
-    interceptor.set(uuid, "style.opacity", { type: "literal", value: opacity });
+    interceptor.set(uuid, "style.opacity", opacity);
     // RF-026: Queue server op — sent when interceptor commits (coalesced)
     pendingServerOps.push({
       setField: {
         nodeUuid: uuid,
         path: "style.opacity",
-        value: JSON.stringify({ type: "literal", value: opacity }),
+        value: JSON.stringify(opacity),
       },
     });
   }

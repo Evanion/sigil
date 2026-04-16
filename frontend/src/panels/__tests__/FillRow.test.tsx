@@ -106,16 +106,28 @@ describe("FillRow", () => {
     expect(handle?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("should render a color swatch span inside a trigger button for solid fills", () => {
+  it("should render a Fill color ValueInput combobox for solid fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const swatch = document.querySelector(".sigil-color-swatch");
-    expect(swatch).toBeTruthy();
-    expect(swatch?.tagName.toLowerCase()).toBe("span");
-    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    expect(combobox).toBeTruthy();
+    // The ValueInput exposes a color swatch trigger button alongside the combobox.
+    const swatchBtn = document.querySelector(".sigil-token-input__swatch-btn");
+    expect(swatchBtn).toBeTruthy();
+  });
+
+  it("should render the hex color of the solid fill in the combobox value", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    renderWithI18n(() => (
+      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    // Solid red => #ff0000
+    expect(combobox.textContent).toContain("#ff0000");
   });
 
   it("should render a remove button with aria-label", () => {
@@ -221,7 +233,29 @@ describe("FillRow", () => {
     expect(swatch).toBeNull();
   });
 
-  it("should show gradient swatch instead of color swatch for gradient fills", () => {
+  // ── flushHistory wiring via onCommit prop ────────────────────────────
+
+  it("should invoke onCommit when the color ValueInput commits via Enter", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    const onCommit = vi.fn();
+    renderWithI18n(() => (
+      <FillRow
+        fill={solidFill}
+        index={0}
+        onUpdate={onUpdate}
+        onRemove={onRemove}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    // ValueInput fires onCommit on Enter — the FillRow forwards to props.onCommit
+    // so AppearancePanel can call store.flushHistory().
+    fireEvent.keyDown(combobox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
+  });
+
+  it("should show gradient swatch instead of ValueInput for gradient fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
@@ -229,8 +263,9 @@ describe("FillRow", () => {
     ));
     const gradientSwatch = document.querySelector(".sigil-gradient-swatch");
     expect(gradientSwatch).toBeTruthy();
-    // Should not have the regular color swatch
-    const colorSwatch = document.querySelector(".sigil-color-swatch");
-    expect(colorSwatch).toBeNull();
+    // Gradient fills should not expose the Fill color combobox — the gradient
+    // editor replaces the per-fill color control.
+    const fillColor = screen.queryByRole("combobox", { name: "Fill color" });
+    expect(fillColor).toBeNull();
   });
 });

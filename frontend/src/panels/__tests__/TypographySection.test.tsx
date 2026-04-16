@@ -365,12 +365,10 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    // NumberInput renders the value in an input element
-    const inputs = document.querySelectorAll("input");
-    const fontSizeInput = Array.from(inputs).find(
-      (el) => el.closest("[aria-label='Font size']") !== null,
-    );
-    expect(fontSizeInput).toBeTruthy();
+    // ValueInput renders a combobox with the numeric value as text content.
+    const fontSize = screen.getByRole("combobox", { name: "Font size" });
+    expect(fontSize).toBeTruthy();
+    expect(fontSize.textContent).toContain("24");
   });
 
   // ── Color row ────────────────────────────────────────────────────────
@@ -398,8 +396,10 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    const liveRegion = screen.getByRole("status");
-    expect(liveRegion).toBeTruthy();
+    // TypographySection exposes its own live region alongside ValueInput's
+    // internal regions — assert at least one exists.
+    const liveRegions = screen.getAllByRole("status");
+    expect(liveRegions.length).toBeGreaterThan(0);
   });
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────
@@ -586,6 +586,58 @@ describe("TypographySection", () => {
     expect(shadowGroup.querySelector("[aria-label='Shadow offset X']")).toBeTruthy();
     expect(shadowGroup.querySelector("[aria-label='Shadow offset Y']")).toBeTruthy();
     expect(shadowGroup.querySelector("[aria-label='Shadow blur radius']")).toBeTruthy();
+  });
+
+  // ── flushHistory on ValueInput commit ────────────────────────────────
+
+  it("should call flushHistory when the font size ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ font_size: 24 }) });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fontSize = screen.getByRole("combobox", { name: "Font size" });
+    // Enter fires ValueInput's onCommit which forwards to handleFontSizeCommit
+    // → store.flushHistory().
+    fireEvent.keyDown(fontSize, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  it("should call flushHistory when the font family ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fontFamily = screen.getByRole("combobox", { name: "Font family" });
+    fireEvent.keyDown(fontFamily, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  it("should call flushHistory when the text color ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const textColor = screen.getByRole("combobox", { name: "Text color" });
+    fireEvent.keyDown(textColor, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
   });
 
   it("should reject shadow blur values above MAX_SHADOW_BLUR", () => {

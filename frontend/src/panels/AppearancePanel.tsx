@@ -23,12 +23,13 @@
  * spec, switch to ID-based dispatch here.
  */
 import { createMemo, createSignal, Index, Show, type Component } from "solid-js";
-import type { BlendMode, Fill, FillSolid, Stroke } from "../types/document";
+import type { BlendMode, Fill, FillSolid, Stroke, StyleValue } from "../types/document";
 import { useDocument } from "../store/document-context";
-import { NumberInput } from "../components/number-input/NumberInput";
+import ValueInput from "../components/value-input/ValueInput";
 import { Select } from "../components/select/Select";
 import { FillRow } from "./FillRow";
 import { StrokeRow } from "./StrokeRow";
+import { formatOpacityStyleValue, parseOpacityInput } from "./panel-value-helpers";
 import "./AppearancePanel.css";
 
 // ── UI boundary limits (RF-017) ───────────────────────────────────────
@@ -101,17 +102,14 @@ export const AppearancePanel: Component = () => {
   });
 
   /**
-   * Opacity displayed in the UI as 0–100.
-   * The store stores 0–1; the StyleValue wrapper is unwrapped here.
-   * Fallback to 100 if not a literal or non-finite.
+   * Opacity as a display string for ValueInput. Literals render as 0..=100
+   * percent integers; token refs render as `{name}`; expressions render as
+   * their raw expression text. Empty string when no node is selected.
    */
-  const opacityPercent = createMemo((): number => {
+  const opacityDisplay = createMemo((): string => {
     const n = node();
-    if (!n) return 100;
-    const sv = n.style.opacity;
-    if (sv.type !== "literal") return 100;
-    const raw = sv.value * 100;
-    return Number.isFinite(raw) ? Math.round(raw) : 100;
+    if (!n) return "";
+    return formatOpacityStyleValue(n.style.opacity);
   });
 
   const blendMode = createMemo((): BlendMode => {
@@ -135,19 +133,31 @@ export const AppearancePanel: Component = () => {
   // ── Opacity handler ───────────────────────────────────────────────
 
   /**
-   * Called by NumberInput with the new 0–100 value.
-   * Converts to 0–1 before calling setOpacity.
-   * Guard: Number.isFinite() per CLAUDE.md §11.
+   * Called by ValueInput with the raw display string.
+   * Parses the string into a `StyleValue<number>` (literal percent, token ref
+   * or expression) and forwards to `store.setOpacity`. Non-parseable input is
+   * ignored — the user is still typing or typed an invalid value.
+   *
+   * `onCommit` forwards to the same handler; the store coalesces rapid
+   * intermediate calls via the interceptor. A final commit is a plain forward
+   * write — the store delivers one history entry per gesture through its
+   * existing flush semantics.
    */
-  function handleOpacityChange(pct: number): void {
-    if (!Number.isFinite(pct)) return;
+  function handleOpacityChange(raw: string): void {
     const uuid = selectedUuid();
     if (!uuid) return;
-    // The store validates 0..=1 internally, but we also reject out-of-range
-    // here to avoid sending invalid input.
-    const value = pct / 100;
-    if (!Number.isFinite(value) || value < 0 || value > 1) return;
-    store.setOpacity(uuid, value);
+    const parsed = parseOpacityInput(raw);
+    if (!parsed) return;
+    const sv: StyleValue<number> = parsed;
+    store.setOpacity(uuid, sv);
+  }
+
+  function handleOpacityCommit(raw: string): void {
+    handleOpacityChange(raw);
+    // Flush any buffered intermediate writes into a single undo entry at the
+    // gesture boundary (CLAUDE.md "Continuous-Value Controls Must Coalesce
+    // History Entries").
+    store.flushHistory();
   }
 
   // ── Blend mode handler ────────────────────────────────────────────
@@ -347,14 +357,13 @@ export const AppearancePanel: Component = () => {
     <div class="sigil-appearance-panel" role="region" aria-label="Appearance">
       {/* ── Opacity + Blend mode row ─────────────────────────────── */}
       <div class="sigil-appearance-panel__opacity-blend">
-        <NumberInput
-          value={opacityPercent()}
-          onValueChange={handleOpacityChange}
+        <ValueInput
+          value={opacityDisplay()}
+          onChange={handleOpacityChange}
+          onCommit={handleOpacityCommit}
+          tokens={store.state.tokens}
+          acceptedTypes={["number"]}
           aria-label="Opacity"
-          step={1}
-          min={0}
-          max={100}
-          suffix="%"
           disabled={selectedUuid() === null}
         />
         <Select
@@ -402,10 +411,12 @@ export const AppearancePanel: Component = () => {
               <FillRow
                 fill={fill()}
                 index={index}
+                tokens={store.state.tokens}
                 onUpdate={handleFillUpdate}
                 onRemove={handleFillRemove}
                 onDragStart={handleGradientDragStart}
                 onDragEnd={handleGradientDragEnd}
+                onCommit={handleGradientDragEnd}
               />
             </div>
           )}
@@ -448,8 +459,10 @@ export const AppearancePanel: Component = () => {
               <StrokeRow
                 stroke={stroke()}
                 index={index}
+                tokens={store.state.tokens}
                 onUpdate={handleStrokeUpdate}
                 onRemove={handleStrokeRemove}
+                onCommit={handleGradientDragEnd}
               />
             </div>
           )}

@@ -145,10 +145,7 @@ export function resolveTokenTypeFilter(
  * Returns a ColorSrgb if the value is a hex literal or a single token ref
  * that resolves to a color token. Returns null otherwise.
  */
-export function resolveSwatchColor(
-  value: string,
-  tokens: Record<string, Token>,
-): ColorSrgb | null {
+export function resolveSwatchColor(value: string, tokens: Record<string, Token>): ColorSrgb | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
 
@@ -273,9 +270,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   const acceptsColor = createMemo<boolean>(() => effectiveAcceptedTypes().includes("color"));
 
   /** Whether this field accepts font_family values (controls font autocomplete). */
-  const isFontField = createMemo<boolean>(() =>
-    effectiveAcceptedTypes().includes("font_family"),
-  );
+  const isFontField = createMemo<boolean>(() => effectiveAcceptedTypes().includes("font_family"));
 
   /** Resolve the token type filter for autocomplete. */
   const tokenTypeFilter = createMemo<TokenType | undefined>(() =>
@@ -881,11 +876,17 @@ const ValueInput: Component<ValueInputProps> = (props) => {
               "position-try-fallbacks": "flip-block",
             }}
           >
-            <ColorPicker
-              color={pickerColor()}
-              onColorChange={handleColorPickerChange}
-              onColorCommit={handleColorPickerCommit}
-            />
+            {/* Mount the ColorPicker only when the popover is open to avoid
+                running its ResizeObserver / rAF loops while the control is
+                idle — this also keeps Vitest+jsdom environments happy since
+                the picker's canvas strips require ResizeObserver. */}
+            <Show when={colorPickerOpen()}>
+              <ColorPicker
+                color={pickerColor()}
+                onColorChange={handleColorPickerChange}
+                onColorCommit={handleColorPickerCommit}
+              />
+            </Show>
           </div>
         </Show>
 
