@@ -106,7 +106,11 @@ export function detectValueMode(input: string, acceptedTypes: readonly ValueType
   }
 
   // Rule 4: Numeric literal
-  const firstChar = input[0]!;
+  // input.length > 0 is guaranteed by the guard at the top of this function
+  // (empty / whitespace-only strings return "unknown" early). The ?? ""
+  // fallback satisfies TypeScript's strict index access without a non-null
+  // assertion.
+  const firstChar = input[0] ?? "";
   const secondChar = input.length > 1 ? input[1] : undefined;
 
   if (isDigit(firstChar)) {

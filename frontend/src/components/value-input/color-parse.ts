@@ -80,37 +80,47 @@ export function parseHexColor(hex: string): ColorSrgb | null {
   let aHigh: string;
   let aLow: string;
 
+  // Split into individual characters. We have already validated that every
+  // character is a hex digit (loop above), so an undefined entry here would
+  // indicate a length mismatch that the branch conditions below prevent.
+  // Using [...stripped] gives a proper string[] with no undefined entries for
+  // any index within the array bounds.
+  const chars = [...stripped];
+
   if (stripped.length === 3) {
     // #RGB → #RRGGBB
-    const expanded = expandHexDigit(stripped[0]!);
-    const expandedG = expandHexDigit(stripped[1]!);
-    const expandedB = expandHexDigit(stripped[2]!);
-    rHigh = expanded[0]!;
-    rLow = expanded[1]!;
-    gHigh = expandedG[0]!;
-    gLow = expandedG[1]!;
-    bHigh = expandedB[0]!;
-    bLow = expandedB[1]!;
+    // chars[0..2] are defined because stripped.length === 3.
+    const expanded = expandHexDigit(chars[0] ?? "");
+    const expandedG = expandHexDigit(chars[1] ?? "");
+    const expandedB = expandHexDigit(chars[2] ?? "");
+    rHigh = expanded[0] ?? "";
+    rLow = expanded[1] ?? "";
+    gHigh = expandedG[0] ?? "";
+    gLow = expandedG[1] ?? "";
+    bHigh = expandedB[0] ?? "";
+    bLow = expandedB[1] ?? "";
     aHigh = "f";
     aLow = "f";
   } else if (stripped.length === 6) {
-    rHigh = stripped[0]!;
-    rLow = stripped[1]!;
-    gHigh = stripped[2]!;
-    gLow = stripped[3]!;
-    bHigh = stripped[4]!;
-    bLow = stripped[5]!;
+    // chars[0..5] are defined because stripped.length === 6.
+    rHigh = chars[0] ?? "";
+    rLow = chars[1] ?? "";
+    gHigh = chars[2] ?? "";
+    gLow = chars[3] ?? "";
+    bHigh = chars[4] ?? "";
+    bLow = chars[5] ?? "";
     aHigh = "f";
     aLow = "f";
   } else if (stripped.length === 8) {
-    rHigh = stripped[0]!;
-    rLow = stripped[1]!;
-    gHigh = stripped[2]!;
-    gLow = stripped[3]!;
-    bHigh = stripped[4]!;
-    bLow = stripped[5]!;
-    aHigh = stripped[6]!;
-    aLow = stripped[7]!;
+    // chars[0..7] are defined because stripped.length === 8.
+    rHigh = chars[0] ?? "";
+    rLow = chars[1] ?? "";
+    gHigh = chars[2] ?? "";
+    gLow = chars[3] ?? "";
+    bHigh = chars[4] ?? "";
+    bLow = chars[5] ?? "";
+    aHigh = chars[6] ?? "";
+    aLow = chars[7] ?? "";
   } else {
     // Invalid length (2, 4, 5, 7, 9+)
     return null;

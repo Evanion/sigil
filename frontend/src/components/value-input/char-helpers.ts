@@ -86,8 +86,12 @@ export function hasOperatorOutsideBraces(input: string): boolean {
 export function hasFunctionCall(input: string): boolean {
   let pos = 0;
   while (pos < input.length) {
-    if (isIdentStart(input[pos]!)) {
-      while (pos < input.length && isIdentChar(input[pos]!)) {
+    // pos < input.length is guaranteed by the outer while condition, so
+    // input[pos] is defined. The ?? "" fallback satisfies TypeScript's
+    // strict index access without a non-null assertion.
+    const ch = input[pos] ?? "";
+    if (isIdentStart(ch)) {
+      while (pos < input.length && isIdentChar(input[pos] ?? "")) {
         pos++;
       }
       // If the identifier is followed by '(', it's a function call
