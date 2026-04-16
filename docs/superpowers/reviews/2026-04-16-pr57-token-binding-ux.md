@@ -7,7 +7,19 @@
 
 ## Summary
 
-9 specialized agents ran in parallel. Findings deduplicated and grouped below by severity. **3 Critical** issues block merge; all involve cross-stack parity (TS/Rust, renderer, drag-coalescing) that the PR description claims to ship but does not actually wire end-to-end.
+9 specialized agents ran in parallel. Findings deduplicated and grouped below by severity. **3 Critical** issues were identified — all involve cross-stack parity (TS/Rust, renderer, drag-coalescing) that the PR description claims to ship but did not actually wire end-to-end.
+
+## Resolution Status (as of 2026-04-16)
+
+All Critical and High findings **resolved**. Major findings resolved except RF-010 (deferred — maintainability refactor, not correctness) and RF-033 (deferred — requires Rust-side changes outside Spec 13c scope). Total tests increased from 1547 → 1658 (+111).
+
+Remediation commits:
+- `ac2eee0` — Phase A: Rust StyleValue::Expression + parity tests (RF-001)
+- `dd8d4ae` — Phase C: ColorPicker drag coalescing fix (RF-003)
+- `09ac07f` — Phase B: renderer wiring + symmetric validation (RF-002/004/017/022/027/028)
+- `195c035` — Phase D: validation feedback + alpha round-trip (RF-005/006/007/014/015/016)
+- `4817c2f` — Phase E: a11y + ValueInput tests (RF-008/009/018/019/020/021/025)
+- `f25903e` — Phase F: major fixes + spec docs (RF-011/012/013/023/024/026/029/030/031/032)
 
 ---
 
@@ -16,7 +28,7 @@
 ### RF-001 — Rust `StyleValue<T>` lacks `Expression` variant
 
 **Source:** Architect, Backend Engineer, Compliance, Data Scientist
-**Status:** open
+**Status:** resolved
 
 Frontend adds `StyleValueExpression { type: "expression"; expr: string }` to `StyleValue<T>` in `frontend/src/types/document.ts:67-72`. Rust `crates/core/src/node.rs:468-475` retains only `Literal` and `TokenRef`. Every expression-typed mutation (opacity, fills, strokes, effects, text_style fields, stroke width) will fail server-side deserialization at `crates/server/src/graphql/mutation.rs:297` with `serde_json::from_value::<StyleValue<f64>>`. MCP (`crates/mcp/src/types.rs:449`) also lacks the variant; agents cannot bind expressions at all.
 
@@ -25,7 +37,7 @@ Frontend adds `StyleValueExpression { type: "expression"; expr: string }` to `St
 ### RF-002 — Canvas renderer silently discards expressions
 
 **Source:** Architect, Data Scientist
-**Status:** open
+**Status:** resolved
 
 `frontend/src/store/token-store.ts:133-157` — both `resolveStyleValueColor` and `resolveStyleValueNumber` return `fallback` for the `expression` variant with a deferral comment. Plan Task 2 Step 5 explicitly required wiring `evaluateExpression()` from `expression-eval.ts`. Users see the expression echoed in the ValueInput (status area shows resolved value) but the canvas renders the default color/number.
 
@@ -34,7 +46,7 @@ Frontend adds `StyleValueExpression { type: "expression"; expr: string }` to `St
 ### RF-003 — `onColorCommit` fires on every drag tick, flooding undo stack
 
 **Source:** Logic, Frontend Engineer, Data Scientist
-**Status:** open
+**Status:** resolved
 
 `frontend/src/components/color-picker/ColorPicker.tsx:141-147` — `createEffect(() => { const _color = props.color; commitColor(); })` tracks both `props.color` changes AND internal state signals `state.r/g/b/alpha` via `commitColor()`. During a drag: emit → parent updates store → `props.color` changes → effect re-runs → `onColorCommit` fires → `handleColorPickerCommit` → `props.onCommit(hex)` → `flushHistory()` per tick. Breaks the PR's own stated undo coalescing guarantee.
 
@@ -47,7 +59,7 @@ Frontend adds `StyleValueExpression { type: "expression"; expr: string }` to `St
 ### RF-004 — Panel commit handlers double-dispatch mutations
 
 **Source:** Logic
-**Status:** open
+**Status:** resolved
 
 In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` calls `handle*Change(raw)` AND `props.onCommit?.()`. Since `onChange` already fires before `onCommit`, the mutation applies twice per commit event. Double GraphQL mutations.
 
@@ -56,7 +68,7 @@ In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` ca
 ### RF-005 — Line-height and letter-spacing lost min validation
 
 **Source:** Git History, Logic
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/TypographySection.tsx:298-305, 312-318` — the old NumberInput had `min={0.1}`. Replacement ValueInput only checks `Number.isFinite`. Server enforces `> 0` in `crates/core/src/validate.rs:476` and will reject, but frontend has no user feedback.
 
@@ -65,7 +77,7 @@ In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` ca
 ### RF-006 — Color picker drops alpha on commit
 
 **Source:** Logic, UX
-**Status:** open
+**Status:** resolved
 
 `frontend/src/components/value-input/color-parse.ts:163-192` — `colorToHex` emits only 6-char `#rrggbb`. `handleColorPickerChange` round-trips color through hex, losing alpha. Users dragging alpha slider in ColorPicker get `#000000` stored (alpha=1) regardless.
 
@@ -74,7 +86,7 @@ In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` ca
 ### RF-007 — Font family token refs silently rejected
 
 **Source:** A11y, UX, Compliance
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/TypographySection.tsx:252` — `validateCssIdentifier("{brand.primary}")` returns false; handler silently returns. No toast, no error message. The `tokens={{}}` suppresses autocomplete but user can still type `{...}` manually, and the font autocomplete dropdown doesn't distinguish tokens vs system fonts.
 
@@ -83,7 +95,7 @@ In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` ca
 ### RF-008 — aria-live region announces on every keystroke
 
 **Source:** A11y
-**Status:** open
+**Status:** resolved
 
 `frontend/src/components/value-input/ValueInput.tsx:925-940` — `<span role="status" aria-live="polite">` switches between `"${suggestions().length} suggestions available"`, `"No suggestions"`, and `committedStatus()`. First two branches update reactively on every keystroke via `autocompleteQuery()`. Violates "aria-live Regions Must Be Scoped to Discrete Status Changes." Makes typing unusable for SR users.
 
@@ -92,7 +104,7 @@ In FillRow, StrokeRow, EffectCard, TypographySection — `handle*Commit(raw)` ca
 ### RF-009 — No `ValueInput.test.tsx`
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 The 1006-line component has no direct test file. Only extracted helpers are tested. Behaviors untested: cursor preservation, auto-pairing, Enter/Escape/Tab flow, color-picker commit path, external value sync, paste truncation, onCommit drag contract.
 
@@ -101,14 +113,16 @@ The 1006-line component has no direct test file. Only extracted helpers are test
 ### RF-010 — ValueInput file size (1006 lines)
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** deferred — follow-up
 
 Component conflates 6 responsibilities. Extract: `useAutocomplete` composable, `<SwatchPopover>` component, `<HighlightedEditor>` component. Target ~300 lines for ValueInput itself.
+
+**Deferral rationale:** Maintainability concern, not correctness. A 1000-line refactor mid-PR risks introducing new bugs, and ValueInput now has solid test coverage (21 tests from RF-009) that would be disrupted. File as Spec 13c follow-up.
 
 ### RF-011 — Behavioral inventory missing for EnhancedTokenInput rewrite
 
 **Source:** Compliance
-**Status:** open
+**Status:** resolved
 
 PR deletes 633 lines of `EnhancedTokenInput.tsx` without the inventory required by CLAUDE.md §11 "Behavioral Inventory Before Deleting Implementation Code". Plan claims "pure rename/move — no behavioral changes" but the resulting ValueInput is 1006 lines with new features.
 
@@ -117,7 +131,7 @@ PR deletes 633 lines of `EnhancedTokenInput.tsx` without the inventory required 
 ### RF-012 — Accessibility audit missing for rewrite
 
 **Source:** Accessibility Reviewer, Compliance
-**Status:** open
+**Status:** resolved
 
 a11y-rules.md requires enumeration of aria-live regions, focus management, keyboard handlers from the outgoing component. Neither spec nor plan contains this audit. The aria-live regression (RF-008) slipped through because of this gap.
 
@@ -126,7 +140,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-013 — Shadow X/Y/Blur/Spread lost visible prefix labels
 
 **Source:** UX, Prior PR Comments
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/EffectCard.tsx` lines 345-405 — ValueInput replaces NumberInput which had `prefix="X"/"Y"/"B"/"S"` (added in PR #30 RF-015). Now four identical-looking fields with only `aria-label`. Sighted users cannot distinguish them.
 
@@ -135,7 +149,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-014 — `parseNumberInput` silently strips unit suffixes
 
 **Source:** Logic, UX
-**Status:** open
+**Status:** resolved
 
 `frontend/src/components/value-input/style-value-format.ts:182` — regex `/^-?(\d+\.?\d*|\.\d+)/` is start-anchored but not end-anchored. `parseNumberInput("16px")` returns `{literal, 16}` silently dropping the unit. Same for `parseTokenValueChange` number path.
 
@@ -144,7 +158,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-015 — EffectCard offset X/Y silently drop non-literal input
 
 **Source:** Frontend Engineer, UX
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/EffectCard.tsx:199-220` — handlers have `if (parsed.type !== "literal") return;` because `Point` type is plain numbers. No user feedback. Documented in TODO but silent-reject is confusing.
 
@@ -153,7 +167,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-016 — StrokeRow negative width silently dropped
 
 **Source:** Frontend Engineer, Compliance
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/StrokeRow.tsx:77` — `if (parsed.value < 0) return;` silently without feedback. Violates "No Silent Clamping of Invalid Input".
 
@@ -166,7 +180,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-017 — apply-remote.ts not updated for expression variant
 
 **Source:** Prior PR Comments
-**Status:** open
+**Status:** resolved
 
 `frontend/src/operations/apply-remote.ts` blind-casts `value as StyleValue<number>` at line 244. Plan listed this file as changed. Not in the diff. Missing shape validation for incoming StyleValue payloads — malformed remote broadcast `{"type":"expression", "expr": null}` corrupts the store.
 
@@ -175,7 +189,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-018 — Swatch `aria-haspopup="dialog"` without matching role
 
 **Source:** Accessibility Reviewer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:843-862` swatch declares `aria-haspopup="dialog"`; target `<div popover="auto">` at line 868 has no `role="dialog"`, no `aria-label`, no focus move on open, no focus trap. Users expect dialog semantics; get native popover that doesn't trap.
 
@@ -184,7 +198,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-019 — No focus return after popover dismiss
 
 **Source:** Accessibility Reviewer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:547-559` — `handlePopoverToggle` doesn't call `swatchRef.focus()` on close. Escape/click-outside loses focus entirely.
 
@@ -193,7 +207,7 @@ a11y-rules.md requires enumeration of aria-live regions, focus management, keybo
 ### RF-020 — NumberInput spinbutton semantics lost
 
 **Source:** Accessibility Reviewer
-**Status:** open
+**Status:** resolved
 
 ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For literal-number mode in numeric fields this is a regression.
 
@@ -202,7 +216,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-021 — `resolveTokenTypeFilter` collapses multi-type acceptedTypes
 
 **Source:** Architect
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:113-141` — `resolveTokenTypeFilter` returns first matching TokenType. For `acceptedTypes: ["number", "dimension"]`, returns only `"number"`. `filterTokenSuggestions` filters by single TokenType. Dimension tokens never appear in autocomplete for numeric fields.
 
@@ -211,7 +225,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-022 — Frontend store missing MAX_EXPRESSION_LENGTH validation
 
 **Source:** Architect, Data Scientist
-**Status:** open
+**Status:** resolved
 
 `frontend/src/store/document-store-solid.tsx:993-1014` — `setOpacity` only validates literal range. Expression length unbounded at transport boundary.
 
@@ -220,7 +234,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-023 — Hardcoded CSS fallback colors
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.css:50, 54, 59, 63, 82, 89-92` — `#3b82f6`, `#8b5cf6`, `#444`, `#808080` hardcoded as CSS variable fallbacks.
 
@@ -229,7 +243,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-024 — Opacity validation asymmetric across transports
 
 **Source:** Architect, Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 `setOpacity` validates literal range only. Expression/token_ref forwarded unchecked. Server likewise validates only literals. Expressions evaluating outside [0,1] will be rendered clamped or NaN.
 
@@ -238,7 +252,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-025 — Escape handler doesn't reset liveText
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:668-674` — Escape branch calls `renderHighlighted(revertTo, false)` but doesn't `setLiveText(revertTo)`. Downstream memos (detectedMode, swatchColor, evalResult) stay stale until next keystroke.
 
@@ -247,7 +261,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-026 — MAX_FONT_SIZE mismatch (frontend 1000 vs Rust 10000)
 
 **Source:** Logic
-**Status:** open
+**Status:** resolved
 
 `TypographySection.tsx:58` uses 1000; `crates/core/src/validate.rs:131` allows 10000.
 
@@ -256,7 +270,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-027 — handleInput doesn't propagate typing via onChange
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:563-581` — `handleInput` updates internal liveText only. Typing hex character-by-character doesn't live-preview on canvas (only commits on blur/Enter). Contradicts docstring promising intermediate updates.
 
@@ -265,7 +279,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-028 — handlePaste mutates DOM without state sync
 
 **Source:** Frontend Engineer
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:700-717` — `insertPlainTextAtCursor` doesn't dispatch input event. After paste: liveText stale, no highlight, no autocomplete, no validation.
 
@@ -274,7 +288,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-029 — Empty token-ref name accepted
 
 **Source:** Logic
-**Status:** open
+**Status:** resolved
 
 `style-value-format.ts:21-33` — `extractTokenRefName("{}")` returns `""` not `null`. Invalid persistent state: `{type: "token_ref", name: ""}` stored.
 
@@ -283,7 +297,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-030 — TokenDetailEditor typography font_family bypasses validateCssIdentifier
 
 **Source:** Security Reviewer
-**Status:** open
+**Status:** resolved
 
 `TokenDetailEditor.tsx:398-413` — plain `<input>` writes font_family directly with no validation.
 
@@ -292,7 +306,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-031 — parseTokenValueChange font_family skips CSS validation
 
 **Source:** Security Reviewer
-**Status:** open
+**Status:** resolved
 
 `frontend/src/panels/token-detail-helpers.ts:231-238` — splits on comma and stores family list without per-entry CSS validation. Output-boundary defenses exist but input-boundary is required per rule.
 
@@ -301,7 +315,7 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-032 — Default placeholder too long for narrow panels
 
 **Source:** UX
-**Status:** open
+**Status:** resolved
 
 `ValueInput.tsx:105` — `"Type { for tokens, or an expression"` (~37 chars) truncates in inspector panels (~240-280px wide).
 
@@ -310,11 +324,13 @@ ValueInput combobox lacks `aria-valuenow`/`min`/`max`, arrow-key increment. For 
 ### RF-033 — Positional index as item identity in Fill/Stroke reorder
 
 **Source:** Compliance
-**Status:** open
+**Status:** deferred — follow-up
 
 `AppearancePanel.tsx:220-254` — Alt+Arrow reorder uses `index: number` to identify items. Concurrent remote ops could reorder between keydown and mutation.
 
 **Fix:** Add stable `id` fields to `Fill` and `Stroke` types (long-term, requires Rust-side change).
+
+**Deferral rationale:** Requires coordinated Rust-side changes (add `id: Uuid` to Fill/Stroke types, update serialization, MCP payloads, GraphQL schema). Outside Spec 13c scope. TODO comment added at `AppearancePanel.tsx` reorder handler.
 
 ---
 
