@@ -13,7 +13,8 @@ import { Select, type SelectOption } from "../components/select/Select";
 import ValueInput from "../components/value-input/ValueInput";
 import { showToast } from "../components/toast/Toast";
 import { MAX_TOKEN_DESCRIPTION_LENGTH } from "../store/document-store-solid";
-import type { Token, TokenValue, Color, DimensionUnit } from "../types/document";
+import type { Token, TokenValue, TokenType } from "../types/document";
+import { tokenValueToString, parseTokenValueChange, acceptedTypesForToken } from "./token-detail-helpers";
 import "./TokenDetailEditor.css";
 
 // ── Constants ───────────────────────────────────────────────────────────
@@ -36,16 +37,6 @@ const MIN_BEZIER = 0;
 const MAX_BEZIER = 1;
 /** Step for cubic bezier control points. */
 const BEZIER_STEP = 0.01;
-
-/** Min dimension value. */
-const MIN_DIMENSION = 0;
-/** Max dimension value. */
-const MAX_DIMENSION = 10_000;
-
-/** Min number value. */
-const MIN_NUMBER = -1_000_000;
-/** Max number value. */
-const MAX_NUMBER = 1_000_000;
 
 /** Min shadow blur/spread. */
 const MIN_SHADOW_BLUR = 0;
@@ -79,15 +70,6 @@ export interface TokenDetailEditorProps {
   readonly onUpdate: (name: string, value: TokenValue, description?: string) => void;
   readonly onDelete?: (name: string) => void;
 }
-
-// ── Dimension unit options ──────────────────────────────────────────────
-
-const DIMENSION_UNITS: readonly SelectOption[] = [
-  { value: "px", label: "px" },
-  { value: "rem", label: "rem" },
-  { value: "em", label: "em" },
-  { value: "percent", label: "%" },
-];
 
 // ── Named font weight options ────────────────────────────────────────────
 
@@ -123,93 +105,96 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     props.onUpdate(props.token.name, newValue, props.token.description ?? undefined);
   }
 
-  // ── Type-specific editors ────────────────────────────────────────────
+  // ── Simple-type ValueInput handler ──────────────────────────────────
 
-  function renderColorEditor(color: Color): ReturnType<Component> {
+  /**
+   * Shared onChange handler for all ValueInput-backed simple token types
+   * (color, dimension, number, font_family).
+   *
+   * Parses the raw string from ValueInput into the appropriate TokenValue
+   * variant and calls updateValue. Shows a toast on parse failure so the
+   * user is informed — no silent discard per CLAUDE.md.
+   *
+   * Extracted per CLAUDE.md: "Business Logic Must Not Live in Inline JSX Handlers".
+   */
+  function handleSimpleValueChange(raw: string, tokenType: TokenType): void {
+    const newValue = parseTokenValueChange(raw, tokenType);
+    if (newValue === null) {
+      if (raw.trim().length > 0) {
+        showToast({
+          title: t("panels:tokens.invalidValue") || "Invalid value",
+          variant: "error",
+        });
+      }
+      return;
+    }
+    updateValue(newValue);
+  }
+
+  // ── Simple-type ValueInput editors ───────────────────────────────────
+
+  function renderColorEditor(): ReturnType<Component> {
+    const displayValue = () => tokenValueToString(props.token.value);
     return (
       <div class="sigil-token-detail__field">
         <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
-        <ColorPicker
-          color={color}
-          onColorChange={(c) => updateValue({ type: "color", value: c })}
+        <ValueInput
+          value={displayValue()}
+          onChange={(raw) => handleSimpleValueChange(raw, "color")}
+          tokens={props.tokens}
+          acceptedTypes={acceptedTypesForToken(props.token.token_type)}
+          aria-label={t("panels:tokens.value")}
         />
       </div>
     );
   }
 
-  function renderDimensionEditor(value: number, unit: DimensionUnit): ReturnType<Component> {
-    return (
-      <div class="sigil-token-detail__row">
-        <div class="sigil-token-detail__field sigil-token-detail__field--grow">
-          <NumberInput
-            value={Number.isFinite(value) ? value : 0}
-            onValueChange={(v) => {
-              if (Number.isFinite(v)) {
-                updateValue({ type: "dimension", value: v, unit });
-              }
-            }}
-            label={t("panels:tokens.value")}
-            min={MIN_DIMENSION}
-            max={MAX_DIMENSION}
-          />
-        </div>
-        <div class="sigil-token-detail__field">
-          <Select
-            options={[...DIMENSION_UNITS]}
-            value={unit}
-            onValueChange={(u) =>
-              updateValue({ type: "dimension", value, unit: u as DimensionUnit })
-            }
-            aria-label="Unit"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  function renderNumberEditor(value: number): ReturnType<Component> {
+  function renderDimensionEditor(): ReturnType<Component> {
+    const displayValue = () => tokenValueToString(props.token.value);
     return (
       <div class="sigil-token-detail__field">
-        <NumberInput
-          value={Number.isFinite(value) ? value : 0}
-          onValueChange={(v) => {
-            if (Number.isFinite(v)) {
-              updateValue({ type: "number", value: v });
-            }
-          }}
-          label={t("panels:tokens.value")}
-          min={MIN_NUMBER}
-          max={MAX_NUMBER}
+        <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
+        <ValueInput
+          value={displayValue()}
+          onChange={(raw) => handleSimpleValueChange(raw, "dimension")}
+          tokens={props.tokens}
+          acceptedTypes={acceptedTypesForToken(props.token.token_type)}
+          placeholder="e.g. 16px, 1.5rem, 50%"
+          aria-label={t("panels:tokens.value")}
         />
       </div>
     );
   }
 
-  function renderFontFamilyEditor(families: readonly string[]): ReturnType<Component> {
-    const joined = () => families.join(", ");
-    // RF-018: id links the <label for> to the <input> for accessible label association.
-    const inputId = "token-detail-font-family";
+  function renderNumberEditor(): ReturnType<Component> {
+    const displayValue = () => tokenValueToString(props.token.value);
     return (
       <div class="sigil-token-detail__field">
-        <label class="sigil-token-detail__field-label" for={inputId}>
+        <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
+        <ValueInput
+          value={displayValue()}
+          onChange={(raw) => handleSimpleValueChange(raw, "number")}
+          tokens={props.tokens}
+          acceptedTypes={acceptedTypesForToken(props.token.token_type)}
+          aria-label={t("panels:tokens.value")}
+        />
+      </div>
+    );
+  }
+
+  function renderFontFamilyEditor(): ReturnType<Component> {
+    const displayValue = () => tokenValueToString(props.token.value);
+    return (
+      <div class="sigil-token-detail__field">
+        <label class="sigil-token-detail__field-label">
           {t("panels:tokens.typeFontFamily")}
         </label>
-        <input
-          id={inputId}
-          class="sigil-token-detail__text-input"
-          type="text"
-          value={joined()}
-          onKeyDown={(e) => e.stopPropagation()}
-          onChange={(e) => {
-            const val = e.currentTarget.value;
-            const parsed = val
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s.length > 0);
-            if (parsed.length > 0) {
-              updateValue({ type: "font_family", families: parsed });
-            }
-          }}
+        <ValueInput
+          value={displayValue()}
+          onChange={(raw) => handleSimpleValueChange(raw, "font_family")}
+          tokens={props.tokens}
+          acceptedTypes={acceptedTypesForToken(props.token.token_type)}
+          aria-label={t("panels:tokens.typeFontFamily")}
         />
       </div>
     );
@@ -543,13 +528,13 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     const value = props.token.value;
     switch (value.type) {
       case "color":
-        return renderColorEditor(value.value);
+        return renderColorEditor();
       case "dimension":
-        return renderDimensionEditor(value.value, value.unit);
+        return renderDimensionEditor();
       case "number":
-        return renderNumberEditor(value.value);
+        return renderNumberEditor();
       case "font_family":
-        return renderFontFamilyEditor(value.families);
+        return renderFontFamilyEditor();
       case "font_weight":
         return renderFontWeightEditor(value.weight);
       case "duration":
@@ -603,23 +588,12 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
       role="form"
       aria-label={t("panels:tokens.editTokenForm", { name: props.token.name })}
     >
-      {/* Color editor is rendered via Show to preserve DOM across reactive
-          updates — an imperative renderColorEditor() call would re-create the
-          ColorPicker on every store update, losing pointer capture during drag.
-          Other types use the imperative renderValueEditor() since they don't
-          have continuous drag interactions. */}
-      <Show when={props.token.value.type === "color" ? props.token.value : null}>
-        {(colorVal) => (
-          <div class="sigil-token-detail__field">
-            <span class="sigil-token-detail__field-label">{t("panels:tokens.value")}</span>
-            <ColorPicker
-              color={colorVal().value}
-              onColorChange={(c) => updateValue({ type: "color", value: c })}
-            />
-          </div>
-        )}
-      </Show>
-      <Show when={props.token.value.type !== "color"}>{renderValueEditor()}</Show>
+      {/* All value types (including color) are now routed through renderValueEditor().
+          Color previously used a <Show>-gated ColorPicker to preserve DOM across
+          reactive updates during drag. With ValueInput, the color swatch and inline
+          picker are managed inside ValueInput itself, so the special-casing is no
+          longer needed. */}
+      {renderValueEditor()}
 
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.description")}</label>
