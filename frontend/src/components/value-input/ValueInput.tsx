@@ -360,10 +360,22 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     return filterFunctionSuggestions(q, MAX_AUTOCOMPLETE_RESULTS);
   });
 
-  /** Parse + evaluate the live text for real-time error/resolved display. */
+  /** Parse + evaluate the live text for real-time error/resolved display.
+   * Short-circuits for literal modes (color, number, font) where the expression
+   * parser does not apply — avoids spurious "Unexpected character '#'" errors. */
   const evalResult = createMemo<{ error: string | null; resolved: string | null }>(() => {
     const text = liveText();
     if (text.trim().length === 0) return { error: null, resolved: null };
+
+    // Literal modes don't need expression parsing — skip to avoid false errors
+    const mode = detectedMode();
+    if (
+      mode === "literal-color" ||
+      mode === "literal-number" ||
+      mode === "literal-font"
+    ) {
+      return { error: null, resolved: null };
+    }
 
     const parsed = parseExpression(text);
     if (isEvalError(parsed)) {
