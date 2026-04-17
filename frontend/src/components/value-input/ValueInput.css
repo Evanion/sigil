@@ -21,6 +21,7 @@
 .sigil-token-input__editable {
   flex: 1 1 auto;
   min-width: 0;
+  padding: 0 0 0 var(--input-padding-x);
   color: var(--text-1);
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-0);
@@ -76,26 +77,33 @@
 
 /* ── Input with swatch prefix ─────────────────────────────────────────── */
 
-/* When a swatch is present, add gap between the swatch button and the text */
+/* When a swatch is present, remove ALL padding from the container so the
+   swatch can stretch edge-to-edge vertically. The editable area gets its
+   own padding instead. */
 .sigil-token-input--has-swatch {
-  gap: 6px;
+  padding: 0;
+  gap: 0;
 }
 
-/* ── Color swatch button (inline prefix within the input flex container) */
+.sigil-token-input--has-swatch > .sigil-token-input__editable {
+  padding: var(--size-1) var(--input-padding-x);
+}
+
+/* ── Color swatch prefix (flush left edge of the input) ──────────────── */
 
 .sigil-token-input__swatch-btn {
-  width: 20px;
-  height: 20px;
+  align-self: stretch;
+  width: 28px;
   flex-shrink: 0;
-  border: 1px solid var(--border-muted);
-  border-radius: 3px;
+  border: none;
+  border-right: 1px solid var(--input-border);
+  border-radius: var(--input-radius) 0 0 var(--input-radius);
   cursor: pointer;
   padding: 0;
-  /* Checkerboard background for transparent colors (RF-023: tokenized).
-     The swatch color is layered on top via inline style --swatch-color
-     as a one-stop linear-gradient, because CSS background-image renders
-     above background-color. Without this trick, the checkerboard always
-     shows through even for opaque colors. */
+  /* Checkerboard background for transparent colors.
+     The swatch color is layered on top via --swatch-color as a one-stop
+     linear-gradient, because CSS background-image renders above
+     background-color. This ensures opaque colors fully cover the checkerboard. */
   background-image:
     linear-gradient(var(--swatch-color, transparent), var(--swatch-color, transparent)),
     linear-gradient(45deg, var(--checkerboard-color) 25%, transparent 25%),
