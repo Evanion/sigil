@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { EffectCard } from "../EffectCard";
 import type { EffectDropShadow, EffectLayerBlur } from "../../types/document";
@@ -25,6 +25,17 @@ const dropShadowBlur12: EffectDropShadow = {
 };
 
 describe("EffectCard", () => {
+  // jsdom does not implement the native popover API — stub the methods so
+  // ValueInput's Popover component does not throw on mount.
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -172,7 +183,9 @@ describe("EffectCard", () => {
     ));
     const combobox = screen.getByRole("combobox", { name: "Shadow color" });
     expect(combobox).toBeTruthy();
-    const swatchBtn = document.querySelector(".sigil-token-input__swatch-btn");
+    // The swatch is now rendered by the shared Popover component as a trigger
+    // button — query by accessible role and label instead of CSS class.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
     expect(swatchBtn).toBeTruthy();
   });
 

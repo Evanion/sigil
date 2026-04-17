@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { StrokeRow } from "../StrokeRow";
 import type { Stroke } from "../../types/document";
@@ -27,6 +27,17 @@ const tokenRefWidthStroke: Stroke = {
 };
 
 describe("StrokeRow", () => {
+  // jsdom does not implement the native popover API — stub the methods so
+  // ValueInput's Popover component does not throw on mount.
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -61,7 +72,8 @@ describe("StrokeRow", () => {
     const combobox = screen.getByRole("combobox", { name: "Stroke color" });
     expect(combobox).toBeTruthy();
     // The ValueInput exposes a swatch button for opening the color picker.
-    const swatchBtn = document.querySelector(".sigil-token-input__swatch-btn");
+    // The swatch is now rendered by the shared Popover component — query by role.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
     expect(swatchBtn).toBeTruthy();
   });
 

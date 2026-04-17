@@ -26,7 +26,6 @@ import {
   createMemo,
   createUniqueId,
   onMount,
-  onCleanup,
   Show,
   Index,
   type Component,
@@ -64,6 +63,7 @@ import { validateCssIdentifier } from "../../validation/css-identifiers";
 import { getAutocompleteContext } from "./autocomplete-context";
 import type { AutocompleteContext } from "./autocomplete-context";
 import { ColorPicker } from "../color-picker/ColorPicker";
+import { Popover } from "../popover/Popover";
 import "./ValueInput.css";
 
 // ── Props ──────────────────────────────────────────────────────────────
@@ -234,18 +234,12 @@ export function getTypeValidationMessage(
 const ValueInput: Component<ValueInputProps> = (props) => {
   // eslint-disable-next-line no-unassigned-vars
   let inputRef: HTMLDivElement | undefined;
-  // eslint-disable-next-line no-unassigned-vars
-  let popoverRef: HTMLDivElement | undefined;
-  // RF-018/019: swatch ref so we can restore focus to it after the popover closes.
-  // eslint-disable-next-line no-unassigned-vars
-  let swatchRef: HTMLButtonElement | undefined;
 
   // RF-027: use Solid's createUniqueId instead of Math.random()
   const uniqueId = createUniqueId();
   const statusId = `sigil-token-input-status-${uniqueId}`;
   const listboxId = `sigil-token-input-listbox-${uniqueId}`;
   const srAnnouncementId = `sigil-token-input-sr-${uniqueId}`;
-  const popoverId = `sigil-token-input-popover-${uniqueId}`;
 
   // ── Internal state ─────────────────────────────────────────────────
 
@@ -586,22 +580,20 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
   // ── Color picker helpers ────────────────────────────────────────────
 
-  function handleSwatchClick(): void {
-    if (popoverRef) {
-      popoverRef.togglePopover();
-      setColorPickerOpen((prev) => !prev);
-      // RF-018: when opening, move focus into the dialog so keyboard users can
-      // immediately interact with the picker. Use queueMicrotask so the popover
-      // contents are mounted (the <Show> gate) before the focus attempt.
-      if (colorPickerOpen()) {
-        queueMicrotask(() => {
-          if (!popoverRef) return;
-          const target = popoverRef.querySelector<HTMLElement>(
-            "[tabindex='0'], button, [role='slider'], input",
-          );
-          target?.focus();
-        });
+  function handleColorPickerOpen(open: boolean): void {
+    setColorPickerOpen(open);
+    if (!open) {
+      // Treat popover close as a commit point for the color value.
+      // liveText() holds the most recent hex string (updated by handleColorPickerChange
+      // on every picker drag tick), so this is equivalent to the original
+      // handlePopoverToggle logic.
+      const hex = liveText();
+      if (hex !== confirmedValue()) {
+        setConfirmedValue(hex);
+        props.onCommit?.(hex);
+        announceStatus();
       }
+      // Focus return: the Popover's trigger button receives focus naturally on close.
     }
   }
 
@@ -610,7 +602,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     const hex = colorToHex(color);
     if (hex === "") return;
     // During drag: preview only — no confirmed value update, no onCommit.
-    // The commit happens when the popover closes (handlePopoverToggle).
+    // The commit happens when the popover closes (handleColorPickerOpen with open=false).
     setLiveText(hex);
     renderHighlighted(hex, false);
     props.onChange(hex);
@@ -623,24 +615,6 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     setConfirmedValue(hex);
     props.onCommit?.(hex);
     announceStatus();
-  }
-
-  // Close color picker when popover is dismissed (light dismiss)
-  function handlePopoverToggle(e: Event): void {
-    const toggleEvent = e as ToggleEvent;
-    if (toggleEvent.newState === "closed") {
-      setColorPickerOpen(false);
-      // Treat popover close as a commit point for the color value.
-      const hex = liveText();
-      if (hex !== confirmedValue()) {
-        setConfirmedValue(hex);
-        props.onCommit?.(hex);
-        announceStatus();
-      }
-      // RF-019: restore focus to the swatch button so keyboard users land
-      // back where they triggered the popover rather than at document root.
-      swatchRef?.focus();
-    }
   }
 
   // ── Event handlers ─────────────────────────────────────────────────
@@ -834,18 +808,6 @@ const ValueInput: Component<ValueInputProps> = (props) => {
     if (inputRef) {
       renderHighlighted(props.value, false);
     }
-
-    // Register popover toggle event listener for light-dismiss tracking
-    if (popoverRef) {
-      popoverRef.addEventListener("toggle", handlePopoverToggle);
-    }
-  });
-
-  // Cleanup popover toggle listener (registered synchronously during setup)
-  onCleanup(() => {
-    if (popoverRef) {
-      popoverRef.removeEventListener("toggle", handlePopoverToggle);
-    }
   });
 
   // Sync external value changes
@@ -933,10 +895,6 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
   // ── Render ─────────────────────────────────────────────────────────
 
-  // CSS Anchor Positioning: each instance gets a unique anchor name so
-  // multiple ValueInputs on the same page don't conflict.
-  const swatchAnchorName = `--sigil-swatch-anchor-${uniqueId}`;
-
   return (
     <div class="sigil-token-input__wrapper">
       {/* The visible "input box" — styled with border, background, radius.
@@ -969,26 +927,39 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         aria-valuemax={numericAriaState()?.valuemax}
         tabIndex={props.disabled ? -1 : 0}
       >
-        {/* Color swatch prefix — first flex child, visible only for color fields */}
+        {/* Color swatch prefix — first flex child, visible only for color fields.
+            The Popover component renders a trigger <button> (with anchor-name,
+            aria-expanded, aria-controls wired automatically) and the popover panel
+            as a fragment. The trigger button receives .sigil-token-input__swatch-btn
+            styles via the contextual CSS selector below so it matches the original
+            swatch appearance. */}
         <Show when={acceptsColor()}>
-          <button
-            ref={swatchRef}
-            type="button"
-            class="sigil-token-input__swatch-btn"
-            style={{
-              "--swatch-color": swatchBgStyle(),
-              "anchor-name": swatchAnchorName,
-            }}
-            aria-label="Color preview, click to edit"
-            aria-haspopup="dialog"
-            aria-expanded={colorPickerOpen()}
-            aria-controls={popoverId}
-            tabIndex={-1}
-            onClick={handleSwatchClick}
-            onMouseDown={(e) => {
-              e.preventDefault();
-            }}
-          />
+          <Popover
+            trigger={
+              <span
+                class="sigil-token-input__swatch-inner"
+                style={{ "--swatch-color": swatchBgStyle() }}
+              />
+            }
+            triggerAriaLabel="Color preview, click to edit"
+            placement="bottom"
+            class="sigil-token-input__color-popover"
+            open={colorPickerOpen()}
+            onOpenChange={handleColorPickerOpen}
+          >
+            {/* Mount the ColorPicker only when the popover is open to avoid
+                running its ResizeObserver / rAF loops while the control is
+                idle — this also keeps Vitest+jsdom environments happy since
+                the picker's canvas strips require ResizeObserver.
+                Note: the Popover component already gates on isOpen() internally
+                via <Show when={isOpen()}>, so this inner Show is redundant but
+                harmless and kept for explicitness. */}
+            <ColorPicker
+              color={pickerColor()}
+              onColorChange={handleColorPickerChange}
+              onColorCommit={handleColorPickerCommit}
+            />
+          </Popover>
         </Show>
 
         {/* The editable text area — second flex child, grows to fill.
@@ -1011,37 +982,6 @@ const ValueInput: Component<ValueInputProps> = (props) => {
           onPaste={handlePaste}
         />
       </div>
-
-      {/* Color picker popover — native HTML popover with CSS Anchor Positioning.
-          Rendered outside the combobox to avoid interfering with contentEditable.
-          position-anchor ties the popover to the swatch button anchor above. */}
-      <Show when={acceptsColor()}>
-        <div
-          ref={popoverRef}
-          id={popoverId}
-          popover="auto"
-          role="dialog"
-          aria-label="Color picker"
-          class="sigil-token-input__color-popover"
-          style={{
-            "position-anchor": swatchAnchorName,
-            "position-area": "bottom span-right",
-            "position-try-fallbacks": "flip-block",
-          }}
-        >
-            {/* Mount the ColorPicker only when the popover is open to avoid
-                running its ResizeObserver / rAF loops while the control is
-                idle — this also keeps Vitest+jsdom environments happy since
-                the picker's canvas strips require ResizeObserver. */}
-            <Show when={colorPickerOpen()}>
-              <ColorPicker
-                color={pickerColor()}
-                onColorChange={handleColorPickerChange}
-                onColorCommit={handleColorPickerCommit}
-              />
-            </Show>
-          </div>
-        </Show>
 
       {/* RF-008: SR announcement for committed status only.
           Autocomplete state (open/closed, item count) is already conveyed by

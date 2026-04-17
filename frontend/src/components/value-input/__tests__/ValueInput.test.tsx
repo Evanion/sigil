@@ -25,7 +25,7 @@
  * events on the combobox outer div is incorrect because the event handlers live
  * on the inner textbox div.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import ValueInput from "../ValueInput";
 import type { Token } from "../../../types/document";
@@ -247,6 +247,18 @@ describe("ValueInput — Escape revert", () => {
 });
 
 describe("ValueInput — color swatch visibility", () => {
+  // jsdom does not implement the native popover API — stub the methods so
+  // the Popover component's createEffect (which calls hidePopover on mount)
+  // does not throw and cause test timeouts.
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -278,7 +290,12 @@ describe("ValueInput — color swatch visibility", () => {
     expect(screen.queryByRole("button", { name: "Color preview, click to edit" })).toBeNull();
   });
 
-  it("swatch exposes aria-haspopup='dialog' honoured by a role=dialog popover (RF-018)", () => {
+  it("swatch trigger exposes aria-expanded and aria-controls pointing at the popover (RF-018)", () => {
+    // The swatch is now rendered by the shared Popover component as a <button
+    // class="sigil-popover-trigger"> with aria-expanded and aria-controls wired
+    // automatically. The old aria-haspopup="dialog" + role="dialog" contract is
+    // replaced by the native popover pattern: aria-expanded conveys open state,
+    // aria-controls points at the popover element (which is top-layer via popover="auto").
     render(() => (
       <ValueInput
         value="#ff0000"
@@ -289,15 +306,17 @@ describe("ValueInput — color swatch visibility", () => {
       />
     ));
     const swatch = screen.getByRole("button", { name: "Color preview, click to edit" });
-    expect(swatch.getAttribute("aria-haspopup")).toBe("dialog");
-    // The controlled popover must exist in the DOM and declare role="dialog"
-    // with an accessible name to match the swatch's popup contract.
+    // aria-expanded must be present (initially false = closed)
+    expect(swatch.getAttribute("aria-expanded")).not.toBeNull();
+    // aria-controls must point at the popover element
     const popoverId = swatch.getAttribute("aria-controls");
     expect(popoverId).toBeTruthy();
     const popover = popoverId ? document.getElementById(popoverId) : null;
     expect(popover).toBeTruthy();
-    expect(popover?.getAttribute("role")).toBe("dialog");
-    expect(popover?.getAttribute("aria-label")).toBe("Color picker");
+    // The popover element uses the native popover attribute (not role="dialog")
+    expect(popover?.getAttribute("popover")).toBe("auto");
+    // The swatch trigger must be inside the .sigil-token-input--has-swatch container
+    expect(swatch.closest(".sigil-token-input--has-swatch")).toBeTruthy();
   });
 });
 

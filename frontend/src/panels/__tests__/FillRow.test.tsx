@@ -56,6 +56,14 @@ function renderWithI18n(ui: () => JSX.Element) {
 describe("FillRow", () => {
   beforeEach(async () => {
     i18nInstance = await createTestI18n();
+    // jsdom does not implement the native popover API — stub the methods so
+    // ValueInput's Popover component does not throw on mount.
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
   });
 
   afterEach(() => {
@@ -115,7 +123,8 @@ describe("FillRow", () => {
     const combobox = screen.getByRole("combobox", { name: "Fill color" });
     expect(combobox).toBeTruthy();
     // The ValueInput exposes a color swatch trigger button alongside the combobox.
-    const swatchBtn = document.querySelector(".sigil-token-input__swatch-btn");
+    // The swatch is now rendered by the shared Popover component — query by role.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
     expect(swatchBtn).toBeTruthy();
   });
 

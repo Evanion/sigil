@@ -91,7 +91,10 @@
 
 /* ── Color swatch prefix (flush left edge of the input) ──────────────── */
 
-.sigil-token-input__swatch-btn {
+/* The swatch trigger is rendered by the shared Popover component as a
+   <button class="sigil-popover-trigger">. We scope these overrides to
+   within the token-input so they don't affect other Popover usages. */
+.sigil-token-input .sigil-popover-trigger {
   align-self: stretch;
   width: 28px;
   flex-shrink: 0;
@@ -100,6 +103,23 @@
   border-radius: var(--input-radius) 0 0 var(--input-radius);
   cursor: pointer;
   padding: 0;
+  /* Reset the color override from .sigil-popover-trigger so the swatch
+     background is fully controlled by the inner span */
+  color: inherit;
+}
+
+.sigil-token-input .sigil-popover-trigger:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Inner span that carries the checkerboard + swatch color background.
+   Fills the full trigger button area so the visual appearance is unchanged. */
+.sigil-token-input__swatch-inner {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
   /* Checkerboard background for transparent colors.
      The swatch color is layered on top via --swatch-color as a one-stop
      linear-gradient, because CSS background-image renders above
@@ -124,29 +144,12 @@
     -4px 0;
 }
 
-.sigil-token-input__swatch-btn:focus-visible {
-  outline: var(--focus-ring);
-  outline-offset: var(--focus-offset);
-}
-
 /* ── Color picker popover ──────────────────────────────────────────────── */
 
+/* Width constraint only — border, background, shadow, arrow, and animation
+   are all provided by the shared Popover component's CSS. */
 .sigil-token-input__color-popover {
   width: 280px;
-  border: 1px solid var(--border-1);
-  border-radius: var(--input-radius);
-  background: var(--surface-3);
-  box-shadow: var(--shadow-3);
-  padding: var(--size-2);
-  /* Fallback positioning for browsers without CSS Anchor Positioning support.
-     position-anchor + position-area are set via inline style from JSX; this
-     block ensures the popover still appears near the swatch if the browser
-     ignores those properties. inset-inline-start + margin-top places the
-     popover at the left edge of the wrapper, slightly below the swatch row. */
-  inset-inline-start: 0;
-  inset-block-start: calc(var(--input-height, 32px) + var(--size-1, 4px));
-  inset-inline-end: auto;
-  inset-block-end: auto;
 }
 
 /* ── Syntax highlight spans ─────────────────────────────────────────── */
