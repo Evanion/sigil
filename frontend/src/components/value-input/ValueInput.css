@@ -132,6 +132,7 @@
 /* ── Color picker popover ──────────────────────────────────────────────── */
 
 .sigil-token-input__color-popover {
+  width: 280px;
   border: 1px solid var(--border-1);
   border-radius: var(--input-radius);
   background: var(--surface-3);
