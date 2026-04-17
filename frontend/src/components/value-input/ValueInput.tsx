@@ -939,55 +939,96 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
   return (
     <div class="sigil-token-input__wrapper">
+      {/* The visible "input box" — styled with border, background, radius.
+          Contains the optional swatch button + the contentEditable text area
+          as flex children. The combobox role goes on this outer container
+          so that both the swatch and the text area are semantically part
+          of one interactive widget. */}
       <div
-        class="sigil-token-input__input-row"
+        class="sigil-token-input"
         classList={{
-          "sigil-token-input__input-row--has-swatch": acceptsColor(),
+          "sigil-token-input--disabled": props.disabled === true,
+          "sigil-token-input--has-swatch": acceptsColor(),
+          [modeClass()]: modeClass() !== "",
         }}
+        role="combobox"
+        aria-label={props["aria-label"] ?? "Token expression"}
+        aria-describedby={statusId}
+        aria-haspopup="listbox"
+        aria-autocomplete="list"
+        aria-expanded={autocompleteOpen()}
+        aria-disabled={props.disabled === true || undefined}
+        aria-activedescendant={
+          autocompleteOpen() && suggestions().length > 0
+            ? `sigil-ac-option-${String(highlightedIndex())}`
+            : undefined
+        }
+        aria-controls={listboxId}
+        aria-valuenow={numericAriaState()?.valuenow}
+        aria-valuemin={numericAriaState()?.valuemin}
+        aria-valuemax={numericAriaState()?.valuemax}
+        tabIndex={props.disabled ? -1 : 0}
       >
-        {/* Color swatch prefix — only when field accepts colors */}
+        {/* Color swatch prefix — first flex child, visible only for color fields */}
         <Show when={acceptsColor()}>
           <button
             ref={swatchRef}
             type="button"
             class="sigil-token-input__swatch-btn"
             style={{
-              "background-color": swatchBgStyle(),
-              // CSS Anchor Positioning: give this button a unique anchor name
-              // so the popover can position itself relative to it.
+              "--swatch-color": swatchBgStyle(),
               "anchor-name": swatchAnchorName,
             }}
             aria-label="Color preview, click to edit"
             aria-haspopup="dialog"
             aria-expanded={colorPickerOpen()}
             aria-controls={popoverId}
-            tabIndex={0}
+            tabIndex={-1}
             onClick={handleSwatchClick}
             onMouseDown={(e) => {
-              // Prevent blur on the input when clicking the swatch
               e.preventDefault();
             }}
           />
-          {/* Color picker popover — native HTML popover with CSS Anchor Positioning.
-              position-anchor ties the popover to the swatch button anchor above.
-              position-area: bottom span-right places it below and aligned to the right.
-              position-try-fallbacks: flip-block flips to above if viewport clips it.
-              The margin-top fallback in CSS handles browsers without anchor positioning.
-              RF-018: role="dialog" + aria-label honour the aria-haspopup="dialog" contract
-              on the swatch button, giving SR users an announced dialog boundary. */}
-          <div
-            ref={popoverRef}
-            id={popoverId}
-            popover="auto"
-            role="dialog"
-            aria-label="Color picker"
-            class="sigil-token-input__color-popover"
-            style={{
-              "position-anchor": swatchAnchorName,
-              "position-area": "bottom span-right",
-              "position-try-fallbacks": "flip-block",
-            }}
-          >
+        </Show>
+
+        {/* The editable text area — second flex child, grows to fill.
+            This is the actual contentEditable that receives keystrokes.
+            role="textbox" satisfies the WAI-ARIA 1.2 combobox pattern:
+            the outer div is role="combobox" (owns aria-expanded, aria-controls, etc.)
+            and the inner editable carries role="textbox" so tests and AT can
+            target the interaction element directly. */}
+        <div
+          ref={inputRef}
+          class="sigil-token-input__editable"
+          role="textbox"
+          aria-multiline="false"
+          contentEditable={props.disabled !== true}
+          data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
+          onInput={handleInput}
+          onKeyDown={handleKeyDown}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          onPaste={handlePaste}
+        />
+      </div>
+
+      {/* Color picker popover — native HTML popover with CSS Anchor Positioning.
+          Rendered outside the combobox to avoid interfering with contentEditable.
+          position-anchor ties the popover to the swatch button anchor above. */}
+      <Show when={acceptsColor()}>
+        <div
+          ref={popoverRef}
+          id={popoverId}
+          popover="auto"
+          role="dialog"
+          aria-label="Color picker"
+          class="sigil-token-input__color-popover"
+          style={{
+            "position-anchor": swatchAnchorName,
+            "position-area": "bottom span-right",
+            "position-try-fallbacks": "flip-block",
+          }}
+        >
             {/* Mount the ColorPicker only when the popover is open to avoid
                 running its ResizeObserver / rAF loops while the control is
                 idle — this also keeps Vitest+jsdom environments happy since
@@ -1001,41 +1042,6 @@ const ValueInput: Component<ValueInputProps> = (props) => {
             </Show>
           </div>
         </Show>
-
-        {/* RF-001: role="combobox" with aria-haspopup and always-present aria-expanded */}
-        <div
-          ref={inputRef}
-          class="sigil-token-input"
-          classList={{
-            "sigil-token-input--disabled": props.disabled === true,
-            [modeClass()]: modeClass() !== "",
-          }}
-          role="combobox"
-          contentEditable={props.disabled !== true}
-          aria-label={props["aria-label"] ?? "Token expression"}
-          aria-describedby={statusId}
-          aria-haspopup="listbox"
-          aria-autocomplete="list"
-          aria-expanded={autocompleteOpen()}
-          aria-disabled={props.disabled === true || undefined}
-          aria-activedescendant={
-            autocompleteOpen() && suggestions().length > 0
-              ? `sigil-ac-option-${String(highlightedIndex())}`
-              : undefined
-          }
-          aria-controls={listboxId}
-          aria-valuenow={numericAriaState()?.valuenow}
-          aria-valuemin={numericAriaState()?.valuemin}
-          aria-valuemax={numericAriaState()?.valuemax}
-          data-placeholder={props.placeholder ?? DEFAULT_PLACEHOLDER}
-          tabIndex={props.disabled ? -1 : 0}
-          onInput={handleInput}
-          onKeyDown={handleKeyDown}
-          onFocus={handleFocus}
-          onBlur={handleBlur}
-          onPaste={handlePaste}
-        />
-      </div>
 
       {/* RF-008: SR announcement for committed status only.
           Autocomplete state (open/closed, item count) is already conveyed by

@@ -151,7 +151,9 @@ describe("StrokeRow", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Stroke color" });
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 
@@ -169,7 +171,9 @@ describe("StrokeRow", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Stroke width" });
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 });

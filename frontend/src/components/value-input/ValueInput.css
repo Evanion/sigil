@@ -1,11 +1,26 @@
 /* ValueInput — contentEditable expression editor with syntax highlighting */
 
+/* The visible "input box" — flex container holding optional swatch + editable area */
 .sigil-token-input {
+  display: flex;
+  align-items: center;
   min-height: var(--input-height);
   padding: var(--size-1) var(--input-padding-x);
   background: var(--input-bg);
   border: 1px solid var(--input-border);
   border-radius: var(--input-radius);
+  cursor: text;
+  /* Smooth border color transition for mode changes */
+  transition: border-color 0.15s ease;
+  /* Fill available width when placed in panel layouts */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The contentEditable text area inside the input box */
+.sigil-token-input__editable {
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-1);
   font-family: var(--font-mono, monospace);
   font-size: var(--font-size-0);
@@ -13,19 +28,14 @@
   white-space: pre;
   overflow-x: auto;
   overflow-y: hidden;
-  cursor: text;
   outline: none;
   /* Single line: prevent wrapping */
   word-break: keep-all;
   overflow-wrap: normal;
-  /* Smooth border color transition for mode changes */
-  transition: border-color 0.15s ease;
-  /* When inside a swatch row, fill available width */
-  flex: 1 1 auto;
-  min-width: 0;
 }
 
-.sigil-token-input:focus-visible {
+/* Focus ring on the outer box when the editable inside receives focus */
+.sigil-token-input:focus-within {
   border-color: var(--input-border-focus);
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
@@ -38,7 +48,8 @@
   opacity: var(--opacity-hidden);
 }
 
-.sigil-token-input[data-placeholder]:empty::before {
+/* Placeholder — shown when the editable area is empty */
+.sigil-token-input__editable[data-placeholder]:empty::before {
   content: attr(data-placeholder);
   color: var(--text-3);
   pointer-events: none;
@@ -54,51 +65,55 @@
   border-color: var(--expression-border);
 }
 
-/* Preserve mode border on focus — override focus-visible border-color */
-.sigil-token-input--mode-reference:focus-visible {
+/* Preserve mode border on focus — override focus-within border-color */
+.sigil-token-input--mode-reference:focus-within {
   border-color: var(--accent-border);
 }
 
-.sigil-token-input--mode-expression:focus-visible {
+.sigil-token-input--mode-expression:focus-within {
   border-color: var(--expression-border);
 }
 
-/* ── Input row (swatch + contentEditable) ──────────────────────────────── */
+/* ── Input with swatch prefix ─────────────────────────────────────────── */
 
-.sigil-token-input__input-row {
-  display: flex;
-  align-items: center;
-}
-
-.sigil-token-input__input-row--has-swatch {
+/* When a swatch is present, add gap between the swatch button and the text */
+.sigil-token-input--has-swatch {
   gap: 6px;
 }
 
-/* ── Color swatch button ───────────────────────────────────────────────── */
+/* ── Color swatch button (inline prefix within the input flex container) */
 
 .sigil-token-input__swatch-btn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--border-muted);
-  border-radius: 4px;
-  cursor: pointer;
+  width: 20px;
+  height: 20px;
   flex-shrink: 0;
+  border: 1px solid var(--border-muted);
+  border-radius: 3px;
+  cursor: pointer;
   padding: 0;
-  /* Checkerboard background for transparent colors (RF-023: tokenized) */
+  /* Checkerboard background for transparent colors (RF-023: tokenized).
+     The swatch color is layered on top via inline style --swatch-color
+     as a one-stop linear-gradient, because CSS background-image renders
+     above background-color. Without this trick, the checkerboard always
+     shows through even for opaque colors. */
   background-image:
+    linear-gradient(var(--swatch-color, transparent), var(--swatch-color, transparent)),
     linear-gradient(45deg, var(--checkerboard-color) 25%, transparent 25%),
     linear-gradient(-45deg, var(--checkerboard-color) 25%, transparent 25%),
     linear-gradient(45deg, transparent 75%, var(--checkerboard-color) 75%),
     linear-gradient(-45deg, transparent 75%, var(--checkerboard-color) 75%);
-  background-size: 8px 8px;
+  background-size:
+    100% 100%,
+    8px 8px,
+    8px 8px,
+    8px 8px,
+    8px 8px;
   background-position:
+    0 0,
     0 0,
     0 4px,
     4px -4px,
     -4px 0;
-  /* The actual swatch color is set via inline style background-color,
-     which will layer on top of the checkerboard. */
-  background-blend-mode: normal;
 }
 
 .sigil-token-input__swatch-btn:focus-visible {

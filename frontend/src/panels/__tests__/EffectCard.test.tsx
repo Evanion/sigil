@@ -190,9 +190,11 @@ describe("EffectCard", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Shadow color" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
     // ValueInput fires onCommit on Enter — EffectCard forwards to props.onCommit
     // so EffectsPanel can call store.flushHistory().
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 
@@ -208,7 +210,8 @@ describe("EffectCard", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Blur" });
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 
@@ -224,7 +227,8 @@ describe("EffectCard", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Radius" });
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 });

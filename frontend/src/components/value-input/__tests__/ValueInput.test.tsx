@@ -11,9 +11,19 @@
  *    is available in recent jsdom but not exercised here — we verify the
  *    swatch DOM semantics, not the popover's visual open state.
  *
- * Pattern: we write plain `textContent` on the contentEditable combobox and
- * fire synthetic key/blur events. This matches the approach used by
- * `AppearancePanel.test.tsx` when validating ValueInput integration.
+ * DOM structure (after the flex-container refactor):
+ *   <div role="combobox">          ← outer wrapper; owns aria-expanded etc.
+ *     <button …/>                  ← optional swatch (color fields only)
+ *     <div role="textbox" …/>      ← inner contentEditable; owns event handlers
+ *   </div>
+ *
+ * Pattern: tests use `getByRole("combobox")` for ARIA attribute assertions
+ * (aria-expanded, aria-haspopup, aria-autocomplete, aria-valuenow, …) and
+ * `getByRole("textbox")` (or `combobox.querySelector('[role="textbox"]')`)
+ * for interaction events (keyDown, input, blur) and content-editable attributes
+ * (contenteditable, data-placeholder). Setting textContent or firing input/key
+ * events on the combobox outer div is incorrect because the event handlers live
+ * on the inner textbox div.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
@@ -52,6 +62,19 @@ const TOKENS: Record<string, Token> = {
   "spacing.md": DIMENSION_TOKEN,
 };
 
+// ── Helper ────────────────────────────────────────────────────────────
+
+/**
+ * Return the inner textbox element (role="textbox") from within the combobox.
+ * All interaction events (input, keyDown, blur) and content-editable attributes
+ * live on this inner div; the outer combobox owns only ARIA state attributes.
+ */
+function getTextbox(combobox: HTMLElement): HTMLElement {
+  const el = combobox.querySelector<HTMLElement>('[role="textbox"]');
+  if (!el) throw new Error("Could not find role=textbox inside combobox");
+  return el;
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────
 
 describe("ValueInput — basic rendering", () => {
@@ -65,8 +88,11 @@ describe("ValueInput — basic rendering", () => {
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox).toBeTruthy();
+    // The outer combobox wraps the inner textbox — textContent propagates up.
     expect(combobox.textContent).toContain("#ff0000");
-    expect(combobox.getAttribute("contenteditable")).toBe("true");
+    // contenteditable is on the inner textbox, not the outer combobox.
+    const textbox = getTextbox(combobox);
+    expect(textbox.getAttribute("contenteditable")).toBe("true");
   });
 
   it("surfaces the placeholder via data-placeholder when value is empty", () => {
@@ -80,7 +106,9 @@ describe("ValueInput — basic rendering", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
-    expect(combobox.getAttribute("data-placeholder")).toBe("Custom placeholder");
+    // data-placeholder is on the inner textbox div.
+    const textbox = getTextbox(combobox);
+    expect(textbox.getAttribute("data-placeholder")).toBe("Custom placeholder");
   });
 
   it("defaults aria-label to 'Token expression' when no label prop is provided", () => {
@@ -105,9 +133,12 @@ describe("ValueInput — basic rendering", () => {
       <ValueInput value="42" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" disabled />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    // tabindex and aria-disabled are on the outer combobox div.
     expect(combobox.getAttribute("tabindex")).toBe("-1");
     expect(combobox.getAttribute("aria-disabled")).toBe("true");
-    expect(combobox.getAttribute("contenteditable")).toBe("false");
+    // contenteditable is on the inner textbox div.
+    const textbox = getTextbox(combobox);
+    expect(textbox.getAttribute("contenteditable")).toBe("false");
   });
 });
 
@@ -122,8 +153,10 @@ describe("ValueInput — input propagation", () => {
       <ValueInput value="" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
-    combobox.textContent = "42";
-    fireEvent.input(combobox);
+    // Interact through the inner textbox — event handlers live there.
+    const textbox = getTextbox(combobox);
+    textbox.textContent = "42";
+    fireEvent.input(textbox);
     expect(onChange).toHaveBeenCalledWith("42");
   });
 });
@@ -145,8 +178,9 @@ describe("ValueInput — commit events", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
-    combobox.textContent = "42";
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    const textbox = getTextbox(combobox);
+    textbox.textContent = "42";
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith("42");
   });
@@ -163,10 +197,11 @@ describe("ValueInput — commit events", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     // Simulate user typing, which also updates the component's confirmedValue tracking.
-    combobox.textContent = "99";
-    fireEvent.input(combobox);
-    fireEvent.blur(combobox);
+    textbox.textContent = "99";
+    fireEvent.input(textbox);
+    fireEvent.blur(textbox);
     expect(onCommit).toHaveBeenCalledWith("99");
   });
 
@@ -182,8 +217,9 @@ describe("ValueInput — commit events", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     // blur without mutation — onBlur sees text matches confirmedValue and skips commit
-    fireEvent.blur(combobox);
+    fireEvent.blur(textbox);
     expect(onCommit).not.toHaveBeenCalled();
   });
 });
@@ -199,12 +235,13 @@ describe("ValueInput — Escape revert", () => {
       <ValueInput value="42" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     // Simulate typing — intermediate onChange fires
-    combobox.textContent = "99";
-    fireEvent.input(combobox);
+    textbox.textContent = "99";
+    fireEvent.input(textbox);
     onChange.mockClear();
     // Press Escape — should revert DOM and re-fire onChange with the confirmed value
-    fireEvent.keyDown(combobox, { key: "Escape" });
+    fireEvent.keyDown(textbox, { key: "Escape" });
     expect(onChange).toHaveBeenCalledWith("42");
   });
 });
@@ -283,9 +320,11 @@ describe("ValueInput — autocomplete", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     // Focus the combobox so selection APIs have a target node
     combobox.focus();
-    fireEvent.keyDown(combobox, { key: "{" });
+    // Key events go to the inner textbox where the handler lives.
+    fireEvent.keyDown(textbox, { key: "{" });
     // After pressing `{`, aria-expanded should flip to true on the combobox.
     expect(combobox.getAttribute("aria-expanded")).toBe("true");
     // The listbox must be present and visible
@@ -307,12 +346,13 @@ describe("ValueInput — autocomplete", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     combobox.focus();
     // Open autocomplete by pressing `{`
-    fireEvent.keyDown(combobox, { key: "{" });
+    fireEvent.keyDown(textbox, { key: "{" });
     expect(combobox.getAttribute("aria-expanded")).toBe("true");
     // Pressing Escape while the autocomplete is open should close it
-    fireEvent.keyDown(combobox, { key: "Escape" });
+    fireEvent.keyDown(textbox, { key: "Escape" });
     expect(combobox.getAttribute("aria-expanded")).toBe("false");
   });
 });
@@ -410,8 +450,9 @@ describe("ValueInput — RF-008 aria-live discrete-event scoping", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Test input" });
+    const textbox = getTextbox(combobox);
     combobox.focus();
-    fireEvent.keyDown(combobox, { key: "{" });
+    fireEvent.keyDown(textbox, { key: "{" });
     const status = document.querySelector<HTMLElement>("[role='status']");
     // Even though autocomplete is open with suggestions, the SR region is
     // still empty — autocomplete state is conveyed via aria-expanded only.

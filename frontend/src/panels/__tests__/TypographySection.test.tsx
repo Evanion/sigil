@@ -608,9 +608,11 @@ describe("TypographySection", () => {
       </TransProvider>
     ));
     const fontSize = screen.getByRole("combobox", { name: "Font size" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const fontSizeTextbox = fontSize.querySelector('[role="textbox"]') as HTMLElement;
     // Enter fires ValueInput's onCommit which forwards to handleFontSizeCommit
     // → store.flushHistory().
-    fireEvent.keyDown(fontSize, { key: "Enter" });
+    fireEvent.keyDown(fontSizeTextbox, { key: "Enter" });
     expect(flushHistory).toHaveBeenCalled();
   });
 
@@ -626,7 +628,8 @@ describe("TypographySection", () => {
       </TransProvider>
     ));
     const fontFamily = screen.getByRole("combobox", { name: "Font family" });
-    fireEvent.keyDown(fontFamily, { key: "Enter" });
+    const fontFamilyTextbox = fontFamily.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(fontFamilyTextbox, { key: "Enter" });
     expect(flushHistory).toHaveBeenCalled();
   });
 
@@ -642,7 +645,8 @@ describe("TypographySection", () => {
       </TransProvider>
     ));
     const textColor = screen.getByRole("combobox", { name: "Text color" });
-    fireEvent.keyDown(textColor, { key: "Enter" });
+    const textColorTextbox = textColor.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textColorTextbox, { key: "Enter" });
     expect(flushHistory).toHaveBeenCalled();
   });
 
@@ -655,14 +659,23 @@ describe("TypographySection", () => {
   // Tests".
 
   /**
-   * Simulate typing into the ValueInput combobox by setting its textContent
+   * Simulate typing into a ValueInput by setting the inner textbox's textContent
    * and firing an `input` event. This is the same mechanism ValueInput uses
-   * internally — `handleInput` reads `inputRef.textContent` and calls
-   * `props.onChange` with the result.
+   * internally — `handleInput` reads `inputRef.textContent` (the inner textbox)
+   * and calls `props.onChange` with the result.
+   *
+   * After the flex-container refactor, ValueInput renders:
+   *   <div role="combobox">  ← outer; owns ARIA state
+   *     <div role="textbox" contenteditable>  ← inner; owns event handlers
+   *
+   * Setting textContent on the outer combobox destroys the inner textbox (native
+   * DOM behaviour: assigning textContent replaces all children with a text node).
+   * We therefore find the inner textbox first and operate on it directly.
    */
-  function typeIntoCombobox(el: HTMLElement, value: string): void {
-    el.textContent = value;
-    fireEvent.input(el);
+  function typeIntoCombobox(comboboxEl: HTMLElement, value: string): void {
+    const textbox = comboboxEl.querySelector<HTMLElement>('[role="textbox"]') ?? comboboxEl;
+    textbox.textContent = value;
+    fireEvent.input(textbox);
   }
 
   it("test_min_line_height_enforced: should reject literal line height below MIN_LINE_HEIGHT", () => {

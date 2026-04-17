@@ -249,9 +249,11 @@ describe("FillRow", () => {
       />
     ));
     const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
     // ValueInput fires onCommit on Enter — the FillRow forwards to props.onCommit
     // so AppearancePanel can call store.flushHistory().
-    fireEvent.keyDown(combobox, { key: "Enter" });
+    fireEvent.keyDown(textbox, { key: "Enter" });
     expect(onCommit).toHaveBeenCalled();
   });
 

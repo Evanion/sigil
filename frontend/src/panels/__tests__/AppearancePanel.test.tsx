@@ -460,9 +460,11 @@ describe("AppearancePanel", () => {
       </TransProvider>
     ));
     const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const opacityTextbox = opacityInput.querySelector('[role="textbox"]') as HTMLElement;
     // Press Enter — this fires onCommit per ValueInput handleKeyDown,
     // which forwards to handleOpacityCommit → store.flushHistory().
-    fireEvent.keyDown(opacityInput, { key: "Enter" });
+    fireEvent.keyDown(opacityTextbox, { key: "Enter" });
     expect(flushHistory).toHaveBeenCalled();
   });
 
@@ -488,10 +490,12 @@ describe("AppearancePanel", () => {
       </TransProvider>
     ));
     const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
-    // Set the raw text directly on the contentEditable div so that
-    // ValueInput's getInputText() returns the token-ref string.
-    opacityInput.textContent = "{opacity.subtle}";
-    fireEvent.keyDown(opacityInput, { key: "Enter" });
+    // Set the raw text directly on the inner contentEditable textbox so that
+    // ValueInput's getInputText() returns the token-ref string. The event
+    // handlers also live on the inner textbox, not the outer combobox.
+    const opacityTextbox = opacityInput.querySelector('[role="textbox"]') as HTMLElement;
+    opacityTextbox.textContent = "{opacity.subtle}";
+    fireEvent.keyDown(opacityTextbox, { key: "Enter" });
     expect(setOpacity).toHaveBeenCalledWith("node-1", {
       type: "token_ref",
       name: "opacity.subtle",
