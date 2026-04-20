@@ -11,7 +11,7 @@
  */
 import { createMemo, Index } from "solid-js";
 import { NumberInput } from "../number-input/NumberInput";
-import { srgbToOklab, srgbToOklch, oklabToSrgb, oklchToSrgb } from "./color-math";
+import { srgbToOklch, oklchToSrgb, srgbToHsl, hslToSrgb } from "./color-math";
 import type { ColorSpace } from "./types";
 import "./ColorPicker.css";
 
@@ -31,7 +31,7 @@ export interface ColorValueFieldsProps {
 }
 
 /** Semantic identifier for each color field (RF-008). */
-type FieldId = "r" | "g" | "b" | "l" | "c" | "h" | "a_axis" | "b_axis" | "alpha";
+type FieldId = "r" | "g" | "b" | "l" | "c" | "h" | "s" | "alpha";
 
 interface FieldDef {
   /** Semantic identifier used for dispatch and aria-label lookup (RF-008). */
@@ -51,8 +51,7 @@ const FIELD_ARIA_LABELS: Record<FieldId, string> = {
   l: "Lightness",
   c: "Chroma",
   h: "Hue",
-  a_axis: "Green-Red axis",
-  b_axis: "Blue-Yellow axis",
+  s: "Saturation",
   alpha: "Opacity",
 };
 
@@ -119,9 +118,18 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
         ];
       }
 
-      case "oklab": {
-        const [l, aAxis, bAxis] = srgbToOklab(r, g, b);
+      case "hsl": {
+        const [h, s, l] = srgbToHsl(r, g, b);
         return [
+          { id: "h", label: "H", value: Math.round(h * 10) / 10, min: 0, max: 360, step: 0.1 },
+          {
+            id: "s",
+            label: "S",
+            value: Math.round(s * 100 * 10) / 10,
+            min: 0,
+            max: 100,
+            step: 0.1,
+          },
           {
             id: "l",
             label: "L",
@@ -129,22 +137,6 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
             min: 0,
             max: 100,
             step: 0.1,
-          },
-          {
-            id: "a_axis",
-            label: "a",
-            value: Math.round(aAxis * 1000) / 1000,
-            min: -0.4,
-            max: 0.4,
-            step: 0.001,
-          },
-          {
-            id: "b_axis",
-            label: "b",
-            value: Math.round(bAxis * 1000) / 1000,
-            min: -0.4,
-            max: 0.4,
-            step: 0.001,
           },
           alphaField,
         ];
@@ -197,13 +189,13 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
         break;
       }
 
-      case "oklab": {
-        const [currentL, currentA, currentB] = srgbToOklab(r, g, b);
-        const lab: [number, number, number] = [currentL, currentA, currentB];
-        if (field.id === "l") lab[0] = raw / 100;
-        else if (field.id === "a_axis") lab[1] = raw;
-        else if (field.id === "b_axis") lab[2] = raw;
-        const [nr, ng, nb] = oklabToSrgb(lab[0], lab[1], lab[2]);
+      case "hsl": {
+        const [currentH, currentS, currentL] = srgbToHsl(r, g, b);
+        const hsl: [number, number, number] = [currentH, currentS, currentL];
+        if (field.id === "h") hsl[0] = raw;
+        else if (field.id === "s") hsl[1] = raw / 100;
+        else if (field.id === "l") hsl[2] = raw / 100;
+        const [nr, ng, nb] = hslToSrgb(hsl[0], hsl[1], hsl[2]);
         props.onChange(nr, ng, nb, alpha);
         break;
       }

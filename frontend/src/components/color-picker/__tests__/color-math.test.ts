@@ -9,6 +9,8 @@ import {
   oklchToOklab,
   srgbToOklch,
   oklchToSrgb,
+  srgbToHsl,
+  hslToSrgb,
   colorToSrgb,
   srgbToColor,
   colorToHex,
@@ -254,6 +256,120 @@ describe("srgbToOklch / oklchToSrgb round-trip", () => {
     expect(approx(r, 1, 1e-3)).toBe(true);
     expect(approx(g, 1, 1e-3)).toBe(true);
     expect(approx(b, 1, 1e-3)).toBe(true);
+  });
+});
+
+// ── srgbToHsl / hslToSrgb ─────────────────────────────────────────────
+
+describe("srgbToHsl", () => {
+  it("should convert black to [0, 0, 0]", () => {
+    const [h, s, l] = srgbToHsl(0, 0, 0);
+    expect(h).toBe(0);
+    expect(s).toBe(0);
+    expect(l).toBe(0);
+  });
+
+  it("should convert white to [0, 0, 1]", () => {
+    const [h, s, l] = srgbToHsl(1, 1, 1);
+    expect(h).toBe(0);
+    expect(s).toBe(0);
+    expect(l).toBe(1);
+  });
+
+  it("should convert pure red to [0, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(1, 0, 0);
+    expect(approx(h, 0)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  it("should convert pure green to [120, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(0, 1, 0);
+    expect(approx(h, 120)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  it("should convert pure blue to [240, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(0, 0, 1);
+    expect(approx(h, 240)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  it("should produce hue in [0, 360) for achromatic colors", () => {
+    const [h] = srgbToHsl(0.5, 0.5, 0.5);
+    expect(h).toBeGreaterThanOrEqual(0);
+    expect(h).toBeLessThan(360);
+  });
+});
+
+describe("hslToSrgb", () => {
+  it("should convert [0, 0, 0] back to black", () => {
+    const [r, g, b] = hslToSrgb(0, 0, 0);
+    expect(approx(r, 0)).toBe(true);
+    expect(approx(g, 0)).toBe(true);
+    expect(approx(b, 0)).toBe(true);
+  });
+
+  it("should convert [0, 0, 1] back to white", () => {
+    const [r, g, b] = hslToSrgb(0, 0, 1);
+    expect(approx(r, 1)).toBe(true);
+    expect(approx(g, 1)).toBe(true);
+    expect(approx(b, 1)).toBe(true);
+  });
+
+  it("should convert [0, 1, 0.5] to pure red", () => {
+    const [r, g, b] = hslToSrgb(0, 1, 0.5);
+    expect(approx(r, 1)).toBe(true);
+    expect(approx(g, 0)).toBe(true);
+    expect(approx(b, 0)).toBe(true);
+  });
+
+  it("should normalize negative hue to [0, 360)", () => {
+    // -120 should be equivalent to 240 (blue)
+    const [r, g, b] = hslToSrgb(-120, 1, 0.5);
+    expect(approx(r, 0)).toBe(true);
+    expect(approx(g, 0)).toBe(true);
+    expect(approx(b, 1)).toBe(true);
+  });
+
+  it("should clamp out-of-range saturation and lightness", () => {
+    // s=2 clamps to 1, l=-1 clamps to 0 → black
+    const [r, g, b] = hslToSrgb(0, 2, -1);
+    expect(r).toBeGreaterThanOrEqual(0);
+    expect(r).toBeLessThanOrEqual(1);
+    expect(g).toBeGreaterThanOrEqual(0);
+    expect(b).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("srgbToHsl / hslToSrgb round-trip", () => {
+  it("should round-trip red", () => {
+    const [h, s, l] = srgbToHsl(1, 0, 0);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, 1)).toBe(true);
+    expect(approx(g, 0)).toBe(true);
+    expect(approx(b, 0)).toBe(true);
+  });
+
+  it("should round-trip an arbitrary color (teal)", () => {
+    const r0 = 0.2;
+    const g0 = 0.6;
+    const b0 = 0.8;
+    const [h, s, l] = srgbToHsl(r0, g0, b0);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, r0, 1e-6)).toBe(true);
+    expect(approx(g, g0, 1e-6)).toBe(true);
+    expect(approx(b, b0, 1e-6)).toBe(true);
+  });
+
+  it("should round-trip grey through achromatic path", () => {
+    const [h, s, l] = srgbToHsl(0.5, 0.5, 0.5);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, 0.5)).toBe(true);
+    expect(approx(g, 0.5)).toBe(true);
+    expect(approx(b, 0.5)).toBe(true);
   });
 });
 

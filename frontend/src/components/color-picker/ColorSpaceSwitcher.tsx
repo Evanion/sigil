@@ -1,6 +1,9 @@
 /**
- * ColorSpaceSwitcher — 4-option segmented toggle for selecting the active
- * color space: sRGB, Display P3, OkLCH, or OkLab.
+ * ColorSpaceSwitcher — segmented toggle for selecting the active display
+ * mode of the color picker's numeric fields: sRGB, OkLCH, or HSL.
+ *
+ * The display mode only affects how channels are labelled and ranged in
+ * ColorValueFields — colors are always stored as sRGB.
  *
  * Rendered as a radiogroup so that screen readers announce the current
  * selection correctly. Each button uses aria-checked to reflect state.
@@ -25,7 +28,7 @@ const SPACE_OPTIONS: SpaceOption[] = [
   // P3 hidden until proper color matrix conversion is implemented
   // { value: "display_p3", label: "P3", title: "Wide-gamut display colors (Display P3)" },
   { value: "oklch", label: "OkLCH", title: "Perceptual lightness/chroma/hue (OkLCH)" },
-  { value: "oklab", label: "OkLab", title: "Perceptual lightness and color axes (OkLab)" },
+  { value: "hsl", label: "HSL", title: "Hue/Saturation/Lightness (HSL)" },
 ];
 
 export interface ColorSpaceSwitcherProps {
