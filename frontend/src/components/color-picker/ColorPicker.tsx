@@ -55,12 +55,27 @@ interface InternalState {
 
 export function ColorPicker(props: ColorPickerProps) {
   // ── Internal state ─────────────────────────────────────────────────────
+  // Initialise from props.color synchronously so that children (HexInput,
+  // ColorValueFields, HueStrip, AlphaStrip) receive the correct sRGB values
+  // on their very first render. Initialising to zeros and relying on the
+  // prop-sync createEffect below to "catch up" causes a timing bug with
+  // Kobalte's NumberField: createControllableSignal captures `defaultValue`
+  // (= rawValue at mount = 0) for the input display, while the component's
+  // rawValue-watching effect uses `defer: true` and captures its change-
+  // detection baseline at its first run — which happens AFTER the parent
+  // effect has already bumped state to the real colour, so the 0 → correct-
+  // value transition is classified as "initial" and never applied to the
+  // displayed text. Children then render "0" forever while HexInput (which
+  // reads props.r/g/b directly every render) shows the real colour.
+  const [initR, initG, initB] = colorToSrgb(props.color);
+  const initAlpha = colorAlpha(props.color);
+  const [initHue, initSat] = srgbToHsv(initR, initG, initB);
   const [state, setState] = createStore<InternalState>({
-    r: 0,
-    g: 0,
-    b: 0,
-    alpha: 1,
-    hue: 0,
+    r: Number.isFinite(initR) ? initR : 0,
+    g: Number.isFinite(initG) ? initG : 0,
+    b: Number.isFinite(initB) ? initB : 0,
+    alpha: Number.isFinite(initAlpha) ? initAlpha : 1,
+    hue: Number.isFinite(initHue) && initSat > 0.001 ? initHue : 0,
     space: "srgb",
   });
 
