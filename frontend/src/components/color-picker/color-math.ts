@@ -266,17 +266,24 @@ export function srgbToHsv(r: number, g: number, b: number): [number, number, num
  * For achromatic colors (max === min), hue is returned as 0.
  */
 export function srgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  // CLAUDE.md §11 Floating-Point Validation / Math Helpers Must Guard Their Domain:
+  // guard NaN/Infinity at the helper's entry, independent of upstream validation.
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return [0, 0, 0];
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
   const l = (max + min) / 2;
   const delta = max - min;
   let h = 0;
   let s = 0;
-  if (delta > 0.001) {
+  // RF-D03: Use a tight achromatic gate — delta > 0 is sufficient because the
+  // division domains below are mathematically safe whenever max > min. The
+  // previous `delta > 0.001` threshold silently clamped ~0.25-units-on-0..255
+  // of channel spread to grey (CLAUDE.md §11 No Silent Clamping).
+  if (delta > 0) {
     // Guard division domain (CLAUDE.md §11 Math Helpers Must Guard Their Domain):
     // both divisors below are strictly positive when delta > 0 because that
-    // implies max > 0 and max + min > 0 (sum > 0), and (2 - max - min) > 0
-    // (since max, min ≤ 1 and at least one differs from the other).
+    // implies max > min, so (max + min) > 0 and (2 - max - min) > 0 (since
+    // max, min ∈ [0, 1] and they differ).
     s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
     if (max === r) h = 60 * (((g - b) / delta) % 6);
     else if (max === g) h = 60 * ((b - r) / delta + 2);
@@ -292,9 +299,12 @@ export function srgbToHsl(r: number, g: number, b: number): [number, number, num
  * Returns [r, g, b] each in [0, 1].
  */
 export function hslToSrgb(h: number, s: number, l: number): [number, number, number] {
+  // CLAUDE.md §11 Floating-Point Validation / Math Helpers Must Guard Their Domain:
+  // guard NaN/Infinity at the helper's entry, independent of upstream validation.
+  if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(l)) return [0, 0, 0];
   const sc = clamp01(s);
   const lc = clamp01(l);
-  if (sc < 0.0001) {
+  if (sc <= 0) {
     return [lc, lc, lc];
   }
   const C = (1 - Math.abs(2 * lc - 1)) * sc;

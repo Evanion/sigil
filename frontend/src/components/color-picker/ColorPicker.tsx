@@ -15,7 +15,7 @@
 import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
 import type { Color } from "../../types/document";
-import type { ColorSpace } from "./types";
+import type { ColorDisplayMode } from "./types";
 import {
   colorToSrgb,
   colorAlpha,
@@ -23,6 +23,7 @@ import {
   isOutOfSrgbGamut,
   hsvToSrgb,
   srgbToHsv,
+  srgbToHsl,
 } from "./color-math";
 import { ColorArea } from "./ColorArea";
 import { HueStrip } from "./HueStrip";
@@ -48,9 +49,19 @@ interface InternalState {
   g: number;
   b: number;
   alpha: number;
-  /** Preserved hue in [0, 360) so achromatic colors don't lose hue memory. */
+  /** Preserved HSV hue in [0, 360) so achromatic colors don't lose hue memory
+   * in the HSV-driven widgets (ColorArea, HueStrip). */
   hue: number;
-  space: ColorSpace;
+  /** Preserved HSL hue in [0, 360). Separate from `hue` because HSL and HSV
+   * agree on hue for chromatic colors but must be tracked independently once
+   * the user edits H in HSL display mode — the HSL and HSV hue wheels share
+   * the same numeric range but our H-strip is HSV-based. */
+  hslH: number;
+  /** Preserved HSL saturation in [0, 1]. Needed so that editing H on a grey
+   * color via the HSL fields does not collapse back to grey on the next render
+   * (RF-D01). */
+  hslS: number;
+  space: ColorDisplayMode;
 }
 
 export function ColorPicker(props: ColorPickerProps) {
@@ -59,23 +70,39 @@ export function ColorPicker(props: ColorPickerProps) {
   // ColorValueFields, HueStrip, AlphaStrip) receive the correct sRGB values
   // on their very first render. Initialising to zeros and relying on the
   // prop-sync createEffect below to "catch up" causes a timing bug with
-  // Kobalte's NumberField: createControllableSignal captures `defaultValue`
-  // (= rawValue at mount = 0) for the input display, while the component's
-  // rawValue-watching effect uses `defer: true` and captures its change-
-  // detection baseline at its first run — which happens AFTER the parent
-  // effect has already bumped state to the real colour, so the 0 → correct-
-  // value transition is classified as "initial" and never applied to the
-  // displayed text. Children then render "0" forever while HexInput (which
-  // reads props.r/g/b directly every render) shows the real colour.
-  const [initR, initG, initB] = colorToSrgb(props.color);
-  const initAlpha = colorAlpha(props.color);
-  const [initHue, initSat] = srgbToHsv(initR, initG, initB);
+  // Kobalte's NumberField: its internal `createControllableSignal` captures
+  // the initial `rawValue` at mount time (= 0 because zero-init state hadn't
+  // caught up yet) and uses that captured value as the baseline for its own
+  // reactive display state. Subsequent prop-driven updates land in the
+  // controlled signal's "external" slot but never propagate to the display
+  // text because Kobalte treats the first post-mount value as "initial" and
+  // suppresses the update. The fix is synchronous init here, which ensures
+  // the first render already has the correct values and Kobalte captures
+  // them correctly. Children then render real channels on first paint while
+  // HexInput (which reads props.r/g/b directly every render) matches.
+  const [rawInitR, rawInitG, rawInitB] = colorToSrgb(props.color);
+  const rawInitAlpha = colorAlpha(props.color);
+  // RF-D06: guard initR/G/B before passing to srgbToHsv, since srgbToHsv is a
+  // math helper that must guard its own domain (CLAUDE.md §11) but defence-
+  // in-depth at the caller keeps the init path hardened against upstream
+  // changes to colorToSrgb.
+  const initR = Number.isFinite(rawInitR) ? rawInitR : 0;
+  const initG = Number.isFinite(rawInitG) ? rawInitG : 0;
+  const initB = Number.isFinite(rawInitB) ? rawInitB : 0;
+  const initAlpha = Number.isFinite(rawInitAlpha) ? rawInitAlpha : 1;
+  const [initHue] = srgbToHsv(initR, initG, initB);
+  const [initHslH, initHslS] = srgbToHsl(initR, initG, initB);
   const [state, setState] = createStore<InternalState>({
-    r: Number.isFinite(initR) ? initR : 0,
-    g: Number.isFinite(initG) ? initG : 0,
-    b: Number.isFinite(initB) ? initB : 0,
-    alpha: Number.isFinite(initAlpha) ? initAlpha : 1,
-    hue: Number.isFinite(initHue) && initSat > 0.001 ? initHue : 0,
+    r: initR,
+    g: initG,
+    b: initB,
+    alpha: initAlpha,
+    // RF-D01: accept any finite hue on mount. Gating on saturation caused
+    // near-grey seeds to lose their stored hue intent; IEEE 754 semantics
+    // already default NaN through Number.isFinite.
+    hue: Number.isFinite(initHue) ? initHue : 0,
+    hslH: Number.isFinite(initHslH) ? initHslH : 0,
+    hslS: Number.isFinite(initHslS) ? initHslS : 0,
     space: "srgb",
   });
 
@@ -96,12 +123,22 @@ export function ColorPicker(props: ColorPickerProps) {
     // Derive hue from RGB (HSV model). Only update hue if the color has
     // saturation — preserve the previous hue for greys/achromatic colors.
     const [h, svS] = srgbToHsv(r, g, b);
-    // RF-019: Read state.hue inside untrack to avoid creating a reactive loop
+    const [hlH, hlS] = srgbToHsl(r, g, b);
+    // RF-019: Read state.* inside untrack to avoid creating a reactive loop
     const prevHue = untrack(() => state.hue);
-    const newHue = svS > 0.001 ? h : prevHue;
+    const prevHslH = untrack(() => state.hslH);
+    const prevHslS = untrack(() => state.hslS);
+    const newHue = svS > 0 ? h : prevHue;
+    // RF-D01: preserve HSL hue/saturation memory across achromatic round-trips.
+    // When the sRGB channels are flat (delta = 0), srgbToHsl returns h=0/s=0,
+    // which would collapse any prior user-typed HSL values. Keep the previous
+    // hslH/hslS in that case so HSL edits on grey colors persist visually
+    // until the user changes chromatic channels.
+    const newHslH = hlS > 0 ? hlH : prevHslH;
+    const newHslS = hlS > 0 ? hlS : prevHslS;
     // Don't overwrite the display space — it's a local UI preference,
-    // not part of the color value. Only update r/g/b/alpha/hue.
-    setState({ r, g, b, alpha, hue: newHue });
+    // not part of the color value.
+    setState({ r, g, b, alpha, hue: newHue, hslH: newHslH, hslS: newHslS });
   });
 
   // ── Emit helper ────────────────────────────────────────────────────────
@@ -117,8 +154,13 @@ export function ColorPicker(props: ColorPickerProps) {
   // Throttle color change emissions to avoid overwhelming the store.
   // During drag, emit at most once per animation frame.
   let emitPending = false;
-  let pendingColor: { r: number; g: number; b: number; alpha: number; space: ColorSpace } | null =
-    null;
+  let pendingColor: {
+    r: number;
+    g: number;
+    b: number;
+    alpha: number;
+    space: ColorDisplayMode;
+  } | null = null;
 
   function flushEmit() {
     emitPending = false;
@@ -277,7 +319,13 @@ export function ColorPicker(props: ColorPickerProps) {
   // per drag tick. `isEcho()` detects round-tripped values (within the
   // quantisation tolerance for 0–255 sRGB channels) and suppresses the
   // commit in that case.
-  function handleFieldsChange(r: number, g: number, b: number, alpha: number) {
+  function handleFieldsChange(
+    r: number,
+    g: number,
+    b: number,
+    alpha: number,
+    hslHint?: { h: number; s: number },
+  ) {
     if (
       !Number.isFinite(r) ||
       !Number.isFinite(g) ||
@@ -288,8 +336,17 @@ export function ColorPicker(props: ColorPickerProps) {
     const echo = isEcho(r, g, b, alpha);
     // Derive hue from HSV — preserve previous hue for achromatic colors
     const [derivedH, derivedS] = srgbToHsv(r, g, b);
-    const h = derivedS > 0.001 ? derivedH : state.hue;
-    setState({ r, g, b, alpha, hue: h });
+    const h = derivedS > 0 ? derivedH : state.hue;
+    // RF-D01: Accept the caller's HSL intent directly when provided.
+    // ColorValueFields sends the *target* H/S chosen by the user in HSL mode
+    // so we can preserve them across the round-trip even when the resulting
+    // sRGB is achromatic (e.g. H=200 at S=0 still produces grey, but the user
+    // meant H=200 and the next render must not reset the H field to 0).
+    const hslPatch =
+      hslHint !== undefined && Number.isFinite(hslHint.h) && Number.isFinite(hslHint.s)
+        ? { hslH: hslHint.h, hslS: hslHint.s }
+        : undefined;
+    setState({ r, g, b, alpha, hue: h, ...(hslPatch ?? {}) });
     emit(r, g, b, alpha);
     if (!echo) commitColor();
   }
@@ -307,15 +364,15 @@ export function ColorPicker(props: ColorPickerProps) {
     const echo = isEcho(r, g, b);
     // Derive hue from HSV — preserve previous hue for achromatic colors
     const [derivedH, derivedS] = srgbToHsv(r, g, b);
-    const h = derivedS > 0.001 ? derivedH : state.hue;
+    const h = derivedS > 0 ? derivedH : state.hue;
     setState({ r, g, b, hue: h });
     emit(r, g, b, state.alpha);
     if (!echo) commitColor();
   }
 
-  // ── ColorSpace change handler ──────────────────────────────────────────
-  // Only changes the display space; internal sRGB state is unchanged.
-  function handleSpaceChange(space: ColorSpace) {
+  // ── ColorDisplayMode change handler ────────────────────────────────────
+  // Only changes the display mode; internal sRGB state is unchanged.
+  function handleSpaceChange(space: ColorDisplayMode) {
     // Only update the display space — don't emit a color change.
     // The color value stays the same (sRGB internally), only the
     // numeric field labels/ranges change.
@@ -365,6 +422,8 @@ export function ColorPicker(props: ColorPickerProps) {
         b={state.b}
         alpha={state.alpha}
         space={state.space}
+        hslH={state.hslH}
+        hslS={state.hslS}
         onChange={handleFieldsChange}
       />
       {/* Visually-hidden live region for discrete color change announcements.

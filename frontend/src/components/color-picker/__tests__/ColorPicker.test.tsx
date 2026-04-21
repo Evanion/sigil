@@ -244,6 +244,41 @@ describe("ColorPicker", () => {
       expect(onColorCommit).toHaveBeenCalledTimes(1);
     });
 
+    it("should render the initial props.color synchronously in ColorValueFields (RF-D04)", async () => {
+      // RF-D04: The synchronous-init path in ColorPicker exists to defeat a
+      // Kobalte `createControllableSignal` mount-time capture bug that
+      // otherwise leaves NumberInput display text stuck at 0 forever. If the
+      // init order regresses (e.g. children re-render before state is
+      // populated), this test catches it: the R/G/B spinbuttons must show
+      // 13, 153, 255 at first paint without any user interaction or prop
+      // update.
+      const onColorChange = vi.fn();
+      const { container } = render(() => (
+        <ColorPicker
+          color={makeColor(13 / 255, 153 / 255, 255 / 255)}
+          onColorChange={onColorChange}
+        />
+      ));
+
+      // The sync-init guarantee is that children render correct values on
+      // the very first render, synchronously. No microtask / tick flushes
+      // should be needed to observe the seeded values.
+      const spinButtons = container.querySelectorAll<HTMLElement>('[role="spinbutton"]');
+      // 4 spinbuttons: R, G, B, A
+      expect(spinButtons.length).toBeGreaterThanOrEqual(4);
+      const [rInput, gInput, bInput] = Array.from(spinButtons);
+      // Kobalte's NumberField renders its raw value into the input's
+      // `textContent` / `value`. Read both in case the primitive changes.
+      const readValue = (el: HTMLElement | undefined): string => {
+        if (!el) return "";
+        if (el instanceof HTMLInputElement) return el.value;
+        return (el.textContent ?? "").trim();
+      };
+      expect(readValue(rInput)).toBe("13");
+      expect(readValue(gInput)).toBe("153");
+      expect(readValue(bInput)).toBe("255");
+    });
+
     it("should still fire onColorCommit when a user increments a NumberInput (echo gate must not block real edits)", async () => {
       const onColorChange = vi.fn();
       const onColorCommit = vi.fn();

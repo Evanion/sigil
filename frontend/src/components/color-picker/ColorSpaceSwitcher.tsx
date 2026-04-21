@@ -1,5 +1,5 @@
 /**
- * ColorSpaceSwitcher — segmented toggle for selecting the active display
+ * ColorDisplayModeSwitcher — segmented toggle for selecting the active display
  * mode of the color picker's numeric fields: sRGB, OkLCH, or HSL.
  *
  * The display mode only affects how channels are labelled and ranged in
@@ -13,11 +13,11 @@
  * (wrapping at ends), calling onChange and moving focus (RF-001).
  */
 import { For } from "solid-js";
-import type { ColorSpace } from "./types";
+import type { ColorDisplayMode } from "./types";
 import "./ColorPicker.css";
 
 interface SpaceOption {
-  value: ColorSpace;
+  value: ColorDisplayMode;
   label: string;
   /** RF-030: Descriptive tooltip for the color space button. */
   title: string;
@@ -28,17 +28,21 @@ const SPACE_OPTIONS: SpaceOption[] = [
   // P3 hidden until proper color matrix conversion is implemented
   // { value: "display_p3", label: "P3", title: "Wide-gamut display colors (Display P3)" },
   { value: "oklch", label: "OkLCH", title: "Perceptual lightness/chroma/hue (OkLCH)" },
-  { value: "hsl", label: "HSL", title: "Hue/Saturation/Lightness (HSL)" },
+  {
+    value: "hsl",
+    label: "HSL",
+    title: "Hue/Saturation/Lightness (HSL \u2014 CSS-style, not Figma's HSB)",
+  },
 ];
 
-export interface ColorSpaceSwitcherProps {
+export interface ColorDisplayModeSwitcherProps {
   /** The currently active color space. */
-  value: ColorSpace;
+  value: ColorDisplayMode;
   /** Called when the user selects a different color space. */
-  onChange: (space: ColorSpace) => void;
+  onChange: (space: ColorDisplayMode) => void;
 }
 
-export function ColorSpaceSwitcher(props: ColorSpaceSwitcherProps) {
+export function ColorSpaceSwitcher(props: ColorDisplayModeSwitcherProps) {
   const buttonRefs: (HTMLButtonElement | undefined)[] = [];
 
   function handleKeyDown(e: KeyboardEvent) {

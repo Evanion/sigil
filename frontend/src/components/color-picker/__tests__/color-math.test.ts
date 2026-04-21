@@ -302,6 +302,44 @@ describe("srgbToHsl", () => {
     expect(h).toBeGreaterThanOrEqual(0);
     expect(h).toBeLessThan(360);
   });
+
+  // RF-D08: exercise every branch of the max === {r,g,b} cascade in round-trip.
+  // The tests above only covered pure R, G, B primaries; yellow (max === r,
+  // but with g at the same value) and cyan / magenta hit the other two
+  // branches.
+  it("should convert yellow (1, 1, 0) to [60, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(1, 1, 0);
+    expect(approx(h, 60)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  it("should convert cyan (0, 1, 1) to [180, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(0, 1, 1);
+    expect(approx(h, 180)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  it("should convert magenta (1, 0, 1) to [300, 1, 0.5]", () => {
+    const [h, s, l] = srgbToHsl(1, 0, 1);
+    expect(approx(h, 300)).toBe(true);
+    expect(approx(s, 1)).toBe(true);
+    expect(approx(l, 0.5)).toBe(true);
+  });
+
+  // RF-D02 / CLAUDE.md §11 Floating-Point Validation: every math helper must
+  // guard NaN/Infinity at its entry. Verify the helper defends itself.
+  it("should return [0, 0, 0] for NaN input (RF-D02 entry guard)", () => {
+    expect(srgbToHsl(NaN, 0.5, 0.5)).toEqual([0, 0, 0]);
+    expect(srgbToHsl(0.5, NaN, 0.5)).toEqual([0, 0, 0]);
+    expect(srgbToHsl(0.5, 0.5, NaN)).toEqual([0, 0, 0]);
+  });
+
+  it("should return [0, 0, 0] for Infinity input (RF-D02 entry guard)", () => {
+    expect(srgbToHsl(Infinity, 0.5, 0.5)).toEqual([0, 0, 0]);
+    expect(srgbToHsl(0.5, -Infinity, 0.5)).toEqual([0, 0, 0]);
+  });
 });
 
 describe("hslToSrgb", () => {
@@ -342,6 +380,28 @@ describe("hslToSrgb", () => {
     expect(g).toBeGreaterThanOrEqual(0);
     expect(b).toBeGreaterThanOrEqual(0);
   });
+
+  // RF-D08: H=360 is the upper boundary of the [0, 360) hue range and must
+  // normalise to the same color as H=0 (pure red at full sat / 0.5 lightness).
+  it("should treat H=360 identically to H=0 (boundary normalisation)", () => {
+    const atZero = hslToSrgb(0, 1, 0.5);
+    const atThreeSixty = hslToSrgb(360, 1, 0.5);
+    expect(approx(atZero[0], atThreeSixty[0])).toBe(true);
+    expect(approx(atZero[1], atThreeSixty[1])).toBe(true);
+    expect(approx(atZero[2], atThreeSixty[2])).toBe(true);
+  });
+
+  // RF-D02 / CLAUDE.md §11 Floating-Point Validation.
+  it("should return [0, 0, 0] for NaN input (RF-D02 entry guard)", () => {
+    expect(hslToSrgb(NaN, 0.5, 0.5)).toEqual([0, 0, 0]);
+    expect(hslToSrgb(180, NaN, 0.5)).toEqual([0, 0, 0]);
+    expect(hslToSrgb(180, 0.5, NaN)).toEqual([0, 0, 0]);
+  });
+
+  it("should return [0, 0, 0] for Infinity input (RF-D02 entry guard)", () => {
+    expect(hslToSrgb(Infinity, 0.5, 0.5)).toEqual([0, 0, 0]);
+    expect(hslToSrgb(180, Infinity, 0.5)).toEqual([0, 0, 0]);
+  });
 });
 
 describe("srgbToHsl / hslToSrgb round-trip", () => {
@@ -362,6 +422,34 @@ describe("srgbToHsl / hslToSrgb round-trip", () => {
     expect(approx(r, r0, 1e-6)).toBe(true);
     expect(approx(g, g0, 1e-6)).toBe(true);
     expect(approx(b, b0, 1e-6)).toBe(true);
+  });
+
+  // RF-D08: every branch of the srgbToHsl `max === r/g/b` cascade must
+  // round-trip. Yellow hits `max === r` with g participating, cyan hits
+  // `max === g`, magenta hits `max === b`. Plus an off-primary (olive) to
+  // stress the `max === g` branch at non-extreme saturation.
+  it("should round-trip yellow", () => {
+    const [h, s, l] = srgbToHsl(1, 1, 0);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, 1, 1e-6)).toBe(true);
+    expect(approx(g, 1, 1e-6)).toBe(true);
+    expect(approx(b, 0, 1e-6)).toBe(true);
+  });
+
+  it("should round-trip cyan", () => {
+    const [h, s, l] = srgbToHsl(0, 1, 1);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, 0, 1e-6)).toBe(true);
+    expect(approx(g, 1, 1e-6)).toBe(true);
+    expect(approx(b, 1, 1e-6)).toBe(true);
+  });
+
+  it("should round-trip magenta", () => {
+    const [h, s, l] = srgbToHsl(1, 0, 1);
+    const [r, g, b] = hslToSrgb(h, s, l);
+    expect(approx(r, 1, 1e-6)).toBe(true);
+    expect(approx(g, 0, 1e-6)).toBe(true);
+    expect(approx(b, 1, 1e-6)).toBe(true);
   });
 
   it("should round-trip grey through achromatic path", () => {
