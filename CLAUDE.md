@@ -378,12 +378,13 @@ The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` 
 
 ### Handlers Must Surface Validation Failures to the User
 
-Never silently reject, clamp, truncate, or coerce an invalid input value. Three anti-patterns are banned:
+Never silently reject, clamp, truncate, or coerce an invalid input value. Four anti-patterns are banned:
 1. **Silent clamping** — `position.max(0)`, `name.truncate(MAX_LEN)`.
 2. **Silent rejection** — `if (!isValid(input)) return;` with no user feedback.
 3. **Silent swallowing** — `try { parse(input); } catch { /* ignore */ }`.
+4. **Silent discriminant collapse** — `if (delta > TOLERANCE) { return [0, 0, ...]; }` where the caller loses not just a value but the *identity* of a channel (e.g., hue set to 0 because saturation fell below a threshold). A coarse tolerance masquerading as a division-safety guard is a silent clamp — use the strict numerical guard (`delta > 0`) and document why.
 
-All three mask bugs in callers and leave the user unable to understand why their action had no effect. Instead, at every input boundary (API handler, MCP tool, deserialization, UI callback, panel commit handler):
+All four mask bugs in callers and leave the user unable to understand why their action had no effect. Instead, at every input boundary (API handler, MCP tool, deserialization, UI callback, panel commit handler):
 - Validate the input.
 - On failure, surface the error via the appropriate channel for that layer:
   - **Rust API/MCP**: return a typed error identifying the invalid value and acceptable range.

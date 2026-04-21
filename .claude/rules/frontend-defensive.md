@@ -8,6 +8,20 @@ These rules apply to all frontend code in `frontend/` — Solid.js reactivity, s
 
 When a value flows from a producer (signal, computed memo, callback prop, store field) to a renderer or side-effecting consumer, the connection MUST be verified by a test that exercises the full path: trigger the producer, assert the consumer's output. A pipeline that compiles and type-checks but whose downstream consumer receives a voided or disconnected value is a silent no-op — the compiler cannot detect broken wiring. This pattern recurs: a signal read but assigned to `_` or not forwarded; a callback prop defined but never passed to the child; a store field populated but the renderer reads a different field. Every new reactive connection introduced in a PR must have at least one integration or component test that asserts the consumer receives and acts on the value. Unit-testing the producer in isolation is not sufficient — the wiring itself must be tested.
 
+### Display Layers Must Preserve User Intent Across Lossy Transforms
+
+When a UI control displays a value that is derived from stored state via a lossy or non-bijective transform (HSL↔sRGB where achromatic colors collapse hue, OkLCH↔sRGB with gamut clipping, font-weight keyword↔numeric mapping, line-height unit coercion, angle modulus normalization), the component MUST carry a "last-typed" cache alongside the derived display value. When the derived value is in the collapsed/lossy region, the display and edit handlers MUST read from the cache instead of re-deriving, and MUST update the cache from user input.
+
+A reactive display that re-derives every render will re-collapse the user's typed value on the next tick, erasing their edit before the commit ever reaches the store. The compiler cannot detect this — every individual link in the reactive chain works; the bug is in the round-trip. This pattern is distinct from "reactive wiring" bugs.
+
+Checklist for any new display↔storage transform:
+1. Identify every coordinate in the display space whose inverse image under the storage→display transform has cardinality > 1 (the "collapsed region" — e.g., H is undefined when S=0).
+2. Store the last user-supplied value for each such coordinate in component-local state.
+3. When reading for render, use the cached value if the derived value falls in the collapsed region.
+4. Add a regression test: enter a value in the collapsed region, assert that the displayed value on the next render matches the entry (not the round-tripped collapse).
+
+Precedent: RF-D01 (PR #57 color picker — HSL hue/saturation lost on achromatic colors).
+
 ### User-Initiated Mutations Must Use Optimistic Updates
 
 Every mutation triggered by a direct user action (drag-and-drop, rename, toggle, delete) that modifies server state MUST apply the expected state change to the local store immediately, before the server responds. Waiting for a server round-trip before updating the UI creates perceptible lag that violates the "feels like Figma" UX requirement. The optimistic update contract:
