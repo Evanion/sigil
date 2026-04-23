@@ -136,6 +136,16 @@ pub const MAX_FIELD_VALUE_SIZE: usize = 1_024 * 1_024;
 /// Maximum length of a `user_id` string.
 pub const MAX_USER_ID_LEN: usize = 128;
 
+/// Maximum value for a single corner radius component (pixels).
+/// Applies to both x and y components of `CornerRadii`.
+pub const MAX_CORNER_RADIUS: f64 = 100_000.0;
+
+/// Minimum superellipse smoothing value (0.0 = no smoothing, collapses to circular arc).
+pub const MIN_CORNER_SMOOTHING: f64 = 0.0;
+
+/// Maximum superellipse smoothing value (1.0 = full G2-continuous squircle).
+pub const MAX_CORNER_SMOOTHING: f64 = 1.0;
+
 // ── Validation Functions ───────────────────────────────────────────────
 
 /// Validates that a float value is finite (not NaN or infinity).
@@ -1182,5 +1192,14 @@ mod tests {
             validate_conic_gradient(&def).is_err(),
             "NaN stop position must be rejected"
         );
+    }
+
+    // ── Corner shape constants ─────────────────────────────────────────
+
+    #[test]
+    fn test_corner_constants_have_expected_values() {
+        assert_eq!(MAX_CORNER_RADIUS, 100_000.0);
+        assert_eq!(MIN_CORNER_SMOOTHING, 0.0);
+        assert_eq!(MAX_CORNER_SMOOTHING, 1.0);
     }
 }
