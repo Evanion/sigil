@@ -1,6 +1,7 @@
 // crates/core/src/validate.rs
 
 use crate::error::CoreError;
+use crate::node::Corner;
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -558,6 +559,97 @@ pub fn validate_conic_gradient(g: &crate::node::ConicGradientDef) -> Result<(), 
                 stop.position
             )));
         }
+    }
+    Ok(())
+}
+
+/// Validates a full `[Corner; 4]` array for a node.
+///
+/// Checks, in order:
+/// 1. Each corner's radii are finite, non-negative, and within `MAX_CORNER_RADIUS`.
+/// 2. Each `Superellipse` corner's smoothing is finite and within
+///    `[MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]`.
+/// 3. Superellipse uniformity: if any corner is `Superellipse`, all four must be.
+/// 4. Superellipse smoothing parity: when all four are `Superellipse`,
+///    their smoothing values must be equal.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any check fails.
+///
+/// # Panics
+/// Does not panic in practice. The two `.unwrap()` calls in the smoothing-parity
+/// loop are guarded by the `superellipse_count == 4` precondition immediately
+/// above them, which guarantees every corner is `Superellipse` and `smoothing()`
+/// returns `Some`.
+pub fn validate_corners(corners: &[Corner; 4]) -> Result<(), CoreError> {
+    // (1) and (2): per-corner field validation.
+    for (i, corner) in corners.iter().enumerate() {
+        let radii = corner.radii();
+        validate_radius_component(radii.x, i, "x")?;
+        validate_radius_component(radii.y, i, "y")?;
+
+        if let Some(s) = corner.smoothing() {
+            if !s.is_finite() {
+                return Err(CoreError::ValidationError(format!(
+                    "corners[{i}].smoothing must be finite, got {s}"
+                )));
+            }
+            if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(&s) {
+                return Err(CoreError::ValidationError(format!(
+                    "corners[{i}].smoothing must be in [{MIN_CORNER_SMOOTHING}, \
+                     {MAX_CORNER_SMOOTHING}], got {s}"
+                )));
+            }
+        }
+    }
+
+    // (3) Uniformity: mixed superellipse + other shapes is rejected.
+    let superellipse_count = corners.iter().filter(|c| c.is_superellipse()).count();
+    if superellipse_count > 0 && superellipse_count < 4 {
+        return Err(CoreError::ValidationError(
+            "superellipse must be applied uniformly to all four corners".to_string(),
+        ));
+    }
+
+    // (4) Smoothing parity when all four are superellipse.
+    if superellipse_count == 4 {
+        // SAFETY: we verified all four corners are Superellipse above, so
+        // `smoothing()` returns `Some` for every element in this loop.
+        let first = corners[0].smoothing().unwrap();
+        for (i, c) in corners.iter().enumerate().skip(1) {
+            let s = c.smoothing().unwrap();
+            // Bitwise equality — smoothing is user-entered; the same value
+            // should round-trip exactly. Epsilon comparison would silently
+            // accept drift introduced by serialization rounding.
+            if s.to_bits() != first.to_bits() {
+                return Err(CoreError::ValidationError(format!(
+                    "superellipse smoothing must match across all four corners \
+                     (corners[0]={first}, corners[{i}]={s})"
+                )));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_radius_component(value: f64, corner_index: usize, axis: &str) -> Result<(), CoreError> {
+    if !value.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "corners[{corner_index}].radii.{axis} must be finite \
+             (no NaN or infinity), got {value}"
+        )));
+    }
+    if value < 0.0 {
+        return Err(CoreError::ValidationError(format!(
+            "corners[{corner_index}].radii.{axis} must be non-negative, got {value}"
+        )));
+    }
+    if value > MAX_CORNER_RADIUS {
+        return Err(CoreError::ValidationError(format!(
+            "corners[{corner_index}].radii.{axis} exceeds MAX_CORNER_RADIUS \
+             ({MAX_CORNER_RADIUS}), got {value}"
+        )));
     }
     Ok(())
 }
@@ -1201,5 +1293,124 @@ mod tests {
         assert_eq!(MAX_CORNER_RADIUS, 100_000.0);
         assert_eq!(MIN_CORNER_SMOOTHING, 0.0);
         assert_eq!(MAX_CORNER_SMOOTHING, 1.0);
+    }
+
+    // ── validate_corners ───────────────────────────────────────────────
+
+    use crate::node::{Corner, CornerRadii};
+
+    fn round_corner(x: f64, y: f64) -> Corner {
+        Corner::Round {
+            radii: CornerRadii { x, y },
+        }
+    }
+
+    fn superellipse_corner(x: f64, y: f64, s: f64) -> Corner {
+        Corner::Superellipse {
+            radii: CornerRadii { x, y },
+            smoothing: s,
+        }
+    }
+
+    #[test]
+    fn test_validate_corners_accepts_all_round() {
+        let corners = [round_corner(8.0, 8.0); 4];
+        assert!(validate_corners(&corners).is_ok());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_nan_radius_x() {
+        let mut corners = [round_corner(8.0, 8.0); 4];
+        corners[0] = round_corner(f64::NAN, 8.0);
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_nan_radius_y() {
+        let mut corners = [round_corner(8.0, 8.0); 4];
+        corners[2] = round_corner(8.0, f64::NAN);
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_infinite_radius() {
+        let mut corners = [round_corner(8.0, 8.0); 4];
+        corners[1] = round_corner(f64::INFINITY, 8.0);
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_negative_radius() {
+        let mut corners = [round_corner(8.0, 8.0); 4];
+        corners[3] = round_corner(-1.0, 8.0);
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_max_corner_radius_enforced() {
+        let mut corners = [round_corner(8.0, 8.0); 4];
+        corners[0] = round_corner(MAX_CORNER_RADIUS + 1.0, 8.0);
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_mixed_superellipse() {
+        let corners = [
+            superellipse_corner(8.0, 8.0, 0.6),
+            round_corner(8.0, 8.0),
+            round_corner(8.0, 8.0),
+            round_corner(8.0, 8.0),
+        ];
+        let err = validate_corners(&corners).expect_err("expected uniformity error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("superellipse must be applied uniformly"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_superellipse_smoothing_mismatch() {
+        let corners = [
+            superellipse_corner(8.0, 8.0, 0.3),
+            superellipse_corner(8.0, 8.0, 0.7),
+            superellipse_corner(8.0, 8.0, 0.3),
+            superellipse_corner(8.0, 8.0, 0.3),
+        ];
+        let err = validate_corners(&corners).expect_err("expected smoothing parity error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("superellipse smoothing must match"),
+            "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_validate_corners_accepts_uniform_superellipse_with_asymmetric_radii() {
+        let corners = [
+            superellipse_corner(4.0, 8.0, 0.6),
+            superellipse_corner(16.0, 16.0, 0.6),
+            superellipse_corner(16.0, 4.0, 0.6),
+            superellipse_corner(8.0, 8.0, 0.6),
+        ];
+        assert!(validate_corners(&corners).is_ok());
+    }
+
+    #[test]
+    fn test_min_corner_smoothing_enforced() {
+        let corners = [superellipse_corner(8.0, 8.0, -0.01); 4];
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_max_corner_smoothing_enforced() {
+        let corners = [superellipse_corner(8.0, 8.0, 1.01); 4];
+        assert!(validate_corners(&corners).is_err());
+    }
+
+    #[test]
+    fn test_validate_corners_rejects_nan_smoothing() {
+        let corners = [superellipse_corner(8.0, 8.0, f64::NAN); 4];
+        assert!(validate_corners(&corners).is_err());
     }
 }
