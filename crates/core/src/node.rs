@@ -767,6 +767,61 @@ impl Default for Constraints {
     }
 }
 
+/// Horizontal and vertical radii for a single corner.
+/// CSS-style elliptical border-radius — `x` is along the top/bottom edge,
+/// `y` is along the left/right edge.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CornerRadii {
+    pub x: f64,
+    pub y: f64,
+}
+
+/// Shape applied to a single corner.
+/// Tagged enum serialized as `{"type": "<variant>", ...}`.
+///
+/// Superellipse carries an additional `smoothing` field (0.0..=1.0).
+/// Other variants have no extra fields — `deny_unknown_fields` on each
+/// variant prevents silent acceptance of misapplied parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum Corner {
+    Round { radii: CornerRadii },
+    Bevel { radii: CornerRadii },
+    Notch { radii: CornerRadii },
+    Scoop { radii: CornerRadii },
+    Superellipse { radii: CornerRadii, smoothing: f64 },
+}
+
+impl Corner {
+    /// The radii of this corner, regardless of shape.
+    #[must_use]
+    pub fn radii(&self) -> CornerRadii {
+        match self {
+            Corner::Round { radii }
+            | Corner::Bevel { radii }
+            | Corner::Notch { radii }
+            | Corner::Scoop { radii }
+            | Corner::Superellipse { radii, .. } => *radii,
+        }
+    }
+
+    /// `true` if this corner is `Corner::Superellipse`.
+    #[must_use]
+    pub fn is_superellipse(&self) -> bool {
+        matches!(self, Corner::Superellipse { .. })
+    }
+
+    /// The smoothing value for superellipse, or `None` for other shapes.
+    #[must_use]
+    pub fn smoothing(&self) -> Option<f64> {
+        match self {
+            Corner::Superellipse { smoothing, .. } => Some(*smoothing),
+            _ => None,
+        }
+    }
+}
+
 /// The kind of a node, determining its specific properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -2697,6 +2752,52 @@ mod tests {
         assert!(
             err_msg.contains("duplicate"),
             "error should mention duplicate: {err_msg}"
+        );
+    }
+
+    // ── Corner / CornerRadii ───────────────────────────────────────────────
+
+    #[test]
+    fn test_corner_round_serde_round_trip() {
+        let corner = Corner::Round {
+            radii: CornerRadii { x: 8.0, y: 12.0 },
+        };
+        let json = serde_json::to_string(&corner).expect("serialize");
+        assert!(json.contains(r#""type":"round""#));
+        let back: Corner = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(corner, back);
+    }
+
+    #[test]
+    fn test_corner_superellipse_serde_round_trip() {
+        let corner = Corner::Superellipse {
+            radii: CornerRadii { x: 8.0, y: 8.0 },
+            smoothing: 0.6,
+        };
+        let json = serde_json::to_string(&corner).expect("serialize");
+        assert!(json.contains(r#""type":"superellipse""#));
+        assert!(json.contains(r#""smoothing":0.6"#));
+        let back: Corner = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(corner, back);
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_unknown_shape() {
+        let json = r#"{"type":"triangle","radii":{"x":8,"y":8}}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_smoothing_on_round() {
+        // Smoothing field on a Round variant must be rejected (field is variant-local).
+        let json = r#"{"type":"round","radii":{"x":8,"y":8},"smoothing":0.5}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        // serde with tagged enums ignores unknown fields by default;
+        // we must use deny_unknown_fields on each variant for this to fail.
+        assert!(
+            result.is_err(),
+            "expected rejection of smoothing on Round variant"
         );
     }
 }

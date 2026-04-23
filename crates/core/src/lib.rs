@@ -26,11 +26,12 @@ pub use id::{ComponentId, NodeId, PageId, TokenId};
 
 // ── Re-exports: Node model ────────────────────────────────────────────
 pub use node::{
-    AlignItems, BlendMode, Color, ConicGradientDef, Constraints, Effect, Fill, FillRule,
-    FlexLayout, FontStyle, GradientDef, GradientStop, GridLayout, GridPlacement, GridSpan,
-    GridTrack, JustifyContent, JustifyItems, LayoutDirection, LayoutMode, Node, NodeKind, Padding,
-    PathData, PinConstraint, Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap, StrokeJoin,
-    Style, StyleValue, TextAlign, TextDecoration, TextShadow, TextSizing, TextStyle, Transform,
+    AlignItems, BlendMode, Color, ConicGradientDef, Constraints, Corner, CornerRadii, Effect, Fill,
+    FillRule, FlexLayout, FontStyle, GradientDef, GradientStop, GridLayout, GridPlacement,
+    GridSpan, GridTrack, JustifyContent, JustifyItems, LayoutDirection, LayoutMode, Node, NodeKind,
+    Padding, PathData, PinConstraint, Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap,
+    StrokeJoin, Style, StyleValue, TextAlign, TextDecoration, TextShadow, TextSizing, TextStyle,
+    Transform,
 };
 
 // ── Re-exports: Path ─────────────────────────────────────────────────
