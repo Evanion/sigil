@@ -11,16 +11,6 @@ const baseStroke: Stroke = {
   join: "miter",
 };
 
-const insideStroke: Stroke = {
-  ...baseStroke,
-  alignment: "inside",
-};
-
-const outsideStroke: Stroke = {
-  ...baseStroke,
-  alignment: "outside",
-};
-
 const tokenRefWidthStroke: Stroke = {
   ...baseStroke,
   width: { type: "token_ref", name: "stroke-width-sm" },

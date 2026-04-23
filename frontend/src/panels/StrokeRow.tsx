@@ -8,7 +8,7 @@
  * before use per CLAUDE.md §11 Floating-Point Validation.
  */
 import { createMemo } from "solid-js";
-import type { Stroke, StrokeAlignment, Token } from "../types/document";
+import type { Stroke, Token } from "../types/document";
 import { GripVertical } from "lucide-solid";
 import ValueInput from "../components/value-input/ValueInput";
 import { showToast } from "../components/toast/Toast";
@@ -20,13 +20,9 @@ import {
 } from "./panel-value-helpers";
 import "./StrokeRow.css";
 
-// ── Alignment options ───────────────────────────────────────────────────
-
-const ALIGNMENT_OPTIONS: readonly { value: StrokeAlignment; label: string }[] = [
-  { value: "inside", label: "Inside" },
-  { value: "center", label: "Center" },
-  { value: "outside", label: "Outside" },
-];
+// Stroke alignment UI is deferred to the WebGL renderer. Canvas 2D only
+// supports center-aligned strokes, so the selector and its handler are
+// intentionally absent — do not re-add until the renderer supports it.
 
 export interface StrokeRowProps {
   readonly stroke: Stroke;
@@ -50,12 +46,6 @@ export interface StrokeRowProps {
 export function StrokeRow(props: StrokeRowProps) {
   const colorDisplay = createMemo(() => formatColorStyleValue(props.stroke.color));
   const widthDisplay = createMemo(() => formatNumberStyleValue(props.stroke.width));
-
-  function handleAlignmentChange(e: Event): void {
-    const value = (e.currentTarget as HTMLSelectElement).value;
-    if (!ALIGNMENT_OPTIONS.some((o) => o.value === value)) return;
-    props.onUpdate(props.index, { ...props.stroke, alignment: value as StrokeAlignment });
-  }
 
   function handleColorChange(raw: string): void {
     const parsed = parseColorInput(raw);
