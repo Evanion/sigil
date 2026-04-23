@@ -11,16 +11,6 @@ const baseStroke: Stroke = {
   join: "miter",
 };
 
-const insideStroke: Stroke = {
-  ...baseStroke,
-  alignment: "inside",
-};
-
-const outsideStroke: Stroke = {
-  ...baseStroke,
-  alignment: "outside",
-};
-
 const tokenRefWidthStroke: Stroke = {
   ...baseStroke,
   width: { type: "token_ref", name: "stroke-width-sm" },
@@ -77,32 +67,8 @@ describe("StrokeRow", () => {
     expect(swatchBtn).toBeTruthy();
   });
 
-  it("should render the alignment as Center text", () => {
-    const onUpdate = vi.fn();
-    const onRemove = vi.fn();
-    render(() => (
-      <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
-    expect(screen.getByText("Center")).toBeTruthy();
-  });
-
-  it("should render the alignment as Inside for inside strokes", () => {
-    const onUpdate = vi.fn();
-    const onRemove = vi.fn();
-    render(() => (
-      <StrokeRow stroke={insideStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
-    expect(screen.getByText("Inside")).toBeTruthy();
-  });
-
-  it("should render the alignment as Outside for outside strokes", () => {
-    const onUpdate = vi.fn();
-    const onRemove = vi.fn();
-    render(() => (
-      <StrokeRow stroke={outsideStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
-    ));
-    expect(screen.getByText("Outside")).toBeTruthy();
-  });
+  // Stroke alignment UI hidden until WebGL renderer supports inside/outside.
+  // Tests for alignment select removed — the element is not rendered.
 
   it("should render a remove button with aria-label", () => {
     const onUpdate = vi.fn();
