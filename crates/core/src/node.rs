@@ -822,15 +822,60 @@ impl Corner {
     }
 }
 
+/// Construct an array of four `Corner::Round` with zero radii.
+/// Used as the default for nodes that don't specify corners.
+#[must_use]
+pub fn default_corners() -> [Corner; 4] {
+    let zero = Corner::Round {
+        radii: CornerRadii { x: 0.0, y: 0.0 },
+    };
+    [zero; 4]
+}
+
+/// Converts a legacy `[f64; 4]` corner-radii array to a `[Corner; 4]` array
+/// where each value becomes a `Corner::Round` with equal x/y radii.
+///
+/// This helper exists only to migrate test fixtures. Do NOT use in production code.
+#[cfg(test)]
+pub(crate) fn corner_radii_to_corners(radii: [f64; 4]) -> [Corner; 4] {
+    [
+        Corner::Round {
+            radii: CornerRadii {
+                x: radii[0],
+                y: radii[0],
+            },
+        },
+        Corner::Round {
+            radii: CornerRadii {
+                x: radii[1],
+                y: radii[1],
+            },
+        },
+        Corner::Round {
+            radii: CornerRadii {
+                x: radii[2],
+                y: radii[2],
+            },
+        },
+        Corner::Round {
+            radii: CornerRadii {
+                x: radii[3],
+                y: radii[3],
+            },
+        },
+    ]
+}
+
 /// The kind of a node, determining its specific properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum NodeKind {
     Frame {
         layout: Option<LayoutMode>,
+        corners: [Corner; 4],
     },
     Rectangle {
-        corner_radii: [f64; 4],
+        corners: [Corner; 4],
     },
     Ellipse {
         arc_start: f64,
@@ -846,6 +891,7 @@ pub enum NodeKind {
     },
     Image {
         asset_ref: String,
+        corners: [Corner; 4],
     },
     Group,
     ComponentInstance {
@@ -957,8 +1003,9 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
     use crate::validate::{validate_finite, validate_text_content, validate_text_style};
 
     match kind {
-        NodeKind::Image { asset_ref } => {
+        NodeKind::Image { asset_ref, corners } => {
             crate::validate::validate_asset_ref(asset_ref)?;
+            crate::validate::validate_corners(corners)?;
         }
         NodeKind::Text {
             content,
@@ -968,15 +1015,12 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
             validate_text_content(content)?;
             validate_text_style(text_style)?;
         }
-        NodeKind::Rectangle { corner_radii } => {
-            for (i, r) in corner_radii.iter().enumerate() {
-                validate_finite(&format!("corner_radii[{i}]"), *r)?;
-                if *r < 0.0 {
-                    return Err(crate::error::CoreError::ValidationError(format!(
-                        "corner_radii[{i}] must be >= 0.0, got {r}"
-                    )));
-                }
-            }
+        NodeKind::Rectangle { corners }
+        | NodeKind::Frame {
+            layout: None,
+            corners,
+        } => {
+            crate::validate::validate_corners(corners)?;
         }
         NodeKind::Ellipse { arc_start, arc_end } => {
             validate_finite("arc_start", *arc_start)?;
@@ -984,13 +1028,17 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
         }
         NodeKind::Frame {
             layout: Some(LayoutMode::Flex(flex)),
+            corners,
         } => {
             validate_flex_layout(flex)?;
+            crate::validate::validate_corners(corners)?;
         }
         NodeKind::Frame {
             layout: Some(LayoutMode::Grid(grid)),
+            corners,
         } => {
             validate_grid_layout(grid)?;
+            crate::validate::validate_corners(corners)?;
         }
         NodeKind::ComponentInstance {
             variant,
@@ -1009,7 +1057,7 @@ pub(crate) fn validate_node_kind(kind: &NodeKind) -> Result<(), crate::error::Co
                 crate::validate::validate_node_name(key)?;
             }
         }
-        _ => {}
+        NodeKind::Group | NodeKind::Path { .. } => {}
     }
 
     Ok(())
@@ -1114,12 +1162,15 @@ mod tests {
         let node = Node::new(
             id,
             uuid,
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: default_corners(),
+            },
             "Frame 1".to_string(),
         )
         .expect("create test node");
         match &node.kind {
-            NodeKind::Frame { layout } => assert!(layout.is_none()),
+            NodeKind::Frame { layout, .. } => assert!(layout.is_none()),
             other => panic!("expected Frame, got {other:?}"),
         }
     }
@@ -1132,14 +1183,15 @@ mod tests {
             id,
             uuid,
             NodeKind::Rectangle {
-                corner_radii: [4.0, 4.0, 4.0, 4.0],
+                corners: corner_radii_to_corners([4.0, 4.0, 4.0, 4.0]),
             },
             "Rect 1".to_string(),
         )
         .expect("create test node");
         match &node.kind {
-            NodeKind::Rectangle { corner_radii } => {
-                assert_eq!(*corner_radii, [4.0, 4.0, 4.0, 4.0]);
+            NodeKind::Rectangle { corners } => {
+                assert_eq!(corners[0].radii().x, 4.0);
+                assert_eq!(corners[1].radii().x, 4.0);
             }
             other => panic!("expected Rectangle, got {other:?}"),
         }
@@ -1198,12 +1250,13 @@ mod tests {
             uuid,
             NodeKind::Image {
                 asset_ref: "images/logo.png".to_string(),
+                corners: default_corners(),
             },
             "Image 1".to_string(),
         )
         .expect("create test node");
         match &node.kind {
-            NodeKind::Image { asset_ref } => assert_eq!(asset_ref, "images/logo.png"),
+            NodeKind::Image { asset_ref, .. } => assert_eq!(asset_ref, "images/logo.png"),
             other => panic!("expected Image, got {other:?}"),
         }
     }
@@ -1786,7 +1839,10 @@ mod tests {
 
     #[test]
     fn test_node_kind_frame_serde_round_trip() {
-        let kind = NodeKind::Frame { layout: None };
+        let kind = NodeKind::Frame {
+            layout: None,
+            corners: default_corners(),
+        };
         let json = serde_json::to_string(&kind).expect("serialize");
         let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(kind, deserialized);
@@ -1795,7 +1851,7 @@ mod tests {
     #[test]
     fn test_node_kind_rectangle_serde_round_trip() {
         let kind = NodeKind::Rectangle {
-            corner_radii: [1.0, 2.0, 3.0, 4.0],
+            corners: corner_radii_to_corners([1.0, 2.0, 3.0, 4.0]),
         };
         let json = serde_json::to_string(&kind).expect("serialize");
         let deserialized: NodeKind = serde_json::from_str(&json).expect("deserialize");
@@ -1891,7 +1947,10 @@ mod tests {
         let node = Node {
             id,
             uuid,
-            kind: NodeKind::Frame { layout: None },
+            kind: NodeKind::Frame {
+                layout: None,
+                corners: default_corners(),
+            },
             name: "Test Frame".to_string(),
             parent: None,
             children: vec![NodeId::new(6, 12)],
@@ -2042,7 +2101,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::nil(),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: default_corners(),
             },
             "Rect".to_string(),
         )
@@ -2154,7 +2213,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::nil(),
             NodeKind::Rectangle {
-                corner_radii: [0.0, f64::NAN, 0.0, 0.0],
+                corners: corner_radii_to_corners([0.0, f64::NAN, 0.0, 0.0]),
             },
             "Rect".to_string(),
         );
@@ -2167,7 +2226,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::nil(),
             NodeKind::Rectangle {
-                corner_radii: [4.0, -1.0, 4.0, 4.0],
+                corners: corner_radii_to_corners([4.0, -1.0, 4.0, 4.0]),
             },
             "Rect".to_string(),
         );
@@ -2180,7 +2239,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::nil(),
             NodeKind::Rectangle {
-                corner_radii: [4.0, 4.0, f64::INFINITY, 4.0],
+                corners: corner_radii_to_corners([4.0, 4.0, f64::INFINITY, 4.0]),
             },
             "Rect".to_string(),
         );
@@ -2225,6 +2284,7 @@ mod tests {
                     gap: f64::NAN,
                     ..FlexLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2241,6 +2301,7 @@ mod tests {
                     gap: -1.0,
                     ..FlexLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2260,6 +2321,7 @@ mod tests {
                     },
                     ..FlexLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2276,6 +2338,7 @@ mod tests {
                     column_gap: -1.0,
                     ..GridLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2295,6 +2358,7 @@ mod tests {
                     columns: tracks,
                     ..GridLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2311,6 +2375,7 @@ mod tests {
                     columns: vec![GridTrack::Fixed { size: -10.0 }],
                     ..GridLayout::default()
                 })),
+                corners: default_corners(),
             },
             "Frame".to_string(),
         );
@@ -2344,6 +2409,7 @@ mod tests {
             Uuid::nil(),
             NodeKind::Image {
                 asset_ref: "valid/path.png".to_string(),
+                corners: default_corners(),
             },
             "Img".to_string(),
         )
@@ -2363,13 +2429,14 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::nil(),
             NodeKind::Rectangle {
-                corner_radii: [4.0, 4.0, 4.0, 4.0],
+                corners: corner_radii_to_corners([4.0, 4.0, 4.0, 4.0]),
             },
             "Rect".to_string(),
         )
         .expect("create node");
         let mut json: serde_json::Value = serde_json::to_value(&node).expect("serialize");
-        json["kind"]["corner_radii"] = serde_json::json!([-1.0, 0.0, 0.0, 0.0]);
+        // Inject a negative x radius on the first corner to force validation failure.
+        json["kind"]["corners"][0]["radii"]["x"] = serde_json::json!(-1.0);
         let result: Result<Node, _> = serde_json::from_value(json);
         assert!(
             result.is_err(),
@@ -2799,5 +2866,46 @@ mod tests {
             result.is_err(),
             "expected rejection of smoothing on Round variant"
         );
+    }
+
+    // ── Task 4: NodeKind corners field ────────────────────────────────
+
+    #[test]
+    fn test_node_kind_rectangle_has_corners_field() {
+        let kind = NodeKind::Rectangle {
+            corners: default_corners(),
+        };
+        if let NodeKind::Rectangle { corners } = kind {
+            assert_eq!(corners.len(), 4);
+            assert!(matches!(corners[0], Corner::Round { .. }));
+        } else {
+            panic!("expected Rectangle variant");
+        }
+    }
+
+    #[test]
+    fn test_node_kind_frame_has_corners_field() {
+        let kind = NodeKind::Frame {
+            layout: None,
+            corners: default_corners(),
+        };
+        if let NodeKind::Frame { corners, .. } = kind {
+            assert_eq!(corners.len(), 4);
+        } else {
+            panic!("expected Frame variant");
+        }
+    }
+
+    #[test]
+    fn test_node_kind_image_has_corners_field() {
+        let kind = NodeKind::Image {
+            asset_ref: "asset-1".to_string(),
+            corners: default_corners(),
+        };
+        if let NodeKind::Image { corners, .. } = kind {
+            assert_eq!(corners.len(), 4);
+        } else {
+            panic!("expected Image variant");
+        }
     }
 }

@@ -85,7 +85,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(uuid_byte),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             name.to_string(),
         )
         .expect("create node");

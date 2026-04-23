@@ -341,7 +341,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame".to_string(),
         )
         .expect("valid");

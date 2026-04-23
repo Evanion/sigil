@@ -245,8 +245,36 @@ impl FieldOperation for SetCornerRadii {
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
-            NodeKind::Rectangle { corner_radii } => {
-                *corner_radii = self.new_radii;
+            NodeKind::Rectangle { corners } => {
+                // Inline conversion: each f64 radius becomes a Corner::Round with equal x/y.
+                // SetCornerRadii is superseded by SetCorners in Task 5; this keeps it
+                // compilable in the interim without exposing corner_radii_to_corners in prod.
+                *corners = [
+                    crate::node::Corner::Round {
+                        radii: crate::node::CornerRadii {
+                            x: self.new_radii[0],
+                            y: self.new_radii[0],
+                        },
+                    },
+                    crate::node::Corner::Round {
+                        radii: crate::node::CornerRadii {
+                            x: self.new_radii[1],
+                            y: self.new_radii[1],
+                        },
+                    },
+                    crate::node::Corner::Round {
+                        radii: crate::node::CornerRadii {
+                            x: self.new_radii[2],
+                            y: self.new_radii[2],
+                        },
+                    },
+                    crate::node::Corner::Round {
+                        radii: crate::node::CornerRadii {
+                            x: self.new_radii[3],
+                            y: self.new_radii[3],
+                        },
+                    },
+                ];
                 Ok(())
             }
             _ => Err(CoreError::ValidationError(format!(
@@ -291,7 +319,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(2),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame".to_string(),
         )
         .expect("create node");
@@ -309,7 +340,7 @@ mod tests {
             NodeId::new(0, 0),
             make_uuid(1),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             "Rect".to_string(),
         )
@@ -600,11 +631,21 @@ mod tests {
 
         op.validate(&doc).expect("validate");
         op.apply(&mut doc).expect("apply");
-        let after = match &doc.arena.get(node_id).expect("get").kind {
-            NodeKind::Rectangle { corner_radii } => *corner_radii,
+        let after_corners = match &doc.arena.get(node_id).expect("get").kind {
+            NodeKind::Rectangle { corners } => *corners,
             _ => panic!("expected Rectangle"),
         };
-        assert_eq!(after, new_radii);
+        // After applying SetCornerRadii, each corner should be Round with matching radii.
+        for (i, &expected_r) in new_radii.iter().enumerate() {
+            assert!(
+                matches!(after_corners[i], crate::node::Corner::Round { .. }),
+                "corner[{i}] should be Round"
+            );
+            assert!(
+                (after_corners[i].radii().x - expected_r).abs() < f64::EPSILON,
+                "corner[{i}].radii.x should be {expected_r}"
+            );
+        }
     }
 
     #[test]

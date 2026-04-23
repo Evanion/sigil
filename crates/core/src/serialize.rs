@@ -587,7 +587,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             uuid,
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             name.to_string(),
         )
         .expect("create test node");
@@ -754,7 +757,7 @@ mod tests {
                 NodeId::new(0, 0),
                 child_uuid,
                 NodeKind::Rectangle {
-                    corner_radii: [8.0, 8.0, 8.0, 8.0],
+                    corners: crate::node::corner_radii_to_corners([8.0, 8.0, 8.0, 8.0]),
                 },
                 "Rounded Rect".to_string(),
             )

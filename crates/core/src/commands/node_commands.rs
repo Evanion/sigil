@@ -5,7 +5,7 @@ use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::{NodeId, PageId};
 use crate::node::{Node, NodeKind, Transform};
-use crate::validate::{validate_finite, validate_node_name, validate_text_content};
+use crate::validate::{validate_node_name, validate_text_content};
 use uuid::Uuid;
 
 /// Creates a new node and inserts it into the arena.
@@ -28,34 +28,9 @@ pub struct CreateNode {
 impl FieldOperation for CreateNode {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         validate_node_name(&self.name)?;
-        // Validate float fields in NodeKind variants
-        match &self.kind {
-            NodeKind::Rectangle { corner_radii } => {
-                for (i, &r) in corner_radii.iter().enumerate() {
-                    validate_finite(&format!("corner_radii[{i}]"), r)?;
-                    if r < 0.0 {
-                        return Err(CoreError::ValidationError(format!(
-                            "corner_radii[{i}] must be non-negative, got {r}"
-                        )));
-                    }
-                }
-            }
-            NodeKind::Ellipse {
-                arc_start, arc_end, ..
-            } => {
-                validate_finite("arc_start", *arc_start)?;
-                validate_finite("arc_end", *arc_end)?;
-            }
-            NodeKind::Text {
-                content,
-                text_style,
-                ..
-            } => {
-                crate::validate::validate_text_content(content)?;
-                crate::validate::validate_text_style(text_style)?;
-            }
-            _ => {}
-        }
+        // Validate float fields in NodeKind variants.
+        // Delegate to validate_node_kind which covers all variants exhaustively.
+        crate::node::validate_node_kind(&self.kind)?;
         if let Some(ref t) = self.initial_transform {
             crate::commands::style_commands::validate_transform(t)?;
         }
@@ -237,7 +212,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame 1".to_string(),
         )
         .expect("create node");
@@ -257,7 +235,7 @@ mod tests {
         let op = CreateNode {
             uuid: make_uuid(1),
             kind: NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             name: "Rect".to_string(),
             page_id: Some(page_id),
@@ -283,7 +261,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame".to_string(),
         )
         .expect("create node");
@@ -318,7 +299,10 @@ mod tests {
         let parent_node = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Parent".to_string(),
         )
         .expect("create parent");
@@ -328,7 +312,7 @@ mod tests {
             NodeId::new(0, 0),
             make_uuid(2),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             "Child".to_string(),
         )
@@ -493,7 +477,7 @@ mod tests {
         let op = CreateNode {
             uuid: make_uuid(1),
             kind: NodeKind::Rectangle {
-                corner_radii: [0.0, f64::NAN, 0.0, 0.0],
+                corners: crate::node::corner_radii_to_corners([0.0, f64::NAN, 0.0, 0.0]),
             },
             name: "Rect".to_string(),
             page_id: None,
@@ -508,7 +492,7 @@ mod tests {
         let op = CreateNode {
             uuid: make_uuid(1),
             kind: NodeKind::Rectangle {
-                corner_radii: [0.0, 0.0, -1.0, 0.0],
+                corners: crate::node::corner_radii_to_corners([0.0, 0.0, -1.0, 0.0]),
             },
             name: "Rect".to_string(),
             page_id: None,
@@ -577,7 +561,10 @@ mod tests {
         let parent = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Parent".to_string(),
         )
         .expect("create parent");
@@ -587,7 +574,7 @@ mod tests {
             NodeId::new(0, 0),
             make_uuid(2),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             "Child".to_string(),
         )
@@ -598,7 +585,7 @@ mod tests {
             NodeId::new(0, 0),
             make_uuid(3),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             "Grandchild".to_string(),
         )
