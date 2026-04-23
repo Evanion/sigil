@@ -17,7 +17,7 @@
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "BUSL-1.1",
   "packageManager": "pnpm@10.0.0",
   "devDependencies": {
     "@eslint/js": "^10.0.1",
