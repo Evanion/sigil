@@ -5,7 +5,7 @@
  * Auto-saves changes via store.updateToken on each field change.
  */
 
-import { Show, For, splitProps, type Component } from "solid-js";
+import { Show, For, Switch, Match, splitProps, type Component } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../components/number-input/NumberInput";
 import { ColorPicker } from "../components/color-picker/ColorPicker";
@@ -210,13 +210,17 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     );
   }
 
-  function renderFontWeightEditor(weight: number): ReturnType<Component> {
-    const safeWeight = Number.isFinite(weight) ? weight : 400;
+  function renderFontWeightEditor(): ReturnType<Component> {
+    const safeWeight = () => {
+      if (props.token.value.type !== "font_weight") return 400;
+      const w = props.token.value.weight;
+      return Number.isFinite(w) ? w : 400;
+    };
     return (
       <div class="sigil-token-detail__row">
         <div class="sigil-token-detail__field sigil-token-detail__field--grow">
           <NumberInput
-            value={safeWeight}
+            value={safeWeight()}
             onValueChange={(v) => {
               if (Number.isFinite(v)) {
                 updateValue({ type: "font_weight", weight: v });
@@ -231,7 +235,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
         <div class="sigil-token-detail__field">
           <Select
             options={[...FONT_WEIGHT_OPTIONS]}
-            value={String(safeWeight)}
+            value={String(safeWeight())}
             onValueChange={(v) => {
               const parsed = parseInt(v, 10);
               if (Number.isFinite(parsed)) {
@@ -245,11 +249,16 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     );
   }
 
-  function renderDurationEditor(seconds: number): ReturnType<Component> {
+  function renderDurationEditor(): ReturnType<Component> {
+    const safeSeconds = () => {
+      if (props.token.value.type !== "duration") return 0;
+      const s = props.token.value.seconds;
+      return Number.isFinite(s) ? s : 0;
+    };
     return (
       <div class="sigil-token-detail__field">
         <NumberInput
-          value={Number.isFinite(seconds) ? seconds : 0}
+          value={safeSeconds()}
           onValueChange={(v) => {
             if (Number.isFinite(v)) {
               updateValue({ type: "duration", seconds: v });
@@ -265,19 +274,21 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     );
   }
 
-  function renderCubicBezierEditor(
-    values: readonly [number, number, number, number],
-  ): ReturnType<Component> {
+  function renderCubicBezierEditor(): ReturnType<Component> {
     const labels = ["P1x", "P1y", "P2x", "P2y"];
+    const values = (): readonly [number, number, number, number] => {
+      if (props.token.value.type !== "cubic_bezier") return [0, 0, 0, 0];
+      return props.token.value.values;
+    };
     return (
       <div class="sigil-token-detail__bezier-grid">
         <For each={labels}>
           {(label, i) => (
             <NumberInput
-              value={Number.isFinite(values[i()]) ? values[i()] : 0}
+              value={Number.isFinite(values()[i()]) ? values()[i()] : 0}
               onValueChange={(v) => {
                 if (Number.isFinite(v)) {
-                  const newValues = [...values] as [number, number, number, number];
+                  const newValues = [...values()] as [number, number, number, number];
                   newValues[i()] = v;
                   updateValue({ type: "cubic_bezier", values: newValues });
                 }
@@ -533,12 +544,16 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     updateValue({ type: "expression", expr: trimmed });
   }
 
-  function renderAliasEditor(name: string): ReturnType<Component> {
+  function renderAliasEditor(): ReturnType<Component> {
+    const aliasValue = () => {
+      if (props.token.value.type !== "alias") return "";
+      return `{${props.token.value.name}}`;
+    };
     return (
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.typeAlias")}</label>
         <ValueInput
-          value={`{${name}}`}
+          value={aliasValue()}
           onChange={handleExpressionChange}
           tokens={props.tokens}
           tokenType={props.token.token_type}
@@ -548,64 +563,46 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
     );
   }
 
-  // ── Render ──────────────────────────────────────────────────────────
-
-  function renderValueEditor(): ReturnType<Component> {
-    const value = props.token.value;
-    switch (value.type) {
-      case "color":
-        return renderColorEditor();
-      case "dimension":
-        return renderDimensionEditor();
-      case "number":
-        return renderNumberEditor();
-      case "font_family":
-        return renderFontFamilyEditor();
-      case "font_weight":
-        return renderFontWeightEditor(value.weight);
-      case "duration":
-        return renderDurationEditor(value.seconds);
-      case "cubic_bezier":
-        return renderCubicBezierEditor(value.values);
-      case "shadow":
-        return renderShadowEditor();
-      case "gradient":
-        // Gradient editing is deferred to the full GradientEditorPopover.
-        // Show a read-only label for now.
-        return (
-          <div class="sigil-token-detail__field">
-            <span class="sigil-token-detail__field-label">{t("panels:tokens.typeGradient")}</span>
-            <span class="sigil-token-detail__readonly-value">
-              {value.gradient.stops.length} stops
-            </span>
-          </div>
-        );
-      case "typography":
-        return renderTypographyEditor();
-      case "alias":
-        return renderAliasEditor(value.name);
-      case "expression":
-        return (
-          <div class="sigil-token-detail__field">
-            <label class="sigil-token-detail__field-label">
-              {t("panels:tokens.typeExpression")}
-            </label>
-            <ValueInput
-              value={value.expr}
-              onChange={handleExpressionChange}
-              tokens={props.tokens}
-              tokenType={props.token.token_type}
-              aria-label="Expression"
-            />
-          </div>
-        );
-      default: {
-        const _exhaustive: never = value;
-        void _exhaustive;
-        return null;
-      }
-    }
+  function renderGradientEditor(): ReturnType<Component> {
+    const stopCount = () =>
+      props.token.value.type === "gradient" ? props.token.value.gradient.stops.length : 0;
+    return (
+      <div class="sigil-token-detail__field">
+        <span class="sigil-token-detail__field-label">{t("panels:tokens.typeGradient")}</span>
+        <span class="sigil-token-detail__readonly-value">{stopCount()} stops</span>
+      </div>
+    );
   }
+
+  function renderExpressionEditor(): ReturnType<Component> {
+    const exprValue = () =>
+      props.token.value.type === "expression" ? props.token.value.expr : "";
+    return (
+      <div class="sigil-token-detail__field">
+        <label class="sigil-token-detail__field-label">{t("panels:tokens.typeExpression")}</label>
+        <ValueInput
+          value={exprValue()}
+          onChange={handleExpressionChange}
+          tokens={props.tokens}
+          tokenType={props.token.token_type}
+          aria-label="Expression"
+        />
+      </div>
+    );
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────
+  //
+  // Branch selection uses <Switch>/<Match> keyed on `props.token.value.type`.
+  // Solid's Switch installs a single reactive memo tracking the matched branch;
+  // when `type` remains stable across token mutations (e.g., the hex channel
+  // of a color token changes during color-picker drag), the active Match stays
+  // the same and its already-mounted DOM subtree is preserved.
+  //
+  // Inserting the editor via `{renderValueEditor()}` previously wrapped the
+  // whole editor in a reactive insert effect that re-evaluated on every
+  // `props.token.value` change, replacing the DOM subtree — which unmounted
+  // any open Popover mid-drag (the Token dialog color-picker regression).
 
   return (
     // F-17: Use dedicated i18n key for form label context
@@ -614,12 +611,20 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
       role="form"
       aria-label={t("panels:tokens.editTokenForm", { name: props.token.name })}
     >
-      {/* All value types (including color) are now routed through renderValueEditor().
-          Color previously used a <Show>-gated ColorPicker to preserve DOM across
-          reactive updates during drag. With ValueInput, the color swatch and inline
-          picker are managed inside ValueInput itself, so the special-casing is no
-          longer needed. */}
-      {renderValueEditor()}
+      <Switch>
+        <Match when={props.token.value.type === "color"}>{renderColorEditor()}</Match>
+        <Match when={props.token.value.type === "dimension"}>{renderDimensionEditor()}</Match>
+        <Match when={props.token.value.type === "number"}>{renderNumberEditor()}</Match>
+        <Match when={props.token.value.type === "font_family"}>{renderFontFamilyEditor()}</Match>
+        <Match when={props.token.value.type === "font_weight"}>{renderFontWeightEditor()}</Match>
+        <Match when={props.token.value.type === "duration"}>{renderDurationEditor()}</Match>
+        <Match when={props.token.value.type === "cubic_bezier"}>{renderCubicBezierEditor()}</Match>
+        <Match when={props.token.value.type === "shadow"}>{renderShadowEditor()}</Match>
+        <Match when={props.token.value.type === "gradient"}>{renderGradientEditor()}</Match>
+        <Match when={props.token.value.type === "typography"}>{renderTypographyEditor()}</Match>
+        <Match when={props.token.value.type === "alias"}>{renderAliasEditor()}</Match>
+        <Match when={props.token.value.type === "expression"}>{renderExpressionEditor()}</Match>
+      </Switch>
 
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.description")}</label>
