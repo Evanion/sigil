@@ -17,6 +17,10 @@ import type {
   DeletePageSnapshot,
   RenamePageValue,
   ReorderPageValue,
+  CreateTokenValue,
+  UpdateTokenValue,
+  DeleteTokenSnapshot,
+  RenameTokenValue,
   Transaction,
 } from "./types";
 
@@ -48,7 +52,9 @@ function inverseType(type: OperationType): OperationType {
   if (type === "delete_node") return "create_node";
   if (type === "create_page") return "delete_page";
   if (type === "delete_page") return "create_page";
-  return type; // set_field, reparent, reorder, rename_page, reorder_page invert by swapping values
+  if (type === "create_token") return "delete_token";
+  if (type === "delete_token") return "create_token";
+  return type; // set_field, reparent, reorder, rename_page, reorder_page, update_token invert by swapping values
 }
 
 // ── Public factory functions ─────────────────────────────────────────
@@ -161,6 +167,48 @@ export function createReorderPageOp(
   const value: ReorderPageValue = { position: newPosition };
   const previousValue: ReorderPageValue = { position: oldPosition };
   return makeOp(userId, pageId, "reorder_page", "", value, previousValue);
+}
+
+/**
+ * Create a create_token operation.
+ * `tokenData` contains the full token state for undo.
+ */
+export function createCreateTokenOp(userId: string, tokenData: CreateTokenValue): Operation {
+  return makeOp(userId, tokenData.name, "create_token", "", tokenData, null);
+}
+
+/**
+ * Create an update_token operation.
+ * `newValue` is the new token state, `previousValue` is the old state (for undo).
+ */
+export function createUpdateTokenOp(
+  userId: string,
+  name: string,
+  newValue: UpdateTokenValue,
+  previousValue: UpdateTokenValue,
+): Operation {
+  return makeOp(userId, name, "update_token", "", newValue, previousValue);
+}
+
+/**
+ * Create a delete_token operation.
+ * `tokenSnapshot` contains the full token state for undo.
+ */
+export function createDeleteTokenOp(userId: string, tokenSnapshot: DeleteTokenSnapshot): Operation {
+  return makeOp(userId, tokenSnapshot.name, "delete_token", "", null, tokenSnapshot);
+}
+
+/**
+ * Create a rename_token operation.
+ * `value` contains the forward rename data (old→new), `previousValue` contains
+ * the reverse (new→old) for undo. Both use the same RenameTokenValue schema.
+ */
+export function createRenameTokenOp(
+  userId: string,
+  value: RenameTokenValue,
+  previousValue: RenameTokenValue,
+): Operation {
+  return makeOp(userId, value.old_name, "rename_token", "", value, previousValue);
 }
 
 /**

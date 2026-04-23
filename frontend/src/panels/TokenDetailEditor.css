@@ -1,0 +1,117 @@
+.sigil-token-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-3);
+}
+
+.sigil-token-detail__name {
+  margin: 0;
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.sigil-token-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+}
+
+.sigil-token-detail__field--grow {
+  flex: 1;
+}
+
+.sigil-token-detail__field-label {
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.sigil-token-detail__row {
+  display: flex;
+  gap: var(--size-2);
+  align-items: flex-end;
+}
+
+.sigil-token-detail__text-input {
+  height: var(--input-height);
+  padding: 0 var(--input-padding-x);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  width: 100%;
+}
+
+.sigil-token-detail__text-input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-detail__textarea {
+  padding: var(--size-1) var(--input-padding-x);
+  border: 1px solid var(--input-border);
+  border-radius: var(--input-radius);
+  background: var(--input-bg);
+  color: var(--text-1);
+  font-size: var(--font-size-0);
+  resize: vertical;
+  font-family: inherit;
+  width: 100%;
+}
+
+.sigil-token-detail__textarea:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-token-detail__readonly-value {
+  font-size: var(--font-size-0);
+  color: var(--text-3);
+  font-style: italic;
+}
+
+/* ── Grid layouts for composite values ────────────────────────────── */
+
+.sigil-token-detail__bezier-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--size-2);
+}
+
+.sigil-token-detail__shadow-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2);
+}
+
+.sigil-token-detail__typography-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2);
+}
+
+/* ── Delete button ────────────────────────────────────────────────── */
+
+.sigil-token-detail__delete-button {
+  margin-top: var(--size-2);
+  padding: var(--size-1) var(--size-2);
+  border: 1px solid var(--danger);
+  border-radius: var(--button-radius);
+  background: transparent;
+  color: var(--danger);
+  font-size: var(--font-size-0);
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.sigil-token-detail__delete-button:hover {
+  background: var(--danger);
+  color: var(--text-on-accent);
+}
+
+.sigil-token-detail__delete-button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

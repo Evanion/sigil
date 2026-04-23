@@ -73,6 +73,15 @@ pub const MAX_TOKEN_DESCRIPTION_LEN: usize = 1_024;
 /// Maximum number of font families in a `FontFamily` token.
 pub const MAX_TOKEN_FONT_FAMILIES: usize = 32;
 
+/// Maximum length of a token expression string before parsing.
+pub const MAX_TOKEN_EXPRESSION_LENGTH: usize = 1024;
+
+/// Maximum depth of a token expression AST (nesting of binary ops, function calls, etc.).
+pub const MAX_EXPRESSION_AST_DEPTH: usize = 32;
+
+/// Maximum number of arguments to a function call in a token expression.
+pub const MAX_FUNCTION_ARGS: usize = 8;
+
 /// Maximum root nodes per page.
 pub const MAX_ROOT_NODES_PER_PAGE: usize = 10_000;
 

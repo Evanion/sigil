@@ -687,10 +687,13 @@ export const Canvas: Component = () => {
       // RF-004: Use memoized render order — only recomputed when node graph changes.
       const nodesArray = renderOrder();
 
+      // Read tokens for token-ref resolution in the renderer
+      const tokens = store.state.tokens;
+
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
       try {
-        renderCanvas(ctx, vp, nodesArray, selSet, dpr, prevRect, previews, guides, marquee);
+        renderCanvas(ctx, vp, nodesArray, selSet, dpr, prevRect, previews, guides, marquee, tokens);
       } catch (err: unknown) {
         console.error("Canvas render error:", err);
       }

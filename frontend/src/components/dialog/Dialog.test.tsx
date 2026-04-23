@@ -1,15 +1,42 @@
 /**
- * Tests for the Dialog component.
+ * Tests for the Dialog component (native <dialog> implementation).
+ *
+ * jsdom provides partial <dialog> support — `showModal()` and `close()`
+ * methods exist but don't behave identically to browsers (no focus trap,
+ * no Escape handling, no ::backdrop). Tests verify DOM structure, prop
+ * wiring, and callback behavior.
  *
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@solidjs/testing-library";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, fireEvent, cleanup } from "@solidjs/testing-library";
 import { Dialog } from "./Dialog";
 
 afterEach(() => {
   cleanup();
+});
+
+// jsdom's HTMLDialogElement may not have showModal/close — stub if needed
+beforeEach(() => {
+  if (!HTMLDialogElement.prototype.showModal) {
+    HTMLDialogElement.prototype.showModal = vi.fn(function (this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    });
+  }
+  if (!HTMLDialogElement.prototype.close) {
+    const originalClose = HTMLDialogElement.prototype.close;
+    HTMLDialogElement.prototype.close = vi.fn(function (this: HTMLDialogElement) {
+      this.removeAttribute("open");
+      if (originalClose) {
+        try {
+          originalClose.call(this);
+        } catch {
+          // jsdom may throw — ignore
+        }
+      }
+    });
+  }
 });
 
 describe("Dialog", () => {
@@ -22,17 +49,27 @@ describe("Dialog", () => {
     expect(screen.getByText("Test Title")).toBeTruthy();
   });
 
-  it("should not render content when closed", () => {
+  it("should render as a dialog element", () => {
     render(() => (
-      <Dialog open={false} onOpenChange={() => {}} title="Hidden Title">
-        <p>Hidden content</p>
+      <Dialog open={true} onOpenChange={() => {}} title="Dialog Element">
+        <p>Content</p>
       </Dialog>
     ));
-    expect(screen.queryByText("Hidden Title")).toBeNull();
-    expect(screen.queryByText("Hidden content")).toBeNull();
+    const dialog = document.querySelector("dialog");
+    expect(dialog).toBeTruthy();
   });
 
-  it("should fire onOpenChange with false when close button is clicked", async () => {
+  it("should have the sigil-dialog class", () => {
+    render(() => (
+      <Dialog open={true} onOpenChange={() => {}} title="Class Test">
+        <p>Content</p>
+      </Dialog>
+    ));
+    const dialog = document.querySelector("dialog.sigil-dialog");
+    expect(dialog).toBeTruthy();
+  });
+
+  it("should fire onOpenChange with false when close button is clicked", () => {
     const handler = vi.fn();
     render(() => (
       <Dialog open={true} onOpenChange={handler} title="Closable">
@@ -43,9 +80,7 @@ describe("Dialog", () => {
     expect(closeButton).toBeTruthy();
     if (!closeButton) throw new Error("Close button not found");
     fireEvent.click(closeButton);
-    await waitFor(() => {
-      expect(handler).toHaveBeenCalledWith(false);
-    });
+    expect(handler).toHaveBeenCalledWith(false);
   });
 
   it("should show description when provided", () => {
@@ -79,17 +114,56 @@ describe("Dialog", () => {
         <p>Content</p>
       </Dialog>
     ));
+    // Native <dialog> has implicit role="dialog"
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
-  it("should apply custom class on content", () => {
+  it("should apply custom class on dialog element", () => {
     render(() => (
       <Dialog open={true} onOpenChange={() => {}} title="Custom Class" class="my-custom-dialog">
         <p>Content</p>
       </Dialog>
     ));
-    const content = document.querySelector(".sigil-dialog");
-    expect(content).toBeTruthy();
-    expect(content?.classList.contains("my-custom-dialog")).toBe(true);
+    const dialog = document.querySelector("dialog.sigil-dialog");
+    expect(dialog).toBeTruthy();
+    expect(dialog?.classList.contains("my-custom-dialog")).toBe(true);
+  });
+
+  it("should have aria-labelledby pointing to title", () => {
+    render(() => (
+      <Dialog open={true} onOpenChange={() => {}} title="Labeled Dialog">
+        <p>Content</p>
+      </Dialog>
+    ));
+    const dialog = document.querySelector("dialog");
+    const titleId = dialog?.getAttribute("aria-labelledby");
+    expect(titleId).toBeTruthy();
+    if (!titleId) throw new Error("aria-labelledby not found");
+    const titleEl = document.getElementById(titleId);
+    expect(titleEl?.textContent).toBe("Labeled Dialog");
+  });
+
+  it("should have aria-describedby when description is provided", () => {
+    render(() => (
+      <Dialog open={true} onOpenChange={() => {}} title="Described" description="Helpful info">
+        <p>Content</p>
+      </Dialog>
+    ));
+    const dialog = document.querySelector("dialog");
+    const descId = dialog?.getAttribute("aria-describedby");
+    expect(descId).toBeTruthy();
+    if (!descId) throw new Error("aria-describedby not found");
+    const descEl = document.getElementById(descId);
+    expect(descEl?.textContent).toBe("Helpful info");
+  });
+
+  it("should not have aria-describedby when no description", () => {
+    render(() => (
+      <Dialog open={true} onOpenChange={() => {}} title="No Desc">
+        <p>Content</p>
+      </Dialog>
+    ));
+    const dialog = document.querySelector("dialog");
+    expect(dialog?.getAttribute("aria-describedby")).toBeNull();
   });
 });

@@ -15,8 +15,10 @@ import type {
   DocumentNode,
   Fill,
   GradientDef,
+  Token,
   Transform,
 } from "../types/document";
+import { resolveStyleValueColor, resolveStyleValueNumber } from "../store/token-store";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { MarqueeRect } from "../tools/select-tool";
@@ -81,13 +83,17 @@ function srgbColorToRgba(c: ColorSrgb): string | null {
  * Stop positions are clamped to [0, 1] since Canvas gradient stops require this range.
  * This is an explicit user-facing affordance (Canvas API constraint), not silent clamping.
  */
-function addGradientStops(grad: CanvasGradient, gradient: GradientDef | ConicGradientDef): void {
+function addGradientStops(
+  grad: CanvasGradient,
+  gradient: GradientDef | ConicGradientDef,
+  tokens: Record<string, Token>,
+): void {
   for (const stop of gradient.stops) {
     if (!Number.isFinite(stop.position)) {
       continue;
     }
     const pos = Math.max(0, Math.min(1, stop.position));
-    grad.addColorStop(pos, resolveStopColorCSS(stop.color));
+    grad.addColorStop(pos, resolveStopColorCSS(stop.color, tokens));
   }
 }
 
@@ -111,13 +117,14 @@ function createLinearGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const sx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x;
   const sy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y;
   const ex = Number.isFinite(gradient.end.x) ? x + gradient.end.x * width : x + width;
   const ey = Number.isFinite(gradient.end.y) ? y + gradient.end.y * height : y + height;
   const grad = ctx.createLinearGradient(sx, sy, ex, ey);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -138,6 +145,7 @@ function createRadialGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const cx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x + width / 2;
   const cy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y + height / 2;
@@ -150,7 +158,7 @@ function createRadialGradientFill(
   // dx*dx + dy*dy is always >= 0, so Math.sqrt is safe here
   const r = Math.max(Math.sqrt(dx * dx + dy * dy), 0.001);
   const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -168,6 +176,7 @@ function createConicGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const cx = Number.isFinite(gradient.center.x) ? x + gradient.center.x * width : x + width / 2;
   const cy = Number.isFinite(gradient.center.y) ? y + gradient.center.y * height : y + height / 2;
@@ -175,7 +184,7 @@ function createConicGradientFill(
   // Math.PI / 180 is a constant multiplication — no domain guard needed.
   const angle = Number.isFinite(gradient.start_angle) ? (gradient.start_angle * Math.PI) / 180 : 0;
   const grad = ctx.createConicGradient(angle, cx, cy);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -192,20 +201,24 @@ function resolveFillStyle(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): string | CanvasGradient | null {
   switch (fill.type) {
     case "solid": {
-      if (fill.color.type === "literal" && fill.color.value.space === "srgb") {
-        return srgbColorToRgba(fill.color.value) ?? DEFAULT_FILL;
+      // Resolve token refs via the token store, falling back to DEFAULT_FILL
+      const defaultColor = { space: "srgb" as const, r: 0.878, g: 0.878, b: 0.878, a: 1 };
+      const resolved = resolveStyleValueColor(fill.color, tokens, defaultColor);
+      if (resolved.space === "srgb") {
+        return srgbColorToRgba(resolved) ?? DEFAULT_FILL;
       }
       return DEFAULT_FILL;
     }
     case "linear_gradient":
-      return createLinearGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createLinearGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "radial_gradient":
-      return createRadialGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createRadialGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "conic_gradient":
-      return createConicGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createConicGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "image":
       // Image fills are deferred to a later plan.
       return null;
@@ -228,7 +241,12 @@ function getEffectiveTransform(
  *
  * Assumes the viewport transform is already applied to the context.
  */
-function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: Transform): void {
+function drawNode(
+  ctx: CanvasRenderingContext2D,
+  node: DocumentNode,
+  transform: Transform,
+  tokens: Record<string, Token>,
+): void {
   const { x, y, width, height } = transform;
 
   switch (node.kind.type) {
@@ -244,7 +262,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       } else {
         // Draw the shape once per fill (bottom-to-top = array order)
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.fillRect(x, y, width, height);
@@ -261,7 +279,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
         ctx.fill();
       } else {
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.beginPath();
@@ -277,28 +295,20 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       const fontStr = buildFontString(ts);
       ctx.font = fontStr;
 
-      // Text color comes from text_style.text_color, not from the node fill.
-      // Only sRGB literals are resolved here; token_refs and non-sRGB spaces
-      // fall back to opaque black matching Figma's default text colour.
+      // Text color: resolve token refs, falling back to opaque black.
+      const defaultTextColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
+      const resolvedTextColor = resolveStyleValueColor(ts.text_color, tokens, defaultTextColor);
       let textColor = "#000000";
-      if (ts.text_color.type === "literal" && ts.text_color.value.space === "srgb") {
-        textColor = srgbColorToRgba(ts.text_color.value) ?? "#000000";
+      if (resolvedTextColor.space === "srgb") {
+        textColor = srgbColorToRgba(resolvedTextColor) ?? "#000000";
       }
       ctx.fillStyle = textColor;
       ctx.textBaseline = "alphabetic";
 
-      // Resolve line height as an absolute pixel value.
-      // The spec stores line_height as a multiplier (e.g. 1.5 means 150% of fontSize).
-      // Guard with Number.isFinite per CLAUDE.md Floating-Point Validation.
-      // RF-031: Use shared constant instead of hardcoded 16.
-      const fontSize =
-        ts.font_size.type === "literal" && Number.isFinite(ts.font_size.value)
-          ? ts.font_size.value
-          : DEFAULT_FONT_SIZE_PX;
-      const lineHeightMultiplier =
-        ts.line_height.type === "literal" && Number.isFinite(ts.line_height.value)
-          ? ts.line_height.value
-          : 1.5;
+      // Resolve font size via token store, falling back to default.
+      const fontSize = resolveStyleValueNumber(ts.font_size, tokens, DEFAULT_FONT_SIZE_PX);
+      // Resolve line height multiplier via token store, falling back to 1.5.
+      const lineHeightMultiplier = resolveStyleValueNumber(ts.line_height, tokens, 1.5);
       const lh = lineHeightMultiplier * fontSize;
 
       const measurement = measureTextLines(
@@ -312,9 +322,15 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
 
       // Apply text shadow if present
       if (ts.text_shadow) {
+        const defaultShadowColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 0.3 };
+        const resolvedShadowColor = resolveStyleValueColor(
+          ts.text_shadow.color,
+          tokens,
+          defaultShadowColor,
+        );
         const shadowColor =
-          ts.text_shadow.color.type === "literal" && ts.text_shadow.color.value.space === "srgb"
-            ? (srgbColorToRgba(ts.text_shadow.color.value) ?? "rgba(0,0,0,0.3)")
+          resolvedShadowColor.space === "srgb"
+            ? (srgbColorToRgba(resolvedShadowColor) ?? "rgba(0,0,0,0.3)")
             : "rgba(0,0,0,0.3)";
         if (
           Number.isFinite(ts.text_shadow.offset_x) &&
@@ -378,7 +394,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
         ctx.fillRect(x, y, width, height);
       } else {
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.fillRect(x, y, width, height);
@@ -632,6 +648,7 @@ export function render(
   previewTransforms: readonly PreviewTransform[] = [],
   snapGuides: readonly SnapGuide[] = [],
   marqueeRect: MarqueeRect | null = null,
+  tokens: Record<string, Token> = {},
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -660,7 +677,7 @@ export function render(
       continue;
     }
     const effectiveTransform = getEffectiveTransform(node, previewMap);
-    drawNode(ctx, node, effectiveTransform);
+    drawNode(ctx, node, effectiveTransform, tokens);
   }
 
   // RF-006: selectedUuids is already a Set — no per-frame allocation needed.

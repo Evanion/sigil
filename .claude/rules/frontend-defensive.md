@@ -54,6 +54,19 @@ For any operation with an apply/undo pair (commands, transactions, client-side O
 
 When an operation fails and the error handler reverts local state, the revert mechanism MUST NOT produce side effects that are visible to the user as new operations. Specifically: error rollback must not create undo entries, redo entries, toast notifications of success, or broadcast events to other clients. If the system's primary revert API (e.g., `undo()`) produces such side effects, the error path must use a dedicated rollback API that suppresses them (e.g., `rollbackLast()`, `revertWithoutHistory()`). The general principle: from the user's perspective, a failed operation that was rolled back should be as if it never happened — no trace in the undo stack, no trace in the redo stack, no trace in the activity log.
 
+This obligation extends to optimistic updates. When a mutation uses the optimistic update pattern (apply locally, then send to server), and the server call fails, the error handler MUST remove the undo entry that was created for the optimistic local change before reverting the store. A rollback that reverts the store but leaves the undo entry produces a ghost undo step — the user presses Ctrl+Z and the operation appears to succeed (the entry is popped) but nothing changes (the state was already reverted). The rollback API must support entry removal without triggering a new undo/redo cycle.
+
 ### History Commits Must Contain At Least One Operation
 
 Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+
+### Business Logic Must Not Live in Inline JSX Handlers
+
+Any logic in a JSX event handler (`onInput`, `onChange`, `onClick`, `onPointerDown`, etc.) that does more than (a) read the event value, (b) call a single named function, or (c) set a single signal/store value MUST be extracted into a named, exported function in a same-concern utility file (e.g., `*-helpers.ts`, `*-utils.ts`). "Business logic" includes: input sanitization, validation, formatting, transformation, computation, and any conditional branching beyond a simple null/undefined guard.
+
+The extracted function:
+1. Must be a named export (not a default export) so it is discoverable via import search.
+2. Must have at least one unit test that exercises its core behavior and edge cases.
+3. Must be imported by all call sites that need the same logic — duplication of the function body across components is a bug, subject to the same reasoning as the Rust rule "inline copies diverge silently."
+
+This rule is the TypeScript counterpart to the Rust convention "Define all validation artifacts in `validate.rs`." Inline anonymous functions in JSX are not independently testable, not discoverable by other developers, and get copy-pasted when the same logic is needed elsewhere.

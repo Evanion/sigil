@@ -28,11 +28,16 @@ use agent_designer_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
 use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
+use agent_designer_core::commands::token_commands::{
+    AddToken, RemoveToken, RenameToken, UpdateToken,
+};
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
+use agent_designer_core::id::TokenId;
 use agent_designer_core::node::{
     BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
     TextDecoration, TextShadow, Transform,
 };
+use agent_designer_core::tokens::{Token, TokenValue};
 use agent_designer_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
@@ -42,8 +47,10 @@ use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPaylo
 use crate::state::ServerState;
 
 use super::types::{
-    ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput, DeletePageInput,
-    OperationInput, RenamePageInput, ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput,
+    AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput,
+    DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, RenameTokenInput,
+    ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput, UpdateTokenInput,
+    parse_token_type,
 };
 
 pub struct MutationRoot;
@@ -104,6 +111,10 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
         OperationInput::DeletePage(dp) => parse_delete_page(dp),
         OperationInput::RenamePage(rp) => parse_rename_page(rp),
         OperationInput::ReorderPage(ro) => parse_reorder_page(ro),
+        OperationInput::AddToken(at) => parse_add_token(at),
+        OperationInput::UpdateToken(ut) => parse_update_token(ut),
+        OperationInput::RemoveToken(rt) => parse_remove_token(rt),
+        OperationInput::RenameToken(rt) => parse_rename_token(rt),
     }
 }
 
@@ -924,6 +935,176 @@ fn parse_reorder_page(input: &ReorderPageInput) -> Result<ParsedOp> {
     })
 }
 
+/// Parses an `AddToken` input.
+fn parse_add_token(input: &AddTokenInput) -> Result<ParsedOp> {
+    // Parse the stable token UUID from the client.
+    let token_uuid: uuid::Uuid = input
+        .token_uuid
+        .parse()
+        .map_err(|_| async_graphql::Error::new("invalid token UUID"))?;
+
+    // Parse token type string.
+    let token_type = parse_token_type(&input.token_type).map_err(async_graphql::Error::new)?;
+
+    // Deserialize token value JSON.
+    if input.value.len() > MAX_FIELD_VALUE_SIZE {
+        return Err(async_graphql::Error::new(format!(
+            "token value exceeds maximum size of {MAX_FIELD_VALUE_SIZE} bytes (got {})",
+            input.value.len()
+        )));
+    }
+    let token_value: TokenValue = serde_json::from_str(&input.value)
+        .map_err(|e| async_graphql::Error::new(format!("invalid token value JSON: {e}")))?;
+
+    // Construct a Token via its validating constructor (validates name, value, type match).
+    let token = Token::new(
+        TokenId::new(token_uuid),
+        input.name.clone(),
+        token_value,
+        token_type,
+        input.description.clone(),
+    )
+    .map_err(|e| async_graphql::Error::new(format!("invalid token: {e}")))?;
+
+    let token_name = token.name().to_string();
+    let token_type_val = serde_json::to_value(token.token_type())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token type: {e}")))?;
+    let token_value_val = serde_json::to_value(token.value())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token value: {e}")))?;
+    let description_val = serde_json::to_value(token.description())
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize description: {e}")))?;
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: token_uuid.to_string(),
+        op_type: "create_token".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({
+            "id": token_uuid.to_string(),
+            "name": &token_name,
+            "token_type": token_type_val,
+            "value": token_value_val,
+            "description": description_val,
+        })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| Ok(Box::new(AddToken { token }) as Box<dyn FieldOperation>)),
+        broadcast,
+    })
+}
+
+/// Parses an `UpdateToken` input.
+fn parse_update_token(input: &UpdateTokenInput) -> Result<ParsedOp> {
+    // Deserialize token value JSON.
+    if input.value.len() > MAX_FIELD_VALUE_SIZE {
+        return Err(async_graphql::Error::new(format!(
+            "token value exceeds maximum size of {MAX_FIELD_VALUE_SIZE} bytes (got {})",
+            input.value.len()
+        )));
+    }
+    let token_value: TokenValue = serde_json::from_str(&input.value)
+        .map_err(|e| async_graphql::Error::new(format!("invalid token value JSON: {e}")))?;
+
+    let token_name = input.name.clone();
+    let description = input.description.clone();
+    let token_value_val = serde_json::to_value(&token_value)
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize token value: {e}")))?;
+    let description_val = serde_json::to_value(&description)
+        .map_err(|e| async_graphql::Error::new(format!("failed to serialize description: {e}")))?;
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: String::new(),
+        op_type: "update_token".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({
+            "name": &token_name,
+            "value": token_value_val,
+            "description": description_val,
+        })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |doc| {
+            // Look up the existing token to get its UUID (stable identity).
+            let existing = doc.token_context.get(&token_name).ok_or_else(|| {
+                async_graphql::Error::new(format!("token '{token_name}' not found"))
+            })?;
+            let token_id = existing.id();
+
+            // Derive the token type from the existing token (type cannot change on update).
+            let existing_type = existing.token_type();
+
+            // Construct the replacement Token via its validating constructor.
+            let new_token = Token::new(
+                token_id,
+                token_name.clone(),
+                token_value,
+                existing_type,
+                description,
+            )
+            .map_err(|e| async_graphql::Error::new(format!("invalid token update: {e}")))?;
+
+            Ok(Box::new(UpdateToken {
+                new_token,
+                token_name,
+            }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
+/// Parses a `RemoveToken` input.
+#[allow(clippy::unnecessary_wraps)]
+fn parse_remove_token(input: &RemoveTokenInput) -> Result<ParsedOp> {
+    let token_name = input.name.clone();
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: String::new(),
+        op_type: "delete_token".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({ "name": &token_name })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(RemoveToken {
+                token_name: token_name.clone(),
+            }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
+/// Parses a `RenameToken` input.
+#[allow(clippy::unnecessary_wraps)]
+fn parse_rename_token(input: &RenameTokenInput) -> Result<ParsedOp> {
+    let old_name = input.old_name.clone();
+    let new_name = input.new_name.clone();
+
+    // Build broadcast payload eagerly (CLAUDE.md: broadcast payload shape contract).
+    // The token's stable UUID is resolved inside the builder closure after lock acquisition,
+    // so we construct the broadcast here with old_name/new_name and patch the id in the builder.
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        node_uuid: String::new(),
+        op_type: "rename_token".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({
+            "old_name": &old_name,
+            "new_name": &new_name,
+        })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(RenameToken { old_name, new_name }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+    })
+}
+
 #[Object]
 #[allow(clippy::unused_async)]
 impl MutationRoot {
@@ -973,6 +1154,11 @@ impl MutationRoot {
             OperationInput::RenamePage(_) | OperationInput::ReorderPage(_) => {
                 MutationEventKind::PageUpdated
             }
+            OperationInput::AddToken(_) => MutationEventKind::TokenCreated,
+            OperationInput::UpdateToken(_) | OperationInput::RenameToken(_) => {
+                MutationEventKind::TokenUpdated
+            }
+            OperationInput::RemoveToken(_) => MutationEventKind::TokenDeleted,
         };
 
         // First pass: parse all inputs (no lock needed).
@@ -1929,6 +2115,254 @@ mod tests {
         assert!(
             !res.errors.is_empty(),
             "invalid page UUID should be rejected"
+        );
+    }
+
+    // ── Token mutation tests ─────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_add_token_via_apply_operations() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let token_uuid = uuid::Uuid::new_v4().to_string();
+        let value_json = r#"{\"type\":\"number\",\"value\":42.0}"#;
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        addToken: {{
+                            tokenUuid: "{token_uuid}",
+                            name: "spacing.md",
+                            tokenType: "number",
+                            value: "{value_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "add token errors: {:?}", res.errors);
+
+        // Verify the token exists in the document.
+        let doc = state.app.document.lock().unwrap();
+        assert!(
+            doc.token_context.get("spacing.md").is_some(),
+            "token 'spacing.md' should exist after addToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_update_token_via_apply_operations() {
+        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
+        use agent_designer_core::id::TokenId;
+        use agent_designer_core::node::Color;
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Seed a color token directly.
+        {
+            let mut doc = state.app.document.lock().unwrap();
+            let token = Token::new(
+                TokenId::new(uuid::Uuid::new_v4()),
+                "color.brand".to_string(),
+                TokenValue::Color {
+                    value: Color::default(),
+                },
+                TokenType::Color,
+                None,
+            )
+            .expect("valid token");
+            let op = CoreAddToken { token };
+            op.validate(&doc).expect("validate");
+            op.apply(&mut doc).expect("apply");
+        }
+
+        // Update it to a new value (Color uses serde tag = "space", rename_all = "snake_case").
+        let new_value_json = r#"{\"type\":\"color\",\"value\":{\"space\":\"srgb\",\"r\":1.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        updateToken: {{
+                            name: "color.brand",
+                            value: "{new_value_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "update token errors: {:?}",
+            res.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn test_remove_token_via_apply_operations() {
+        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
+        use agent_designer_core::id::TokenId;
+        use agent_designer_core::node::Color;
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Seed a token.
+        {
+            let mut doc = state.app.document.lock().unwrap();
+            let token = Token::new(
+                TokenId::new(uuid::Uuid::new_v4()),
+                "color.accent".to_string(),
+                TokenValue::Color {
+                    value: Color::default(),
+                },
+                TokenType::Color,
+                None,
+            )
+            .expect("valid token");
+            let op = CoreAddToken { token };
+            op.validate(&doc).expect("validate");
+            op.apply(&mut doc).expect("apply");
+        }
+
+        let query = r#"mutation {
+            applyOperations(
+                operations: [{ removeToken: { name: "color.accent" } }],
+                userId: "test-user"
+            ) {
+                seq
+            }
+        }"#;
+        let res = schema.execute(query).await;
+        assert!(
+            res.errors.is_empty(),
+            "remove token errors: {:?}",
+            res.errors
+        );
+
+        let doc = state.app.document.lock().unwrap();
+        assert!(
+            doc.token_context.get("color.accent").is_none(),
+            "token 'color.accent' should be gone after removeToken"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_token_duplicate_name_rejected() {
+        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
+        use agent_designer_core::id::TokenId;
+        use agent_designer_core::node::Color;
+        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Seed a token first.
+        {
+            let mut doc = state.app.document.lock().unwrap();
+            let token = Token::new(
+                TokenId::new(uuid::Uuid::new_v4()),
+                "color.primary".to_string(),
+                TokenValue::Color {
+                    value: Color::default(),
+                },
+                TokenType::Color,
+                None,
+            )
+            .expect("valid token");
+            let op = CoreAddToken { token };
+            op.validate(&doc).expect("validate");
+            op.apply(&mut doc).expect("apply");
+        }
+
+        // Attempt to add again with same name — should fail.
+        let token_uuid = uuid::Uuid::new_v4().to_string();
+        // Color uses serde tag = "space", rename_all = "snake_case".
+        let value_json = r#"{\"type\":\"color\",\"value\":{\"space\":\"srgb\",\"r\":0.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        addToken: {{
+                            tokenUuid: "{token_uuid}",
+                            name: "color.primary",
+                            tokenType: "color",
+                            value: "{value_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "duplicate token name should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_remove_nonexistent_token_rejected() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let query = r#"mutation {
+            applyOperations(
+                operations: [{ removeToken: { name: "does.not.exist" } }],
+                userId: "test-user"
+            ) {
+                seq
+            }
+        }"#;
+        let res = schema.execute(query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "removing nonexistent token should be rejected"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_token_invalid_type_string_rejected() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let token_uuid = uuid::Uuid::new_v4().to_string();
+        let value_json = r#"{\"type\":\"number\",\"value\":1.0}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        addToken: {{
+                            tokenUuid: "{token_uuid}",
+                            name: "spacing.sm",
+                            tokenType: "not_a_real_type",
+                            value: "{value_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "unknown token type should be rejected"
         );
     }
 }

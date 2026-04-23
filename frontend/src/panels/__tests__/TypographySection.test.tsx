@@ -28,6 +28,7 @@ function createMockStore(
       info: { name: "", page_count: 0, node_count: 0, can_undo: false, can_redo: false },
       pages: [],
       nodes,
+      tokens: {},
     },
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
@@ -69,6 +70,11 @@ function createMockStore(
     undo: vi.fn(),
     redo: vi.fn(),
     flushHistory: vi.fn(),
+    createToken: vi.fn(),
+    updateToken: vi.fn(),
+    deleteToken: vi.fn(),
+    renameToken: vi.fn(),
+    resolveToken: () => null,
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }
