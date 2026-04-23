@@ -326,16 +326,13 @@ describe("AppearancePanel", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    // Kobalte NumberField associates aria-label via aria-labelledby, not a direct attribute.
-    // Use getByLabelText which resolves both aria-label and aria-labelledby associations.
-    const opacityInput = screen.getByLabelText("Opacity");
+    // ValueInput exposes a combobox with aria-label="Opacity".
+    const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
     expect(opacityInput).toBeTruthy();
   });
 
-  it("should call setOpacity when opacity increment button is clicked", () => {
-    const setOpacity = vi.fn();
+  it("should display opacity as a percent integer in the ValueInput", () => {
     const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 0.5 }) });
-    store.setOpacity = setOpacity;
     render(() => (
       <TransProvider instance={i18nInstance}>
         <DocumentProvider store={store}>
@@ -343,18 +340,8 @@ describe("AppearancePanel", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    // Trigger increment — Kobalte fires onRawValueChange synchronously
-    const incrementBtn = screen.getByLabelText("Increment");
-    fireEvent.click(incrementBtn);
-    // setOpacity should be called with a value in 0-1 range (51% / 100 = 0.51)
-    if (setOpacity.mock.calls.length > 0) {
-      const [, value] = setOpacity.mock.calls[0] as [string, number];
-      expect(Number.isFinite(value)).toBe(true);
-      expect(value).toBeGreaterThanOrEqual(0);
-      expect(value).toBeLessThanOrEqual(1);
-    }
-    // At minimum, verify the store method is wired and callable
-    expect(typeof setOpacity).toBe("function");
+    const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
+    expect(opacityInput.textContent).toContain("50");
   });
 
   // ── Keyboard reorder — fills ────────────────────────────────────────
@@ -457,6 +444,62 @@ describe("AppearancePanel", () => {
     const addBtn = screen.getByRole("button", { name: "Add fill" });
     fireEvent.click(addBtn);
     expect(setFills).not.toHaveBeenCalled();
+  });
+
+  // ── flushHistory on ValueInput commit ───────────────────────────────
+
+  it("should call flushHistory when opacity ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 0.5 }) });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const opacityTextbox = opacityInput.querySelector('[role="textbox"]') as HTMLElement;
+    // Press Enter — this fires onCommit per ValueInput handleKeyDown,
+    // which forwards to handleOpacityCommit → store.flushHistory().
+    fireEvent.keyDown(opacityTextbox, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  // ── Opacity token binding ───────────────────────────────────────────
+  //
+  // Verifies the full wiring: combobox input containing a token-ref string
+  // → parseOpacityInput → store.setOpacity called with { type: "token_ref" }.
+  //
+  // jsdom does not support the Selection API used inside ValueInput's
+  // renderHighlighted/getCursorOffset helpers, so we set textContent directly
+  // on the contentEditable combobox element before firing the keydown event.
+  // This is the lightest feasible path that exercises the real parse → store
+  // dispatch chain without mocking internal ValueInput details.
+  it("should call setOpacity with a token_ref StyleValue when a token ref is entered and committed", () => {
+    const setOpacity = vi.fn();
+    const store = createMockStore("node-1", { "node-1": makeNode({ opacity: 1 }) });
+    store.setOpacity = setOpacity;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <AppearancePanel />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const opacityInput = screen.getByRole("combobox", { name: "Opacity" });
+    // Set the raw text directly on the inner contentEditable textbox so that
+    // ValueInput's getInputText() returns the token-ref string. The event
+    // handlers also live on the inner textbox, not the outer combobox.
+    const opacityTextbox = opacityInput.querySelector('[role="textbox"]') as HTMLElement;
+    opacityTextbox.textContent = "{opacity.subtle}";
+    fireEvent.keyDown(opacityTextbox, { key: "Enter" });
+    expect(setOpacity).toHaveBeenCalledWith("node-1", {
+      type: "token_ref",
+      name: "opacity.subtle",
+    });
   });
 
   it("test_max_strokes_enforced: should not add stroke when at maximum (32)", () => {

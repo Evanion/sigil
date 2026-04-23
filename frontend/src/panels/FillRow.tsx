@@ -30,11 +30,13 @@ import type {
   GradientDef,
   GradientStop,
   StyleValue,
+  Token,
 } from "../types/document";
-import { ColorSwatch } from "../components/color-picker";
 import { Select } from "../components/select/Select";
 import { pointsFromAngle } from "../components/gradient-editor/gradient-utils";
+import ValueInput from "../components/value-input/ValueInput";
 import { GradientEditorPopover } from "./GradientEditorPopover";
+import { formatColorStyleValue, parseColorInput } from "./panel-value-helpers";
 import "./FillRow.css";
 
 export interface FillRowProps {
@@ -42,6 +44,11 @@ export interface FillRowProps {
   readonly index: number;
   readonly onUpdate: (index: number, fill: Fill) => void;
   readonly onRemove: (index: number) => void;
+  /**
+   * Token dictionary used by the solid-fill ValueInput for autocomplete and
+   * swatch resolution. Defaults to an empty record when omitted.
+   */
+  readonly tokens?: Record<string, Token>;
   /**
    * Called when a continuous drag gesture begins inside gradient controls.
    * Parent should flush pending history buffer to start a fresh coalesce window.
@@ -52,6 +59,12 @@ export interface FillRowProps {
    * Parent should flush the history buffer to commit the drag as one undo entry.
    */
   readonly onDragEnd?: () => void;
+  /**
+   * Called at the gesture boundary (ValueInput blur/commit) so the parent can
+   * flush its history buffer into a single undo entry. When omitted the parent
+   * receives updates via `onUpdate` only.
+   */
+  readonly onCommit?: () => void;
 }
 
 /** Default opaque black color. */
@@ -63,9 +76,9 @@ const DEFAULT_LINEAR_ANGLE = 180;
 /** Default radial gradient center. */
 const DEFAULT_RADIAL_CENTER = { x: 0.5, y: 0.5 };
 
-function solidFillColor(fill: FillSolid): Color {
-  if (fill.color.type === "literal") return fill.color.value;
-  return BLACK;
+/** Solid fill's color as a StyleValue for the ValueInput display. */
+function solidFillStyleValue(fill: FillSolid): StyleValue<Color> {
+  return fill.color;
 }
 
 /**
@@ -190,11 +203,20 @@ export function FillRow(props: FillRowProps) {
     { value: "conic_gradient", label: t("panels:fill.typeConic") },
   ]);
 
-  function handleColorChange(newColor: Color): void {
+  function handleColorChange(raw: string): void {
     if (props.fill.type !== "solid") return;
-    const newStyleValue: StyleValue<Color> = { type: "literal", value: newColor };
-    const newFill: FillSolid = { type: "solid", color: newStyleValue };
+    const parsed = parseColorInput(raw);
+    if (!parsed) return;
+    const newFill: FillSolid = { type: "solid", color: parsed };
     props.onUpdate(props.index, newFill);
+  }
+
+  function handleColorCommit(_raw: string): void {
+    // RF-004: Value was already applied via onChange during the gesture.
+    // onCommit only signals the gesture boundary so the parent can flush
+    // buffered writes into a single history entry. Calling handleColorChange
+    // here would double-dispatch the store write.
+    props.onCommit?.();
   }
 
   function handleTypeChange(newType: string): void {
@@ -222,8 +244,11 @@ export function FillRow(props: FillRowProps) {
     props.onUpdate(props.index, updatedFill);
   }
 
-  const solidColor = createMemo(() =>
-    props.fill.type === "solid" ? solidFillColor(props.fill as FillSolid) : BLACK,
+  /** Display string for the solid fill color ValueInput. */
+  const solidColorDisplay = createMemo(() =>
+    props.fill.type === "solid"
+      ? formatColorStyleValue(solidFillStyleValue(props.fill as FillSolid))
+      : "",
   );
 
   return (
@@ -256,7 +281,14 @@ export function FillRow(props: FillRowProps) {
             </Show>
           }
         >
-          <ColorSwatch color={solidColor()} onColorChange={handleColorChange} />
+          <ValueInput
+            value={solidColorDisplay()}
+            onChange={handleColorChange}
+            onCommit={handleColorCommit}
+            tokens={props.tokens ?? {}}
+            acceptedTypes={["color"]}
+            aria-label="Fill color"
+          />
         </Show>
 
         <Select

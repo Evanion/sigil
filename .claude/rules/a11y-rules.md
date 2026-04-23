@@ -32,3 +32,11 @@ Any `<canvas>` element (or its wrapper) used as a 2D interactive control (color 
 ### Text Inputs with Suggestions Must Use the Combobox Pattern
 
 Any custom text input component that displays a dynamic suggestion list, autocomplete dropdown, or filterable option menu MUST use `role="combobox"` (not `role="textbox"` or `role="searchbox"`). The combobox role is the only WAI-ARIA role that establishes the semantic relationship between a text input and its associated listbox. Without it, `aria-autocomplete`, `aria-expanded`, `aria-controls`, and `aria-activedescendant` are either invalid or ignored by assistive technology — the user has no indication that suggestions exist or how to navigate them. Additionally, `aria-autocomplete` must be set as a static attribute (always present, value does not change based on whether suggestions are currently visible) — it declares the control's capability, not its momentary state. `aria-expanded` is the attribute that communicates whether the listbox is currently shown. Reference: WAI-ARIA Authoring Practices Guide, Combobox Pattern.
+
+### Numeric Text Inputs Must Expose Numeric State
+
+When a text input (including a combobox-pattern input like ValueInput) is used for a numeric field with a constrained domain (opacity 0-1, rotation 0-360, stroke width ≥ 0, font size 1-10000, line height > 0), the input MUST expose ARIA numeric state: `aria-valuemin`, `aria-valuemax`, and `aria-valuenow` updated on every change. It MUST also support arrow-key increment (ArrowUp/ArrowDown to step by 1 and Shift+ArrowUp/Down to step by 10, matching the HTML `<input type="number">` keyboard contract).
+
+A numeric-domain text input that omits these attributes is a regression from `<input type="number">` or `role="spinbutton"` — screen reader users lose both the announced bounds and the ability to step. The `role` may remain `combobox` when token autocomplete is also offered; the numeric state attributes compose with the combobox semantics.
+
+This obligation is scoped to components whose current value is unambiguously numeric. When the same input accepts either a literal number, a token reference, or an expression (ValueInput), expose `aria-valuemin`/`max`/`now` only while the detected mode is `"literal-number"` or `"literal-dimension"`; omit them while typing a token or expression.

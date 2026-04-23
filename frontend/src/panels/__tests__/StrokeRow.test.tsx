@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { StrokeRow } from "../StrokeRow";
 import type { Stroke } from "../../types/document";
@@ -27,6 +27,17 @@ const tokenRefWidthStroke: Stroke = {
 };
 
 describe("StrokeRow", () => {
+  // jsdom does not implement the native popover API — stub the methods so
+  // ValueInput's Popover component does not throw on mount.
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -52,17 +63,18 @@ describe("StrokeRow", () => {
     expect(handle?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("should render a color swatch span inside a trigger button", () => {
+  it("should render a Stroke color ValueInput combobox with swatch trigger", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     render(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const swatch = document.querySelector(".sigil-color-swatch");
-    expect(swatch).toBeTruthy();
-    // The swatch visual is a <span>; the Kobalte trigger <button> wraps it
-    expect(swatch?.tagName.toLowerCase()).toBe("span");
-    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
+    const combobox = screen.getByRole("combobox", { name: "Stroke color" });
+    expect(combobox).toBeTruthy();
+    // The ValueInput exposes a swatch button for opening the color picker.
+    // The swatch is now rendered by the shared Popover component — query by role.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
+    expect(swatchBtn).toBeTruthy();
   });
 
   it("should render the alignment as Center text", () => {
@@ -113,42 +125,67 @@ describe("StrokeRow", () => {
     expect(onRemove).toHaveBeenCalledWith(3);
   });
 
-  it("should render a width input showing the literal value", () => {
+  it("should render a width ValueInput showing the literal value", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     render(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    // NumberInput renders an <input> element; value should be 2
-    const input = document.querySelector(".sigil-stroke-row__width input");
-    expect(input).toBeTruthy();
-    expect((input as HTMLInputElement).value).toBe("2");
+    const combobox = screen.getByRole("combobox", { name: "Stroke width" });
+    expect(combobox).toBeTruthy();
+    expect(combobox.textContent).toContain("2");
   });
 
-  it("should render width as 0 for token_ref widths (unknown literal value)", () => {
+  it("should render width as {name} for token_ref widths", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     render(() => (
       <StrokeRow stroke={tokenRefWidthStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    // token_ref widths cannot display a number, so we fall back to 0
-    const input = document.querySelector(".sigil-stroke-row__width input");
-    expect(input).toBeTruthy();
-    expect((input as HTMLInputElement).value).toBe("0");
+    // ValueInput renders token refs as "{name}" rather than a number.
+    const combobox = screen.getByRole("combobox", { name: "Stroke width" });
+    expect(combobox.textContent).toContain("{stroke-width-sm}");
   });
 
-  it("should call onUpdate with updated width when width input changes", () => {
+  // ── flushHistory wiring via onCommit prop ────────────────────────────
+
+  it("should invoke onCommit when the color ValueInput commits via Enter", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
+    const onCommit = vi.fn();
     render(() => (
-      <StrokeRow stroke={baseStroke} index={1} onUpdate={onUpdate} onRemove={onRemove} />
+      <StrokeRow
+        stroke={baseStroke}
+        index={0}
+        onUpdate={onUpdate}
+        onRemove={onRemove}
+        onCommit={onCommit}
+      />
     ));
-    const input = document.querySelector(".sigil-stroke-row__width input") as HTMLInputElement;
-    fireEvent.input(input, { target: { value: "4" } });
-    // onUpdate should have been called with index 1 and new stroke with width 4
-    expect(onUpdate).toHaveBeenCalledWith(
-      1,
-      expect.objectContaining({ width: { type: "literal", value: 4 } }),
-    );
+    const combobox = screen.getByRole("combobox", { name: "Stroke color" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
+  });
+
+  it("should invoke onCommit when the width ValueInput commits via Enter", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    const onCommit = vi.fn();
+    render(() => (
+      <StrokeRow
+        stroke={baseStroke}
+        index={0}
+        onUpdate={onUpdate}
+        onRemove={onRemove}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Stroke width" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
   });
 });

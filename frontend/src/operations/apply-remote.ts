@@ -25,6 +25,11 @@ import type {
   TokenType,
 } from "../types/document";
 import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
+import {
+  isValidStyleValue,
+  isValidColor,
+  isValidFiniteNumber,
+} from "../store/style-value-validate";
 
 /**
  * Recursively strips `readonly` from all properties.
@@ -201,6 +206,114 @@ function applyRemoteOperation(
   }
 }
 
+// ── Internal: shape validators for style payloads ─────────────────────
+
+/**
+ * RF-017: Validate a `Fill` object's embedded StyleValues before acceptance.
+ * Only validates fields that carry StyleValues (solid color, gradient stop
+ * colors). Returns true if all embedded StyleValues shape-match.
+ */
+function isValidFill(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  switch (f["type"]) {
+    case "solid":
+      return isValidStyleValue(f["color"], isValidColor);
+    case "linear_gradient":
+    case "radial_gradient": {
+      const gradient = f["gradient"];
+      if (typeof gradient !== "object" || gradient === null) return false;
+      const stops = (gradient as Record<string, unknown>)["stops"];
+      if (!Array.isArray(stops)) return false;
+      for (const stop of stops) {
+        if (typeof stop !== "object" || stop === null) return false;
+        if (!isValidStyleValue((stop as Record<string, unknown>)["color"], isValidColor)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case "conic_gradient": {
+      const gradient = f["gradient"];
+      if (typeof gradient !== "object" || gradient === null) return false;
+      const stops = (gradient as Record<string, unknown>)["stops"];
+      if (!Array.isArray(stops)) return false;
+      for (const stop of stops) {
+        if (typeof stop !== "object" || stop === null) return false;
+        if (!isValidStyleValue((stop as Record<string, unknown>)["color"], isValidColor)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case "image":
+      // Image fills carry no StyleValues.
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isValidFillsPayload(v: unknown): v is Fill[] {
+  if (!Array.isArray(v)) return false;
+  for (const fill of v) {
+    if (!isValidFill(fill)) return false;
+  }
+  return true;
+}
+
+/**
+ * RF-017: Validate a `Stroke` object's embedded StyleValues.
+ * Both `color` (StyleValue<Color>) and `width` (StyleValue<number>) must match.
+ */
+function isValidStroke(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    isValidStyleValue(s["color"], isValidColor) &&
+    isValidStyleValue(s["width"], isValidFiniteNumber)
+  );
+}
+
+function isValidStrokesPayload(v: unknown): v is Stroke[] {
+  if (!Array.isArray(v)) return false;
+  for (const stroke of v) {
+    if (!isValidStroke(stroke)) return false;
+  }
+  return true;
+}
+
+/**
+ * RF-017: Validate an `Effect` object's embedded StyleValues.
+ * Drop/inner shadow: color + blur + spread; layer/background blur: radius.
+ */
+function isValidEffect(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  switch (e["type"]) {
+    case "drop_shadow":
+    case "inner_shadow":
+      return (
+        isValidStyleValue(e["color"], isValidColor) &&
+        isValidStyleValue(e["blur"], isValidFiniteNumber) &&
+        isValidStyleValue(e["spread"], isValidFiniteNumber)
+      );
+    case "layer_blur":
+    case "background_blur":
+      return isValidStyleValue(e["radius"], isValidFiniteNumber);
+    default:
+      return false;
+  }
+}
+
+function isValidEffectsPayload(v: unknown): v is Effect[] {
+  if (!Array.isArray(v)) return false;
+  for (const effect of v) {
+    if (!isValidEffect(effect)) return false;
+  }
+  return true;
+}
+
 // ── Internal: set_field ───────────────────────────────────────────────
 
 function applyFieldSet(
@@ -233,15 +346,36 @@ function applyFieldSet(
       setState("nodes", nodeUuid, "locked", value as boolean);
       break;
     case "style.fills":
+      // RF-017: validate every StyleValue embedded in each fill before accepting
+      if (!isValidFillsPayload(value)) {
+        console.warn(`Remote set_field style.fills: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "fills", value as Fill[]);
       break;
     case "style.strokes":
+      // RF-017: validate every StyleValue embedded in each stroke before accepting
+      if (!isValidStrokesPayload(value)) {
+        console.warn(`Remote set_field style.strokes: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "strokes", value as Stroke[]);
       break;
     case "style.effects":
+      // RF-017: validate every StyleValue embedded in each effect before accepting
+      if (!isValidEffectsPayload(value)) {
+        console.warn(`Remote set_field style.effects: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "effects", value as Effect[]);
       break;
     case "style.opacity":
+      // RF-017: validate opacity as a StyleValue<number> — literal must be a
+      // finite number; expressions bounded by MAX_EXPRESSION_LENGTH.
+      if (!isValidStyleValue(value, isValidFiniteNumber)) {
+        console.warn(`Remote set_field style.opacity: invalid StyleValue<number> shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "opacity", value as StyleValue<number>);
       break;
     case "style.blend_mode":
@@ -282,6 +416,30 @@ function applyFieldSet(
       // Handle kind.text_style.* sub-field paths
       if (path.startsWith("kind.text_style.") && node.kind.type === "text") {
         const subField = path.slice("kind.text_style.".length);
+        // RF-017: validate StyleValue-typed text style fields before accepting.
+        // font_size, line_height, letter_spacing are StyleValue<number>;
+        // text_color is StyleValue<Color>. Other fields (font_family,
+        // font_weight, font_style, text_align, text_decoration, text_shadow)
+        // are plain values and pass through without StyleValue validation.
+        if (
+          subField === "font_size" ||
+          subField === "line_height" ||
+          subField === "letter_spacing"
+        ) {
+          if (!isValidStyleValue(value, isValidFiniteNumber)) {
+            console.warn(
+              `Remote set_field kind.text_style.${subField}: invalid StyleValue<number> shape, skipping`,
+            );
+            return;
+          }
+        } else if (subField === "text_color") {
+          if (!isValidStyleValue(value, isValidColor)) {
+            console.warn(
+              `Remote set_field kind.text_style.text_color: invalid StyleValue<Color> shape, skipping`,
+            );
+            return;
+          }
+        }
         setState(
           produce((s) => {
             const n = s.nodes[nodeUuid];

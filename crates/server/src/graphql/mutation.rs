@@ -2365,4 +2365,74 @@ mod tests {
             "unknown token type should be rejected"
         );
     }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_opacity_accepts_expression_variant() {
+        // Spec 13c Phase A: StyleValue::Expression round-trips through GraphQL
+        // for every StyleValue-typed field. Covers style.opacity here; other
+        // fields share the same parse path via the auto-derived Deserialize.
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_frame_direct(&state, "TestNode");
+
+        // JSON-encoded StyleValue::Expression. The GraphQL value is a string
+        // containing JSON — inner braces and quotes are escaped appropriately.
+        let expr_json = r#"{\"type\":\"expression\",\"expr\":\"{spacing.md} * 2\"}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        setField: {{
+                            nodeUuid: "{uuid}",
+                            path: "style.opacity",
+                            value: "{expr_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "setField with StyleValue::Expression should succeed, got errors: {:?}",
+            res.errors
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_set_opacity_rejects_malformed_expression() {
+        // Expression variants must still fail parse validation at the field
+        // operation boundary — the expression engine rejects syntax errors.
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_frame_direct(&state, "TestNode");
+
+        let expr_json = r#"{\"type\":\"expression\",\"expr\":\"1 + + 2\"}"#;
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        setField: {{
+                            nodeUuid: "{uuid}",
+                            path: "style.opacity",
+                            value: "{expr_json}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "setField with malformed StyleValue::Expression should be rejected"
+        );
+    }
 }

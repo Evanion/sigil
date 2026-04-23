@@ -64,7 +64,12 @@ export interface StyleValueTokenRef {
   readonly name: string;
 }
 
-export type StyleValue<T> = StyleValueLiteral<T> | StyleValueTokenRef;
+export interface StyleValueExpression {
+  readonly type: "expression";
+  readonly expr: string;
+}
+
+export type StyleValue<T> = StyleValueLiteral<T> | StyleValueTokenRef | StyleValueExpression;
 
 // ── Color ─────────────────────────────────────────────────────────────
 

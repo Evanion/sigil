@@ -101,6 +101,31 @@
   grid-column: 1 / -1;
 }
 
+/*
+ * RF-013: Shadow X/Y/Blur/Spread prefix layout.
+ *
+ * The prefix span sits in the left "gutter" of the field so the X/Y/B/S
+ * letter reads as part of the control while the ValueInput fills the
+ * remaining width. Using a grid column (fixed prefix, flexible input)
+ * instead of absolute positioning keeps the prefix selectable-free and
+ * avoids layout shift when ValueInput grows the swatch prefix variant.
+ */
+.sigil-effect-card__field-with-prefix {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sigil-effect-card__field-prefix {
+  color: var(--text-3);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-0, 11px);
+  user-select: none;
+  line-height: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sigil-effect-card__remove {
     transition: none;

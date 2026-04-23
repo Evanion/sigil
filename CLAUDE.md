@@ -222,6 +222,14 @@ Scopes: `core`, `server`, `mcp`, `frontend`, `cli`, `bindings`, `devops`
 
 Keep descriptions concise and lowercase. Reference spec numbers when implementing features: `feat(core): add node tree operations (spec-01)`.
 
+### Type semantics (enforced)
+
+- **`refactor`** — behavior-preserving rearrangement only. A `refactor` commit MUST NOT: introduce new types, add new fields, add new enum variants, change function signatures in a way that alters input/output domain, add new validation, or add/remove user-visible behavior. If the change does any of these, it is `feat` or `fix`, not `refactor`. Plan tasks labeled "refactor" that then introduce type changes indicate that the plan is mis-scoped — update the plan before opening the PR.
+- **`fix`** — corrects a defect in existing behavior. Does not introduce new features.
+- **`feat`** — adds new user-visible capability or a new type/field that expands the data model.
+
+This matters during review: reviewers calibrate scrutiny based on the commit type. A mislabeled `refactor` invites lighter review of code that actually changes behavior, which is how regressions slip through.
+
 ---
 
 ## 7. Pull Request Process
@@ -319,6 +327,17 @@ Any spec that introduces a new canvas tool MUST include a section titled **"Tool
 - Whether the tool stays active after one use or returns to select.
 - How the tool interacts with document-level keyboard handlers during its active phase.
 
+### Cross-Stack Type Extension Inventory
+
+Any spec that extends a shared wire-format type (a type that crosses the Rust↔TypeScript boundary via GraphQL, MCP, WebSocket, or file serialization) MUST include a section titled **"Transport Boundary Inventory"** that enumerates, for each affected type:
+
+- The Rust definition site (file and type name).
+- The TypeScript definition site (file and type name).
+- Every transport handler that serializes or deserializes the type: GraphQL resolvers, MCP tool handlers, WebSocket broadcast paths, `frontend/src/operations/apply-remote.ts` handlers, persistence paths, canvas renderer paths.
+- Every in-code consumer that pattern-matches on the type's discriminant (every `match` in Rust, every `switch` or `if/else` ladder in TypeScript).
+
+For each entry, the spec must state whether this PR updates it, or document why no update is needed. A spec that extends a shared type without this inventory is incomplete — the implementer has no checklist to verify end-to-end parity.
+
 ---
 
 ## 11. Defensive Coding Rules
@@ -357,9 +376,24 @@ Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppresse
 
 The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` on a `Result` where the error represents a real failure (e.g., serialization failure). Prefer `match` with an explicit log branch. "Silent" also includes mapping a specific error to a generic variant — if a rollback error is mapped to `InvalidInput`, the diagnostic trail is corrupted. Create a typed variant (e.g., `RollbackFailed`) instead.
 
-### No Silent Clamping of Invalid Input
+### Handlers Must Surface Validation Failures to the User
 
-Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
+Never silently reject, clamp, truncate, or coerce an invalid input value. Four anti-patterns are banned:
+1. **Silent clamping** — `position.max(0)`, `name.truncate(MAX_LEN)`.
+2. **Silent rejection** — `if (!isValid(input)) return;` with no user feedback.
+3. **Silent swallowing** — `try { parse(input); } catch { /* ignore */ }`.
+4. **Silent discriminant collapse** — `if (delta > TOLERANCE) { return [0, 0, ...]; }` where the caller loses not just a value but the *identity* of a channel (e.g., hue set to 0 because saturation fell below a threshold). A coarse tolerance masquerading as a division-safety guard is a silent clamp — use the strict numerical guard (`delta > 0`) and document why.
+
+All four mask bugs in callers and leave the user unable to understand why their action had no effect. Instead, at every input boundary (API handler, MCP tool, deserialization, UI callback, panel commit handler):
+- Validate the input.
+- On failure, surface the error via the appropriate channel for that layer:
+  - **Rust API/MCP**: return a typed error identifying the invalid value and acceptable range.
+  - **Frontend panel/ValueInput handlers**: write a status message to the component's `aria-live` status region AND, for destructive intent (e.g., committing an invalid value), show a toast or inline error — not both silent paths.
+  - **Background parse attempts** (e.g., autocomplete match): fail silently is acceptable ONLY when the user will immediately receive feedback through another channel (the suggestion list didn't open, the swatch didn't appear) AND there is no persistence attempt.
+
+A handler that short-circuits on `parsed.type !== "literal"`, `value < 0`, or similar without updating a visible status region is a bug. If the input type legitimately cannot be represented (e.g., token ref to a field that doesn't support bindings), the status message must explain *why* — "Font family token binding not yet supported", "Stroke width must be ≥ 0", etc.
+
+The exception is explicit user-facing affordances (a slider that visually constrains its range) where clamping IS the intended UX.
 
 ### No Fire-and-Forget Mutations
 
@@ -377,9 +411,19 @@ When a boolean or enum flag is set to temporarily change system behavior (suppre
 
 Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
 
-### Behavioral Inventory Before Deleting Implementation Code
+### Behavioral Inventory Before Deleting or Rewriting Implementation Code
 
-When deleting a module, trait, struct, or function that carries non-trivial logic (computation, validation, state transitions, coordinate transforms, invariant maintenance), the PR MUST include a behavioral inventory before deletion. Enumerate: (1) every side effect and computation the deleted code performs beyond simple CRUD, (2) for each item, whether it is preserved in the replacement code, moved to a different location, or intentionally removed with rationale. "The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. This rule exists because PR #39 deleted Command structs that contained bounding box computation, transform adjustment, and child ordering logic. The replacement FieldOperations omitted this behavior, causing four Critical regressions that were only caught during review.
+When a PR either (a) deletes a module, trait, struct, or function carrying non-trivial logic, OR (b) rewrites a frontend component such that net line delta exceeds ±30% or the implementation is substantially different (new internal architecture, new state model, extracted/combined helpers), the PR MUST include a behavioral inventory before the diff.
+
+The scope obligation is independent of how the PR is labeled. Plan-task labels such as "rename", "move", "refactor", or "extract" do NOT exempt the change from inventory if the actual diff meets the criteria above. The inventory is keyed on the diff, not the intent.
+
+The inventory enumerates:
+1. Every side effect and computation the outgoing code performs beyond simple CRUD — validation rules, min/max bounds, prefix/suffix labels, formatting, keyboard handlers, focus management, aria-live regions, autocomplete state, cursor preservation, CSS class contracts, event emission ordering.
+2. For each item: (a) preserved in the replacement, (b) moved to a different location (specify where), or (c) intentionally removed (with rationale).
+
+"The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. For frontend component rewrites, the inventory additionally satisfies the "Accessibility Behavior Must Be Audited During UI Rewrites" rule in `a11y-rules.md` — both items are enumerated in the same document.
+
+This rule exists because PR #39 deleted Command structs containing bounding box / transform / child ordering logic whose omission produced four Critical regressions, and because PR #57 rewrote EnhancedTokenInput → ValueInput without inventory and lost: min validation on line-height/letter-spacing (RF-005), prefix labels on shadow X/Y/Blur/Spread (RF-013), spinbutton semantics (RF-020), and aria-live discipline (RF-008).
 
 ### Validation Must Be Symmetric Across All Transports
 
@@ -415,3 +459,5 @@ When the same algorithm, function set, or computation is implemented in both Rus
 Test vectors must cover: (a) normal inputs, (b) boundary values (0, 1, max), (c) the specific semantics most likely to diverge (scale/range of numeric values, argument order, naming conventions, edge case behavior). If a function intentionally differs between Rust and TypeScript (e.g., because the frontend uses a simplified approximation), document the divergence in a comment in both implementations and exclude it from parity vectors with a rationale.
 
 This rule exists because PR #55 (Spec 13d) shipped 6 Critical/High bugs where the TypeScript expression evaluator diverged from the Rust evaluator on function semantics — inverted size functions, different channel scales, different blend mode naming, and missing alpha compositing.
+
+This rule applies to **shared wire-format types**, not only algorithms. When a type that crosses the Rust↔TypeScript boundary (enums, discriminated unions, structs serialized via GraphQL/MCP/WebSocket) gains a new variant or field on one side, the same PR MUST: (1) add the variant on both sides, (2) add a parity fixture in `tests/fixtures/parity/` with one entry per variant covering the full encoding, (3) update every transport handler (GraphQL resolver, MCP tool, WebSocket broadcast, `apply-remote.ts`) to handle the new variant. A type whose Rust and TypeScript definitions have diverged variant sets is a bug regardless of whether an algorithm exists — deserialization will fail at runtime on the side missing the variant.

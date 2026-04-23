@@ -1,5 +1,5 @@
 /**
- * Pure helper functions extracted from EnhancedTokenInput (RF-026).
+ * Pure helper functions extracted from ValueInput (RF-026).
  *
  * These functions have no dependencies on Solid.js reactivity and can be
  * tested independently.

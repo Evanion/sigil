@@ -3,7 +3,13 @@ import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
 import type { i18n } from "i18next";
-import { TypographySection } from "../TypographySection";
+import {
+  TypographySection,
+  MIN_LINE_HEIGHT,
+  MAX_LINE_HEIGHT,
+  MIN_LETTER_SPACING,
+  MAX_LETTER_SPACING,
+} from "../TypographySection";
 import { DocumentProvider } from "../../store/document-context";
 import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
@@ -365,12 +371,10 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    // NumberInput renders the value in an input element
-    const inputs = document.querySelectorAll("input");
-    const fontSizeInput = Array.from(inputs).find(
-      (el) => el.closest("[aria-label='Font size']") !== null,
-    );
-    expect(fontSizeInput).toBeTruthy();
+    // ValueInput renders a combobox with the numeric value as text content.
+    const fontSize = screen.getByRole("combobox", { name: "Font size" });
+    expect(fontSize).toBeTruthy();
+    expect(fontSize.textContent).toContain("24");
   });
 
   // ── Color row ────────────────────────────────────────────────────────
@@ -398,8 +402,10 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    const liveRegion = screen.getByRole("status");
-    expect(liveRegion).toBeTruthy();
+    // TypographySection exposes its own live region alongside ValueInput's
+    // internal regions — assert at least one exists.
+    const liveRegions = screen.getAllByRole("status");
+    expect(liveRegions.length).toBeGreaterThan(0);
   });
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────
@@ -586,6 +592,191 @@ describe("TypographySection", () => {
     expect(shadowGroup.querySelector("[aria-label='Shadow offset X']")).toBeTruthy();
     expect(shadowGroup.querySelector("[aria-label='Shadow offset Y']")).toBeTruthy();
     expect(shadowGroup.querySelector("[aria-label='Shadow blur radius']")).toBeTruthy();
+  });
+
+  // ── flushHistory on ValueInput commit ────────────────────────────────
+
+  it("should call flushHistory when the font size ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ font_size: 24 }) });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fontSize = screen.getByRole("combobox", { name: "Font size" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const fontSizeTextbox = fontSize.querySelector('[role="textbox"]') as HTMLElement;
+    // Enter fires ValueInput's onCommit which forwards to handleFontSizeCommit
+    // → store.flushHistory().
+    fireEvent.keyDown(fontSizeTextbox, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  it("should call flushHistory when the font family ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fontFamily = screen.getByRole("combobox", { name: "Font family" });
+    const fontFamilyTextbox = fontFamily.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(fontFamilyTextbox, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  it("should call flushHistory when the text color ValueInput commits via Enter", () => {
+    const flushHistory = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.flushHistory = flushHistory;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const textColor = screen.getByRole("combobox", { name: "Text color" });
+    const textColorTextbox = textColor.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textColorTextbox, { key: "Enter" });
+    expect(flushHistory).toHaveBeenCalled();
+  });
+
+  // ── RF-005: Line-height / letter-spacing range enforcement ──────────
+  //
+  // These tests verify that the `MIN_LINE_HEIGHT`, `MAX_LINE_HEIGHT`,
+  // `MIN_LETTER_SPACING`, and `MAX_LETTER_SPACING` constants are actually
+  // enforced by the handler — not just declared. A limit constant without an
+  // enforcement test is treated as a bug per CLAUDE.md "Constant Enforcement
+  // Tests".
+
+  /**
+   * Simulate typing into a ValueInput by setting the inner textbox's textContent
+   * and firing an `input` event. This is the same mechanism ValueInput uses
+   * internally — `handleInput` reads `inputRef.textContent` (the inner textbox)
+   * and calls `props.onChange` with the result.
+   *
+   * After the flex-container refactor, ValueInput renders:
+   *   <div role="combobox">  ← outer; owns ARIA state
+   *     <div role="textbox" contenteditable>  ← inner; owns event handlers
+   *
+   * Setting textContent on the outer combobox destroys the inner textbox (native
+   * DOM behaviour: assigning textContent replaces all children with a text node).
+   * We therefore find the inner textbox first and operate on it directly.
+   */
+  function typeIntoCombobox(comboboxEl: HTMLElement, value: string): void {
+    const textbox = comboboxEl.querySelector<HTMLElement>('[role="textbox"]') ?? comboboxEl;
+    textbox.textContent = value;
+    fireEvent.input(textbox);
+  }
+
+  it("test_min_line_height_enforced: should reject literal line height below MIN_LINE_HEIGHT", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    // Below min (0.05 < MIN_LINE_HEIGHT = 0.1) must not reach the store.
+    const belowMin = String(MIN_LINE_HEIGHT / 2);
+    typeIntoCombobox(lineHeight, belowMin);
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBe(0);
+  });
+
+  it("test_max_line_height_enforced: should reject literal line height above MAX_LINE_HEIGHT", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    // Above max (MAX_LINE_HEIGHT + 1 = 11) must not reach the store.
+    const aboveMax = String(MAX_LINE_HEIGHT + 1);
+    typeIntoCombobox(lineHeight, aboveMax);
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBe(0);
+  });
+
+  it("should accept a literal line height within [MIN_LINE_HEIGHT, MAX_LINE_HEIGHT]", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ line_height: 1.5 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const lineHeight = screen.getByRole("combobox", { name: "Line height" });
+    typeIntoCombobox(lineHeight, "2");
+    const lineHeightCalls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "line_height",
+    );
+    expect(lineHeightCalls.length).toBeGreaterThan(0);
+  });
+
+  it("test_min_letter_spacing_enforced: should reject literal letter spacing below MIN_LETTER_SPACING", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ letter_spacing: 0 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const letterSpacing = screen.getByRole("combobox", { name: "Letter spacing" });
+    const belowMin = String(MIN_LETTER_SPACING - 1);
+    typeIntoCombobox(letterSpacing, belowMin);
+    const calls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "letter_spacing",
+    );
+    expect(calls.length).toBe(0);
+  });
+
+  it("test_max_letter_spacing_enforced: should reject literal letter spacing above MAX_LETTER_SPACING", () => {
+    const setTextStyle = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode({ letter_spacing: 0 }) });
+    store.setTextStyle = setTextStyle;
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const letterSpacing = screen.getByRole("combobox", { name: "Letter spacing" });
+    const aboveMax = String(MAX_LETTER_SPACING + 1);
+    typeIntoCombobox(letterSpacing, aboveMax);
+    const calls = setTextStyle.mock.calls.filter(
+      (c: unknown[]) => (c[1] as { field: string }).field === "letter_spacing",
+    );
+    expect(calls.length).toBe(0);
   });
 
   it("should reject shadow blur values above MAX_SHADOW_BLUR", () => {

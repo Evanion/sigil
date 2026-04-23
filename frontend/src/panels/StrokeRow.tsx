@@ -8,10 +8,16 @@
  * before use per CLAUDE.md §11 Floating-Point Validation.
  */
 import { createMemo } from "solid-js";
-import type { Color, Stroke, StrokeAlignment, StyleValue } from "../types/document";
+import type { Stroke, StrokeAlignment, Token } from "../types/document";
 import { GripVertical } from "lucide-solid";
-import { ColorSwatch } from "../components/color-picker";
-import { NumberInput } from "../components/number-input/NumberInput";
+import ValueInput from "../components/value-input/ValueInput";
+import { showToast } from "../components/toast/Toast";
+import {
+  formatColorStyleValue,
+  formatNumberStyleValue,
+  parseColorInput,
+  parseNumberInput,
+} from "./panel-value-helpers";
 import "./StrokeRow.css";
 
 // ── Alignment options ───────────────────────────────────────────────────
@@ -27,38 +33,23 @@ export interface StrokeRowProps {
   readonly index: number;
   readonly onUpdate: (index: number, stroke: Stroke) => void;
   readonly onRemove: (index: number) => void;
-}
-
-// ── Color extraction ───────────────────────────────────────────────────
-
-function strokeColor(stroke: Stroke): Color {
-  if (stroke.color.type === "literal") {
-    return stroke.color.value;
-  }
-  // token_ref — return a fallback opaque black; cannot resolve without token store
-  return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
-}
-
-// ── Width extraction ───────────────────────────────────────────────────
-
-/**
- * Returns the stroke width as a number for display.
- * If the width is a token_ref, returns 0 (the token value is not available
- * at this level without a token store — the UI shows 0 as a placeholder).
- */
-function strokeWidthValue(stroke: Stroke): number {
-  if (stroke.width.type === "literal") {
-    const v = stroke.width.value;
-    return Number.isFinite(v) ? v : 0;
-  }
-  return 0;
+  /**
+   * Token dictionary used by the color and width ValueInputs for autocomplete
+   * and swatch resolution. Defaults to an empty record when omitted.
+   */
+  readonly tokens?: Record<string, Token>;
+  /**
+   * Called at gesture boundaries (ValueInput blur/commit) so the parent can
+   * flush history buffers into a single undo entry.
+   */
+  readonly onCommit?: () => void;
 }
 
 // ── StrokeRow component ────────────────────────────────────────────────
 
 export function StrokeRow(props: StrokeRowProps) {
-  const currentColor = createMemo(() => strokeColor(props.stroke));
-  const widthValue = createMemo(() => strokeWidthValue(props.stroke));
+  const colorDisplay = createMemo(() => formatColorStyleValue(props.stroke.color));
+  const widthDisplay = createMemo(() => formatNumberStyleValue(props.stroke.width));
 
   function handleAlignmentChange(e: Event): void {
     const value = (e.currentTarget as HTMLSelectElement).value;
@@ -66,16 +57,40 @@ export function StrokeRow(props: StrokeRowProps) {
     props.onUpdate(props.index, { ...props.stroke, alignment: value as StrokeAlignment });
   }
 
-  function handleColorChange(newColor: Color): void {
-    const newColorValue: StyleValue<Color> = { type: "literal", value: newColor };
-    props.onUpdate(props.index, { ...props.stroke, color: newColorValue });
+  function handleColorChange(raw: string): void {
+    const parsed = parseColorInput(raw);
+    if (!parsed) return;
+    props.onUpdate(props.index, { ...props.stroke, color: parsed });
   }
 
-  function handleWidthChange(newWidth: number): void {
-    // Number.isFinite guard: NumberInput already guards, but enforce here too
-    if (!Number.isFinite(newWidth)) return;
-    const newWidthValue: StyleValue<number> = { type: "literal", value: newWidth };
-    props.onUpdate(props.index, { ...props.stroke, width: newWidthValue });
+  function handleColorCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    // onCommit only flushes history — do not re-dispatch the change.
+    props.onCommit?.();
+  }
+
+  function handleWidthChange(raw: string): void {
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    // RF-016: Reject negative literal widths with a visible toast. UX clamp
+    // at zero is a legitimate affordance only for the slider-style
+    // NumberInput; typed input must surface the out-of-range value rather
+    // than silently dropping it — the user deserves to know their input
+    // was rejected.
+    if (parsed.type === "literal" && parsed.value < 0) {
+      showToast({
+        title: "Stroke width must be ≥ 0",
+        variant: "error",
+      });
+      return;
+    }
+    props.onUpdate(props.index, { ...props.stroke, width: parsed });
+  }
+
+  function handleWidthCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    // onCommit only flushes history — do not re-dispatch the change.
+    props.onCommit?.();
   }
 
   function handleRemove(): void {
@@ -89,15 +104,23 @@ export function StrokeRow(props: StrokeRowProps) {
         <GripVertical size={14} />
       </span>
 
-      <ColorSwatch color={currentColor()} onColorChange={handleColorChange} />
+      <ValueInput
+        value={colorDisplay()}
+        onChange={handleColorChange}
+        onCommit={handleColorCommit}
+        tokens={props.tokens ?? {}}
+        acceptedTypes={["color"]}
+        aria-label="Stroke color"
+      />
 
       <div class="sigil-stroke-row__width">
-        <NumberInput
-          value={widthValue()}
-          onValueChange={handleWidthChange}
+        <ValueInput
+          value={widthDisplay()}
+          onChange={handleWidthChange}
+          onCommit={handleWidthCommit}
+          tokens={props.tokens ?? {}}
+          acceptedTypes={["number", "dimension"]}
           aria-label="Stroke width"
-          step={1}
-          min={0}
         />
       </div>
 

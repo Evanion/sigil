@@ -92,7 +92,8 @@ pub use validate::{
     MAX_TRANSITIONS_PER_DOCUMENT, MAX_VARIANTS_PER_COMPONENT, MIN_FONT_SIZE, MIN_FONT_WEIGHT,
     MIN_GROUP_MEMBERS, validate_asset_ref, validate_collection_size, validate_conic_gradient,
     validate_finite, validate_floats_in_value, validate_grid_track, validate_node_name,
-    validate_page_name, validate_text_content, validate_token_name,
+    validate_page_name, validate_style_value_expression, validate_text_content,
+    validate_token_name,
 };
 
 #[must_use]

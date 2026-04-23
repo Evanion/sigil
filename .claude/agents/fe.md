@@ -83,6 +83,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - When capturing a "before" value for undo or rollback, read it BEFORE calling `produce()` or `setState()`. Reading after the mutation returns the new value, not the old one. Pattern: `const before = node.field; setState(produce(s => { s.field = newValue; })); trackUndo(before);`.
 - `onCleanup` must be called synchronously during component setup — never inside DOM event handlers, setTimeout callbacks, or Promise.then. Outside a reactive owner, onCleanup silently no-ops, leaving timers and event listeners alive after the component is destroyed.
 - Frontend-assigned stable IDs on list items must flow through the full prop callback chain. Strip them only at the store's outbound mutation boundary, not before calling onUpdate/onChange props — regenerating IDs per render causes identity churn.
+- When a display layer derives a value via a lossy transform from storage (HSL↔sRGB with S=0 collapse, font-weight keyword↔number, gamut clipping), carry a "last-typed" cache. See frontend-defensive.md "Display Layers Must Preserve User Intent Across Lossy Transforms".
 
 ### Styling Conventions
 
