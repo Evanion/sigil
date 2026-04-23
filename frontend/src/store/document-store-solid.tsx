@@ -706,7 +706,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // Track last received sequence number for future reconnect protocol (Plan 15d)
   // @ts-expect-error -- lastSeq is written but read will be used in reconnect/gap-fill protocol
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   let _lastSeq = 0;
 
   // ── Subscription (RF-002: capture for cleanup, RF-004: self-echo) ───

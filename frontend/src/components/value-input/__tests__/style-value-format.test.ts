@@ -30,7 +30,7 @@ describe("formatStyleValue — literal variant", () => {
   it("should format a literal color (ColorSrgb) with the provided formatter", () => {
     const color: ColorSrgb = { space: "srgb", r: 1, g: 0, b: 0, a: 1 };
     const sv: StyleValueLiteral<Color> = { type: "literal", value: color };
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     expect(formatStyleValue(sv, (_c) => "#ff0000")).toBe("#ff0000");
   });
 });
@@ -49,7 +49,7 @@ describe("formatStyleValue — token_ref variant", () => {
   it("should ignore the formatter for token_ref and always use {name}", () => {
     const sv: StyleValueTokenRef = { type: "token_ref", name: "size.md" };
     // The formatter should NOT be applied for token refs
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     expect(formatStyleValue(sv, (_v: unknown) => "IGNORED")).toBe("{size.md}");
   });
 });
@@ -62,7 +62,7 @@ describe("formatStyleValue — expression variant", () => {
 
   it("should ignore the formatter for expression and always return raw expr", () => {
     const sv: StyleValueExpression = { type: "expression", expr: "calc(16)" };
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     expect(formatStyleValue(sv, (_v: unknown) => "IGNORED")).toBe("calc(16)");
   });
 });
