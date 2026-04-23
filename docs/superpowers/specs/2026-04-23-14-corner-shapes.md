@@ -119,14 +119,14 @@ The MCP tool's JSON schema description tells agents explicitly: *"To apply super
 
 **Shorthand expansion lives in one shared helper** used by both the GraphQL resolver and the MCP tool (CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports"). The helper expands shorthand to the canonical `[Corner; 4]` form, then the core `SetCorners::validate` runs — a single source of truth for the uniformity rule. Response payload is always the canonical expanded form so clients reconcile optimistic state against server-canonical values.
 
-**Broadcast payload contract:**
+**Broadcast payload contract:** reuses the existing `set_field` op_type (the GraphQL `SetField` resolver already uses this for kind mutations today), unifying the shape across GraphQL and MCP:
 ```
-op_type: "set_corners"       // was "set_corner_radii"
+op_type: "set_field"
 path:    "kind"
-value:   { corners: [Corner, Corner, Corner, Corner] }
+value:   { type: "rectangle" | "frame" | "image", corners: [Corner, Corner, Corner, Corner], ...other kind fields }
 ```
 
-The matching `applyRemoteOperation` handler in `frontend/src/operations/apply-remote.ts` lands in the same PR (CLAUDE.md §4 "MCP Broadcast Payload Shape Contract").
+The legacy MCP broadcast path `"kind.corner_radii"` (narrow-path variant) is removed — the GraphQL path-`"kind"` full-object form becomes the single broadcast shape. The matching `applyRemoteOperation` handler for `path: "kind"` in `frontend/src/operations/apply-remote.ts` is extended to handle the new corner data; the legacy `"kind.corner_radii"` case is deleted (CLAUDE.md §4 "MCP Broadcast Payload Shape Contract" + §11 "Migrations Must Remove All Superseded Code").
 
 **Legacy `set_corner_radii` tool is fully removed**, not kept as an alias. CLAUDE.md §11 "Migrations Must Remove All Superseded Code" requires deleting:
 1. The MCP tool definition and its handler.
