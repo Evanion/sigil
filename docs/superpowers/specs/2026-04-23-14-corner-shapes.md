@@ -74,6 +74,12 @@ Behavioral inventory for the removal (CLAUDE.md §11 "Behavioral Inventory Befor
 New behaviors added:
 - `smoothing` validation (finite, `0.0..=1.0`) — only on Superellipse variant.
 - Per-corner shape dispatch (no additional logic — enum variant carries it).
+- **Superellipse uniformity rule.** Superellipse must be applied at the whole-shape level. `validate` rejects:
+  - Mixed arrays — if any corner is `Superellipse`, all four must be. Typed error: `InvalidCornerShape { reason: "superellipse must be applied uniformly to all four corners" }`.
+  - Smoothing mismatch — when all four are `Superellipse`, their `smoothing` values must be equal. Typed error: `InvalidCornerShape { reason: "superellipse smoothing must match across all four corners" }`.
+  - Per-corner radii MAY still differ under superellipse (asymmetric shapes are legitimate and match Figma).
+
+  Rationale: superellipse's curvature bleeds along the adjacent edges, so a superellipse corner next to a bevel/notch/scoop corner produces a broken-looking kink. Figma and iOS both treat smoothing as a shape-level property for this reason. Storing per-corner (for CSS export fidelity) while constraining at `validate` gives us the best of both.
 
 Single `FieldOperation` for all four corners because history-entry granularity is at the node level: the frontend `HistoryManager` captures the full `[Corner; 4]` before-state, and a single undo restores atomically.
 
@@ -81,25 +87,37 @@ Single `FieldOperation` for all four corners because history-entry granularity i
 
 **GraphQL mutation** (`crates/server/src/graphql/mutation.rs`): rename `setCornerRadii` → `setCorners`, accepting a `[CornerInput; 4]`.
 
-**MCP tool** (`crates/mcp/src/server.rs`): rename `set_corner_radii` → `set_corners`. Accepts two input shapes:
+**MCP tool** (`crates/mcp/src/server.rs`): rename `set_corner_radii` → `set_corners`. Accepts three input shapes, ordered from most to least common agent use:
 
 ```jsonc
-// Shorthand — all corners identical, scalar radius (most common agent call)
+// 1. Uniform shorthand — same shape + radius on all four corners (most common)
 { "uuid": "...", "corners": { "shape": "round", "radius": 8 } }
 
-// Full — per-corner, axis-asymmetric, with smoothing where applicable
+// 2. Shape-level superellipse — required form for superellipse since it's whole-shape only
+//    Either a single scalar radius, or per-corner radii, but shape + smoothing are shape-level.
+{ "uuid": "...", "corners": { "shape": "superellipse", "radius": 8, "smoothing": 0.6 } }
+{ "uuid": "...", "corners": {
+    "shape": "superellipse",
+    "smoothing": 0.6,
+    "radii": [{"x": 8, "y": 8}, {"x": 12, "y": 12}, {"x": 12, "y": 12}, {"x": 8, "y": 8}]
+}}
+
+// 3. Full per-corner form — for mixing Round/Bevel/Notch/Scoop.
+//    Superellipse is REJECTED in this form; use form 2 for superellipse.
 {
   "uuid": "...",
   "corners": [
-    { "shape": "round",        "radii": { "x": 8, "y": 8 } },
-    { "shape": "bevel",        "radii": { "x": 12, "y": 12 } },
-    { "shape": "superellipse", "radii": { "x": 16, "y": 16 }, "smoothing": 0.6 },
-    { "shape": "notch",        "radii": { "x": 4, "y": 4 } }
+    { "shape": "round", "radii": { "x": 8,  "y": 8  } },
+    { "shape": "bevel", "radii": { "x": 12, "y": 12 } },
+    { "shape": "notch", "radii": { "x": 16, "y": 16 } },
+    { "shape": "scoop", "radii": { "x": 4,  "y": 4  } }
   ]
 }
 ```
 
-**Shorthand expansion lives in one shared helper** used by both the GraphQL resolver and the MCP tool (CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports"). Response payload is always the canonical expanded form so clients reconcile optimistic state against server-canonical values.
+The MCP tool's JSON schema description tells agents explicitly: *"To apply superellipse smoothing, use the shape-level form (#2). Superellipse cannot be mixed with other shapes on the same node."* This steers agents toward valid calls before they invoke the tool.
+
+**Shorthand expansion lives in one shared helper** used by both the GraphQL resolver and the MCP tool (CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports"). The helper expands shorthand to the canonical `[Corner; 4]` form, then the core `SetCorners::validate` runs — a single source of truth for the uniformity rule. Response payload is always the canonical expanded form so clients reconcile optimistic state against server-canonical values.
 
 **Broadcast payload contract:**
 ```
@@ -145,16 +163,26 @@ Custom `<CornerSection />` component in the Design panel's Appearance tab. The e
    - 4 corner hotspots (TL, TR, BR, BL) — edit that single corner.
    - 4 edge-midpoint hotspots (top, right, bottom, left) — edit the two connected corners.
    - 1 center hotspot — edit all four corners.
-3. **Popover per hotspot** anchored to the hotspot element. Opens on click or Enter/Space. Contains:
-   - Shape dropdown (wrapped `<Select>`).
+3. **Popover per hotspot** anchored to the hotspot element. Opens on click or Enter/Space. Contents depend on which hotspot:
+
+   **Corner hotspots (TL/TR/BR/BL) and edge hotspots (top/right/bottom/left):**
+   - Shape dropdown (wrapped `<Select>`) — options: Round, Bevel, Notch, Scoop. **Superellipse is NOT available here.**
    - Radius input — `<ValueInput>` from Spec 13, so tokens (e.g. `$radius-md`) and expressions work.
    - "Unlock axes" toggle (wrapped `<ToggleButton>`). When unlocked, radius splits into `rx` and `ry` fields, each a `ValueInput`.
+
+   **Center hotspot (all four):**
+   - Shape dropdown — options: Round, Bevel, Notch, Scoop, **Superellipse**.
+   - Radius input (same as above; applies to all four corners).
+   - "Unlock axes" toggle (same as above; applies to all four corners).
    - **Smoothing control** (conditional — only when shape = Superellipse): a composite of `ValueInput` (for tokens/expressions) + the new `<Slider>` wrapper (Plan 14b), rendering side-by-side. Literal mode: dragging the slider scrubs the number. Token/expression mode: slider is disabled with a tooltip; its position reflects the resolved value read-only.
+
+**Superellipse lock state.** When the current shape state is superellipse (all four corners are `Corner::Superellipse`), the 4 corner hotspots and 4 edge hotspots are rendered disabled — non-focusable, with a tooltip on hover/focus: *"Superellipse applies to all corners. Change the shape to edit corners individually."* Only the center hotspot remains active. Switching the center hotspot's shape picker away from Superellipse re-enables per-corner editing.
 
 **Multi-select is not in v1.** Each popover edits exactly the hotspot's target set (1, 2, or 4 corners). Users change all four via the center hotspot.
 
 **Auto-link behavior:**
 - On load, if all four corners are identical, the section opens in a visually "linked" state (center hotspot shows as active).
+- If the current shape is Superellipse, the shape is *always* in linked state — per-corner hotspots are disabled per the lock state above.
 - If one corner has `x != y`, the "unlock axes" toggle in its popover is pre-activated.
 
 **Accessibility:**
@@ -247,6 +275,9 @@ Stays AABB-based for v1. Picking a rectangular region containing the shape match
 - One test per `Corner` variant (round, bevel, notch, scoop, superellipse) covering `validate` + `apply`.
 - `test_set_corners_rejects_nan_radius`, `test_set_corners_rejects_negative_radius`, `test_set_corners_rejects_infinite_radius` — for both `x` and `y`.
 - `test_set_corners_rejects_out_of_range_smoothing` (below 0 and above 1).
+- `test_set_corners_rejects_mixed_superellipse` — one corner Superellipse, three others Round. Expect `InvalidCornerShape` with the uniformity reason.
+- `test_set_corners_rejects_superellipse_smoothing_mismatch` — all four Superellipse but smoothing differs. Expect `InvalidCornerShape` with the smoothing-match reason.
+- `test_set_corners_accepts_uniform_superellipse_with_asymmetric_radii` — all four Superellipse, same smoothing, different `{x, y}` per corner. Expect success.
 - `test_set_corners_rejects_non_rect_shaped_node` (Ellipse, Text, Group, Component instance).
 - `test_max_corner_radius_enforced`, `test_min_corner_smoothing_enforced`, `test_max_corner_smoothing_enforced` — constant enforcement tests (CLAUDE.md §11).
 - `test_corner_deserialize_rejects_nan_radii`, `test_corner_deserialize_rejects_duplicate_keys` — custom deserializer tests.
@@ -254,7 +285,7 @@ Stays AABB-based for v1. Picking a rectangular region containing the shape match
 
 ### 4.2 Transport (Plan 14a)
 
-- MCP tool: `test_set_corners_shorthand_expansion` (scalar → `{x, y}`), `test_set_corners_full_form`, `test_set_corners_rejects_shorthand_with_smoothing_on_non_superellipse`.
+- MCP tool: `test_set_corners_uniform_shorthand_expansion` (scalar → `{x, y}`), `test_set_corners_superellipse_shape_level_form`, `test_set_corners_full_per_corner_form`, `test_set_corners_rejects_superellipse_in_full_per_corner_form`, `test_set_corners_rejects_shorthand_with_smoothing_on_non_superellipse`.
 - GraphQL resolver: equivalent coverage. Both use the shared helper so a single helper-level test suite covers shorthand logic.
 - Broadcast: `test_set_corners_broadcasts_to_other_clients`.
 
@@ -318,7 +349,13 @@ No migration for in-memory state: a session-wide schema change happens on file l
 
 **No string or path fields.** No collection capacity limits (fixed-length array). No deserialization depth changes. No recursion introduced.
 
-**Cross-field invariant:** the enum variant IS the cross-field guard — smoothing cannot exist on non-superellipse corners by construction. Custom `Deserialize` for `Corner` rejects duplicate keys (CLAUDE.md rust-defensive "Deserialization Boundaries Must Match Validation Rules").
+**Cross-field invariants** (all enforced in `SetCorners::validate` and any deserializer that produces `[Corner; 4]`):
+
+1. **Variant-local.** Smoothing cannot exist on non-superellipse corners — the enum variant IS the guard.
+2. **Superellipse uniformity.** If any element of `[Corner; 4]` is `Corner::Superellipse`, all four must be `Corner::Superellipse`. A mixed array is rejected with `InvalidCornerShape { reason: "superellipse must be applied uniformly to all four corners" }`.
+3. **Superellipse smoothing parity.** When all four corners are `Corner::Superellipse`, their `smoothing` values must be equal. A mismatched array is rejected with `InvalidCornerShape { reason: "superellipse smoothing must match across all four corners" }`. Per-corner radii may differ under superellipse — only shape and smoothing are uniform.
+
+Custom `Deserialize` for `Corner` rejects duplicate keys (CLAUDE.md rust-defensive "Deserialization Boundaries Must Match Validation Rules").
 
 **Shorthand expansion** happens only at the MCP/GraphQL input boundary; internal `Corner` construction requires fully-expanded `{x, y}` values. Validation is symmetric across both transports via a shared helper.
 
