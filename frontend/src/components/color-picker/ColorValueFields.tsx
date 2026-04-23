@@ -11,8 +11,8 @@
  */
 import { createMemo, Index } from "solid-js";
 import { NumberInput } from "../number-input/NumberInput";
-import { srgbToOklab, srgbToOklch, oklabToSrgb, oklchToSrgb } from "./color-math";
-import type { ColorSpace } from "./types";
+import { srgbToOklch, oklchToSrgb, srgbToHsl, hslToSrgb } from "./color-math";
+import type { ColorDisplayMode } from "./types";
 import "./ColorPicker.css";
 
 export interface ColorValueFieldsProps {
@@ -25,13 +25,34 @@ export interface ColorValueFieldsProps {
   /** Alpha in [0, 1]. */
   alpha: number;
   /** Active color space controlling labels, ranges, and conversions. */
-  space: ColorSpace;
-  /** Called with the new sRGB+alpha values whenever any field changes. */
-  onChange: (r: number, g: number, b: number, alpha: number) => void;
+  space: ColorDisplayMode;
+  /**
+   * Preserved HSL hue [0, 360). When the current sRGB is achromatic, the HSL
+   * display mode falls back to this value instead of the derived 0 so the
+   * user's typed H persists across render cycles (RF-D01).
+   */
+  hslH?: number;
+  /**
+   * Preserved HSL saturation [0, 1]. Same rationale as `hslH` — preserves the
+   * user's typed S across achromatic round-trips (RF-D01).
+   */
+  hslS?: number;
+  /**
+   * Called with the new sRGB+alpha values whenever any field changes.
+   * In HSL display mode, also passes an `hslHint` with the target H and S so
+   * the parent can preserve them across achromatic sRGB round-trips (RF-D01).
+   */
+  onChange: (
+    r: number,
+    g: number,
+    b: number,
+    alpha: number,
+    hslHint?: { h: number; s: number },
+  ) => void;
 }
 
 /** Semantic identifier for each color field (RF-008). */
-type FieldId = "r" | "g" | "b" | "l" | "c" | "h" | "a_axis" | "b_axis" | "alpha";
+type FieldId = "r" | "g" | "b" | "l" | "c" | "h" | "s" | "alpha";
 
 interface FieldDef {
   /** Semantic identifier used for dispatch and aria-label lookup (RF-008). */
@@ -51,8 +72,7 @@ const FIELD_ARIA_LABELS: Record<FieldId, string> = {
   l: "Lightness",
   c: "Chroma",
   h: "Hue",
-  a_axis: "Green-Red axis",
-  b_axis: "Blue-Yellow axis",
+  s: "Saturation",
   alpha: "Opacity",
 };
 
@@ -64,7 +84,7 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
   // Track the previous space so we can suppress spurious onRawValueChange
   // callbacks that fire when space changes (NumberInput re-renders with new
   // values and Kobalte fires onRawValueChange for each).
-  let lastSpace: ColorSpace = props.space;
+  let lastSpace: ColorDisplayMode = props.space;
 
   const fields = createMemo<FieldDef[]>(() => {
     const { r, g, b, alpha } = props;
@@ -87,7 +107,6 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
 
     switch (props.space) {
       case "srgb":
-      case "display_p3":
         return [
           { id: "r", label: "R", value: Math.round(r * 255), min: 0, max: 255, step: 1 },
           { id: "g", label: "G", value: Math.round(g * 255), min: 0, max: 255, step: 1 },
@@ -119,32 +138,31 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
         ];
       }
 
-      case "oklab": {
-        const [l, aAxis, bAxis] = srgbToOklab(r, g, b);
+      case "hsl": {
+        // RF-D01: When the sRGB is achromatic, srgbToHsl returns h=0/s=0.
+        // Fall back to the preserved hslH/hslS from the picker so the user's
+        // typed H and S are visible in the fields instead of collapsing to 0.
+        const [derivedH, derivedS, derivedL] = srgbToHsl(r, g, b);
+        const isAchromatic = derivedS <= 0;
+        const h = isAchromatic && props.hslH !== undefined ? props.hslH : derivedH;
+        const s = isAchromatic && props.hslS !== undefined ? props.hslS : derivedS;
         return [
+          { id: "h", label: "H", value: Math.round(h * 10) / 10, min: 0, max: 360, step: 0.1 },
           {
-            id: "l",
-            label: "L",
-            value: Math.round(l * 100 * 10) / 10,
+            id: "s",
+            label: "S",
+            value: Math.round(s * 100 * 10) / 10,
             min: 0,
             max: 100,
             step: 0.1,
           },
           {
-            id: "a_axis",
-            label: "a",
-            value: Math.round(aAxis * 1000) / 1000,
-            min: -0.4,
-            max: 0.4,
-            step: 0.001,
-          },
-          {
-            id: "b_axis",
-            label: "b",
-            value: Math.round(bAxis * 1000) / 1000,
-            min: -0.4,
-            max: 0.4,
-            step: 0.001,
+            id: "l",
+            label: "L",
+            value: Math.round(derivedL * 100 * 10) / 10,
+            min: 0,
+            max: 100,
+            step: 0.1,
           },
           alphaField,
         ];
@@ -175,8 +193,7 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
     }
 
     switch (props.space) {
-      case "srgb":
-      case "display_p3": {
+      case "srgb": {
         // Channels are displayed as 0-255; convert back to 0-1.
         const channels: [number, number, number] = [r * 255, g * 255, b * 255];
         if (field.id === "r") channels[0] = raw;
@@ -197,14 +214,23 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
         break;
       }
 
-      case "oklab": {
-        const [currentL, currentA, currentB] = srgbToOklab(r, g, b);
-        const lab: [number, number, number] = [currentL, currentA, currentB];
-        if (field.id === "l") lab[0] = raw / 100;
-        else if (field.id === "a_axis") lab[1] = raw;
-        else if (field.id === "b_axis") lab[2] = raw;
-        const [nr, ng, nb] = oklabToSrgb(lab[0], lab[1], lab[2]);
-        props.onChange(nr, ng, nb, alpha);
+      case "hsl": {
+        // RF-D01: Base the HSL edit on the *displayed* H/S (possibly
+        // preserved via props.hslH/hslS when sRGB is achromatic), not on the
+        // re-derived values from sRGB. Otherwise editing H or S on a grey
+        // color silently collapses back to grey because derivedH=0/derivedS=0.
+        const [derivedH, derivedS, derivedL] = srgbToHsl(r, g, b);
+        const isAchromatic = derivedS <= 0;
+        const baseH = isAchromatic && props.hslH !== undefined ? props.hslH : derivedH;
+        const baseS = isAchromatic && props.hslS !== undefined ? props.hslS : derivedS;
+        const hsl: [number, number, number] = [baseH, baseS, derivedL];
+        if (field.id === "h") hsl[0] = raw;
+        else if (field.id === "s") hsl[1] = raw / 100;
+        else if (field.id === "l") hsl[2] = raw / 100;
+        const [nr, ng, nb] = hslToSrgb(hsl[0], hsl[1], hsl[2]);
+        // Pass the target H and S so the parent can preserve them even when
+        // the resulting sRGB is still achromatic (S=0) or the color is grey.
+        props.onChange(nr, ng, nb, alpha, { h: hsl[0], s: hsl[1] });
         break;
       }
     }

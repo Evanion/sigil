@@ -31,6 +31,30 @@ import { resolveStopColorCSS } from "../components/gradient-editor/gradient-util
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
 
+/**
+ * RF-024: Clamp a resolved opacity value to the rendering-safe range [0, 1].
+ *
+ * Literal opacity values are validated at the frontend store + Rust boundaries
+ * (see `validate_opacity` in crates/core/src/validate.rs). Token refs and
+ * expressions, by contrast, defer type-checking to evaluation time — an
+ * expression like `2 * {spacing.md}` might resolve to a value outside [0, 1],
+ * and the evaluator is not opacity-aware. This helper performs the final
+ * rendering-boundary clamp so an out-of-range evaluated result produces
+ * visually-sensible output (fully transparent or fully opaque) rather than
+ * an ignored `globalAlpha` assignment.
+ *
+ * Kept at the opacity-specific call site (NOT inside `resolveStyleValueNumber`,
+ * which is generic for all number fields — see Spec 13c §5 Consistency
+ * Guarantees). A non-finite input also returns 1 (fully opaque) so the
+ * rendered artifact is visible for debugging.
+ */
+export function clampOpacity(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 /** Selection highlight color. */
 const SELECTION_COLOR = "#0d99ff";
 

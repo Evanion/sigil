@@ -8,6 +8,17 @@
  * - `popover="auto"` (default): light dismiss (click outside closes)
  * - `popover="manual"` (modal=true): no light dismiss, close via Escape or programmatically
  *
+ * **Modal-dialog nesting**: when a Popover renders inside an open modal
+ * `<dialog>` (detected by walking `triggerRef`'s ancestors for a `:modal`
+ * match on mount), the browser's native `popover="auto"` light-dismiss
+ * algorithm misfires — pointerdown events inside the popover content
+ * (e.g., the ColorArea canvas in ColorPicker) are incorrectly classified
+ * as "outside" because the popover and the dialog occupy separate
+ * top-layer entries. To avoid this, Popover switches to `popover="manual"`
+ * when nested inside a modal dialog and installs its own outside-click
+ * dismisser that uses DOM containment (`popoverRef.contains(target)`)
+ * instead of the browser's top-layer hit-testing.
+ *
  * The arrow is a CSS pseudo-element (::before) that points toward the trigger.
  */
 import {
@@ -18,6 +29,7 @@ import {
   createUniqueId,
   createEffect,
   onCleanup,
+  onMount,
 } from "solid-js";
 import "./Popover.css";
 
@@ -92,6 +104,15 @@ export function Popover(props: PopoverProps) {
 
   const [isOpen, setIsOpen] = createSignal(local.open ?? false);
 
+  /**
+   * True when this Popover is rendered inside an open modal `<dialog>`.
+   * Detected once on mount by walking ancestors of `triggerRef`.
+   * When true, we force manual popover mode and run our own outside-click
+   * dismisser to work around the native light-dismiss misfire on nested
+   * top-layer elements.
+   */
+  const [insideModalDialog, setInsideModalDialog] = createSignal(false);
+
   const className = () => {
     const classes = ["sigil-popover"];
     if (local.class) classes.push(local.class);
@@ -100,9 +121,17 @@ export function Popover(props: PopoverProps) {
 
   const placement = () => local.placement ?? "bottom";
 
+  /**
+   * Effective modal mode — either the caller explicitly requested it
+   * (local.modal) or we auto-detected a modal-dialog ancestor. Both
+   * cases use `popover="manual"`; only the auto-detected case installs
+   * our fallback outside-click dismisser.
+   */
+  const effectiveModal = () => local.modal === true || insideModalDialog();
+
   // For manual mode: close on Escape
   function handlePopoverKeyDown(e: KeyboardEvent): void {
-    if (e.key === "Escape" && local.modal) {
+    if (e.key === "Escape" && effectiveModal()) {
       e.preventDefault();
       e.stopPropagation();
       hidePopover();
@@ -168,7 +197,7 @@ export function Popover(props: PopoverProps) {
   }
 
   function handleTriggerClick(): void {
-    if (local.modal) {
+    if (effectiveModal()) {
       if (!popoverRef) return;
       try {
         if (popoverRef.matches(":popover-open")) {
@@ -182,6 +211,49 @@ export function Popover(props: PopoverProps) {
     }
   }
 
+  /**
+   * Walk ancestors from `triggerRef` and return true if any is an
+   * open modal `<dialog>` (`.matches(':modal')`). The `:modal`
+   * pseudo-class matches any element currently in the browser's
+   * top-layer via `showModal()`.
+   */
+  function detectModalDialogAncestor(): boolean {
+    if (!triggerRef) return false;
+    let current: Element | null = triggerRef.parentElement;
+    while (current) {
+      if (current instanceof HTMLDialogElement) {
+        try {
+          if (current.matches(":modal")) return true;
+        } catch {
+          // :modal pseudo-class unsupported — fall through
+        }
+      }
+      current = current.parentElement;
+    }
+    return false;
+  }
+
+  /**
+   * Outside-click dismisser for auto-detected modal-dialog nesting.
+   * Uses DOM containment (which works across top-layer entries)
+   * instead of the browser's light-dismiss hit-test.
+   */
+  function handleGlobalPointerDown(e: PointerEvent): void {
+    if (!isOpen()) return;
+    // Only run for auto-detected nesting — callers using explicit
+    // `modal=true` manage their own dismissal.
+    if (local.modal === true || !insideModalDialog()) return;
+    if (!popoverRef || !triggerRef) return;
+    const target = e.target as Node | null;
+    if (!target) return;
+    if (popoverRef.contains(target) || triggerRef.contains(target)) return;
+    hidePopover();
+  }
+
+  onMount(() => {
+    setInsideModalDialog(detectModalDialogAncestor());
+  });
+
   // Controlled mode
   createEffect(() => {
     const shouldBeOpen = local.open;
@@ -191,6 +263,17 @@ export function Popover(props: PopoverProps) {
     } else {
       hidePopover();
     }
+  });
+
+  // Install the outside-click dismisser only while the popover is open
+  // AND we're auto-detecting a modal-dialog ancestor. Capture-phase so
+  // we see the event before any descendant stopPropagation calls.
+  createEffect(() => {
+    if (!isOpen() || local.modal === true || !insideModalDialog()) return;
+    document.addEventListener("pointerdown", handleGlobalPointerDown, true);
+    onCleanup(() => {
+      document.removeEventListener("pointerdown", handleGlobalPointerDown, true);
+    });
   });
 
   onCleanup(() => {
@@ -205,7 +288,7 @@ export function Popover(props: PopoverProps) {
         aria-label={local.triggerAriaLabel}
         aria-expanded={isOpen()}
         aria-controls={popoverId}
-        popovertarget={local.modal ? undefined : popoverId}
+        popovertarget={effectiveModal() ? undefined : popoverId}
         onClick={handleTriggerClick}
         style={{ "anchor-name": anchorName }}
       >
@@ -214,7 +297,7 @@ export function Popover(props: PopoverProps) {
       <div
         ref={popoverRef}
         id={popoverId}
-        popover={local.modal ? "manual" : "auto"}
+        popover={effectiveModal() ? "manual" : "auto"}
         class={className()}
         classList={{
           "sigil-popover--top": placement() === "top",

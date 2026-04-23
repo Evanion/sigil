@@ -257,6 +257,78 @@ export function srgbToHsv(r: number, g: number, b: number): [number, number, num
   return [h, s, v];
 }
 
+// ── HSL conversions ──────────────────────────────────────────────────
+
+/**
+ * Convert sRGB to HSL.
+ * r, g, b each in [0, 1].
+ * Returns [h, s, l] where h is in [0, 360), s and l in [0, 1].
+ * For achromatic colors (max === min), hue is returned as 0.
+ */
+export function srgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  // CLAUDE.md §11 Floating-Point Validation / Math Helpers Must Guard Their Domain:
+  // guard NaN/Infinity at the helper's entry, independent of upstream validation.
+  if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b)) return [0, 0, 0];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const delta = max - min;
+  let h = 0;
+  let s = 0;
+  // RF-D03: Use a tight achromatic gate — delta > 0 is sufficient because the
+  // division domains below are mathematically safe whenever max > min. The
+  // previous `delta > 0.001` threshold silently clamped ~0.25-units-on-0..255
+  // of channel spread to grey (CLAUDE.md §11 No Silent Clamping).
+  if (delta > 0) {
+    // Guard division domain (CLAUDE.md §11 Math Helpers Must Guard Their Domain):
+    // both divisors below are strictly positive when delta > 0 because that
+    // implies max > min, so (max + min) > 0 and (2 - max - min) > 0 (since
+    // max, min ∈ [0, 1] and they differ).
+    s = l > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+    if (max === r) h = 60 * (((g - b) / delta) % 6);
+    else if (max === g) h = 60 * ((b - r) / delta + 2);
+    else h = 60 * ((r - g) / delta + 4);
+    if (h < 0) h += 360;
+  }
+  return [h, s, l];
+}
+
+/**
+ * Convert HSL to sRGB.
+ * h in [0, 360), s and l in [0, 1].
+ * Returns [r, g, b] each in [0, 1].
+ */
+export function hslToSrgb(h: number, s: number, l: number): [number, number, number] {
+  // CLAUDE.md §11 Floating-Point Validation / Math Helpers Must Guard Their Domain:
+  // guard NaN/Infinity at the helper's entry, independent of upstream validation.
+  if (!Number.isFinite(h) || !Number.isFinite(s) || !Number.isFinite(l)) return [0, 0, 0];
+  const sc = clamp01(s);
+  const lc = clamp01(l);
+  if (sc <= 0) {
+    return [lc, lc, lc];
+  }
+  const C = (1 - Math.abs(2 * lc - 1)) * sc;
+  // Normalise hue into [0, 360) without using the % operator on negatives.
+  let hh = h % 360;
+  if (hh < 0) hh += 360;
+  const hp = hh / 60;
+  const X = C * (1 - Math.abs((hp % 2) - 1));
+  const [r1, g1, b1]: [number, number, number] =
+    hp < 1
+      ? [C, X, 0]
+      : hp < 2
+        ? [X, C, 0]
+        : hp < 3
+          ? [0, C, X]
+          : hp < 4
+            ? [0, X, C]
+            : hp < 5
+              ? [X, 0, C]
+              : [C, 0, X];
+  const m = lc - C / 2;
+  return [r1 + m, g1 + m, b1 + m];
+}
+
 // ── Color type helpers ────────────────────────────────────────────────
 
 /**

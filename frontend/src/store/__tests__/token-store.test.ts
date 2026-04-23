@@ -240,6 +240,91 @@ describe("resolveStyleValueNumber", () => {
   });
 });
 
+// ── RF-002: Expression evaluation in the renderer path ─────────────────
+
+describe("resolveStyleValueColor with expression", () => {
+  it("should evaluate a bare token-ref expression and return the color", () => {
+    // Note: token names use dot separators per the frontend's token identifier rules.
+    const tokens: Record<string, Token> = {
+      "brand.primary": makeToken("1", "brand.primary", { type: "color", value: RED }),
+    };
+    const sv: StyleValue<Color> = { type: "expression", expr: "{brand.primary}" };
+    const result = resolveStyleValueColor(sv, tokens, BLUE);
+    expect(result).toEqual(RED);
+  });
+
+  it("should return fallback when the expression fails to parse", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<Color> = { type: "expression", expr: "{{{broken" };
+    const result = resolveStyleValueColor(sv, tokens, BLUE);
+    expect(result).toEqual(BLUE);
+  });
+
+  it("should return fallback when the expression references a missing token", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<Color> = { type: "expression", expr: "{missing}" };
+    const result = resolveStyleValueColor(sv, tokens, BLUE);
+    expect(result).toEqual(BLUE);
+  });
+
+  it("should return fallback when the expression evaluates to a non-color (number)", () => {
+    const tokens: Record<string, Token> = {
+      "spacing.md": makeToken("1", "spacing.md", { type: "dimension", value: 16, unit: "px" }),
+    };
+    const sv: StyleValue<Color> = { type: "expression", expr: "{spacing.md}" };
+    const result = resolveStyleValueColor(sv, tokens, BLUE);
+    expect(result).toEqual(BLUE);
+  });
+});
+
+describe("resolveStyleValueNumber with expression", () => {
+  it("should evaluate a multiplicative expression and return the numeric result", () => {
+    const tokens: Record<string, Token> = {
+      "spacing.md": makeToken("1", "spacing.md", { type: "dimension", value: 16, unit: "px" }),
+    };
+    const sv: StyleValue<number> = { type: "expression", expr: "{spacing.md} * 2" };
+    const result = resolveStyleValueNumber(sv, tokens, 0);
+    expect(result).toBe(32);
+  });
+
+  it("should return fallback when the expression fails to parse", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<number> = { type: "expression", expr: "1 + +" };
+    const result = resolveStyleValueNumber(sv, tokens, 99);
+    expect(result).toBe(99);
+  });
+
+  it("should return fallback when the expression references a missing token", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<number> = { type: "expression", expr: "{missing} * 2" };
+    const result = resolveStyleValueNumber(sv, tokens, 99);
+    expect(result).toBe(99);
+  });
+
+  it("should return fallback when the expression evaluates to a non-number (color)", () => {
+    const tokens: Record<string, Token> = {
+      "brand.primary": makeToken("1", "brand.primary", { type: "color", value: RED }),
+    };
+    const sv: StyleValue<number> = { type: "expression", expr: "{brand.primary}" };
+    const result = resolveStyleValueNumber(sv, tokens, 99);
+    expect(result).toBe(99);
+  });
+
+  it("should return fallback when the expression evaluates to a non-finite number (div by zero)", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<number> = { type: "expression", expr: "1 / 0" };
+    const result = resolveStyleValueNumber(sv, tokens, 99);
+    expect(result).toBe(99);
+  });
+
+  it("should resolve a literal numeric expression", () => {
+    const tokens: Record<string, Token> = {};
+    const sv: StyleValue<number> = { type: "expression", expr: "8 + 4" };
+    const result = resolveStyleValueNumber(sv, tokens, 0);
+    expect(result).toBe(12);
+  });
+});
+
 // ── F-01: Token name validation ───────────────────────────────────────
 
 describe("validateTokenName", () => {

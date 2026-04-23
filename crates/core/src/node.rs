@@ -270,7 +270,10 @@ impl TextShadow {
         blur_radius: f64,
         color: StyleValue<Color>,
     ) -> Result<Self, crate::error::CoreError> {
-        use crate::validate::{MAX_TEXT_SHADOW_BLUR, validate_finite};
+        use crate::validate::{
+            MAX_TEXT_SHADOW_BLUR, validate_finite, validate_style_value_expression,
+            validate_token_name,
+        };
 
         validate_finite("text_shadow.offset_x", offset_x)?;
         validate_finite("text_shadow.offset_y", offset_y)?;
@@ -287,28 +290,30 @@ impl TextShadow {
             )));
         }
 
-        // Validate color channels if literal.
-        if let StyleValue::Literal { value } = color {
-            match value {
+        // Expression variants defer semantic validation to evaluation time.
+        match &color {
+            StyleValue::Literal { value } => match value {
                 Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
-                    validate_finite("text_shadow.color.r", r)?;
-                    validate_finite("text_shadow.color.g", g)?;
-                    validate_finite("text_shadow.color.b", b)?;
-                    validate_finite("text_shadow.color.a", a)?;
+                    validate_finite("text_shadow.color.r", *r)?;
+                    validate_finite("text_shadow.color.g", *g)?;
+                    validate_finite("text_shadow.color.b", *b)?;
+                    validate_finite("text_shadow.color.a", *a)?;
                 }
                 Color::Oklch { l, c, h, a } => {
-                    validate_finite("text_shadow.color.l", l)?;
-                    validate_finite("text_shadow.color.c", c)?;
-                    validate_finite("text_shadow.color.h", h)?;
-                    validate_finite("text_shadow.color.a", a)?;
+                    validate_finite("text_shadow.color.l", *l)?;
+                    validate_finite("text_shadow.color.c", *c)?;
+                    validate_finite("text_shadow.color.h", *h)?;
+                    validate_finite("text_shadow.color.a", *a)?;
                 }
                 Color::Oklab { l, a, b, alpha } => {
-                    validate_finite("text_shadow.color.l", l)?;
-                    validate_finite("text_shadow.color.a", a)?;
-                    validate_finite("text_shadow.color.b", b)?;
-                    validate_finite("text_shadow.color.alpha", alpha)?;
+                    validate_finite("text_shadow.color.l", *l)?;
+                    validate_finite("text_shadow.color.a", *a)?;
+                    validate_finite("text_shadow.color.b", *b)?;
+                    validate_finite("text_shadow.color.alpha", *alpha)?;
                 }
-            }
+            },
+            StyleValue::TokenRef { name } => validate_token_name(name)?,
+            StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
         }
 
         Ok(Self {
@@ -462,9 +467,22 @@ impl Point {
     }
 }
 
-/// A style value that can be either a literal or a token reference.
+/// A style value that can be a literal, a token reference, or an expression.
 ///
-/// Serializes as `{"type":"literal","value":...}` or `{"type":"token_ref","name":"..."}`.
+/// Serializes as one of:
+/// - `{"type":"literal","value":...}` — a concrete typed value.
+/// - `{"type":"token_ref","name":"..."}` — a reference to a named design token.
+/// - `{"type":"expression","expr":"..."}` — an unresolved token expression string
+///   (e.g., `"{spacing.md} * 2"`), evaluated at render time.
+///
+/// # Expression variants
+///
+/// Expression values carry a raw expression string that is parsed and evaluated
+/// by [`crate::tokens::parse_expression`] and [`crate::tokens::evaluate`] when
+/// resolved. `FieldOperation`s that accept `StyleValue` call
+/// [`crate::validate::validate_style_value_expression`] to confirm the string
+/// is within size limits and is syntactically valid — but semantic validation
+/// (domain range, type compatibility) happens at evaluation time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum StyleValue<T> {
@@ -472,6 +490,8 @@ pub enum StyleValue<T> {
     Literal { value: T },
     #[serde(rename = "token_ref")]
     TokenRef { name: String },
+    #[serde(rename = "expression")]
+    Expression { expr: String },
 }
 
 impl<T: Default> Default for StyleValue<T> {
@@ -1431,6 +1451,7 @@ mod tests {
         match sv {
             StyleValue::Literal { value: v } => assert!((v - 0.5).abs() < f64::EPSILON),
             StyleValue::TokenRef { .. } => panic!("expected Literal"),
+            StyleValue::Expression { .. } => panic!("expected Literal"),
         }
     }
 
@@ -1442,6 +1463,19 @@ mod tests {
         match sv {
             StyleValue::TokenRef { name } => assert_eq!(name, "opacity.primary"),
             StyleValue::Literal { .. } => panic!("expected TokenRef"),
+            StyleValue::Expression { .. } => panic!("expected TokenRef"),
+        }
+    }
+
+    #[test]
+    fn test_style_value_expression() {
+        let sv: StyleValue<f64> = StyleValue::Expression {
+            expr: "{spacing.md} * 2".to_string(),
+        };
+        match sv {
+            StyleValue::Expression { expr } => assert_eq!(expr, "{spacing.md} * 2"),
+            StyleValue::Literal { .. } => panic!("expected Expression"),
+            StyleValue::TokenRef { .. } => panic!("expected Expression"),
         }
     }
 
@@ -2697,6 +2731,106 @@ mod tests {
         assert!(
             err_msg.contains("duplicate"),
             "error should mention duplicate: {err_msg}"
+        );
+    }
+
+    // ── StyleValue encoding parity with TypeScript ───────────────────────
+    //
+    // Loads tests/fixtures/parity/style_value_encoding.json and asserts that
+    // the Rust implementation round-trips each documented variant with an
+    // identical JSON encoding. The matching TypeScript test in
+    // frontend/src/types/__tests__/document-parity.test.ts consumes the
+    // same file, enforcing cross-language parity per CLAUDE.md "Parallel
+    // Implementations Must Have Parity Tests".
+    const STYLE_VALUE_PARITY_FIXTURE: &str =
+        include_str!("../../../tests/fixtures/parity/style_value_encoding.json");
+
+    /// The variant names that use `StyleValue<Color>` (color-typed).
+    /// All other variants are `StyleValue<f64>`.
+    fn is_color_variant(name: &str) -> bool {
+        name.starts_with("literal_color_")
+    }
+
+    #[test]
+    fn test_style_value_parity_fixture_round_trips() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(STYLE_VALUE_PARITY_FIXTURE).expect("fixture is valid JSON");
+        let variants = fixture
+            .get("variants")
+            .and_then(|v| v.as_array())
+            .expect("fixture has variants array");
+
+        assert!(
+            !variants.is_empty(),
+            "parity fixture must contain at least one variant"
+        );
+
+        for variant in variants {
+            let name = variant
+                .get("name")
+                .and_then(|v| v.as_str())
+                .expect("variant has name");
+            let value = variant.get("value").expect("variant has value");
+
+            // Round-trip: parse → serialize → parse should produce the same JSON shape.
+            if is_color_variant(name) {
+                let parsed: StyleValue<Color> = serde_json::from_value(value.clone())
+                    .unwrap_or_else(|e| {
+                        panic!("variant {name} should parse as StyleValue<Color>: {e}")
+                    });
+                let serialized = serde_json::to_value(&parsed)
+                    .unwrap_or_else(|e| panic!("variant {name} should serialize: {e}"));
+                assert_eq!(
+                    &serialized, value,
+                    "variant {name} round-trip must be identical"
+                );
+            } else {
+                let parsed: StyleValue<f64> =
+                    serde_json::from_value(value.clone()).unwrap_or_else(|e| {
+                        panic!("variant {name} should parse as StyleValue<f64>: {e}")
+                    });
+                let serialized = serde_json::to_value(&parsed)
+                    .unwrap_or_else(|e| panic!("variant {name} should serialize: {e}"));
+                assert_eq!(
+                    &serialized, value,
+                    "variant {name} round-trip must be identical"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_style_value_parity_fixture_contains_all_variants() {
+        // Guard against the fixture silently drifting away from covering every
+        // StyleValue variant. If a new variant is added to the enum, this test
+        // must fail until the fixture is updated.
+        let fixture: serde_json::Value =
+            serde_json::from_str(STYLE_VALUE_PARITY_FIXTURE).expect("fixture is valid JSON");
+        let variants = fixture
+            .get("variants")
+            .and_then(|v| v.as_array())
+            .expect("fixture has variants array");
+
+        let types: std::collections::HashSet<&str> = variants
+            .iter()
+            .filter_map(|v| {
+                v.get("value")
+                    .and_then(|val| val.get("type"))
+                    .and_then(|t| t.as_str())
+            })
+            .collect();
+
+        assert!(
+            types.contains("literal"),
+            "fixture must cover StyleValue::Literal"
+        );
+        assert!(
+            types.contains("token_ref"),
+            "fixture must cover StyleValue::TokenRef"
+        );
+        assert!(
+            types.contains("expression"),
+            "fixture must cover StyleValue::Expression"
         );
     }
 }

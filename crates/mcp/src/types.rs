@@ -441,7 +441,7 @@ pub struct PartialTextStyle {
     pub text_shadow: Option<Option<TextShadowInput>>,
 }
 
-/// A style value that is either a literal or a token reference.
+/// A style value that is a literal, a token reference, or an expression.
 ///
 /// Mirrors the core `StyleValue<T>` enum with `JsonSchema` support.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -456,6 +456,14 @@ pub enum StyleValueInput<T> {
     TokenRef {
         /// Token name.
         name: String,
+    },
+    /// A token expression string evaluated at render time.
+    ///
+    /// The expression follows the same grammar as Spec 13d token expressions
+    /// (e.g., `"{spacing.md} * 2"`, `"darken({color.bg}, 10%)"`).
+    Expression {
+        /// The raw expression string.
+        expr: String,
     },
 }
 

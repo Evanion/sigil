@@ -1,0 +1,54 @@
+{
+  "description": "Cross-language parity vectors for StyleValue<T> serialization. Verifies that Rust StyleValue and TypeScript StyleValue produce identical JSON encodings for each variant. Updated when new StyleValue variants are added. See Spec 13c and CLAUDE.md 'Parallel Implementations Must Have Parity Tests'.",
+  "variants": [
+    {
+      "name": "literal_number",
+      "value": { "type": "literal", "value": 16.0 }
+    },
+    {
+      "name": "literal_number_fractional",
+      "value": { "type": "literal", "value": 0.75 }
+    },
+    {
+      "name": "literal_number_zero",
+      "value": { "type": "literal", "value": 0.0 }
+    },
+    {
+      "name": "token_ref",
+      "value": { "type": "token_ref", "name": "spacing.md" }
+    },
+    {
+      "name": "token_ref_dotted",
+      "value": { "type": "token_ref", "name": "color.primary.500" }
+    },
+    {
+      "name": "expression_simple",
+      "value": { "type": "expression", "expr": "{spacing.md} * 2" }
+    },
+    {
+      "name": "expression_function_call",
+      "value": { "type": "expression", "expr": "round({spacing.md} * 1.5)" }
+    },
+    {
+      "name": "literal_color_srgb",
+      "value": {
+        "type": "literal",
+        "value": { "space": "srgb", "r": 0.5, "g": 0.5, "b": 0.5, "a": 1.0 }
+      }
+    },
+    {
+      "name": "literal_color_display_p3",
+      "value": {
+        "type": "literal",
+        "value": { "space": "display_p3", "r": 0.2, "g": 0.4, "b": 0.6, "a": 0.8 }
+      }
+    },
+    {
+      "name": "literal_color_oklch",
+      "value": {
+        "type": "literal",
+        "value": { "space": "oklch", "l": 0.7, "c": 0.15, "h": 240.0, "a": 1.0 }
+      }
+    }
+  ]
+}

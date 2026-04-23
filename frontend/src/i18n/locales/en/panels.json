@@ -48,7 +48,11 @@
     "shadowBlur": "Shadow blur radius",
     "shadowColor": "Shadow color",
     "opacity": "Opacity",
-    "blendMode": "Blend mode"
+    "blendMode": "Blend mode",
+    "fontFamilyInvalid": "Font family contains invalid characters",
+    "fontFamilyNoTokenBinding": "Font family does not yet support token bindings",
+    "lineHeightOutOfRange": "Line height must be between {{min}} and {{max}}",
+    "letterSpacingOutOfRange": "Letter spacing must be between {{min}} and {{max}}"
   },
   "fontWeight": {
     "100": "Thin",

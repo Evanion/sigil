@@ -48,7 +48,11 @@
     "shadowBlur": "Radio de desenfoque de sombra",
     "shadowColor": "Color de sombra",
     "opacity": "Opacidad",
-    "blendMode": "Modo de fusión"
+    "blendMode": "Modo de fusión",
+    "fontFamilyInvalid": "La familia tipográfica contiene caracteres no válidos",
+    "fontFamilyNoTokenBinding": "La familia tipográfica aún no admite vínculos de tokens",
+    "lineHeightOutOfRange": "La altura de línea debe estar entre {{min}} y {{max}}",
+    "letterSpacingOutOfRange": "El espaciado entre letras debe estar entre {{min}} y {{max}}"
   },
   "fontWeight": {
     "100": "Fina",

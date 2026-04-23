@@ -301,6 +301,29 @@ pub fn validate_token_name(name: &str) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Validates a `StyleValue::Expression` expression string: max length and syntactic validity.
+///
+/// Callers include every `FieldOperation::validate()` that accepts a `StyleValue` field.
+/// Semantic validation (numeric domain range, type compatibility) is deferred to
+/// evaluation time — `StyleValue::Expression` variants skip per-field range checks.
+///
+/// # Errors
+///
+/// Returns [`CoreError::ValidationError`] if:
+/// - The expression string exceeds [`MAX_TOKEN_EXPRESSION_LENGTH`] bytes.
+/// - The expression string is not parseable by [`crate::tokens::parse_expression`].
+pub fn validate_style_value_expression(expr: &str) -> Result<(), CoreError> {
+    if expr.len() > MAX_TOKEN_EXPRESSION_LENGTH {
+        return Err(CoreError::ValidationError(format!(
+            "StyleValue expression exceeds max length of {MAX_TOKEN_EXPRESSION_LENGTH} bytes (got {})",
+            expr.len()
+        )));
+    }
+    crate::tokens::parse_expression(expr)
+        .map_err(|e| CoreError::ValidationError(format!("invalid StyleValue expression: {e}")))?;
+    Ok(())
+}
+
 /// Validates an asset reference: must be a relative path with no `..` components, max 256 chars.
 ///
 /// Note: This performs lexical validation only. It does not handle URL-encoded
@@ -422,45 +445,9 @@ pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\
 /// # Errors
 /// Returns `CoreError::ValidationError` if any field fails validation.
 pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError> {
-    use crate::node::{Color, StyleValue};
+    validate_text_style_font_family(&ts.font_family)?;
+    validate_text_style_font_size(&ts.font_size)?;
 
-    // ── font_family ──────────────────────────────────────────────
-    if ts.font_family.is_empty() {
-        return Err(CoreError::ValidationError(
-            "font_family must not be empty".to_string(),
-        ));
-    }
-    if ts.font_family.len() > MAX_FONT_FAMILY_LEN {
-        return Err(CoreError::ValidationError(format!(
-            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-            ts.font_family.len()
-        )));
-    }
-    if let Some(pos) = ts.font_family.find(|c: char| c.is_control()) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains control character at byte position {pos}"
-        )));
-    }
-    if let Some(pos) = ts
-        .font_family
-        .find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c))
-    {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains forbidden character at byte position {pos}"
-        )));
-    }
-
-    // ── font_size ────────────────────────────────────────────────
-    if let StyleValue::Literal { value } = ts.font_size {
-        validate_finite("font_size", value)?;
-        if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(&value) {
-            return Err(CoreError::ValidationError(format!(
-                "font_size must be in {MIN_FONT_SIZE}..={MAX_FONT_SIZE}, got {value}"
-            )));
-        }
-    }
-
-    // ── font_weight ──────────────────────────────────────────────
     if ts.font_weight < MIN_FONT_WEIGHT || ts.font_weight > MAX_FONT_WEIGHT {
         return Err(CoreError::ValidationError(format!(
             "font_weight must be in {}..={}, got {}",
@@ -468,64 +455,140 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
         )));
     }
 
-    // ── line_height ──────────────────────────────────────────────
-    if let StyleValue::Literal { value } = ts.line_height {
-        validate_finite("line_height", value)?;
-        if value <= 0.0 {
-            return Err(CoreError::ValidationError(format!(
-                "line_height must be > 0, got {value}"
-            )));
+    validate_text_style_line_height(&ts.line_height)?;
+    validate_text_style_letter_spacing(&ts.letter_spacing)?;
+    validate_text_style_text_color(&ts.text_color)?;
+    validate_text_style_text_shadow(ts.text_shadow.as_ref())?;
+
+    Ok(())
+}
+
+fn validate_text_style_font_family(family: &str) -> Result<(), CoreError> {
+    if family.is_empty() {
+        return Err(CoreError::ValidationError(
+            "font_family must not be empty".to_string(),
+        ));
+    }
+    if family.len() > MAX_FONT_FAMILY_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+            family.len()
+        )));
+    }
+    if let Some(pos) = family.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains control character at byte position {pos}"
+        )));
+    }
+    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains forbidden character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_text_style_font_size(sv: &crate::node::StyleValue<f64>) -> Result<(), CoreError> {
+    use crate::node::StyleValue;
+    match sv {
+        StyleValue::Literal { value } => {
+            validate_finite("font_size", *value)?;
+            if !(MIN_FONT_SIZE..=MAX_FONT_SIZE).contains(value) {
+                return Err(CoreError::ValidationError(format!(
+                    "font_size must be in {MIN_FONT_SIZE}..={MAX_FONT_SIZE}, got {value}"
+                )));
+            }
+            Ok(())
         }
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
     }
+}
 
-    // ── letter_spacing ───────────────────────────────────────────
-    if let StyleValue::Literal { value } = ts.letter_spacing {
-        validate_finite("letter_spacing", value)?;
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_text_style_line_height(sv: &crate::node::StyleValue<f64>) -> Result<(), CoreError> {
+    use crate::node::StyleValue;
+    match sv {
+        StyleValue::Literal { value } => {
+            validate_finite("line_height", *value)?;
+            if *value <= 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "line_height must be > 0, got {value}"
+                )));
+            }
+            Ok(())
+        }
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
     }
+}
 
-    // ── text_color ───────────────────────────────────────────────
-    if let StyleValue::Literal { value } = ts.text_color {
-        match value {
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_text_style_letter_spacing(sv: &crate::node::StyleValue<f64>) -> Result<(), CoreError> {
+    use crate::node::StyleValue;
+    match sv {
+        StyleValue::Literal { value } => validate_finite("letter_spacing", *value),
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
+    }
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_text_style_text_color(
+    sv: &crate::node::StyleValue<crate::node::Color>,
+) -> Result<(), CoreError> {
+    use crate::node::{Color, StyleValue};
+    match sv {
+        StyleValue::Literal { value } => match value {
             Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
-                validate_finite("text_color.r", r)?;
-                validate_finite("text_color.g", g)?;
-                validate_finite("text_color.b", b)?;
-                validate_finite("text_color.a", a)?;
+                validate_finite("text_color.r", *r)?;
+                validate_finite("text_color.g", *g)?;
+                validate_finite("text_color.b", *b)?;
+                validate_finite("text_color.a", *a)?;
+                Ok(())
             }
             Color::Oklch { l, c, h, a } => {
-                validate_finite("text_color.l", l)?;
-                validate_finite("text_color.c", c)?;
-                validate_finite("text_color.h", h)?;
-                validate_finite("text_color.a", a)?;
+                validate_finite("text_color.l", *l)?;
+                validate_finite("text_color.c", *c)?;
+                validate_finite("text_color.h", *h)?;
+                validate_finite("text_color.a", *a)?;
+                Ok(())
             }
             Color::Oklab { l, a, b, alpha } => {
-                validate_finite("text_color.l", l)?;
-                validate_finite("text_color.a", a)?;
-                validate_finite("text_color.b", b)?;
-                validate_finite("text_color.alpha", alpha)?;
+                validate_finite("text_color.l", *l)?;
+                validate_finite("text_color.a", *a)?;
+                validate_finite("text_color.b", *b)?;
+                validate_finite("text_color.alpha", *alpha)?;
+                Ok(())
             }
-        }
+        },
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
     }
+}
 
-    // ── text_shadow (defense-in-depth re-validation) ──────────────
-    if let Some(shadow) = &ts.text_shadow {
-        validate_finite("text_shadow.offset_x", shadow.offset_x())?;
-        validate_finite("text_shadow.offset_y", shadow.offset_y())?;
-        validate_finite("text_shadow.blur_radius", shadow.blur_radius())?;
-        if shadow.blur_radius() < 0.0 {
-            return Err(CoreError::ValidationError(format!(
-                "text_shadow.blur_radius must be >= 0, got {}",
-                shadow.blur_radius()
-            )));
-        }
-        if shadow.blur_radius() > MAX_TEXT_SHADOW_BLUR {
-            return Err(CoreError::ValidationError(format!(
-                "text_shadow.blur_radius must be <= {MAX_TEXT_SHADOW_BLUR}, got {}",
-                shadow.blur_radius()
-            )));
-        }
+fn validate_text_style_text_shadow(
+    shadow: Option<&crate::node::TextShadow>,
+) -> Result<(), CoreError> {
+    let Some(shadow) = shadow else {
+        return Ok(());
+    };
+    validate_finite("text_shadow.offset_x", shadow.offset_x())?;
+    validate_finite("text_shadow.offset_y", shadow.offset_y())?;
+    validate_finite("text_shadow.blur_radius", shadow.blur_radius())?;
+    if shadow.blur_radius() < 0.0 {
+        return Err(CoreError::ValidationError(format!(
+            "text_shadow.blur_radius must be >= 0, got {}",
+            shadow.blur_radius()
+        )));
     }
-
+    if shadow.blur_radius() > MAX_TEXT_SHADOW_BLUR {
+        return Err(CoreError::ValidationError(format!(
+            "text_shadow.blur_radius must be <= {MAX_TEXT_SHADOW_BLUR}, got {}",
+            shadow.blur_radius()
+        )));
+    }
     Ok(())
 }
 
@@ -1190,6 +1253,54 @@ mod tests {
         assert!(
             validate_conic_gradient(&def).is_err(),
             "NaN stop position must be rejected"
+        );
+    }
+
+    // ── validate_style_value_expression ─────────────────────────────────
+
+    #[test]
+    fn test_validate_style_value_expression_accepts_simple_expression() {
+        assert!(validate_style_value_expression("1 + 2").is_ok());
+        assert!(validate_style_value_expression("{spacing.md} * 2").is_ok());
+        assert!(validate_style_value_expression("round({a} + {b})").is_ok());
+    }
+
+    #[test]
+    fn test_validate_style_value_expression_rejects_syntax_error() {
+        assert!(validate_style_value_expression("1 + + 2").is_err());
+        assert!(validate_style_value_expression("unclosed(").is_err());
+        assert!(validate_style_value_expression("").is_err());
+    }
+
+    #[test]
+    fn test_max_token_expression_length_enforced_in_style_value() {
+        // Build a syntactically valid expression that exceeds the byte limit.
+        let long_expr = format!("{}0", "1+".repeat(MAX_TOKEN_EXPRESSION_LENGTH));
+        assert!(long_expr.len() > MAX_TOKEN_EXPRESSION_LENGTH);
+        let result = validate_style_value_expression(&long_expr);
+        assert!(
+            result.is_err(),
+            "expression longer than MAX_TOKEN_EXPRESSION_LENGTH must be rejected by validate_style_value_expression"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("max length"),
+            "error should mention max length: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_style_value_expression_at_boundary_accepted() {
+        // `1` repeated up to MAX_TOKEN_EXPRESSION_LENGTH bytes is syntactically valid
+        // as a token path, but token paths must start with a letter, so use `a`s.
+        // A valid expression at the byte boundary: `a` repeated to exactly the limit.
+        let at_limit = "a".repeat(MAX_TOKEN_EXPRESSION_LENGTH);
+        let result = validate_style_value_expression(&at_limit);
+        // `aaa...` is a valid bare token path per the parser grammar.
+        assert!(
+            result.is_ok(),
+            "expression at byte limit must be accepted, got {:?}",
+            result.err()
         );
     }
 }
