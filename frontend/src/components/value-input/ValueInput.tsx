@@ -363,11 +363,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
 
     // Literal modes don't need expression parsing — skip to avoid false errors
     const mode = detectedMode();
-    if (
-      mode === "literal-color" ||
-      mode === "literal-number" ||
-      mode === "literal-font"
-    ) {
+    if (mode === "literal-color" || mode === "literal-number" || mode === "literal-font") {
       return { error: null, resolved: null };
     }
 

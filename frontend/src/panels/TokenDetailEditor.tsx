@@ -575,8 +575,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
   }
 
   function renderExpressionEditor(): ReturnType<Component> {
-    const exprValue = () =>
-      props.token.value.type === "expression" ? props.token.value.expr : "";
+    const exprValue = () => (props.token.value.type === "expression" ? props.token.value.expr : "");
     return (
       <div class="sigil-token-detail__field">
         <label class="sigil-token-detail__field-label">{t("panels:tokens.typeExpression")}</label>
