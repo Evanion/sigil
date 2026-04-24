@@ -2,8 +2,8 @@
  * Tests for the defensive kind-field handler in apply-remote.ts.
  *
  * Covers the path="kind" case that validates the corners array shape
- * before committing to the store. The legacy kind.corner_radii path
- * has been deleted — these tests verify the new handler rejects invalid
+ * before committing to the store. The old numeric-array corners format
+ * has been removed — these tests verify the new handler rejects invalid
  * payloads and accepts well-formed ones.
  */
 
