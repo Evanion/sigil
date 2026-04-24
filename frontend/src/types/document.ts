@@ -579,16 +579,59 @@ export interface Transition {
   readonly animation: TransitionAnimation;
 }
 
+// ── Corner shape types ───────────────────────────────────────────────
+
+export interface CornerRadii {
+  readonly x: number;
+  readonly y: number;
+}
+
+export interface CornerRound {
+  readonly type: "round";
+  readonly radii: CornerRadii;
+}
+
+export interface CornerBevel {
+  readonly type: "bevel";
+  readonly radii: CornerRadii;
+}
+
+export interface CornerNotch {
+  readonly type: "notch";
+  readonly radii: CornerRadii;
+}
+
+export interface CornerScoop {
+  readonly type: "scoop";
+  readonly radii: CornerRadii;
+}
+
+export interface CornerSuperellipse {
+  readonly type: "superellipse";
+  readonly radii: CornerRadii;
+  readonly smoothing: number;
+}
+
+export type Corner =
+  | CornerRound
+  | CornerBevel
+  | CornerNotch
+  | CornerScoop
+  | CornerSuperellipse;
+
+export type Corners = readonly [Corner, Corner, Corner, Corner];
+
 // ── NodeKind (tagged union) ───────────────────────────────────────────
 
 export interface NodeKindFrame {
   readonly type: "frame";
   readonly layout: LayoutMode | null;
+  readonly corners: Corners;
 }
 
 export interface NodeKindRectangle {
   readonly type: "rectangle";
-  readonly corner_radii: readonly [number, number, number, number];
+  readonly corners: Corners;
 }
 
 export interface NodeKindEllipse {
@@ -612,6 +655,7 @@ export interface NodeKindText {
 export interface NodeKindImage {
   readonly type: "image";
   readonly asset_ref: string;
+  readonly corners: Corners;
 }
 
 export interface NodeKindGroup {
