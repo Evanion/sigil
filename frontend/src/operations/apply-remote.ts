@@ -30,6 +30,20 @@ type DeepMutable<T> = {
   -readonly [K in keyof T]: T[K] extends object ? DeepMutable<T[K]> : T[K];
 };
 
+// ── Corner shape validation constants ─────────────────────────────────
+// These values must stay in sync with crates/core/src/validate.rs:
+//   MIN_CORNER_SMOOTHING = 0.0
+//   MAX_CORNER_SMOOTHING = 1.0
+
+/** Valid discriminator strings for the Corner union type. */
+const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
+
+/** Minimum superellipse smoothing (matches Rust MIN_CORNER_SMOOTHING). */
+const MIN_CORNER_SMOOTHING = 0.0;
+
+/** Maximum superellipse smoothing (matches Rust MAX_CORNER_SMOOTHING). */
+const MAX_CORNER_SMOOTHING = 1.0;
+
 // ── Remote payload types ──────────────────────────────────────────────
 
 /**
@@ -230,9 +244,56 @@ function applyFieldSet(
     case "style.blend_mode":
       setState("nodes", nodeUuid, "style", "blend_mode", value as BlendMode);
       break;
-    case "kind":
-      setState("nodes", nodeUuid, "kind", value as NodeKind);
+    case "kind": {
+      // Defensive validation: reject non-object / null / array values.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) return;
+      const payload = value as Record<string, unknown>;
+
+      // Reject cross-kind replacements — prevents rectangle→frame corruption.
+      if (payload["type"] !== node.kind.type) return;
+
+      // For corner-bearing kinds, validate the corners array before committing.
+      if (
+        payload["type"] === "rectangle" ||
+        payload["type"] === "frame" ||
+        payload["type"] === "image"
+      ) {
+        const rawCorners = payload["corners"];
+        if (!Array.isArray(rawCorners) || rawCorners.length !== 4) return;
+        for (const c of rawCorners) {
+          if (typeof c !== "object" || c === null) return;
+          const corner = c as Record<string, unknown>;
+          const cornerType = corner["type"];
+          if (typeof cornerType !== "string" || !VALID_CORNER_TYPES.has(cornerType)) return;
+          const radii = corner["radii"];
+          if (
+            typeof radii !== "object" ||
+            radii === null ||
+            typeof (radii as Record<string, unknown>)["x"] !== "number" ||
+            !Number.isFinite((radii as Record<string, unknown>)["x"] as number) ||
+            typeof (radii as Record<string, unknown>)["y"] !== "number" ||
+            !Number.isFinite((radii as Record<string, unknown>)["y"] as number)
+          )
+            return;
+          if (cornerType === "superellipse") {
+            const smoothing = corner["smoothing"];
+            if (typeof smoothing !== "number" || !Number.isFinite(smoothing)) return;
+            if (smoothing < MIN_CORNER_SMOOTHING || smoothing > MAX_CORNER_SMOOTHING) return;
+          }
+        }
+      }
+
+      setState(
+        produce((s) => {
+          const n = s.nodes[nodeUuid];
+          // Double-check type hasn't changed between the read above and the write now.
+          if (!n || n.kind.type !== payload["type"]) return;
+          (s.nodes[nodeUuid] as DeepMutable<StoreDocumentNode>).kind =
+            payload as DeepMutable<NodeKind>;
+        }),
+      );
       break;
+    }
     case "kind.content":
       if (node.kind.type === "text") {
         setState(
@@ -242,20 +303,6 @@ function applyFieldSet(
               // produce() provides mutable access — DeepMutable strips readonly
               const mutableKind = n.kind as DeepMutable<typeof n.kind>;
               mutableKind.content = value as string;
-            }
-          }),
-        );
-      }
-      break;
-    case "kind.corner_radii":
-      if (node.kind.type === "rectangle") {
-        setState(
-          produce((s) => {
-            const n = s.nodes[nodeUuid];
-            if (n && n.kind.type === "rectangle") {
-              // produce() provides mutable access — DeepMutable strips readonly
-              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
-              mutableKind.corner_radii = value as [number, number, number, number];
             }
           }),
         );
@@ -333,7 +380,15 @@ function applyCreateNode(
   const node: StoreDocumentNode = {
     id: PLACEHOLDER_NODE_ID,
     uuid,
-    kind: (raw["kind"] as NodeKind) ?? { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: (raw["kind"] as NodeKind) ?? {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: (raw["name"] as string) ?? "",
     parent: null,
     children: [],
