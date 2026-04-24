@@ -25,7 +25,7 @@ use agent_designer_core::commands::page_commands::{
 };
 use agent_designer_core::commands::style_commands::validate_transform;
 use agent_designer_core::commands::style_commands::{
-    SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+    SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
 use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
 use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
@@ -326,52 +326,40 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             })
         }
         "kind" => {
-            // Extract corner_radii from the kind JSON for SetCornerRadii
-            let corner_radii: Vec<f64> = value
-                .get("corner_radii")
-                .ok_or_else(|| async_graphql::Error::new("kind value must contain corner_radii"))?
-                .as_array()
-                .ok_or_else(|| async_graphql::Error::new("corner_radii must be an array"))?
-                .iter()
-                .map(|v| {
-                    v.as_f64().ok_or_else(|| {
-                        async_graphql::Error::new("corner_radii elements must be numbers")
+            // Value must be: { "type": "<kind>", "corners": <corners-input> }
+            // where <corners-input> is accepted by parse_corners_input (object or array).
+            let kind_type = value
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| async_graphql::Error::new("kind value must include 'type' field"))?;
+            match kind_type {
+                "rectangle" | "frame" | "image" => {
+                    let corners_value = value.get("corners").ok_or_else(|| {
+                        async_graphql::Error::new(format!(
+                            "{kind_type} kind value must include 'corners' field"
+                        ))
+                    })?;
+                    let new_corners =
+                        agent_designer_core::corners_input::parse_corners_input(corners_value)
+                            .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
+                    Ok(ParsedOp {
+                        builder: Box::new(move |doc| {
+                            let node_id = doc
+                                .arena
+                                .id_by_uuid(&parsed_uuid)
+                                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                            Ok(Box::new(SetCorners {
+                                node_id,
+                                new_corners,
+                            }) as Box<dyn FieldOperation>)
+                        }),
+                        broadcast,
                     })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            if corner_radii.len() != 4 {
-                return Err(async_graphql::Error::new(
-                    "corner_radii must have exactly 4 elements",
-                ));
-            }
-            for (i, &r) in corner_radii.iter().enumerate() {
-                if !r.is_finite() {
-                    return Err(async_graphql::Error::new(format!(
-                        "corner_radii[{i}] must be finite"
-                    )));
                 }
-                if r < 0.0 {
-                    return Err(async_graphql::Error::new(format!(
-                        "corner_radii[{i}] must be non-negative"
-                    )));
-                }
+                other => Err(async_graphql::Error::new(format!(
+                    "kind type '{other}' is not supported by SetField on path 'kind'"
+                ))),
             }
-            let new_radii: [f64; 4] = [
-                corner_radii[0],
-                corner_radii[1],
-                corner_radii[2],
-                corner_radii[3],
-            ];
-            Ok(ParsedOp {
-                builder: Box::new(move |doc| {
-                    let node_id = doc
-                        .arena
-                        .id_by_uuid(&parsed_uuid)
-                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-                    Ok(Box::new(SetCornerRadii { node_id, new_radii }) as Box<dyn FieldOperation>)
-                }),
-                broadcast,
-            })
         }
         "kind.content" => {
             if let Some(s) = value.as_str()
@@ -1070,7 +1058,10 @@ mod tests {
         let node_uuid = uuid::Uuid::new_v4();
         let cmd = CreateNode {
             uuid: node_uuid,
-            kind: NodeKind::Frame { layout: None },
+            kind: NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             name: name.to_string(),
             page_id: None,
             initial_transform: None,
@@ -1193,11 +1184,24 @@ mod tests {
         let parent_uuid = create_test_frame_direct(&state, "Parent");
 
         let child_uuid = uuid::Uuid::new_v4().to_string();
+        // NodeKind::Frame now requires corners — serialize the full kind JSON and escape
+        // it for embedding as a GraphQL string argument (all double-quotes become \").
+        let frame_kind = serde_json::json!({
+            "type": "frame",
+            "layout": null,
+            "corners": [
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}}
+            ]
+        });
+        let frame_kind_escaped = frame_kind.to_string().replace('"', "\\\"");
         let query = format!(
             r#"mutation {{
                 applyOperations(
                     operations: [
-                        {{ createNode: {{ nodeUuid: "{child_uuid}", kind: "{{\"type\": \"frame\"}}", name: "Child" }} }},
+                        {{ createNode: {{ nodeUuid: "{child_uuid}", kind: "{frame_kind_escaped}", name: "Child" }} }},
                         {{ reparent: {{ nodeUuid: "{child_uuid}", newParentUuid: "{parent_uuid}", position: 0 }} }}
                     ],
                     userId: "test-user"
@@ -1929,6 +1933,116 @@ mod tests {
         assert!(
             !res.errors.is_empty(),
             "invalid page UUID should be rejected"
+        );
+    }
+
+    // ── Corner shape tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_set_field_kind_accepts_new_corners_shape() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Create a frame node (SetCorners supports Frame, Rectangle, Image).
+        let uuid = create_test_frame_direct(&state, "FrameForCorners");
+
+        // Per-corner array form: four different corner shapes.
+        // parse_corners_input uses "shape" and "radii" keys.
+        let corners_json = serde_json::json!([
+            { "shape": "round",  "radii": { "x": 4.0,  "y": 4.0  } },
+            { "shape": "bevel",  "radii": { "x": 8.0,  "y": 8.0  } },
+            { "shape": "notch",  "radii": { "x": 12.0, "y": 12.0 } },
+            { "shape": "scoop",  "radii": { "x": 16.0, "y": 16.0 } }
+        ]);
+        let kind_value = serde_json::json!({
+            "type": "frame",
+            "corners": corners_json
+        });
+        let kind_value_str = kind_value.to_string();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind", value: {kind_value_str:?} }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Verify corners were updated in the document.
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Frame { corners, .. } => {
+                assert!(
+                    matches!(corners[0], agent_designer_core::node::Corner::Round { .. }),
+                    "corners[0] should be Round"
+                );
+                assert!(
+                    matches!(corners[1], agent_designer_core::node::Corner::Bevel { .. }),
+                    "corners[1] should be Bevel"
+                );
+                assert!(
+                    matches!(corners[2], agent_designer_core::node::Corner::Notch { .. }),
+                    "corners[2] should be Notch"
+                );
+                assert!(
+                    matches!(corners[3], agent_designer_core::node::Corner::Scoop { .. }),
+                    "corners[3] should be Scoop"
+                );
+            }
+            _ => panic!("expected Frame node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_field_kind_rejects_superellipse_in_per_corner_array() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_frame_direct(&state, "FrameForBadCorners");
+
+        // Per-corner array with superellipse — parse_corners_input rejects this.
+        // Superellipse must use the shape-level (object) form, not per-corner.
+        let bad_corners_json = serde_json::json!([
+            { "shape": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.5 },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        let kind_value = serde_json::json!({
+            "type": "frame",
+            "corners": bad_corners_json
+        });
+        let kind_value_str = kind_value.to_string();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind", value: {kind_value_str:?} }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "superellipse in per-corner array form should be rejected"
+        );
+        // Error message should mention superellipse or shape-level form.
+        let err_msg = res.errors[0].message.to_lowercase();
+        assert!(
+            err_msg.contains("superellipse") || err_msg.contains("shape-level"),
+            "error message should mention superellipse or shape-level, got: {}",
+            res.errors[0].message
         );
     }
 }

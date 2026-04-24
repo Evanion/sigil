@@ -550,7 +550,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             Uuid::new_v4(),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             "Frame 1".to_string(),
         )
         .expect("create node");
@@ -633,7 +636,10 @@ mod tests {
         let parent = Node::new(
             NodeId::new(0, 0),
             Uuid::new_v4(),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             "Parent".to_string(),
         )
         .expect("create parent");
@@ -646,7 +652,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::new_v4(),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: agent_designer_core::node::default_corners(),
             },
             "Child".to_string(),
         )

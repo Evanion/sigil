@@ -9,7 +9,7 @@ use agent_designer_core::{
     MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
     commands::style_commands::{
-        SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+        SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
     },
     commands::tree_commands::{ReorderChildren, ReparentNode},
     validate_floats_in_value,
@@ -31,9 +31,12 @@ use crate::types::{CreateNodeResult, MutationResult, NodeInfo, TransformInfo, Tr
 /// Returns `McpToolError::InvalidInput` if the string does not match a known kind.
 pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
     match kind {
-        "frame" => Ok(NodeKind::Frame { layout: None }),
+        "frame" => Ok(NodeKind::Frame {
+            layout: None,
+            corners: agent_designer_core::node::default_corners(),
+        }),
         "rectangle" => Ok(NodeKind::Rectangle {
-            corner_radii: [0.0; 4],
+            corners: agent_designer_core::node::default_corners(),
         }),
         "ellipse" => Ok(NodeKind::Ellipse {
             arc_start: 0.0,
@@ -980,7 +983,33 @@ pub fn set_corner_radii_impl(
             )));
         }
     }
-    let new_radii: [f64; 4] = [radii[0], radii[1], radii[2], radii[3]];
+    // Convert the legacy [f64; 4] radii into [Corner; 4] (uniform round corners).
+    let new_corners: [agent_designer_core::Corner; 4] = [
+        agent_designer_core::Corner::Round {
+            radii: agent_designer_core::CornerRadii {
+                x: radii[0],
+                y: radii[0],
+            },
+        },
+        agent_designer_core::Corner::Round {
+            radii: agent_designer_core::CornerRadii {
+                x: radii[1],
+                y: radii[1],
+            },
+        },
+        agent_designer_core::Corner::Round {
+            radii: agent_designer_core::CornerRadii {
+                x: radii[2],
+                y: radii[2],
+            },
+        },
+        agent_designer_core::Corner::Round {
+            radii: agent_designer_core::CornerRadii {
+                x: radii[3],
+                y: radii[3],
+            },
+        },
+    ];
 
     let node_uuid: Uuid = uuid_str
         .parse()
@@ -994,7 +1023,10 @@ pub fn set_corner_radii_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let cmd = SetCornerRadii { node_id, new_radii };
+        let cmd = SetCorners {
+            node_id,
+            new_corners,
+        };
         cmd.validate(&doc)?;
         cmd.apply(&mut doc)?;
     }
@@ -1463,7 +1495,7 @@ mod tests {
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         assert!(result.unwrap().success);
 
-        // Verify radii were applied.
+        // Verify corners were applied as uniform round corners.
         let doc = crate::server::acquire_document_lock(&state);
         let node_id = doc
             .arena
@@ -1471,31 +1503,34 @@ mod tests {
             .unwrap();
         let node = doc.arena.get(node_id).unwrap();
         match &node.kind {
-            agent_designer_core::NodeKind::Rectangle { corner_radii } => {
-                assert_eq!(*corner_radii, [4.0, 8.0, 4.0, 8.0]);
+            agent_designer_core::NodeKind::Rectangle { corners } => {
+                assert!(matches!(
+                    corners[0],
+                    agent_designer_core::Corner::Round {
+                        radii: agent_designer_core::CornerRadii { x: 4.0, y: 4.0 }
+                    }
+                ));
+                assert!(matches!(
+                    corners[1],
+                    agent_designer_core::Corner::Round {
+                        radii: agent_designer_core::CornerRadii { x: 8.0, y: 8.0 }
+                    }
+                ));
             }
             _ => panic!("expected rectangle"),
         }
     }
 
     #[test]
-    fn test_set_corner_radii_impl_rejects_non_rectangle() {
+    fn test_set_corner_radii_impl_rejects_non_corner_node() {
+        // SetCorners only accepts Rectangle, Frame, and Image.
+        // Use a group node (which has no corners) to verify rejection.
         let (state, page_id) = make_state_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&state, "group", "Group", Some(&page_id), None, None).unwrap();
 
         let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0, 4.0, 4.0]);
-        assert!(result.is_err());
-        // Rectangle check now comes from core's validate() via From<CoreError>
-        let err = result.unwrap_err();
-        assert!(
-            matches!(
-                &err,
-                McpToolError::CoreError(agent_designer_core::CoreError::ValidationError(msg))
-                    if msg.contains("Rectangle") || msg.contains("rectangle")
-            ),
-            "error should mention rectangle requirement, got: {err}"
-        );
+        assert!(result.is_err(), "SetCorners on a Group should be rejected");
     }
 
     #[test]

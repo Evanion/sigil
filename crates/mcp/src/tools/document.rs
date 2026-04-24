@@ -177,7 +177,10 @@ mod tests {
             let node = Node::new(
                 NodeId::new(0, 0),
                 uuid::Uuid::new_v4(),
-                NodeKind::Frame { layout: None },
+                NodeKind::Frame {
+                    layout: None,
+                    corners: agent_designer_core::node::default_corners(),
+                },
                 "Header".to_string(),
             )
             .unwrap();
@@ -215,7 +218,10 @@ mod tests {
                 let node = Node::new(
                     NodeId::new(0, 0),
                     uuid::Uuid::new_v4(),
-                    NodeKind::Frame { layout: None },
+                    NodeKind::Frame {
+                        layout: None,
+                        corners: agent_designer_core::node::default_corners(),
+                    },
                     format!("node-{i}"),
                 )
                 .unwrap();
