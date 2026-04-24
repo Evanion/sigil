@@ -45,7 +45,7 @@ pub const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
 pub const DEFAULT_MAX_NODES: usize = 100_000;
 
 /// Current schema version for serialization.
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 /// Maximum alias chain depth for token resolution.
 pub const MAX_ALIAS_CHAIN_DEPTH: usize = 16;

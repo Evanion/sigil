@@ -10,6 +10,7 @@ pub mod component;
 pub mod document;
 pub mod error;
 pub mod id;
+pub mod migrations;
 pub mod node;
 pub mod path;
 pub mod prototype;

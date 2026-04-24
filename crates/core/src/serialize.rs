@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::error::CoreError;
 use crate::id::NodeId;
+use crate::migrations::migrate_to_v2;
 use crate::node::Node;
 use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
@@ -104,7 +105,11 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         ));
     }
 
-    let page: SerializedPage = serde_json::from_value(raw)
+    // Apply schema migrations in version order.
+    // Each migrate_to_vN function is idempotent on already-migrated input.
+    let migrated = if version < 2 { migrate_to_v2(raw) } else { raw };
+
+    let page: SerializedPage = serde_json::from_value(migrated)
         .map_err(|e| CoreError::SerializationError(format!("failed to deserialize page: {e}")))?;
 
     // Validate collection sizes
@@ -653,6 +658,52 @@ mod tests {
             nodes_pos < schema_pos,
             "nodes should come before schema_version"
         );
+    }
+
+    #[test]
+    fn test_deserialize_migrates_legacy_v1_rectangle_to_corners() {
+        // v1 workfile with legacy `corner_radii: [4, 8, 12, 16]` on a rectangle.
+        // Migration must produce a Rectangle with Corner::Round entries whose
+        // radii match the legacy asymmetric-uniform mapping (x = y = legacy radius).
+        let legacy_json = r#"{
+            "schema_version": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Legacy",
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000002",
+                "kind": { "type": "rectangle", "corner_radii": [4.0, 8.0, 12.0, 16.0] },
+                "name": "Rect",
+                "parent": null,
+                "children": [],
+                "transform": {"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1},
+                "style": {"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]},
+                "constraints": {"horizontal":"start","vertical":"start"},
+                "visible": true,
+                "locked": false
+            }],
+            "transitions": []
+        }"#;
+
+        let page = deserialize_page(legacy_json).expect("load migrated page");
+        assert_eq!(page.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(page.nodes.len(), 1);
+
+        let kind: NodeKind =
+            serde_json::from_value(page.nodes[0].kind.clone()).expect("deserialize migrated kind");
+        let corners = match kind {
+            NodeKind::Rectangle { corners } => corners,
+            other => panic!("expected Rectangle, got {other:?}"),
+        };
+        let expected_radii = [4.0_f64, 8.0, 12.0, 16.0];
+        for (i, corner) in corners.iter().enumerate() {
+            let radii = corner.radii();
+            assert_eq!(radii.x, expected_radii[i], "corner {i} x");
+            assert_eq!(radii.y, expected_radii[i], "corner {i} y");
+            assert!(
+                matches!(corner, crate::node::Corner::Round { .. }),
+                "corner {i} should be Round, got {corner:?}"
+            );
+        }
     }
 
     #[test]
