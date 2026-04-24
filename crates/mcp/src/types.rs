@@ -360,14 +360,30 @@ pub struct SetEffectsInput {
     pub effects: serde_json::Value,
 }
 
-/// Input for setting a rectangle node's corner radii.
+/// Input for setting a node's corner shapes.
+///
+/// The `corners` value accepts three shapes:
+///
+/// 1. **Uniform shorthand** — an object `{ "shape": "<shape>", "radius": N }`
+///    where `<shape>` is one of `round | bevel | notch | scoop`.
+///    Applied uniformly to all four corners.
+///    Example: `{ "uuid": "...", "corners": { "shape": "round", "radius": 12.0 } }`.
+/// 2. **Shape-level superellipse** — an object describing a squircle applied to the full shape:
+///    `{ "uuid": "...", "corners": { "shape": "superellipse", "radius": 16.0, "smoothing": 0.6 } }`.
+///    Superellipse is shape-level only because squircle curvature blends along edges;
+///    mixing it per-corner would produce visible kinks.
+/// 3. **Per-corner array** — exactly four corner objects in order
+///    `[top-left, top-right, bottom-right, bottom-left]`. Each corner is
+///    `{ "shape": "round" | "bevel" | "notch" | "scoop", "radii": { "x": <n>, "y": <n> } }`.
+///    The per-corner array does NOT accept `"superellipse"` — use shorthand shape 2 instead.
+///
+/// All numeric values must be finite and non-negative; `smoothing` must lie in `[0.0, 1.0]`.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct SetCornerRadiiInput {
-    /// UUID of the node to modify (must be a rectangle).
+pub struct SetCornersInput {
+    /// UUID of the node to modify (rectangle, frame, or image).
     pub uuid: String,
-    /// Four corner radii: [top-left, top-right, bottom-right, bottom-left].
-    /// Each must be finite and non-negative.
-    pub radii: Vec<f64>,
+    /// The corner specification. See struct-level doc for accepted shapes.
+    pub corners: serde_json::Value,
 }
 
 // ── Text tool input types ─────────────────────────────────────────────
