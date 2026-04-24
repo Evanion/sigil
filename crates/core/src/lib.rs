@@ -7,6 +7,7 @@ pub mod boolean;
 pub mod command;
 pub mod commands;
 pub mod component;
+pub mod corners_input;
 pub mod document;
 pub mod error;
 pub mod id;
