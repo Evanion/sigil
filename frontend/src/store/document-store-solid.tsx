@@ -34,6 +34,8 @@ import {
   createReorderPageOp,
 } from "../operations/operation-helpers";
 import type { TextStylePatch } from "./document-store-types";
+import { parseCornersInput } from "./corners-input";
+import type { CornersInput } from "./corners-input";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -107,7 +109,7 @@ export interface DocumentStoreAPI {
   setFills(uuid: string, fills: Fill[]): void;
   setStrokes(uuid: string, strokes: Stroke[]): void;
   setEffects(uuid: string, effects: Effect[]): void;
-  setCornerRadii(uuid: string, radii: [number, number, number, number]): void;
+  setCorners(uuid: string, input: import("./corners-input").CornersInput): void;
   setTextContent(uuid: string, content: string): void;
   setTextStyle(uuid: string, patch: TextStylePatch): void;
   batchSetTransform(entries: Array<{ uuid: string; transform: Transform }>): void;
@@ -941,19 +943,28 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
-  function setCornerRadii(uuid: string, radii: [number, number, number, number]): void {
-    // Validate all 4 values are finite and non-negative
-    for (const r of radii) {
-      if (!Number.isFinite(r) || r < 0) return;
-    }
+  function setCorners(uuid: string, input: CornersInput): void {
+    // Validate and expand the input to a canonical Corners tuple.
+    // parseCornersInput enforces: Number.isFinite, non-negative, MAX_CORNER_RADIUS,
+    // MIN/MAX_CORNER_SMOOTHING, no superellipse in per-corner form.
+    // Returns null for any invalid input — we treat that as a no-op (no silent clamping).
+    const corners = parseCornersInput(input);
+    if (corners === null) return;
 
-    // Early return if node is not a rectangle — before snapshot to avoid spurious mutations
+    // Early return for non-corner-bearing kinds (text, ellipse, path, group,
+    // component_instance). Only rectangle, frame, and image have a corners field.
     const node = state.nodes[uuid];
-    if (!node || node.kind.type !== "rectangle") return;
+    if (
+      !node ||
+      (node.kind.type !== "rectangle" &&
+        node.kind.type !== "frame" &&
+        node.kind.type !== "image")
+    )
+      return;
 
     // JSON clone: Solid proxy not structuredClone-safe
     const previousKind = deepClone(node.kind);
-    const newKind = { ...previousKind, corner_radii: radii };
+    const newKind = { ...previousKind, corners };
 
     interceptor.set(uuid, "kind", newKind);
     // RF-026: Queue server op — sent when interceptor commits (coalesced)
@@ -1703,7 +1714,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setFills,
     setStrokes,
     setEffects,
-    setCornerRadii,
+    setCorners,
     setTextContent,
     setTextStyle,
     batchSetTransform,
