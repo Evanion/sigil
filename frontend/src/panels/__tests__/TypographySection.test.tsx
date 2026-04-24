@@ -54,7 +54,7 @@ function createMockStore(
     setFills: vi.fn(),
     setStrokes: vi.fn(),
     setEffects: vi.fn(),
-    setCornerRadii: vi.fn(),
+    setCorners: vi.fn(),
     setTextContent: vi.fn(),
     setTextStyle: vi.fn(),
     batchSetTransform: vi.fn(),

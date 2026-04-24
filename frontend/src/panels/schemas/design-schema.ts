@@ -57,12 +57,12 @@ export const designSchema: PropertySchema = {
     },
     {
       name: "Corner Radius",
-      when: "rectangle",
+      when: ["rectangle", "frame", "image"],
       fields: [
-        { key: "kind.corner_radii.0", label: "TL", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.1", label: "TR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.2", label: "BR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.3", label: "BL", type: "number", step: 1, min: 0 },
+        { key: "kind.corners.0.radii.x", label: "TL", type: "number", step: 1, min: 0 },
+        { key: "kind.corners.1.radii.x", label: "TR", type: "number", step: 1, min: 0 },
+        { key: "kind.corners.2.radii.x", label: "BR", type: "number", step: 1, min: 0 },
+        { key: "kind.corners.3.radii.x", label: "BL", type: "number", step: 1, min: 0 },
       ],
     },
     {

@@ -18,7 +18,7 @@ const testSchema: PropertySchema = {
     {
       name: "Rectangle Only",
       when: "rectangle",
-      fields: [{ key: "kind.corner_radii.0", label: "TL", type: "number" }],
+      fields: [{ key: "kind.corners.0.radii.x", label: "TL", type: "number" }],
     },
   ],
 };
@@ -67,7 +67,7 @@ function createMockStore(
     setFills: vi.fn(),
     setStrokes: vi.fn(),
     setEffects: vi.fn(),
-    setCornerRadii: vi.fn(),
+    setCorners: vi.fn(),
     setTextContent: vi.fn(),
     setTextStyle: vi.fn(),
     batchSetTransform: vi.fn(),
@@ -105,7 +105,15 @@ describe("SchemaPanel", () => {
     const node = {
       id: { index: 0, generation: 0 },
       uuid: "test-uuid",
-      kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+      kind: {
+        type: "rectangle",
+        corners: [
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+        ],
+      },
       name: "Test",
       parent: null,
       children: [],

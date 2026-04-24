@@ -36,6 +36,7 @@ import {
 import type { TextStylePatch } from "./document-store-types";
 import { parseCornersInput } from "./corners-input";
 import type { CornersInput } from "./corners-input";
+import { defaultCorners } from "./default-corners";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -1138,7 +1139,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const groupNodeData: MutableDocumentNode = {
       id: PLACEHOLDER_NODE_ID,
       uuid: groupUuid,
-      kind: { type: "frame" as const, layout: null },
+      kind: { type: "frame" as const, layout: null, corners: defaultCorners() },
       name: name.slice(0, MAX_NODE_NAME_LENGTH),
       parent: null,
       children: [],

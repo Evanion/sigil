@@ -51,7 +51,7 @@ function createMockStore(
     setFills: () => {},
     setStrokes: () => {},
     setEffects: () => {},
-    setCornerRadii: () => {},
+    setCorners: () => {},
     setTextContent: () => {},
     setTextStyle: () => {},
     batchSetTransform: () => {},
@@ -77,7 +77,15 @@ function makeNode(uuid: string, x: number, y: number) {
   return {
     id: { index: 0, generation: 0 },
     uuid,
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: `Rectangle ${uuid}`,
     parent: null,
     children: [],

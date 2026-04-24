@@ -44,7 +44,15 @@ function makeTestNode(overrides: Record<string, unknown> = {}): Record<string, u
       blend_mode: "normal",
       effects: [],
     },
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     parentUuid: null,
     childrenUuids: [],
     ...overrides,
@@ -385,10 +393,19 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     });
   });
 
-  describe("setCornerRadii — operation tracking", () => {
+  describe("setCorners — operation tracking", () => {
+    const roundZero = { type: "round", radii: { x: 0, y: 0 } };
+    const roundEight = { type: "round", radii: { x: 8, y: 8 } };
+
     it("should create a set_field operation with path 'kind'", () => {
-      const previousKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
-      const newKind = { type: "rectangle", corner_radii: [8, 8, 8, 8] };
+      const previousKind = {
+        type: "rectangle",
+        corners: [roundZero, roundZero, roundZero, roundZero],
+      };
+      const newKind = {
+        type: "rectangle",
+        corners: [roundEight, roundEight, roundEight, roundEight],
+      };
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "kind", newKind, previousKind);
 
       expect(op.type).toBe("set_field");
@@ -398,8 +415,14 @@ describe("mutation operations — simple field mutations (Task 3)", () => {
     });
 
     it("should track in HistoryManager and can undo", () => {
-      const previousKind = { type: "rectangle", corner_radii: [0, 0, 0, 0] };
-      const newKind = { type: "rectangle", corner_radii: [8, 8, 8, 8] };
+      const previousKind = {
+        type: "rectangle",
+        corners: [roundZero, roundZero, roundZero, roundZero],
+      };
+      const newKind = {
+        type: "rectangle",
+        corners: [roundEight, roundEight, roundEight, roundEight],
+      };
       const op = createSetFieldOp(TEST_USER_ID, "node-1", "kind", newKind, previousKind);
       applyAndTrack(
         op,
@@ -680,7 +703,15 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       const nodeData = {
         uuid: "new-uuid",
         name: "Rect 1",
-        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
         style: {
           fills: [],
@@ -706,7 +737,15 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       const nodeData = {
         uuid: "new-uuid",
         name: "Rect 1",
-        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
         style: {
           fills: [],

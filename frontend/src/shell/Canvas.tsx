@@ -32,6 +32,7 @@ import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overla
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 import { buildRenderOrder } from "../canvas/render-order";
+import { defaultCorners } from "../store/default-corners";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
 // the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
@@ -175,10 +176,14 @@ export const Canvas: Component = () => {
     const makeShapeTool = (kindFactory: () => NodeKind, prefix: string) =>
       createShapeTool(storeAdapter, kindFactory, prefix, () => store.setActiveTool("select"));
 
-    const frameKind = (): NodeKind => ({ type: "frame" as const, layout: null });
+    const frameKind = (): NodeKind => ({
+      type: "frame" as const,
+      layout: null,
+      corners: defaultCorners(),
+    });
     const rectKind = (): NodeKind => ({
       type: "rectangle" as const,
-      corner_radii: [0, 0, 0, 0] as readonly [number, number, number, number],
+      corners: defaultCorners(),
     });
     const ellipseKind = (): NodeKind => ({
       type: "ellipse" as const,
