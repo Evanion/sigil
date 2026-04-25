@@ -37,9 +37,12 @@ fn make_state_with_rect() -> (
         .expect("create rect");
 
     // Drain the two setup events so the test body sees only its own event.
+    // Bind to named results to satisfy the no-`let _` rule (CLAUDE.md §11);
+    // a `TryRecvError::Empty` here would mean the publish was synchronous and
+    // already drained, both states are acceptable for setup.
     let mut rx = rx;
-    let _ = rx.try_recv(); // create_page
-    let _ = rx.try_recv(); // create_node
+    let _page_event = rx.try_recv();
+    let _node_event = rx.try_recv();
 
     (state, rx, rect.uuid)
 }
