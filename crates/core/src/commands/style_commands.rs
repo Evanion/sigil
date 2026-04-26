@@ -731,6 +731,68 @@ mod tests {
     }
 
     #[test]
+    fn test_set_corners_rejects_radius_above_max() {
+        // RF-035: explicit FieldOperation-level max enforcement test.
+        let (doc, node_id) = setup_doc_with_rect();
+        let mut corners = crate::node::default_corners();
+        corners[0] = Corner::Round {
+            radii: crate::node::CornerRadii {
+                x: crate::validate::MAX_CORNER_RADIUS + 1.0,
+                y: 0.0,
+            },
+        };
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected MAX_CORNER_RADIUS error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("MAX_CORNER_RADIUS"),
+            "expected MAX_CORNER_RADIUS in error message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_set_corners_rejects_smoothing_above_max() {
+        // RF-035: explicit FieldOperation-level max enforcement test for smoothing.
+        let (doc, node_id) = setup_doc_with_rect();
+        let above = crate::validate::MAX_CORNER_SMOOTHING + 0.5;
+        let corners = [
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected MAX_CORNER_SMOOTHING error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing"),
+            "expected smoothing in error message, got: {msg}"
+        );
+    }
+
+    #[test]
     fn test_set_corners_rejects_infinite_radius() {
         let (doc, node_id) = setup_doc_with_rect();
         let mut corners = crate::node::default_corners();
