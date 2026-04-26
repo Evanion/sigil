@@ -987,8 +987,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       return;
     }
 
-    // JSON clone: Solid proxy not structuredClone-safe
-    const previousKind = deepClone(node.kind);
+    // RF-017: Wrap deepClone in try-catch — Solid proxy cloning may fail.
+    // Mirrors the defensive pattern in setTextContent / setTextStyle.
+    let previousKind: typeof node.kind;
+    try {
+      // JSON clone: Solid proxy not structuredClone-safe
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setCorners: deepClone failed", { uuid, err });
+      return;
+    }
     const newKind = { ...previousKind, corners };
 
     interceptor.set(uuid, "kind", newKind);
