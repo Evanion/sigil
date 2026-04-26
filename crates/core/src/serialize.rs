@@ -10,6 +10,17 @@ use crate::node::Node;
 use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
 
+// RF-040: serde_json enforces a default recursion limit of 128, matching
+// `MAX_JSON_NESTING_DEPTH`. If serde_json changes this default we must add
+// explicit depth checking. The compile-time assertion below pins the
+// expected value of our constant; if it is ever changed without a
+// corresponding audit of serde_json's behavior we will see a compile error
+// rather than silently diverging from the upstream default.
+const _: () = assert!(
+    crate::validate::MAX_JSON_NESTING_DEPTH == 128,
+    "MAX_JSON_NESTING_DEPTH must match serde_json's default recursion limit (128)"
+);
+
 /// A serializable representation of a page (file format).
 ///
 /// Uses UUIDs exclusively for node identity. Arena indices are not stable
@@ -98,16 +109,8 @@ pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32)
         )));
     }
 
-    // RF-040: serde_json enforces a default recursion limit of 128, matching
-    // `MAX_JSON_NESTING_DEPTH`. If serde_json changes this default we must add
-    // explicit depth checking. The compile-time assertion below pins the
-    // expected value of our constant; if it is ever changed without a
-    // corresponding audit of serde_json's behavior we will see a compile error
-    // rather than silently diverging from the upstream default.
-    const _: () = assert!(
-        crate::validate::MAX_JSON_NESTING_DEPTH == 128,
-        "MAX_JSON_NESTING_DEPTH must match serde_json's default recursion limit (128)"
-    );
+    // RF-040: serde_json's default 128-recursion limit is asserted at module
+    // scope to match MAX_JSON_NESTING_DEPTH; see top of file.
 
     // Check schema version first (partial parse)
     let raw: serde_json::Value = serde_json::from_str(json)
