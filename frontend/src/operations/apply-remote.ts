@@ -32,11 +32,15 @@ type DeepMutable<T> = {
 
 // ── Corner shape validation constants ─────────────────────────────────
 // These values must stay in sync with crates/core/src/validate.rs:
+//   MAX_CORNER_RADIUS   = 100_000.0
 //   MIN_CORNER_SMOOTHING = 0.0
 //   MAX_CORNER_SMOOTHING = 1.0
 
 /** Valid discriminator strings for the Corner union type. */
 const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
+
+/** Maximum corner radius component (matches Rust MAX_CORNER_RADIUS). */
+const MAX_CORNER_RADIUS = 100_000;
 
 /** Minimum superellipse smoothing (matches Rust MIN_CORNER_SMOOTHING). */
 const MIN_CORNER_SMOOTHING = 0.0;
@@ -260,25 +264,40 @@ function applyFieldSet(
       ) {
         const rawCorners = payload["corners"];
         if (!Array.isArray(rawCorners) || rawCorners.length !== 4) return;
+        let superellipseCount = 0;
+        let firstSuperellipseSmoothing: number | null = null;
         for (const c of rawCorners) {
           if (typeof c !== "object" || c === null) return;
           const corner = c as Record<string, unknown>;
           const cornerType = corner["type"];
           if (typeof cornerType !== "string" || !VALID_CORNER_TYPES.has(cornerType)) return;
           const radii = corner["radii"];
-          if (
-            typeof radii !== "object" ||
-            radii === null ||
-            typeof (radii as Record<string, unknown>)["x"] !== "number" ||
-            !Number.isFinite((radii as Record<string, unknown>)["x"] as number) ||
-            typeof (radii as Record<string, unknown>)["y"] !== "number" ||
-            !Number.isFinite((radii as Record<string, unknown>)["y"] as number)
-          )
-            return;
+          if (typeof radii !== "object" || radii === null) return;
+          const rx = (radii as Record<string, unknown>)["x"];
+          const ry = (radii as Record<string, unknown>)["y"];
+          if (typeof rx !== "number" || !Number.isFinite(rx)) return;
+          if (rx < 0 || rx > MAX_CORNER_RADIUS) return;
+          if (typeof ry !== "number" || !Number.isFinite(ry)) return;
+          if (ry < 0 || ry > MAX_CORNER_RADIUS) return;
           if (cornerType === "superellipse") {
+            superellipseCount += 1;
             const smoothing = corner["smoothing"];
             if (typeof smoothing !== "number" || !Number.isFinite(smoothing)) return;
             if (smoothing < MIN_CORNER_SMOOTHING || smoothing > MAX_CORNER_SMOOTHING) return;
+            if (firstSuperellipseSmoothing === null) {
+              firstSuperellipseSmoothing = smoothing;
+            }
+          }
+        }
+        // Superellipse uniformity: if any corner is superellipse, all four must be.
+        if (superellipseCount > 0 && superellipseCount < 4) return;
+        // Superellipse smoothing parity: all four smoothings must be identical.
+        // Object.is gives bitwise equality for finite numbers (NaN already rejected above).
+        if (superellipseCount === 4 && firstSuperellipseSmoothing !== null) {
+          for (const c of rawCorners) {
+            const corner = c as Record<string, unknown>;
+            const smoothing = corner["smoothing"] as number;
+            if (!Object.is(smoothing, firstSuperellipseSmoothing)) return;
           }
         }
       }

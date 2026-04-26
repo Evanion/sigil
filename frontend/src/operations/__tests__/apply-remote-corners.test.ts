@@ -714,6 +714,362 @@ describe("apply-remote corners handler (path='kind')", () => {
     });
   });
 
+  // ── M1 findings: missing bounds/uniformity checks ────────────────
+
+  describe("rejection: negative radii (M1 finding)", () => {
+    it("should reject negative radii.x", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "round", radii: { x: -1, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // Store must remain unchanged with zero radii from seed
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should reject negative radii.y", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "round", radii: { x: 8, y: -5 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+  });
+
+  describe("rejection: radii above MAX_CORNER_RADIUS (M1 finding)", () => {
+    it("should reject radii.x above MAX_CORNER_RADIUS (100_000)", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "round", radii: { x: 100_001, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should reject radii.y above MAX_CORNER_RADIUS (100_000)", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "round", radii: { x: 8, y: 100_001 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should accept radii exactly at MAX_CORNER_RADIUS (100_000)", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "round", radii: { x: 100_000, y: 100_000 } },
+                { type: "round", radii: { x: 100_000, y: 100_000 } },
+                { type: "round", radii: { x: 100_000, y: 100_000 } },
+                { type: "round", radii: { x: 100_000, y: 100_000 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // Should be applied — exactly at limit is valid
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(100_000);
+        }
+        dispose();
+      });
+    });
+  });
+
+  describe("rejection: superellipse uniformity (M1 finding)", () => {
+    it("should reject mixed superellipse and round corners", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+                { type: "round", radii: { x: 8, y: 8 } }, // not superellipse — invalid
+                { type: "round", radii: { x: 8, y: 8 } },
+                { type: "round", radii: { x: 8, y: 8 } },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // Must be rejected — store unchanged
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].type).toBe("round");
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should reject a single superellipse corner among other types", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "bevel", radii: { x: 8, y: 8 } },
+                { type: "notch", radii: { x: 8, y: 8 } },
+                { type: "scoop", radii: { x: 8, y: 8 } },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should accept all four superellipse corners", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // All four superellipse — valid, store must be updated
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].type).toBe("superellipse");
+        }
+        dispose();
+      });
+    });
+  });
+
+  describe("rejection: superellipse smoothing parity (M1 finding)", () => {
+    it("should reject superellipse corners with mismatched smoothing values", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 }, // different!
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // Must be rejected — smoothing values not all equal
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+
+    it("should reject superellipse corners where first and last smoothing differ", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeRectNode("node-1") },
+          pages: [],
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx([
+            makeKindOp("node-1", {
+              type: "rectangle",
+              corners: [
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.3 }, // different!
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+                { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.5 },
+              ],
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        const kind = state.nodes["node-1"].kind;
+        if (kind.type === "rectangle") {
+          expect(kind.corners[0].radii.x).toBe(0);
+        }
+        dispose();
+      });
+    });
+  });
+
   describe("rejection: non-object payload", () => {
     it("should leave state unchanged when value is a string", () => {
       createRoot((dispose) => {
