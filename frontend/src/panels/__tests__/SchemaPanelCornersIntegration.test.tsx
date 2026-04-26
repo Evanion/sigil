@@ -221,7 +221,7 @@ describe("RF-018: SchemaPanel → setCorners integration", () => {
       selectedNodeId,
       activeTool,
       selectedNodeIds: () => ["ellipse-uuid"],
-    } as DocumentStoreAPI;
+    } as unknown as DocumentStoreAPI;
 
     const { container } = render(() => (
       <DocumentProvider store={store}>

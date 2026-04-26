@@ -14,9 +14,10 @@
  * 5. Frame and image kinds also accept writes.
  */
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, type Mock } from "vitest";
 import { handleCornersFieldChange } from "../schema-panel-corners-handler";
 import type { DocumentNode, Corner } from "../../types/document";
+import type { DocumentStoreAPI } from "../../store/document-store-solid";
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
@@ -24,15 +25,18 @@ function roundCorner(r: number): Corner {
   return { type: "round", radii: { x: r, y: r } };
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnyMock = ReturnType<typeof vi.fn> & ((...args: any[]) => any);
+// RF-032: Replace the `any`-bearing AnyMock alias with a precise Mock type
+// derived from the real store's `setCorners` signature. This eliminates the
+// eslint-disable-next-line directive and gives the test file the same
+// `no-explicit-any` discipline as production code.
+type SetCornersMock = Mock<DocumentStoreAPI["setCorners"]>;
 
 interface CornersStore {
-  setCorners: AnyMock;
+  setCorners: SetCornersMock;
 }
 
 function makeStore(): CornersStore {
-  return { setCorners: vi.fn() as AnyMock };
+  return { setCorners: vi.fn() as unknown as SetCornersMock };
 }
 
 function makeRectNode(corners: [Corner, Corner, Corner, Corner]): DocumentNode {
