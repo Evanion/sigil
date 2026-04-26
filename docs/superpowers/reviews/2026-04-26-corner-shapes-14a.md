@@ -41,7 +41,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, Security, BE
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `08ff0e7`) — `validate_deserialized_page` now calls `validate_corners` for Rectangle/Frame/Image kinds; tests reject hand-crafted invalid Superellipse/Round mix.
 - **Location:** `crates/core/src/serialize.rs` (`validate_deserialized_page`), `crates/core/src/node.rs:773-794`
 - **Issue:** Cross-field invariants for `[Corner;4]` (superellipse uniformity, smoothing parity, MAX_CORNER_RADIUS) are NOT enforced at the workfile deserialization boundary. `validate_deserialized_page` walks floats but never calls `validate_corners`. A hand-edited workfile with mixed Superellipse+Round corners loads silently. Spec §7 promises this enforcement.
 - **Recommendation:** In `validate_deserialized_page`, when kind is Rectangle/Frame/Image, call `validate_corners` on the corners array. Add a workfile-load test asserting hand-crafted invalid corners is rejected.
@@ -59,7 +59,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, Security, Logic, Data Scientist
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `307eacb`) — added typed `MigrationError::InvalidLegacyCornerRadii { node_id, raw_value }`; tests cover negative, NaN, infinite, null, and string-encoded legacy `corner_radii`.
 - **Location:** `crates/core/src/migrations.rs:42-53`
 - **Issue:** `migrate_to_v2` silently coerces malformed legacy `corner_radii` (missing/null/non-numeric/string-encoded) to `0.0` via chained `unwrap_or_default()` / `unwrap_or(0.0)`. Violates §11 "No Silent Clamping of Invalid Input". A v1 file with `corner_radii: "broken"` becomes `[0,0,0,0]` Round corners with no diagnostic.
 - **Recommendation:** Return `MigrationError::InvalidLegacyCornerRadii { node_id, raw_value }` when present-but-malformed. Missing field may default to 0; type-confused values must error. Add tests for null/string/wrong-arity.
@@ -95,7 +95,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** DevOps
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `ad17290`) — `LoadedWorkfile { migrated_from }` plumbs migration flag through to persistence task; `main.rs:52` calls `signal_dirty()` when present, forcing a v2 save on next persistence tick.
 - **Location:** `crates/server/src/persistence.rs`, `crates/server/src/main.rs:52`
 - **Issue:** After v1→v2 load, in-memory doc is v2 but on-disk file remains v1 until first user mutation triggers `signal_dirty`. Server restart re-runs migration each load; v1 file lingers indefinitely.
 - **Recommendation:** Mark document dirty after successful v1→v2 migration (or write synchronously at end of `load_workfile`). Turns silent migration into observable migration.
@@ -104,7 +104,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** DevOps
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `2079f63`) — added `BACKUP_DIR_NAME = ".backup-v1"` and `backup_v1_files` helper; `write_prepared_save` invokes backup helper when `prepared.migrated_from.is_some()` before any overwrite (one-shot via `metadata(.backup-v1).is_ok() => Ok(())`); writes are atomic.
 - **Location:** `crates/server/src/workfile.rs:159-197`
 - **Issue:** Migrated v2 content overwrites v1 in place via `atomic_write` — no backup of v1 file. One-way migration with no rollback affordance if a v2 round-trip introduces an unintended mutation.
 - **Recommendation:** Before first migrated write, copy `manifest.json` and `pages/*.json` to a sibling `.sigil/.backup-v1/` directory. Pass `migrated_from: Option<u32>` flag through to `write_prepared_save`.
