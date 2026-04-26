@@ -68,7 +68,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE, Data Scientist
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `11f83ab`) — factory now constructs four independent Corner objects (and four independent radii objects); colocated `default-corners.test.ts` asserts `result[i] !== result[j]` for all i ≠ j and that mutating one corner does not affect the others.
 - **Location:** `frontend/src/store/default-corners.ts:14-17`
 - **Issue:** `defaultCorners()` returns `[c, c, c, c]` — all four entries reference the same Corner object. Docstring claims "fresh tuple … callers may mutate without aliasing" but mutation of `corners[0].radii.x` mutates indices 1, 2, 3. Latent footgun for any future positional in-place mutation.
 - **Recommendation:** Construct 4 independent objects in the array literal, OR `Object.freeze` and update the docstring. Add `result[0] !== result[1]` assertion test.
@@ -77,7 +77,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE, UX
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `d4691ff`) — imported `MAX_CORNER_RADIUS` from `store/corners-input` into `design-schema.ts`; all four corner-radius entries now declare `max: MAX_CORNER_RADIUS`. Added `design-schema.test.ts` asserting every corner-radius field has `max === MAX_CORNER_RADIUS` and `min === 0`.
 - **Location:** `frontend/src/panels/schemas/design-schema.ts:62-65`
 - **Issue:** Corner-radius `NumberInput` fields use `min: 0` but no `max`. CLAUDE.md §11 ("Constants Must Be Enforced") requires every numeric input to have a named-constant max. `MAX_CORNER_RADIUS` exists in `store/corners-input.ts`.
 - **Recommendation:** Add `max: MAX_CORNER_RADIUS` to all four corner-radius schema entries (extend schema infra to reference the imported constant).
@@ -86,7 +86,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE, UX
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `7d13fb0`) — handler now parses the axis component from the field key and updates only the edited axis on the per-corner array branch; the orthogonal axis is preserved. Uniform-scalar shorthand and shape-level superellipse paths intentionally collapse asymmetry per spec §7. Added per-corner preservation tests for Round and Bevel corners on both axes.
 - **Location:** `frontend/src/panels/schema-panel-corners-handler.ts:109`
 - **Issue:** Editing a single corner's `.x` writes `radii: { x: value, y: value }`, silently overwriting any pre-existing y value. Nodes with elliptical corners (x≠y) set via MCP have their y silently destroyed. Silent data loss, not silent clamping.
 - **Recommendation:** Preserve `y: existingCorners[idx].radii.y` so independent y values survive single-axis edits, OR document uniform-only constraint and reject elliptical inputs at the parser.
