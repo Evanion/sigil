@@ -205,6 +205,48 @@ describe("parseCornersInput — per-corner array", () => {
     ];
     expect(parseCornersInput(input)).toBeNull();
   });
+
+  // RF-016: stray `smoothing` on non-superellipse per-corner entries must be
+  // rejected — symmetric with the Rust parse_per_corner_array validation.
+  it("should reject Round corner with stray smoothing field", () => {
+    const bad = [
+      { type: "round", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+    ] as unknown as Corners;
+    expect(parseCornersInput(bad)).toBeNull();
+  });
+
+  it("should reject Bevel corner with stray smoothing field", () => {
+    const bad = [
+      { type: "bevel", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+    ] as unknown as Corners;
+    expect(parseCornersInput(bad)).toBeNull();
+  });
+
+  it("should reject Notch corner with stray smoothing field", () => {
+    const bad = [
+      { type: "notch", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+    ] as unknown as Corners;
+    expect(parseCornersInput(bad)).toBeNull();
+  });
+
+  it("should reject Scoop corner with stray smoothing field", () => {
+    const bad = [
+      { type: "scoop", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+    ] as unknown as Corners;
+    expect(parseCornersInput(bad)).toBeNull();
+  });
 });
 
 // ── parseCornersInput — non-corner-bearing kind guard ─────────────────────
