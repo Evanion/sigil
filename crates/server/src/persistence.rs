@@ -219,18 +219,25 @@ mod tests {
         // No assertion needed — we're verifying no panic / hang.
     }
 
-    /// RF-009: when the persistence task is constructed with a migration flag
-    /// and a dirty signal arrives, the resulting save must consume the
-    /// migration flag exactly once. The flag is the signal that the next save
-    /// is the first persisted write after a v1→current migration on load.
+    /// RF-009/RF-010: when the persistence task is constructed with a migration
+    /// flag and a dirty signal arrives, the resulting save must (1) consume the
+    /// migration flag exactly once and (2) populate the `.backup-v1/` directory.
     #[tokio::test]
-    async fn test_persistence_consumes_migration_flag_on_save() {
+    async fn test_persistence_consumes_migration_flag_and_creates_backup() {
         let doc = Arc::new(Mutex::new(SendDocument(Document::new(
             "Migrated".to_string(),
         ))));
         let dir = tempfile::tempdir().unwrap();
         let workfile_path = dir.path().join("migrated.sigil");
         tokio::fs::create_dir_all(&workfile_path).await.unwrap();
+
+        // Lay down a synthetic v1 manifest so the backup has something to capture.
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            r#"{"schema_version": 1, "name": "Original", "page_order": []}"#,
+        )
+        .await
+        .unwrap();
 
         let migration_flag: MigrationFlag = Arc::new(Mutex::new(Some(1)));
         let (tx, _handle) = spawn_persistence_task_with_migration_flag(
@@ -242,8 +249,14 @@ mod tests {
         tx.try_send(()).unwrap();
         sleep(Duration::from_millis(SAVE_DEBOUNCE_MS + 200)).await;
 
-        // Migration flag should be cleared so subsequent saves don't re-trigger
-        // migration-specific behavior.
+        // Backup directory should exist after the migrated save.
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_ok(),
+            ".backup-v1/ should be created on the first migrated save"
+        );
+
+        // Migration flag should be cleared so subsequent saves don't re-back-up.
         let flag_state = migration_flag.lock().unwrap();
         assert!(
             flag_state.is_none(),

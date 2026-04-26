@@ -163,6 +163,85 @@ async fn atomic_write(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Subdirectory under the workfile that holds an immutable copy of the original
+/// pre-migration files (manifest + pages). Written exactly once on the first
+/// save after a v1→current migration on load (RF-010).
+const BACKUP_DIR_NAME: &str = ".backup-v1";
+
+/// Backs up the current `manifest.json` and `pages/*.json` files to `.backup-v1/`
+/// before they are overwritten by a migrated save (RF-010).
+///
+/// This is a one-shot operation: the function is a no-op if the backup directory
+/// already exists, ensuring we never overwrite the original v1 snapshot. Each
+/// file is copied via the atomic write-to-temp-then-rename pattern to prevent
+/// partially-written backups on crash.
+///
+/// # Errors
+///
+/// Returns an error if reading the source files fails or writing the backup
+/// fails. Errors from this function abort the save so the migration flag stays
+/// armed for the next attempt.
+async fn backup_v1_files(workfile_path: &Path, original_version: u32) -> Result<()> {
+    let backup_root = workfile_path.join(BACKUP_DIR_NAME);
+
+    // Idempotent: if a previous backup exists, leave it alone.
+    if tokio::fs::metadata(&backup_root).await.is_ok() {
+        tracing::debug!(
+            "backup directory already exists, skipping: {}",
+            backup_root.display()
+        );
+        return Ok(());
+    }
+
+    let backup_pages_dir = backup_root.join("pages");
+    tokio::fs::create_dir_all(&backup_pages_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create backup directory: {}",
+                backup_pages_dir.display()
+            )
+        })?;
+
+    // Back up manifest.json if it exists.
+    let manifest_src = workfile_path.join("manifest.json");
+    if tokio::fs::metadata(&manifest_src).await.is_ok() {
+        let manifest_content = tokio::fs::read_to_string(&manifest_src)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to read manifest for backup: {}",
+                    manifest_src.display()
+                )
+            })?;
+        atomic_write(&backup_root.join("manifest.json"), &manifest_content).await?;
+    }
+
+    // Back up each existing page file.
+    let pages_src_dir = workfile_path.join("pages");
+    if tokio::fs::metadata(&pages_src_dir).await.is_ok() {
+        let mut entries = tokio::fs::read_dir(&pages_src_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                let content = tokio::fs::read_to_string(&path).await.with_context(|| {
+                    format!("failed to read page for backup: {}", path.display())
+                })?;
+                atomic_write(&backup_pages_dir.join(name), &content).await?;
+            }
+        }
+    }
+
+    tracing::info!(
+        "backed up v{original_version} workfile to {} before first migrated save",
+        backup_root.display()
+    );
+
+    Ok(())
+}
+
 /// Writes a [`PreparedSave`] to the `.sigil/` directory on disk.
 ///
 /// This is the async half of the save pipeline. Call [`prepare_save`] first
@@ -174,10 +253,20 @@ async fn atomic_write(path: &Path, content: &str) -> Result<()> {
 ///
 /// All file writes use atomic write-to-temp-then-rename to prevent partial writes.
 ///
+/// If `prepared.migrated_from` is `Some(v)`, the function first copies the
+/// existing on-disk files to `.backup-v1/` (RF-010) so the original pre-migration
+/// state is preserved. The backup is one-shot: subsequent saves skip the copy
+/// if the backup directory already exists.
+///
 /// # Errors
 ///
 /// Returns an error if directory creation or file writes fail.
 pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) -> Result<()> {
+    // RF-010: back up the original v1 files before the first migrated write.
+    if let Some(original_version) = prepared.migrated_from {
+        backup_v1_files(workfile_path, original_version).await?;
+    }
+
     let pages_dir = workfile_path.join("pages");
     tokio::fs::create_dir_all(&pages_dir).await?;
 
@@ -1109,5 +1198,138 @@ mod tests {
             "v1 page should produce migrated_from = Some(1)"
         );
         assert_eq!(loaded.document.metadata.name, "Legacy Doc");
+    }
+
+    /// RF-010: when `prepared.migrated_from` is set, the writer copies the
+    /// existing `manifest.json` and `pages/*.json` files to `.backup-v1/`
+    /// before overwriting them.
+    #[tokio::test]
+    async fn test_write_prepared_save_creates_backup_when_migrated() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("backup.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create dirs");
+
+        // Lay down a synthetic v1 manifest + page on disk.
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            r#"{"schema_version": 1, "name": "Original", "page_order": []}"#,
+        )
+        .await
+        .expect("write original manifest");
+        let original_page_uuid = Uuid::new_v4();
+        tokio::fs::write(
+            pages_dir.join(format!("{original_page_uuid}.json")),
+            r#"{"schema_version": 1, "id": "00000000-0000-0000-0000-000000000099", "name": "Old", "nodes": [], "transitions": []}"#,
+        )
+        .await
+        .expect("write original page");
+
+        // Build a PreparedSave with migrated_from set.
+        let doc = Document::new("Migrated".to_string());
+        let mut prepared = prepare_save(&doc).expect("prepare save");
+        prepared.migrated_from = Some(1);
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        // Verify backup directory exists.
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_ok(),
+            ".backup-v1/ should exist after migrated save"
+        );
+
+        // Verify backup contains the original manifest with v1 contents.
+        let backup_manifest = tokio::fs::read_to_string(backup_root.join("manifest.json"))
+            .await
+            .expect("read backup manifest");
+        assert!(
+            backup_manifest.contains("\"schema_version\": 1"),
+            "backup should preserve original v1 manifest, got: {backup_manifest}"
+        );
+        assert!(
+            backup_manifest.contains("Original"),
+            "backup should preserve original manifest contents"
+        );
+
+        // Verify backup contains the original page file.
+        let backup_page = backup_root
+            .join("pages")
+            .join(format!("{original_page_uuid}.json"));
+        assert!(
+            tokio::fs::metadata(&backup_page).await.is_ok(),
+            "backup should preserve original page file"
+        );
+
+        // Verify the live manifest was overwritten with the new v2 form.
+        let live_manifest = tokio::fs::read_to_string(workfile_path.join("manifest.json"))
+            .await
+            .expect("read live manifest");
+        assert!(
+            live_manifest.contains("Migrated"),
+            "live manifest should reflect new document"
+        );
+    }
+
+    /// RF-010: a second migrated save must not overwrite the existing backup —
+    /// the backup is a one-shot snapshot of the original v1 state.
+    #[tokio::test]
+    async fn test_write_prepared_save_does_not_overwrite_existing_backup() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("idempotent.sigil");
+        let backup_root = workfile_path.join(".backup-v1");
+        tokio::fs::create_dir_all(&backup_root)
+            .await
+            .expect("create dirs");
+
+        // Pre-existing backup with sentinel content.
+        tokio::fs::write(backup_root.join("manifest.json"), "ORIGINAL_BACKUP")
+            .await
+            .expect("write sentinel");
+
+        let doc = Document::new("Doc".to_string());
+        let mut prepared = prepare_save(&doc).expect("prepare save");
+        prepared.migrated_from = Some(1);
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        let backup_manifest = tokio::fs::read_to_string(backup_root.join("manifest.json"))
+            .await
+            .expect("read backup");
+        assert_eq!(
+            backup_manifest, "ORIGINAL_BACKUP",
+            "existing backup must not be overwritten"
+        );
+    }
+
+    /// RF-010: when `migrated_from` is `None`, the writer must NOT create a
+    /// `.backup-v1/` directory — backups only happen on the first migrated save.
+    #[tokio::test]
+    async fn test_write_prepared_save_does_not_create_backup_when_not_migrated() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("normal.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create dir");
+
+        let doc = Document::new("Normal".to_string());
+        let prepared = prepare_save(&doc).expect("prepare save");
+        // migrated_from defaults to None.
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_err(),
+            ".backup-v1/ should not be created for non-migrated saves"
+        );
     }
 }
