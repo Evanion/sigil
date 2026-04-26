@@ -118,6 +118,15 @@ fn parse_per_corner_array(arr: &[Value]) -> Result<[Corner; 4], CoreError> {
                     .into(),
             ));
         }
+        // Reject stray `smoothing` on non-superellipse per-corner entries —
+        // smoothing only applies to superellipse, and per the spec superellipse
+        // must use the shape-level form. Silently dropping the field would mask
+        // a malformed input.
+        if entry.get("smoothing").is_some() {
+            return Err(CoreError::ValidationError(format!(
+                "corners[{i}]: 'smoothing' is only valid on superellipse shape, not '{shape}'"
+            )));
+        }
         let radii_obj = entry.get("radii").ok_or_else(|| {
             CoreError::ValidationError(format!("corners[{i}] missing 'radii' field"))
         })?;
@@ -445,6 +454,76 @@ mod tests {
         assert!(
             format!("{err}").contains("MAX_CORNER_RADIUS") || format!("{err}").contains("100000"),
             "error message must reference the limit, got: {err}"
+        );
+    }
+
+    // ── RF-016: per-corner array must reject stray smoothing on non-superellipse ──
+
+    #[test]
+    fn test_per_corner_array_rejects_smoothing_on_round() {
+        let input = json!([
+            { "shape": "round", "radii": { "x": 4, "y": 4 }, "smoothing": 0.5 },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for stray smoothing on round corner");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing") && msg.contains("round"),
+            "error must reference smoothing and shape, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_per_corner_array_rejects_smoothing_on_bevel() {
+        let input = json!([
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "bevel", "radii": { "x": 4, "y": 4 }, "smoothing": 0.5 },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for stray smoothing on bevel corner");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing") && msg.contains("bevel"),
+            "error must reference smoothing and shape, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_per_corner_array_rejects_smoothing_on_notch() {
+        let input = json!([
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "notch", "radii": { "x": 4, "y": 4 }, "smoothing": 0.5 },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for stray smoothing on notch corner");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing") && msg.contains("notch"),
+            "error must reference smoothing and shape, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_per_corner_array_rejects_smoothing_on_scoop() {
+        let input = json!([
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "round", "radii": { "x": 4, "y": 4 } },
+            { "shape": "scoop", "radii": { "x": 4, "y": 4 }, "smoothing": 0.5 }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for stray smoothing on scoop corner");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing") && msg.contains("scoop"),
+            "error must reference smoothing and shape, got: {msg}"
         );
     }
 
