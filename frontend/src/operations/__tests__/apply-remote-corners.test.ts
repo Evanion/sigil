@@ -1143,4 +1143,123 @@ describe("apply-remote corners handler (path='kind')", () => {
       });
     });
   });
+
+  // ── RF-030: structured logging on every silent early-return ──────────
+  //
+  // Per CLAUDE.md "No Silent Error Suppression": each rejection branch
+  // in the kind handler must emit a structured `console.warn` carrying
+  // `{ nodeUuid, reason, ...ctx }` so dropped remote mutations are
+  // observable. These tests assert the log shape, not just presence.
+
+  describe("RF-030: emits structured warn on every rejection branch", () => {
+    function expectRejection(
+      payload: unknown,
+      expectedReason: string,
+      makeNode: (uuid: string) => StoreDocumentNode = makeRectNode,
+    ): void {
+      createRoot((dispose) => {
+        const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        try {
+          const [state, setState] = createStore<StoreState>({
+            nodes: { "node-1": makeNode("node-1") },
+            pages: [],
+          });
+          const fetchPages = vi.fn().mockResolvedValue(undefined);
+          applyRemoteTransaction(
+            makeTx([makeKindOp("node-1", payload)]),
+            LOCAL_USER,
+            setState,
+            (uuid) => state.nodes[uuid],
+            fetchPages,
+          );
+          const matched = warnSpy.mock.calls.find(
+            (call) =>
+              call[0] === "Remote set_field kind: rejected" &&
+              typeof call[1] === "object" &&
+              call[1] !== null &&
+              (call[1] as Record<string, unknown>).reason === expectedReason,
+          );
+          expect(matched, `expected reason=${expectedReason}`).toBeDefined();
+          const ctx = matched?.[1] as Record<string, unknown>;
+          expect(ctx.nodeUuid).toBe("node-1");
+        } finally {
+          warnSpy.mockRestore();
+          dispose();
+        }
+      });
+    }
+
+    it("warns reason=kind_value_not_object when value is null", () => {
+      expectRejection(null, "kind_value_not_object");
+    });
+
+    it("warns reason=kind_value_not_object when value is an array", () => {
+      expectRejection(["rectangle"], "kind_value_not_object");
+    });
+
+    it("warns reason=kind_type_mismatch when type discriminator differs", () => {
+      expectRejection({ type: "frame", layout: null, corners: ZERO_CORNERS }, "kind_type_mismatch");
+    });
+
+    it("warns reason=corners_not_array_of_4 when corners is missing", () => {
+      expectRejection({ type: "rectangle" }, "corners_not_array_of_4");
+    });
+
+    it("warns reason=corners_not_array_of_4 when corners has wrong length", () => {
+      expectRejection(
+        { type: "rectangle", corners: [{ type: "round", radii: { x: 0, y: 0 } }] },
+        "corners_not_array_of_4",
+      );
+    });
+
+    it("warns reason=corner_invalid_type when discriminator is not in the allowlist", () => {
+      const corners = [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "elliptical", radii: { x: 0, y: 0 } }, // unknown type
+      ];
+      expectRejection({ type: "rectangle", corners }, "corner_invalid_type");
+    });
+
+    it("warns reason=corner_radius_x_not_finite when x is NaN", () => {
+      const corners = [
+        { type: "round", radii: { x: NaN, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ];
+      expectRejection({ type: "rectangle", corners }, "corner_radius_x_not_finite");
+    });
+
+    it("warns reason=corner_radius_x_out_of_range when x is negative", () => {
+      const corners = [
+        { type: "round", radii: { x: -1, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ];
+      expectRejection({ type: "rectangle", corners }, "corner_radius_x_out_of_range");
+    });
+
+    it("warns reason=superellipse_partial_uniformity when only some corners are superellipse", () => {
+      const corners = [
+        { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+        { type: "round", radii: { x: 8, y: 8 } },
+        { type: "round", radii: { x: 8, y: 8 } },
+        { type: "round", radii: { x: 8, y: 8 } },
+      ];
+      expectRejection({ type: "rectangle", corners }, "superellipse_partial_uniformity");
+    });
+
+    it("warns reason=superellipse_smoothing_parity_violation when smoothings differ across corners", () => {
+      const corners = [
+        { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+        { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+        { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.6 },
+        { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: 0.7 }, // mismatched
+      ];
+      expectRejection({ type: "rectangle", corners }, "superellipse_smoothing_parity_violation");
+    });
+  });
 });
