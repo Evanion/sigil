@@ -137,6 +137,50 @@ describe("parseCornersInput — shape-level superellipse", () => {
   });
 });
 
+// ── parseCornersInput — aliasing safety (forms 1 and 2) ──────────────────
+//
+// The shorthand expansion forms (uniform scalar, shape-level superellipse)
+// must produce four INDEPENDENT Corner objects, not four references to the
+// same object. Sharing a single instance across all slots is an aliasing
+// hazard: downstream code mutating one corner via `produce()` would silently
+// mutate the other three. Mirrors `default-corners.ts` and Rust
+// `expand_uniform_scalar`.
+
+describe("parseCornersInput — aliasing safety", () => {
+  it("uniform scalar produces 4 independent Corner objects (not shared reference)", () => {
+    const corners = parseCornersInput(8) as Corners;
+    // Identity check: every pair must be a distinct object reference.
+    expect(corners[0]).not.toBe(corners[1]);
+    expect(corners[0]).not.toBe(corners[2]);
+    expect(corners[0]).not.toBe(corners[3]);
+    expect(corners[1]).not.toBe(corners[2]);
+    expect(corners[1]).not.toBe(corners[3]);
+    expect(corners[2]).not.toBe(corners[3]);
+    // The radii sub-objects must also be distinct — otherwise mutating
+    // corner[0].radii.x would still alias the others' radii.
+    expect(corners[0].radii).not.toBe(corners[1].radii);
+    expect(corners[0].radii).not.toBe(corners[2].radii);
+    expect(corners[0].radii).not.toBe(corners[3].radii);
+  });
+
+  it("shape-level superellipse produces 4 independent Corner objects (not shared reference)", () => {
+    const corners = parseCornersInput({
+      type: "superellipse",
+      radius: 12,
+      smoothing: 0.6,
+    }) as Corners;
+    expect(corners[0]).not.toBe(corners[1]);
+    expect(corners[0]).not.toBe(corners[2]);
+    expect(corners[0]).not.toBe(corners[3]);
+    expect(corners[1]).not.toBe(corners[2]);
+    expect(corners[1]).not.toBe(corners[3]);
+    expect(corners[2]).not.toBe(corners[3]);
+    expect(corners[0].radii).not.toBe(corners[1].radii);
+    expect(corners[0].radii).not.toBe(corners[2].radii);
+    expect(corners[0].radii).not.toBe(corners[3].radii);
+  });
+});
+
 // ── parseCornersInput — Form 3: per-corner array ──────────────────────────
 
 describe("parseCornersInput — per-corner array", () => {

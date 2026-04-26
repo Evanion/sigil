@@ -64,10 +64,15 @@ export type CornersInput = number | SuperellipseInput | Corners;
  */
 export function parseCornersInput(input: CornersInput): Corners | null {
   // ── Form 1: uniform scalar ──────────────────────────────────────────
+  // Construct four independent Corner objects (no shared reference). Sharing
+  // a single object across all four slots is an aliasing hazard: any
+  // downstream code that mutates one corner via `produce()` would silently
+  // mutate the other three. Mirrors the per-slot construction in
+  // `default-corners.ts` and the Rust `expand_uniform_scalar` helper.
   if (typeof input === "number") {
     if (!Number.isFinite(input) || input < 0 || input > MAX_CORNER_RADIUS) return null;
-    const corner: Corner = { type: "round", radii: { x: input, y: input } };
-    return [corner, corner, corner, corner];
+    const make = (): Corner => ({ type: "round", radii: { x: input, y: input } });
+    return [make(), make(), make(), make()];
   }
 
   // ── Form 2: shape-level superellipse object ─────────────────────────
@@ -82,12 +87,13 @@ export function parseCornersInput(input: CornersInput): Corners | null {
     const smooth = smoothing ?? DEFAULT_SMOOTHING;
     if (!Number.isFinite(smooth) || smooth < MIN_CORNER_SMOOTHING || smooth > MAX_CORNER_SMOOTHING)
       return null;
-    const corner: Corner = {
+    // Same aliasing rule applies — one Corner object per slot.
+    const make = (): Corner => ({
       type: "superellipse",
       radii: { x: radius, y: radius },
       smoothing: smooth,
-    };
-    return [corner, corner, corner, corner];
+    });
+    return [make(), make(), make(), make()];
   }
 
   // ── Form 3: per-corner array ────────────────────────────────────────
