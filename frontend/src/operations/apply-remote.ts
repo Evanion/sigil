@@ -31,22 +31,17 @@ type DeepMutable<T> = {
 };
 
 // ── Corner shape validation constants ─────────────────────────────────
-// These values must stay in sync with crates/core/src/validate.rs:
-//   MAX_CORNER_RADIUS   = 100_000.0
-//   MIN_CORNER_SMOOTHING = 0.0
-//   MAX_CORNER_SMOOTHING = 1.0
+// RF-031: Consolidated — import from the canonical source in corners-input.ts
+// instead of redefining locally. The previous local copies drifted silently
+// when the Rust source-of-truth changed; a single import site prevents that.
+import {
+  MAX_CORNER_RADIUS,
+  MIN_CORNER_SMOOTHING,
+  MAX_CORNER_SMOOTHING,
+} from "../store/corners-input";
 
 /** Valid discriminator strings for the Corner union type. */
 const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
-
-/** Maximum corner radius component (matches Rust MAX_CORNER_RADIUS). */
-const MAX_CORNER_RADIUS = 100_000;
-
-/** Minimum superellipse smoothing (matches Rust MIN_CORNER_SMOOTHING). */
-const MIN_CORNER_SMOOTHING = 0.0;
-
-/** Maximum superellipse smoothing (matches Rust MAX_CORNER_SMOOTHING). */
-const MAX_CORNER_SMOOTHING = 1.0;
 
 // ── Remote payload types ──────────────────────────────────────────────
 
