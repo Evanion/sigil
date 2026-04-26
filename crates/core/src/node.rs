@@ -1055,8 +1055,15 @@ impl<'de> Deserialize<'de> for Corner {
 
 /// Construct an array of four `Corner::Round` with zero radii.
 /// Used as the default for nodes that don't specify corners.
+///
+/// `const fn` so it can be invoked in `const` contexts and (more
+/// importantly) optimized away to a static value at compile time.
+/// We construct the inner `CornerRadii` via struct literal here rather
+/// than `CornerRadii::new`, since `new` is fallible (`Result`) and
+/// cannot be `const`. The literal `0.0` values trivially satisfy the
+/// validation rules in `CornerRadii::new`, so this is sound.
 #[must_use]
-pub fn default_corners() -> [Corner; 4] {
+pub const fn default_corners() -> [Corner; 4] {
     let zero = Corner::Round {
         radii: CornerRadii { x: 0.0, y: 0.0 },
     };
