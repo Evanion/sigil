@@ -506,6 +506,74 @@ mod tests {
         );
     }
 
+    // ── RF-021: Round-trip canonicalization ────────────────────────────
+
+    /// Shorthand input → parse → serialize must produce the canonical
+    /// verbose form (per-corner objects with `type` and `radii`).
+    #[test]
+    fn test_uniform_shorthand_serializes_to_canonical_verbose_form() {
+        let input = json!({ "shape": "round", "radius": 8 });
+        let corners = parse_corners_input(&input).expect("parse");
+        let serialized = serde_json::to_value(corners).expect("serialize");
+        let expected = json!([
+            { "type": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "type": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "type": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "type": "round", "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        assert_eq!(serialized, expected);
+    }
+
+    /// Shape-level superellipse shorthand → parse → serialize must produce
+    /// the canonical verbose form with `smoothing` on every corner.
+    #[test]
+    fn test_superellipse_shorthand_serializes_to_canonical_verbose_form() {
+        let input = json!({ "shape": "superellipse", "radius": 8, "smoothing": 0.6 });
+        let corners = parse_corners_input(&input).expect("parse");
+        let serialized = serde_json::to_value(corners).expect("serialize");
+        let expected = json!([
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 }
+        ]);
+        assert_eq!(serialized, expected);
+    }
+
+    /// Verbose canonical form → serde deserialize → serde serialize must
+    /// round-trip to the identical verbose canonical form. The persisted
+    /// workfile format uses `type` (not the parser's `shape` alias).
+    #[test]
+    fn test_verbose_form_deserialize_serialize_round_trip() {
+        let verbose = json!([
+            { "type": "round", "radii": { "x": 4.0, "y": 4.0 } },
+            { "type": "bevel", "radii": { "x": 8.0, "y": 8.0 } },
+            { "type": "notch", "radii": { "x": 12.0, "y": 12.0 } },
+            { "type": "scoop", "radii": { "x": 16.0, "y": 16.0 } }
+        ]);
+        // Deserialize directly via serde — the verbose form is the canonical
+        // persisted shape used by the serialize/deserialize pipeline.
+        let corners: Vec<Corner> = serde_json::from_value(verbose.clone()).expect("deserialize");
+        let reserialized = serde_json::to_value(&corners).expect("serialize");
+        assert_eq!(reserialized, verbose);
+    }
+
+    /// Verbose superellipse form → deserialize → serialize must round-trip.
+    #[test]
+    fn test_verbose_superellipse_round_trip_via_serde() {
+        let verbose = json!([
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 },
+            { "type": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.6 }
+        ]);
+        // The parser rejects superellipse in the per-corner-array form;
+        // deserialize each corner directly via serde to verify round-trip.
+        let corners: Vec<Corner> = serde_json::from_value(verbose.clone()).expect("deserialize");
+        let reserialized = serde_json::to_value(&corners).expect("serialize");
+        assert_eq!(reserialized, verbose);
+    }
+
     #[test]
     fn test_parse_corners_input_rejects_negative_radius_in_superellipse_radii_array() {
         // Shape-level superellipse with per-corner radii array — one entry is negative.
