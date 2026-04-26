@@ -949,19 +949,43 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // parseCornersInput enforces: Number.isFinite, non-negative, MAX_CORNER_RADIUS,
     // MIN/MAX_CORNER_SMOOTHING, no superellipse in per-corner form.
     // Returns null for any invalid input — we treat that as a no-op (no silent clamping).
+    // RF-015: log structured payload at every early-return so callers can observe
+    // why a mutation was silently dropped. The store layer's responsibility ends
+    // at logging — surfacing a user-facing toast is the caller's job.
     const corners = parseCornersInput(input);
-    if (corners === null) return;
+    if (corners === null) {
+      console.warn("setCorners: parseCornersInput rejected input", {
+        uuid,
+        reason: "invalid_input",
+        input,
+      });
+      return;
+    }
 
     // Early return for non-corner-bearing kinds (text, ellipse, path, group,
     // component_instance). Only rectangle, frame, and image have a corners field.
     const node = state.nodes[uuid];
-    if (
-      !node ||
-      (node.kind.type !== "rectangle" &&
-        node.kind.type !== "frame" &&
-        node.kind.type !== "image")
-    )
+    if (!node) {
+      console.warn("setCorners: node not found", {
+        uuid,
+        reason: "node_not_found",
+        input,
+      });
       return;
+    }
+    if (
+      node.kind.type !== "rectangle" &&
+      node.kind.type !== "frame" &&
+      node.kind.type !== "image"
+    ) {
+      console.warn("setCorners: node kind does not bear corners", {
+        uuid,
+        reason: "kind_not_corner_bearing",
+        kindType: node.kind.type,
+        input,
+      });
+      return;
+    }
 
     // JSON clone: Solid proxy not structuredClone-safe
     const previousKind = deepClone(node.kind);

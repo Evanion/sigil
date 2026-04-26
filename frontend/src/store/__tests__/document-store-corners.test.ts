@@ -8,7 +8,7 @@
  * verified via a thin integration test using the interceptor + mock setState
  * pattern consistent with existing store tests.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   parseCornersInput,
   MAX_CORNER_RADIUS,
@@ -17,6 +17,7 @@ import {
   DEFAULT_SMOOTHING,
 } from "../corners-input";
 import type { Corner, Corners } from "../../types/document";
+import { createDocumentStoreSolid } from "../document-store-solid";
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -261,5 +262,58 @@ describe("parseCornersInput — returns null for null/undefined inputs", () => {
   it("should return null for wrong-length array (more than 4)", () => {
     const long = [roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8)] as unknown as Corners;
     expect(parseCornersInput(long)).toBeNull();
+  });
+});
+
+// ── setCorners — diagnostic logging on early returns (RF-015) ────────────
+//
+// The store's setCorners function MUST emit a structured `console.warn` at
+// every early-return so callers can observe why a mutation was silently
+// dropped. The warn payload includes `{ uuid, reason, input }` (and
+// `kindType` when the kind doesn't bear corners).
+//
+// These tests use createDocumentStoreSolid() directly to exercise the real
+// setCorners path. The store creates a urql client that lazily connects,
+// so no live server is required for synchronous call-and-warn assertions.
+
+describe("setCorners diagnostic logging (RF-015)", () => {
+  it("warns with reason=invalid_input when parseCornersInput returns null", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = createDocumentStoreSolid();
+      // -1 is rejected by parseCornersInput (negative scalar)
+      store.setCorners("missing-uuid", -1 as unknown as number);
+      const matched = warn.mock.calls.find(
+        (call) =>
+          typeof call[0] === "string" &&
+          (call[0] as string).startsWith("setCorners: parseCornersInput rejected"),
+      );
+      expect(matched).toBeDefined();
+      const payload = matched?.[1] as Record<string, unknown> | undefined;
+      expect(payload?.reason).toBe("invalid_input");
+      expect(payload?.uuid).toBe("missing-uuid");
+      store.destroy();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("warns with reason=node_not_found when uuid is unknown", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const store = createDocumentStoreSolid();
+      store.setCorners("missing-uuid", 8);
+      const matched = warn.mock.calls.find(
+        (call) =>
+          typeof call[0] === "string" && (call[0] as string) === "setCorners: node not found",
+      );
+      expect(matched).toBeDefined();
+      const payload = matched?.[1] as Record<string, unknown> | undefined;
+      expect(payload?.reason).toBe("node_not_found");
+      expect(payload?.uuid).toBe("missing-uuid");
+      store.destroy();
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
