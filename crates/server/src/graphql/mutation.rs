@@ -416,8 +416,20 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                         })),
                     })
                 }
+                // Explicitly enumerate the non-corner-bearing variants so that
+                // adding a new variant in core forces a compile error here once
+                // a corresponding string is added (RF-014). The wildcard arm
+                // remains as a guard against malformed (unknown) `type` values
+                // — it is unreachable for known v2 kinds.
+                "ellipse" | "path" | "text" | "group" | "component_instance" => {
+                    Err(async_graphql::Error::new(format!(
+                        "kind type '{kind_type}' does not carry corners; \
+                         SetField on path 'kind' is only supported for \
+                         rectangle, frame, and image"
+                    )))
+                }
                 other => Err(async_graphql::Error::new(format!(
-                    "kind type '{other}' is not supported by SetField on path 'kind'"
+                    "kind type '{other}' is not a known node kind"
                 ))),
             }
         }

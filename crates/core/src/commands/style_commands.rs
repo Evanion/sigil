@@ -220,11 +220,19 @@ impl FieldOperation for SetCorners {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         validate_corners(&self.new_corners)?;
         let node = doc.arena.get(self.node_id)?;
+        // Explicitly enumerate every NodeKind variant — adding a new variant
+        // in core forces a compile error here so the validator stays in sync
+        // (rust-defensive "NodeKind Variants Must Have Complete Validation
+        // Coverage", RF-014). No wildcard arm.
         match &node.kind {
             NodeKind::Rectangle { .. } | NodeKind::Frame { .. } | NodeKind::Image { .. } => Ok(()),
-            other => Err(CoreError::ValidationError(format!(
+            non_corner @ (NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Text { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. }) => Err(CoreError::ValidationError(format!(
                 "SetCorners requires Rectangle, Frame, or Image node, got {:?}",
-                std::mem::discriminant(other)
+                std::mem::discriminant(non_corner)
             ))),
         }
     }
@@ -238,9 +246,13 @@ impl FieldOperation for SetCorners {
                 *corners = self.new_corners;
                 Ok(())
             }
-            other => Err(CoreError::ValidationError(format!(
+            non_corner @ (NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Text { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. }) => Err(CoreError::ValidationError(format!(
                 "SetCorners requires Rectangle, Frame, or Image node, got {:?}",
-                std::mem::discriminant(other)
+                std::mem::discriminant(non_corner)
             ))),
         }
     }
