@@ -107,7 +107,12 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
 
     // Apply schema migrations in version order.
     // Each migrate_to_vN function is idempotent on already-migrated input.
-    let migrated = if version < 2 { migrate_to_v2(raw) } else { raw };
+    let migrated = if version < 2 {
+        migrate_to_v2(raw)
+            .map_err(|e| CoreError::SerializationError(format!("v1→v2 migration failed: {e}")))?
+    } else {
+        raw
+    };
 
     let page: SerializedPage = serde_json::from_value(migrated)
         .map_err(|e| CoreError::SerializationError(format!("failed to deserialize page: {e}")))?;
