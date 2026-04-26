@@ -575,29 +575,23 @@ pub fn validate_conic_gradient(g: &crate::node::ConicGradientDef) -> Result<(), 
 ///
 /// # Errors
 /// Returns `CoreError::ValidationError` if any check fails.
-///
-/// # Panics
-/// Does not panic in practice. The two `.unwrap()` calls in the smoothing-parity
-/// loop are guarded by the `superellipse_count == 4` precondition immediately
-/// above them, which guarantees every corner is `Superellipse` and `smoothing()`
-/// returns `Some`.
 pub fn validate_corners(corners: &[Corner; 4]) -> Result<(), CoreError> {
     // (1) and (2): per-corner field validation.
     for (i, corner) in corners.iter().enumerate() {
         let radii = corner.radii();
-        validate_radius_component(radii.x, i, "x")?;
-        validate_radius_component(radii.y, i, "y")?;
+        validate_radius_value(radii.x, &format!("corners[{i}].radii.x"))?;
+        validate_radius_value(radii.y, &format!("corners[{i}].radii.y"))?;
 
-        if let Some(s) = corner.smoothing() {
-            if !s.is_finite() {
+        if let Corner::Superellipse { smoothing, .. } = corner {
+            if !smoothing.is_finite() {
                 return Err(CoreError::ValidationError(format!(
-                    "corners[{i}].smoothing must be finite, got {s}"
+                    "corners[{i}].smoothing must be finite, got {smoothing}"
                 )));
             }
-            if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(&s) {
+            if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(smoothing) {
                 return Err(CoreError::ValidationError(format!(
                     "corners[{i}].smoothing must be in [{MIN_CORNER_SMOOTHING}, \
-                     {MAX_CORNER_SMOOTHING}], got {s}"
+                     {MAX_CORNER_SMOOTHING}], got {smoothing}"
                 )));
             }
         }
@@ -612,20 +606,24 @@ pub fn validate_corners(corners: &[Corner; 4]) -> Result<(), CoreError> {
     }
 
     // (4) Smoothing parity when all four are superellipse.
-    if superellipse_count == 4 {
-        // SAFETY: we verified all four corners are Superellipse above, so
-        // `smoothing()` returns `Some` for every element in this loop.
-        let first = corners[0].smoothing().unwrap();
+    // We pattern-match the first corner directly rather than calling
+    // `smoothing()` and unwrapping — the discriminant is in the type system,
+    // so a non-`Superellipse` corner here would be a compile-time-impossible
+    // contradiction with the `superellipse_count == 4` check above.
+    if let (4, Corner::Superellipse { smoothing: first, .. }) =
+        (superellipse_count, &corners[0])
+    {
         for (i, c) in corners.iter().enumerate().skip(1) {
-            let s = c.smoothing().unwrap();
-            // Bitwise equality — smoothing is user-entered; the same value
-            // should round-trip exactly. Epsilon comparison would silently
-            // accept drift introduced by serialization rounding.
-            if s.to_bits() != first.to_bits() {
-                return Err(CoreError::ValidationError(format!(
-                    "superellipse smoothing must match across all four corners \
-                     (corners[0]={first}, corners[{i}]={s})"
-                )));
+            if let Corner::Superellipse { smoothing: s, .. } = c {
+                // Bitwise equality — smoothing is user-entered; the same
+                // value should round-trip exactly. Epsilon comparison would
+                // silently accept drift introduced by serialization rounding.
+                if s.to_bits() != first.to_bits() {
+                    return Err(CoreError::ValidationError(format!(
+                        "superellipse smoothing must match across all four corners \
+                         (corners[0]={first}, corners[{i}]={s})"
+                    )));
+                }
             }
         }
     }
@@ -633,22 +631,30 @@ pub fn validate_corners(corners: &[Corner; 4]) -> Result<(), CoreError> {
     Ok(())
 }
 
-fn validate_radius_component(value: f64, corner_index: usize, axis: &str) -> Result<(), CoreError> {
+/// Validates a single radius value (NaN/inf/range/`MAX_CORNER_RADIUS`).
+///
+/// Shared by `validate_corners` and the corners-input parser
+/// (`crates/core/src/corners_input.rs`) so the rules cannot diverge.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` when:
+/// - `value` is NaN or infinite.
+/// - `value` is negative.
+/// - `value` exceeds `MAX_CORNER_RADIUS`.
+pub(crate) fn validate_radius_value(value: f64, label: &str) -> Result<(), CoreError> {
     if !value.is_finite() {
         return Err(CoreError::ValidationError(format!(
-            "corners[{corner_index}].radii.{axis} must be finite \
-             (no NaN or infinity), got {value}"
+            "{label} must be finite (no NaN or infinity), got {value}"
         )));
     }
     if value < 0.0 {
         return Err(CoreError::ValidationError(format!(
-            "corners[{corner_index}].radii.{axis} must be non-negative, got {value}"
+            "{label} must be non-negative, got {value}"
         )));
     }
     if value > MAX_CORNER_RADIUS {
         return Err(CoreError::ValidationError(format!(
-            "corners[{corner_index}].radii.{axis} exceeds MAX_CORNER_RADIUS \
-             ({MAX_CORNER_RADIUS}), got {value}"
+            "{label} exceeds MAX_CORNER_RADIUS ({MAX_CORNER_RADIUS}), got {value}"
         )));
     }
     Ok(())
@@ -1351,6 +1357,57 @@ mod tests {
         let mut corners = [round_corner(8.0, 8.0); 4];
         corners[0] = round_corner(MAX_CORNER_RADIUS + 1.0, 8.0);
         assert!(validate_corners(&corners).is_err());
+    }
+
+    // ── validate_radius_value (RF-034 shared helper) ───────────────────
+
+    #[test]
+    fn test_validate_radius_value_accepts_zero() {
+        assert!(validate_radius_value(0.0, "label").is_ok());
+    }
+
+    #[test]
+    fn test_validate_radius_value_accepts_max_boundary() {
+        assert!(validate_radius_value(MAX_CORNER_RADIUS, "label").is_ok());
+    }
+
+    #[test]
+    fn test_validate_radius_value_rejects_nan() {
+        let err = validate_radius_value(f64::NAN, "x").expect_err("NaN must be rejected");
+        assert!(
+            format!("{err}").contains("finite"),
+            "error must mention 'finite', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_radius_value_rejects_infinity() {
+        let err =
+            validate_radius_value(f64::INFINITY, "x").expect_err("Infinity must be rejected");
+        assert!(
+            format!("{err}").contains("finite"),
+            "error must mention 'finite', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_radius_value_rejects_negative() {
+        let err =
+            validate_radius_value(-1.0, "x").expect_err("negative value must be rejected");
+        assert!(
+            format!("{err}").contains("non-negative"),
+            "error must mention 'non-negative', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_validate_radius_value_rejects_above_max() {
+        let err = validate_radius_value(MAX_CORNER_RADIUS + 1.0, "x")
+            .expect_err("value above MAX_CORNER_RADIUS must be rejected");
+        assert!(
+            format!("{err}").contains("MAX_CORNER_RADIUS"),
+            "error must mention MAX_CORNER_RADIUS, got: {err}"
+        );
     }
 
     #[test]

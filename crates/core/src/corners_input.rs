@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::CoreError;
 use crate::node::{Corner, CornerRadii};
-use crate::validate::{MAX_CORNER_RADIUS, MAX_CORNER_SMOOTHING, MIN_CORNER_SMOOTHING};
+use crate::validate::{MAX_CORNER_SMOOTHING, MIN_CORNER_SMOOTHING, validate_radius_value};
 
 /// Parses a GraphQL/MCP corners input blob into a canonical `[Corner; 4]`.
 ///
@@ -63,7 +63,7 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
             let scalar = r
                 .as_f64()
                 .ok_or_else(|| CoreError::ValidationError("'radius' must be a number".into()))?;
-            check_radius_value(scalar, "radius")?;
+            validate_radius_value(scalar, "radius")?;
             [CornerRadii {
                 x: scalar,
                 y: scalar,
@@ -86,7 +86,7 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
         let radius = obj.get("radius").and_then(Value::as_f64).ok_or_else(|| {
             CoreError::ValidationError("uniform shorthand requires 'radius' field".into())
         })?;
-        check_radius_value(radius, "radius")?;
+        validate_radius_value(radius, "radius")?;
         let radii = CornerRadii {
             x: radius,
             y: radius,
@@ -147,43 +147,13 @@ fn parse_single_radii(v: &Value) -> Result<CornerRadii, CoreError> {
         .get("x")
         .and_then(Value::as_f64)
         .ok_or_else(|| CoreError::ValidationError("radii entry missing 'x'".into()))?;
-    check_radius_value(x, "radii.x")?;
+    validate_radius_value(x, "radii.x")?;
     let y = v
         .get("y")
         .and_then(Value::as_f64)
         .ok_or_else(|| CoreError::ValidationError("radii entry missing 'y'".into()))?;
-    check_radius_value(y, "radii.y")?;
+    validate_radius_value(y, "radii.y")?;
     Ok(CornerRadii { x, y })
-}
-
-/// Guards a single radius value at the parser boundary.
-///
-/// Callers in `parse_corners_input` use this before constructing `CornerRadii`
-/// so that invalid values are caught early, independent of whether the caller
-/// also invokes `validate_corners` downstream (which it should — defense in depth).
-///
-/// # Errors
-/// Returns `CoreError::ValidationError` when:
-/// - `v` is NaN or infinite.
-/// - `v` is negative.
-/// - `v` exceeds `MAX_CORNER_RADIUS`.
-fn check_radius_value(v: f64, label: &str) -> Result<(), CoreError> {
-    if !v.is_finite() {
-        return Err(CoreError::ValidationError(format!(
-            "{label} must be finite (no NaN or infinity), got {v}"
-        )));
-    }
-    if v < 0.0 {
-        return Err(CoreError::ValidationError(format!(
-            "{label} must be non-negative, got {v}"
-        )));
-    }
-    if v > MAX_CORNER_RADIUS {
-        return Err(CoreError::ValidationError(format!(
-            "{label} must be ≤ MAX_CORNER_RADIUS ({MAX_CORNER_RADIUS}), got {v}"
-        )));
-    }
-    Ok(())
 }
 
 /// Guards a smoothing value at the parser boundary.
@@ -353,20 +323,20 @@ mod tests {
     // Note on NaN/Infinity in serde_json: The `json!` macro serializes Rust
     // `f64::NAN` and `f64::INFINITY` to JSON `null` (since they are not valid
     // JSON numbers). `as_f64()` returns `None` for null, so the `ok_or_else`
-    // path fires with a "missing field" error — not the `check_radius_value`
-    // "finite" error. To test `check_radius_value` directly with NaN/Infinity
+    // path fires with a "missing field" error — not the `validate_radius_value`
+    // "finite" error. To test `validate_radius_value` directly with NaN/Infinity
     // we construct `serde_json::Value` objects manually using
     // `serde_json::Number::from_f64` which returns `None` for non-finite
     // values; therefore we inject them through `Value::from(f64)` via the
-    // arbitrary_precision feature path or simply call `check_radius_value`
+    // arbitrary_precision feature path or simply call `validate_radius_value`
     // directly in a unit test. The integration tests below use values that
     // exercise the actual boundary conditions reachable from JSON input.
 
     #[test]
     fn test_parse_corners_input_rejects_nan_radius() {
-        // serde_json::Number cannot represent NaN, so we test check_radius_value
+        // serde_json::Number cannot represent NaN, so we test validate_radius_value
         // directly for the NaN case.
-        let err = super::check_radius_value(f64::NAN, "radii.x")
+        let err = crate::validate::validate_radius_value(f64::NAN, "radii.x")
             .expect_err("expected rejection for NaN radius");
         assert!(
             format!("{err}").contains("finite"),
@@ -376,8 +346,8 @@ mod tests {
 
     #[test]
     fn test_parse_corners_input_rejects_infinity_radius() {
-        // Verify check_radius_value rejects Infinity directly.
-        let err = super::check_radius_value(f64::INFINITY, "radius")
+        // Verify validate_radius_value rejects Infinity directly.
+        let err = crate::validate::validate_radius_value(f64::INFINITY, "radius")
             .expect_err("expected rejection for Infinity radius");
         assert!(
             format!("{err}").contains("finite"),
