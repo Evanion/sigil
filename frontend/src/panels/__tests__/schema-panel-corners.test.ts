@@ -27,7 +27,7 @@ function roundCorner(r: number): Corner {
 
 // RF-032: Replace the `any`-bearing AnyMock alias with a precise Mock type
 // derived from the real store's `setCorners` signature. This eliminates the
-// eslint-disable-next-line directive and gives the test file the same
+// previous lint-suppression comment and gives the test file the same
 // `no-explicit-any` discipline as production code.
 type SetCornersMock = Mock<DocumentStoreAPI["setCorners"]>;
 
