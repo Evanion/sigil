@@ -81,12 +81,40 @@ fn acquire_document_lock(
 /// The `builder` closure captures the parsed input data and constructs the
 /// appropriate `FieldOperation` struct after UUID-to-NodeId resolution
 /// (which requires the document lock).
+///
+/// Most operations build their broadcast payload eagerly from the input
+/// JSON (see `broadcast`). For operations whose canonical wire-format
+/// differs from the user input — currently only `SetField` on `path = "kind"`,
+/// where the user may submit the shorthand corners form — `post_apply_value`
+/// is set to a closure that produces the canonical post-apply value from
+/// the document AFTER `apply()` has succeeded. The caller in
+/// `apply_operations` invokes this closure under the same lock acquisition
+/// and replaces `broadcast.value` with its result before publishing.
+///
+/// Per `.claude/rules/rust-defensive.md` "Side-Effect Artifacts Must Be
+/// Constructed After Precondition Verification", this defers the
+/// kind-path payload construction until after validation+apply have been
+/// confirmed. This addresses RF-001 (frontend dispatcher rejected raw
+/// shorthand) and partially addresses RF-004 (other paths still build
+/// their broadcast value eagerly because their input shape already
+/// matches what `frontend/src/operations/apply-remote.ts` expects).
 struct ParsedOp {
     /// Builds the `FieldOperation` after UUID→NodeId resolution inside the lock.
     #[allow(clippy::type_complexity)]
     builder: Box<dyn FnOnce(&agent_designer_core::Document) -> Result<Box<dyn FieldOperation>>>,
-    /// The broadcast payload for this operation (built eagerly from input data).
+    /// The broadcast payload for this operation. For paths whose input shape
+    /// already matches the frontend dispatcher's expected `value` shape, this
+    /// is built eagerly from the input JSON. For paths that need a canonical
+    /// post-apply representation (e.g. `kind` with shorthand corners),
+    /// `broadcast.value` is overwritten with the result of `post_apply_value`
+    /// after `apply()` succeeds.
     broadcast: OperationPayload,
+    /// Optional builder that produces the canonical broadcast `value` from
+    /// the post-apply document. Required when the user-input shape differs
+    /// from the frontend dispatcher's expected wire format.
+    #[allow(clippy::type_complexity)]
+    post_apply_value:
+        Option<Box<dyn FnOnce(&agent_designer_core::Document) -> Result<serde_json::Value>>>,
 }
 
 /// Parses all operation inputs into `ParsedOp` structs.
@@ -154,6 +182,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "name" => {
@@ -168,6 +197,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(RenameNode { node_id, new_name }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "visible" => {
@@ -185,6 +215,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "locked" => {
@@ -202,6 +233,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.fills" => {
@@ -226,6 +258,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetFills { node_id, new_fills }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.strokes" => {
@@ -253,6 +286,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.effects" => {
@@ -280,6 +314,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.opacity" => {
@@ -306,6 +341,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.blend_mode" => {
@@ -323,6 +359,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind" => {
@@ -342,6 +379,14 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     let new_corners =
                         agent_designer_core::corners_input::parse_corners_input(corners_value)
                             .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
+                    // RF-001 / RF-004: the broadcast `value` for `path = "kind"`
+                    // must be the canonical post-apply `NodeKind` JSON (mirroring
+                    // `set_corners_impl` in `crates/mcp/src/tools/nodes.rs`).
+                    // The user may submit shorthand corners input
+                    // (`{shape:"round", radius:N}`), but `apply-remote.ts` case
+                    // `"kind"` requires the canonical 4-element corners array.
+                    // We defer broadcast value construction until after `apply()`
+                    // succeeds and read it from the post-apply node.
                     Ok(ParsedOp {
                         builder: Box::new(move |doc| {
                             let node_id = doc
@@ -354,6 +399,21 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                             }) as Box<dyn FieldOperation>)
                         }),
                         broadcast,
+                        post_apply_value: Some(Box::new(move |doc| {
+                            let node_id = doc.arena.id_by_uuid(&parsed_uuid).ok_or_else(|| {
+                                async_graphql::Error::new("node not found after apply")
+                            })?;
+                            let node = doc.arena.get(node_id).map_err(|e| {
+                                async_graphql::Error::new(format!(
+                                    "failed to read post-apply node: {e}"
+                                ))
+                            })?;
+                            serde_json::to_value(&node.kind).map_err(|e| {
+                                async_graphql::Error::new(format!(
+                                    "failed to serialise post-apply kind: {e}"
+                                ))
+                            })
+                        })),
                     })
                 }
                 other => Err(async_graphql::Error::new(format!(
@@ -383,6 +443,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_family" => {
@@ -409,6 +470,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_size" => {
@@ -429,6 +491,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_weight" => {
@@ -446,6 +509,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_style" => {
@@ -463,6 +527,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.line_height" => {
@@ -483,6 +548,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.letter_spacing" => {
@@ -503,6 +569,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_align" => {
@@ -520,6 +587,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_decoration" => {
@@ -537,6 +605,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_color" => {
@@ -557,6 +626,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_shadow" => {
@@ -588,6 +658,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         _ => Err(async_graphql::Error::new(format!(
@@ -668,6 +739,7 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -706,6 +778,7 @@ fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
             Ok(Box::new(DeleteNode { node_id, page_id }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -755,6 +828,7 @@ fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -796,6 +870,7 @@ fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -822,6 +897,7 @@ fn parse_create_page(input: &CreatePageInput) -> Result<ParsedOp> {
             Ok(Box::new(CreatePage { page_id, name }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -847,6 +923,7 @@ fn parse_delete_page(input: &DeletePageInput) -> Result<ParsedOp> {
             Ok(Box::new(DeletePage { page_id }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -873,6 +950,7 @@ fn parse_rename_page(input: &RenamePageInput) -> Result<ParsedOp> {
             Ok(Box::new(RenamePage { page_id, new_name }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -909,6 +987,7 @@ fn parse_reorder_page(input: &ReorderPageInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -971,10 +1050,6 @@ impl MutationRoot {
             parsed.push(parse_operation_input(op_input)?);
         }
 
-        // Collect broadcast payloads before consuming parsed ops
-        let broadcast_ops: Vec<OperationPayload> =
-            parsed.iter().map(|p| p.broadcast.clone()).collect();
-
         // Second pass: build, validate, and apply sequentially under lock.
         // UUID→NodeId resolution happens inside the lock scope.
         // Operations are applied sequentially because later operations may
@@ -982,14 +1057,29 @@ impl MutationRoot {
         //
         // RF-001: The batch is atomic — if any operation fails, the document
         // is restored to its pre-batch state via snapshot rollback.
-        {
+        //
+        // RF-001 / RF-004: broadcast payloads for paths whose canonical
+        // wire-format differs from the user input (currently `path = "kind"`
+        // with shorthand corners) are produced from the post-apply document
+        // via `post_apply_value`. All broadcast payloads are collected AFTER
+        // their corresponding apply has succeeded, so a failed batch never
+        // emits a partial broadcast.
+        let broadcast_ops: Vec<OperationPayload> = {
             let mut doc_guard = acquire_document_lock(state);
 
             // Snapshot the document state for rollback on partial failure
             let snapshot = doc_guard.0.clone();
 
+            let mut collected: Vec<OperationPayload> = Vec::with_capacity(parsed.len());
+
             for p in parsed {
-                let build_result = (p.builder)(&doc_guard);
+                let ParsedOp {
+                    builder,
+                    mut broadcast,
+                    post_apply_value,
+                } = p;
+
+                let build_result = builder(&doc_guard);
                 let op = match build_result {
                     Ok(op) => op,
                     Err(e) => {
@@ -1011,8 +1101,24 @@ impl MutationRoot {
                     doc_guard.0 = snapshot;
                     return Err(e);
                 }
+
+                // After apply succeeds, overwrite broadcast.value with the
+                // canonical post-apply representation if one was registered.
+                if let Some(post_apply_value) = post_apply_value {
+                    match post_apply_value(&doc_guard) {
+                        Ok(canonical) => broadcast.value = Some(canonical),
+                        Err(e) => {
+                            doc_guard.0 = snapshot;
+                            return Err(e);
+                        }
+                    }
+                }
+
+                collected.push(broadcast);
             }
-        }
+
+            collected
+        };
 
         // Signal dirty + broadcast
         state.app.signal_dirty();
