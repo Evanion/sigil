@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::CoreError;
 use crate::node::{Corner, CornerRadii};
+use crate::validate::{MAX_CORNER_RADIUS, MAX_CORNER_SMOOTHING, MIN_CORNER_SMOOTHING};
 
 /// Parses a GraphQL/MCP corners input blob into a canonical `[Corner; 4]`.
 ///
@@ -56,11 +57,13 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
                     "superellipse shorthand requires 'smoothing' field".into(),
                 )
             })?;
+        check_smoothing_value(smoothing)?;
 
         let radii_array = if let Some(r) = obj.get("radius") {
             let scalar = r
                 .as_f64()
                 .ok_or_else(|| CoreError::ValidationError("'radius' must be a number".into()))?;
+            check_radius_value(scalar, "radius")?;
             [CornerRadii {
                 x: scalar,
                 y: scalar,
@@ -83,6 +86,7 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
         let radius = obj.get("radius").and_then(Value::as_f64).ok_or_else(|| {
             CoreError::ValidationError("uniform shorthand requires 'radius' field".into())
         })?;
+        check_radius_value(radius, "radius")?;
         let radii = CornerRadii {
             x: radius,
             y: radius,
@@ -143,11 +147,62 @@ fn parse_single_radii(v: &Value) -> Result<CornerRadii, CoreError> {
         .get("x")
         .and_then(Value::as_f64)
         .ok_or_else(|| CoreError::ValidationError("radii entry missing 'x'".into()))?;
+    check_radius_value(x, "radii.x")?;
     let y = v
         .get("y")
         .and_then(Value::as_f64)
         .ok_or_else(|| CoreError::ValidationError("radii entry missing 'y'".into()))?;
+    check_radius_value(y, "radii.y")?;
     Ok(CornerRadii { x, y })
+}
+
+/// Guards a single radius value at the parser boundary.
+///
+/// Callers in `parse_corners_input` use this before constructing `CornerRadii`
+/// so that invalid values are caught early, independent of whether the caller
+/// also invokes `validate_corners` downstream (which it should — defense in depth).
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` when:
+/// - `v` is NaN or infinite.
+/// - `v` is negative.
+/// - `v` exceeds `MAX_CORNER_RADIUS`.
+fn check_radius_value(v: f64, label: &str) -> Result<(), CoreError> {
+    if !v.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "{label} must be finite (no NaN or infinity), got {v}"
+        )));
+    }
+    if v < 0.0 {
+        return Err(CoreError::ValidationError(format!(
+            "{label} must be non-negative, got {v}"
+        )));
+    }
+    if v > MAX_CORNER_RADIUS {
+        return Err(CoreError::ValidationError(format!(
+            "{label} must be ≤ MAX_CORNER_RADIUS ({MAX_CORNER_RADIUS}), got {v}"
+        )));
+    }
+    Ok(())
+}
+
+/// Guards a smoothing value at the parser boundary.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` when `s` is not finite or not in
+/// `[MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]`.
+fn check_smoothing_value(s: f64) -> Result<(), CoreError> {
+    if !s.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "smoothing must be finite (no NaN or infinity), got {s}"
+        )));
+    }
+    if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(&s) {
+        return Err(CoreError::ValidationError(format!(
+            "smoothing must be in [{MIN_CORNER_SMOOTHING}, {MAX_CORNER_SMOOTHING}], got {s}"
+        )));
+    }
+    Ok(())
 }
 
 fn build_non_superellipse_corner(shape: &str, radii: CornerRadii) -> Result<Corner, CoreError> {
@@ -291,5 +346,156 @@ mod tests {
     fn test_rejects_unknown_shape() {
         let input = json!({ "shape": "triangle", "radius": 8 });
         assert!(parse_corners_input(&input).is_err());
+    }
+
+    // ── Parser-boundary radius guards (M2) ────────────────────────────
+    //
+    // Note on NaN/Infinity in serde_json: The `json!` macro serializes Rust
+    // `f64::NAN` and `f64::INFINITY` to JSON `null` (since they are not valid
+    // JSON numbers). `as_f64()` returns `None` for null, so the `ok_or_else`
+    // path fires with a "missing field" error — not the `check_radius_value`
+    // "finite" error. To test `check_radius_value` directly with NaN/Infinity
+    // we construct `serde_json::Value` objects manually using
+    // `serde_json::Number::from_f64` which returns `None` for non-finite
+    // values; therefore we inject them through `Value::from(f64)` via the
+    // arbitrary_precision feature path or simply call `check_radius_value`
+    // directly in a unit test. The integration tests below use values that
+    // exercise the actual boundary conditions reachable from JSON input.
+
+    #[test]
+    fn test_parse_corners_input_rejects_nan_radius() {
+        // serde_json::Number cannot represent NaN, so we test check_radius_value
+        // directly for the NaN case.
+        let err = super::check_radius_value(f64::NAN, "radii.x")
+            .expect_err("expected rejection for NaN radius");
+        assert!(
+            format!("{err}").contains("finite"),
+            "error message must mention 'finite', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_infinity_radius() {
+        // Verify check_radius_value rejects Infinity directly.
+        let err = super::check_radius_value(f64::INFINITY, "radius")
+            .expect_err("expected rejection for Infinity radius");
+        assert!(
+            format!("{err}").contains("finite"),
+            "error message must mention 'finite', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_negative_radius() {
+        // Uniform shorthand form — scalar radius is negative.
+        let input = json!({ "shape": "round", "radius": -1.0 });
+        let err = parse_corners_input(&input).expect_err("expected rejection for negative radius");
+        assert!(
+            format!("{err}").contains("non-negative"),
+            "error message must mention 'non-negative', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_radius_above_max() {
+        // Uniform shorthand form — scalar radius above MAX_CORNER_RADIUS.
+        let input = json!({ "shape": "bevel", "radius": 100_001.0 });
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for radius above MAX_CORNER_RADIUS");
+        assert!(
+            format!("{err}").contains("MAX_CORNER_RADIUS") || format!("{err}").contains("100000"),
+            "error message must reference the limit, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_nan_smoothing() {
+        // serde_json::Number cannot represent NaN, so test check_smoothing_value
+        // directly for the NaN case.
+        let err = super::check_smoothing_value(f64::NAN)
+            .expect_err("expected rejection for NaN smoothing");
+        assert!(
+            format!("{err}").contains("finite"),
+            "error message must mention 'finite', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_smoothing_below_min() {
+        // Shape-level superellipse form — smoothing is below MIN_CORNER_SMOOTHING.
+        let input = json!({ "shape": "superellipse", "radius": 8.0, "smoothing": -0.1 });
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for smoothing below MIN_CORNER_SMOOTHING");
+        assert!(
+            format!("{err}").contains("smoothing"),
+            "error message must mention 'smoothing', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_smoothing_above_max() {
+        // Shape-level superellipse form — smoothing is above MAX_CORNER_SMOOTHING.
+        let input = json!({ "shape": "superellipse", "radius": 8.0, "smoothing": 1.1 });
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for smoothing above MAX_CORNER_SMOOTHING");
+        assert!(
+            format!("{err}").contains("smoothing"),
+            "error message must mention 'smoothing', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_negative_radius_in_per_corner_array() {
+        // Per-corner array form — one radii component is negative.
+        let input = json!([
+            { "shape": "round", "radii": { "x": -1.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for negative radius in per-corner array");
+        assert!(
+            format!("{err}").contains("non-negative"),
+            "error message must mention 'non-negative', got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_radius_above_max_in_per_corner_y() {
+        // Per-corner array form — radii.y exceeds MAX_CORNER_RADIUS.
+        let input = json!([
+            { "shape": "round", "radii": { "x": 8.0, "y": 100_001.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for radius.y above MAX_CORNER_RADIUS");
+        assert!(
+            format!("{err}").contains("MAX_CORNER_RADIUS") || format!("{err}").contains("100000"),
+            "error message must reference the limit, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_corners_input_rejects_negative_radius_in_superellipse_radii_array() {
+        // Shape-level superellipse with per-corner radii array — one entry is negative.
+        let input = json!({
+            "shape": "superellipse",
+            "smoothing": 0.5,
+            "radii": [
+                { "x": 8.0, "y": -1.0 },
+                { "x": 8.0, "y": 8.0 },
+                { "x": 8.0, "y": 8.0 },
+                { "x": 8.0, "y": 8.0 }
+            ]
+        });
+        let err = parse_corners_input(&input)
+            .expect_err("expected rejection for negative radius in superellipse radii array");
+        assert!(
+            format!("{err}").contains("non-negative"),
+            "error message must mention 'non-negative', got: {err}"
+        );
     }
 }
