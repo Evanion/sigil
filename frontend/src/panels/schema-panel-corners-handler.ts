@@ -26,7 +26,6 @@
 
 import type { DocumentStoreAPI } from "../store/document-store-solid";
 import type { Corner, Corners, DocumentNode, CornerSuperellipse } from "../types/document";
-import { DEFAULT_SMOOTHING } from "../store/corners-input";
 
 /** Corner kinds that bear a `corners` field. */
 const CORNER_BEARING_KINDS = new Set(["rectangle", "frame", "image"]);
@@ -77,9 +76,23 @@ export function handleCornersFieldChange(
   // If any existing corner is superellipse, we must use the shape-level form.
   // Per-corner arrays with superellipse are forbidden by parseCornersInput.
   if (existingCorners.some((c) => c.type === "superellipse")) {
-    // Grab smoothing from corner 0 (all superellipse corners are uniform).
+    // RF-037: `CornerSuperellipse.smoothing` is a required field on the
+    // discriminated union (see types/document.ts). Any superellipse corner
+    // that reaches this branch was constructed by parseCornersInput or
+    // applyRemoteTransaction, both of which enforce a valid finite smoothing
+    // in [MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]. A missing or non-finite
+    // smoothing here represents a corrupt invariant — bail with a structured
+    // log rather than silently substituting a default that would mask the
+    // bug. Mirrors the "No Silent Clamping" rule in CLAUDE.md §11.
     const c0 = existingCorners[0] as CornerSuperellipse;
-    const smoothing = c0.smoothing ?? DEFAULT_SMOOTHING;
+    const smoothing = c0.smoothing;
+    if (typeof smoothing !== "number" || !Number.isFinite(smoothing)) {
+      console.error("handleCornersFieldChange: superellipse corner missing valid smoothing", {
+        uuid,
+        smoothing,
+      });
+      return;
+    }
     store.setCorners(uuid, { type: "superellipse", radius: value, smoothing });
     return;
   }
