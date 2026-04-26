@@ -19,7 +19,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** BE
 - **Severity:** Critical
-- **Status:** open
+- **Status:** resolved (commit `671687b`) — `parse_set_field` extended with optional `post_apply_value` closure; the `kind` arm canonicalizes the broadcast `value` from post-apply `node.kind`, mirroring `set_corners_impl`. New integration test `crates/server/tests/integration_set_field_kind_broadcast.rs` proves shorthand input now produces canonical 4-element broadcast.
 - **Location:** `crates/server/src/graphql/mutation.rs:124-130, 328-358`
 - **Issue:** GraphQL `setField` path eagerly captures the raw user-supplied `value` JSON into the broadcast. For shorthand corners input (`{shape:"round",radius:8}`), the broadcast forwards the shorthand. Frontend `apply-remote.ts case "kind"` requires a canonical 4-element corners array and silently drops shorthand — connected clients never see the change. MCP path is correct (it serializes post-mutation `node.kind`).
 - **Recommendation:** After validate/apply succeed, build the broadcast `value` from the post-mutation canonical kind JSON (mirror MCP). Add an integration test driving GraphQL shorthand and asserting the broadcast `value` is canonical.
@@ -28,7 +28,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Critical
-- **Status:** open
+- **Status:** deferred to Plan 14d — see spec §13. Plan 14a delivers the data layer only; §1.5 of Spec 14 already specifies the `<CornerSection />` UI that exposes all 5 shapes. Shipping an interim per-corner shape selector here would be redundant work that 14d replaces.
 - **Location:** `frontend/src/panels/schemas/design-schema.ts:58-67`
 - **Issue:** The 4 new corner shapes (Bevel/Notch/Scoop/Superellipse) are unreachable from the UI. Schema only exposes `radii.x` per corner. A user opening the panel after the changelog announces 5 shapes will see no shape selector at all.
 - **Recommendation:** Add a per-section Shape `<select>` (Round/Bevel/Notch/Scoop) above the 4 numeric inputs, OR document deferral and gate merge on 14d landing.
@@ -50,7 +50,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** BE
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved (commit `671687b`) for the `kind` path. `apply_operations` was restructured so per-op broadcast `value` is finalized inside the lock scope after `apply()` succeeds, and rollback skips broadcasts on failure. The other 28 SetField paths still echo input-shaped values; this is currently safe because each input shape matches what the corresponding `apply-remote.ts` handler destructures. Tracked as residual technical debt — convert remaining paths if any one of them gains a server-side normalization step.
 - **Location:** `crates/server/src/graphql/mutation.rs:124-130`
 - **Issue:** Side-effect artifacts (broadcast payload) constructed before lock acquisition and precondition verification — violates rust-defensive "Side-Effect Artifacts Must Be Constructed After Precondition Verification". Affects all `parse_set_field` paths, not only `kind`.
 - **Recommendation:** Move broadcast payload construction to after `validate()`/`apply()` succeed, populated from verified post-mutation document state (this also fixes RF-001).
@@ -113,7 +113,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Data Scientist, FE, UX
 - **Severity:** High (deferral disclosure)
-- **Status:** open
+- **Status:** deferred to Plan 14c — recorded in spec §13 deferred table. Spec §3 already owns this. Plan 14a ships the data layer only; the renderer continuing to draw flat `fillRect` is intentional in 14a's scope.
 - **Location:** `frontend/src/canvas/renderer.ts:234-254`
 - **Issue:** Renderer ignores `node.kind.corners` — Rectangle/frame/image still drawn with flat `ctx.fillRect`. Likely deferred to 14b/c per spec, but PR description should explicitly document the deferral so reviewers don't expect visual output.
 - **Recommendation:** Confirm scope deferral in PR description and spec. No code fix in 14a.
@@ -198,7 +198,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Data Scientist
 - **Severity:** Medium
-- **Status:** open
+- **Status:** wont-fix (accepted with documentation) — Spec §14 "Performance Considerations" now records the +96 KB-per-1000-nodes regression and rationale for keeping the discriminated `Corner` enum (variant-local invariants tied to type system; alternative niche representation weakens §7 cross-field guards). Re-evaluate if profiling at large documents shows hot-path impact.
 - **Location:** `crates/core/src/node.rs:786-794`
 - **Issue:** `Corner` enum is 32 bytes; `[Corner;4]` = 128 bytes vs old 32 bytes — 4× memory regression per node. ~50% wasted for common Round-uniform case. At 1000 nodes: +96 KB.
 - **Recommendation:** Either accept and document in spec performance section, or use a niche representation (separate discriminant + radii arrays). Add benchmark.
@@ -243,7 +243,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Medium
-- **Status:** open
+- **Status:** deferred to Plan 14d — spec §13. §1.5 hotspot preview SVG addresses this directly.
 - **Location:** `frontend/src/panels/SchemaPanel` (gap)
 - **Issue:** Current corner shape is invisible to user. An MCP agent setting Bevel via `set_corners` produces no visible panel signal. Violates "Agents and humans see each other's changes" (CLAUDE.md §1 UX).
 - **Recommendation:** Render a one-line status row showing per-corner shape ("Shapes: round, bevel, round, round") in the Corner Radius section. ~5 LOC change.
@@ -252,7 +252,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Medium
-- **Status:** open
+- **Status:** deferred to Plan 14d — spec §13. §1.5 center hotspot + auto-link behavior addresses this.
 - **Location:** Schema panel (gap)
 - **Issue:** Linked-corners rule (uniform shorthand emitted only when all 4 corners identical) is implicit and unobservable — no Figma-style chain-link icon. User edits TL but unclear when it edits all vs only TL.
 - **Recommendation:** Add visible link/unlink toggle adjacent to the 4 inputs (Figma chain-icon pattern).
@@ -261,7 +261,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Medium
-- **Status:** open
+- **Status:** deferred to Plan 14d — spec §13. §1.5 "Superellipse lock state" omits Superellipse from per-corner / per-edge popovers and surfaces a tooltip when locked.
 - **Location:** Schema panel (gap)
 - **Issue:** Superellipse-must-be-uniform constraint enforced server-side but not communicated client-side. Failure mode is after-the-fact rejection.
 - **Recommendation:** When a shape selector is added (per RF-002), exclude Superellipse from per-corner options; only offer it at the all-corners scope.
@@ -364,7 +364,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Low
-- **Status:** open
+- **Status:** deferred to Plan 14d — spec §13. §1.5 must render the section disabled with an explanatory tooltip when the selected node's kind doesn't support corners.
 - **Location:** `frontend/src/panels/schemas/design-schema.ts:60` (`when` filter)
 - **Issue:** Section disappears for non-rectangular kinds — no hint that it's kind-specific. Layout jitter; obscures discoverability.
 - **Recommendation:** Render disabled with tooltip "Corner radius applies to rectangles, frames, and images only".

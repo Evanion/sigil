@@ -408,3 +408,50 @@ N/A — Spec 14 introduces no new canvas tools. The corner editor is a property 
 | **14d** | Corner editor UI | `<CornerSection />` with hotspot preview, popover per hotspot, composite smoothing control (`ValueInput` + `Slider`), link/unlock behavior, design-schema integration, Storybook + tests. |
 
 Plan 14a must land first (it provides the data layer). Plans 14b and 14c are parallelizable. Plan 14d depends on all three.
+
+---
+
+## 13. Deferred review findings (from Plan 14a)
+
+The Plan 14a `/review` pass surfaced findings that align with work already scoped to later sub-plans. Rather than ship interim UI that 14d throws away, the items below are explicitly deferred and their target sub-plan owns the fix. Each must be acknowledged as in-scope for the receiving plan before the receiving plan is considered ready for review.
+
+Persisted source: `docs/superpowers/reviews/2026-04-26-corner-shapes-14a.md`.
+
+### Deferred to Plan 14d (UI — corner editor)
+
+The `<CornerSection />` design in §1.5 already addresses these. They are recorded here so Plan 14d's review checklist includes them as acceptance criteria.
+
+| Finding | Severity | Title | What 14d must deliver |
+|---------|----------|-------|------------------------|
+| **RF-002** | Critical | 4 new corner shapes unreachable from the UI | Shape selector exposing Round / Bevel / Notch / Scoop in per-corner and per-edge popovers; Round / Bevel / Notch / Scoop / Superellipse in the center popover. (§1.5 already specifies this.) |
+| **RF-025** | Medium | Current corner shape invisible to user | Shape preview SVG (§1.5 layout item 1) communicates the active per-corner shape — covers the "MCP agent set Bevel and the panel shows nothing" gap. |
+| **RF-026** | Medium | Linked-corners rule implicit and unobservable | Center hotspot + per-hotspot popover model (§1.5) makes the link state explicit. The auto-link behavior in §1.5 must visibly reflect identity across all four corners. |
+| **RF-027** | Medium | Superellipse-must-be-uniform constraint not communicated client-side | §1.5 "Superellipse lock state" — per-corner / per-edge popovers omit Superellipse; only the center popover offers it. Lock-state tooltip must surface when a non-center hotspot is focused while shape state is Superellipse. |
+| **RF-038** | Low | Section disappears for non-rectangular kinds | When the selected node's kind is not Rectangle/Frame/Image, the corner section must render disabled with a tooltip explaining "Corner radius applies to rectangles, frames, and images only" (rather than vanishing). |
+
+### Deferred to Plan 14c (canvas rendering)
+
+| Finding | Severity | Title | What 14c must deliver |
+|---------|----------|-------|------------------------|
+| **RF-011** | High (deferral) | Renderer ignores `node.kind.corners` | §3 (`buildCornerPath`, per-shape path construction, radius clamping, `drawNode` switch to `fill(path)`, frame clipping). 14c's PR description must explicitly close this finding. |
+
+### Tracked outside sub-plans
+
+| Finding | Severity | Title | Disposition |
+|---------|----------|-------|-------------|
+| **RF-020** | Medium | `[Corner; 4]` is 4× the in-memory size of legacy representation | Accepted with documentation. See §14 "Performance Considerations" below. A niche representation (separate discriminant + radii arrays) is rejected for v1 because the discriminated `Corner` enum is the source of variant-local invariants — splitting them weakens the type-level guard described in §7. Re-evaluate if profiling at 1000-node documents shows measurable impact. |
+
+---
+
+## 14. Performance Considerations
+
+### Memory footprint (added by Plan 14a)
+
+| Type | Size on x86_64 | Per-node cost |
+|------|---------------|---------------|
+| `Corner` enum | 32 bytes | — |
+| `[Corner; 4]` | 128 bytes | replaces the prior `[f64; 4]` (32 bytes) on Rectangle |
+
+Net effect on memory: rectangles, frames, and images each carry 96 additional bytes. At 1 000 nodes: +96 KB. Within the workspace's "design for 1 000-node documents at 60 fps" envelope. Profiling has not detected a measurable hot-path regression.
+
+The shorthand `Serialize` representation (RF-021, fixed in Plan 14a) keeps the on-disk and on-wire JSON compact when all four corners are identical Round/x==y — the common case — so persistence and broadcast costs are unchanged from the legacy format for that case.
