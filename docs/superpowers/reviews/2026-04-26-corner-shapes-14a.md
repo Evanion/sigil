@@ -68,7 +68,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE, Data Scientist
 - **Severity:** High
-- **Status:** resolved (commit `11f83ab`) — factory now constructs four independent Corner objects (and four independent radii objects); colocated `default-corners.test.ts` asserts `result[i] !== result[j]` for all i ≠ j and that mutating one corner does not affect the others.
+- **Status:** resolved (commits `11f83ab`, `13d8d1d`) — `defaultCorners()` factory now constructs four independent Corner objects (and four independent radii objects); colocated `default-corners.test.ts` asserts `result[i] !== result[j]` for all i ≠ j and that mutating one corner does not affect the others. Follow-up commit `13d8d1d` fixed the same aliasing pattern in `parseCornersInput` shorthand forms 1 and 2 (round + superellipse): all four entries are now constructed via a per-call `make()` factory rather than `[c, c, c, c]`. Companion tests in `document-store-corners.test.ts` assert `corners[i] !== corners[j]` and `corners[i].radii !== corners[j].radii` across both forms.
 - **Location:** `frontend/src/store/default-corners.ts:14-17`
 - **Issue:** `defaultCorners()` returns `[c, c, c, c]` — all four entries reference the same Corner object. Docstring claims "fresh tuple … callers may mutate without aliasing" but mutation of `corners[0].radii.x` mutates indices 1, 2, 3. Latent footgun for any future positional in-place mutation.
 - **Recommendation:** Construct 4 independent objects in the array literal, OR `Object.freeze` and update the docstring. Add `result[0] !== result[1]` assertion test.
@@ -153,7 +153,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, Security, FE, UX
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `7e35647`) — `setCorners` now emits `console.warn` with structured `{ uuid, kind, reason, ... }` payload on every early-return branch (missing node, non-corner-bearing kind, parse failure); silent no-op replaced with diagnosable rejection.
 - **Location:** `frontend/src/store/document-store-solid.tsx:947-979` (`setCorners`)
 - **Issue:** Silent no-op when `parseCornersInput` returns null or kind isn't corner-bearing. No log/error/toast. Violates §11 "No Silent Clamping" + frontend-defensive "User-Initiated Mutations" (#5: visible error notification).
 - **Recommendation:** Surface typed error or `console.warn` with structured payload. Update callers to handle error path.
@@ -162,7 +162,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Logic
 - **Severity:** Medium
-- **Status:** resolved (commit 4139ddf) for the Rust path — `parse_per_corner_array` now rejects stray `smoothing` on non-superellipse entries with a typed error. TS mirror flagged for Cluster 5 (frontend mediums batch).
+- **Status:** resolved (commit 4139ddf for Rust; commit `ef1c7c0` for TS mirror) — `parse_per_corner_array` and the TS `parseCornersInput` per-corner-array branch now reject stray `smoothing` on non-superellipse entries with a typed error. Symmetric across transports.
 - **Location:** `crates/core/src/corners_input.rs:99-128` (`parse_per_corner_array`), `frontend/src/store/corners-input.ts`
 - **Issue:** Per-corner array form silently ignores stray `smoothing` field on non-superellipse shapes. Shorthand form rejects it. Violates "Validation Must Be Symmetric Across All Transports".
 - **Recommendation:** Reject `smoothing` on non-superellipse entries in per-corner array. Mirror in TS.
@@ -171,7 +171,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `cd8f489`) — `setCorners` now wraps `deepClone(node.kind)` in try-catch matching `setTextContent`/`setTextStyle` siblings; clone failure logs a structured warning and aborts the mutation rather than throwing into the reactive runtime.
 - **Location:** `frontend/src/store/document-store-solid.tsx` (setCorners)
 - **Issue:** `deepClone(node.kind)` not wrapped in try-catch like sibling `setTextContent`/`setTextStyle`. Asymmetric defensive pattern.
 - **Recommendation:** Wrap in try-catch matching sibling functions.
@@ -180,7 +180,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `8cc9bd8`) — added `SchemaPanelCornersIntegration.test.tsx` mounting `<SchemaPanel>` inside `DocumentProvider`, dispatching a NumberField change event, and asserting `setCorners` was called with the expected uuid and value (uniform-zero corners → scalar shorthand). A negative test asserts the corner section hides for non-corner-bearing kinds. Mount-time Kobalte emission is filtered by snapshotting call count before the user event.
 - **Location:** `frontend/src/panels/__tests__/` (gap)
 - **Issue:** No integration test exercising SchemaPanel → setCorners → store path. "Reactive Pipelines Must Be Verified End-to-End" rule requires producer→consumer chain test.
 - **Recommendation:** Mount `<SchemaPanel>` inside `DocumentProvider`, dispatch corner field change, assert `state.nodes[uuid].kind.corners[0].radii.x` updated.
@@ -189,7 +189,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `f8f2382`) — handler now builds a mutable `[Corner, Corner, Corner, Corner]` draft and assigns it to a single `Corners` (readonly) view. The double-cast is removed; the conversion now relies on TypeScript's natural mutable→readonly variance.
 - **Location:** `frontend/src/panels/schema-panel-corners-handler.ts:112`
 - **Issue:** Double-cast `as unknown as Corners` bypasses TypeScript variance check. Single cast suffices.
 - **Recommendation:** Replace with single `as Corners` cast or define `newCorners` directly as Corners type.
@@ -216,7 +216,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** A11y
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `f7a9656`) — `SchemaSection` now generates a stable `fieldsId` via `createUniqueId()`, sets it as the `id` of the fields container, and points `aria-controls` from the disclosure button at it. WAI-ARIA Disclosure pattern is now complete.
 - **Location:** `frontend/src/panels/SchemaSection.tsx:42-52`
 - **Issue:** Disclosure button has `aria-expanded` but no `aria-controls`. Screen-reader users can't programmatically jump to the controlled region. WCAG 1.3.1, 4.1.2. Pre-existing pattern; this PR adds another instance.
 - **Recommendation:** Add generated `id` to `<div class="sigil-schema-section__fields">`; set `aria-controls={fieldsId}` on the toggle button. Apply across all sections.
@@ -225,7 +225,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** A11y
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `f7a9656`) — visible prefix span is now `aria-hidden="true"`; the input's `aria-label` is the sole announced label. Screen readers no longer announce the field abbreviation twice.
 - **Location:** `frontend/src/components/number-input/NumberInput.tsx:62-65`
 - **Issue:** Visible label `<span class="sigil-number-input__prefix">` is not `aria-hidden`, AND input has duplicate `aria-label` — screen reader announces field twice ("TL, edit … TL"). WCAG 1.3.1, 4.1.2.
 - **Recommendation:** Add `aria-hidden="true"` to prefix span (rely on input aria-label), OR drop input aria-label and use `aria-labelledby` to prefix span.
@@ -234,7 +234,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** A11y
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit `f7a9656`) — added optional `ariaLabel` on `FieldDef`; `FieldRenderer` prefers `field.ariaLabel ?? field.label`. Corner-radius schema entries now declare full-spoken labels ("Top-left corner radius", etc.); transform/constraint fields also gained spoken labels. Visible "TL"/"TR"/"BR"/"BL" prefixes retained.
 - **Location:** `frontend/src/panels/schemas/design-schema.ts:62-65`
 - **Issue:** Labels are abbreviations only ("TL", "TR", "BR", "BL") — read as letter sequences without sighted context. WCAG 4.1.2.
 - **Recommendation:** Set full-spoken `aria-label` ("Top-left corner radius") with visible "TL" prefix retained, or wire `aria-labelledby` to section heading + prefix span.
@@ -292,7 +292,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Security, FE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit `9efd081`) — every early-return in the `path="kind"` branch now calls a local `reject(reason, ctx)` helper that emits `console.warn` with `{ nodeUuid, reason, ...ctx }`. Indexed for-loops thread the corner index into rejection context. Added 10 tests in `apply-remote-corners.test.ts` asserting structured warn shape on every rejection branch.
 - **Location:** `frontend/src/operations/apply-remote.ts:251-313`
 - **Issue:** Multiple validation early-`return`s with no `console.warn`. A misbehaving server (or compromised peer) can produce silent client-side drops. Inconsistent with neighboring `applyCreateNode`.
 - **Recommendation:** Add `console.warn` at each early-return identifying the rejection cause.
@@ -301,7 +301,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit `30f0c30`) — `apply-remote.ts` now imports `MAX_CORNER_RADIUS`, `MIN_CORNER_SMOOTHING`, and `MAX_CORNER_SMOOTHING` from `store/corners-input`; the local module-private duplicates are removed. Single source of truth.
 - **Location:** `frontend/src/operations/apply-remote.ts:33-49` vs `frontend/src/store/corners-input.ts`
 - **Issue:** `MAX_CORNER_RADIUS`/min/max smoothing duplicated as module-private constants in both files. Will diverge silently.
 - **Recommendation:** Import from a single shared module (`frontend/src/types/validation.ts` or extend `corners-input.ts` exports).
@@ -310,7 +310,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commits `8ea4791`, `53e7ba0`) — replaced the `any`-based mock alias with `Mock<DocumentStoreAPI["setCorners"]>` from vitest, removing the `eslint-disable` directive. Follow-up `53e7ba0` reworded a comment that ESLint was misparsing as an inline directive.
 - **Location:** `frontend/src/panels/__tests__/schema-panel-corners.test.ts:27-28`
 - **Issue:** `eslint-disable @typescript-eslint/no-explicit-any` in test code. CLAUDE.md "no any types" is unqualified.
 - **Recommendation:** Type the mock as `Mock<typeof setCorners>` or `vi.fn<Parameters<...>, void>()`.
@@ -319,7 +319,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** FE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit `7a229af`) — added a type-level test in `document-corners.test-d.ts` with an exhaustive `switch (c.type)` over all five variants and a `default: const _exhaustive: never = c;` sentinel. Adding a new `Corner` variant without updating dispatch sites now fails `tsc --noEmit`.
 - **Location:** `frontend/src/types/document.ts:582-622`
 - **Issue:** No exhaustiveness sentinel test for Corner discriminated union. Adding a variant won't force update of `VALID_CORNER_TYPES` set, `CORNER_BEARING_KINDS` set, or renderer.
 - **Recommendation:** Add type-level test in `document-corners.test-d.ts`: exhaustive `switch (c.type)` with `default: const _exhaust: never = c;`.
@@ -355,7 +355,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** UX
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit `e29008f`) — replaced silent `?? DEFAULT_SMOOTHING` fallback with an explicit invariant check: if a superellipse corner reaches the handler with a missing or non-finite `smoothing`, the handler logs `console.error` with `{ uuid, smoothing }` and returns without mutating. Mirrors the §11 "No Silent Clamping" rule.
 - **Location:** `frontend/src/panels/schema-panel-corners-handler.ts:71`
 - **Issue:** `?? DEFAULT_SMOOTHING` fallback masks a potential type-system invariant violation (superellipse Corner without smoothing).
 - **Recommendation:** Replace with invariant assertion: `if (c0.smoothing === undefined) { console.error("invariant: ..."); return; }`.
