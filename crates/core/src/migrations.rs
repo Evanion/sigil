@@ -1,6 +1,17 @@
 //! Workfile schema migrations. Each public `migrate_to_vN` function
 //! takes a `serde_json::Value` representing a `SerializedPage` at
 //! version N-1 and returns it transformed to version N.
+//!
+//! # Migration cost (RF-039)
+//!
+//! Each `migrate_to_vN` function performs a single linear pass over the
+//! parsed page's `nodes` array. Per-node work is O(1): inspect `kind`,
+//! optionally read or write a `corners`/`corner_radii` field, no nested
+//! recursion or per-node allocation beyond the new `corners` array. Total
+//! migration cost is therefore O(n) in the number of nodes, bounded by the
+//! deserialization envelope `MAX_FILE_SIZE` enforced in `serialize.rs`.
+//! There is no separate per-migration size check because the page has
+//! already been parsed by `deserialize_page_with_version` under that limit.
 
 use serde_json::{Value, json};
 
@@ -56,10 +67,22 @@ pub fn migrate_to_v2(mut page: Value) -> Result<Value, MigrationError> {
             continue;
         };
         let kind_type = kind.get("type").and_then(Value::as_str).map(String::from);
+        // RF-041: this match dispatches on a free-form `serde_json::Value` string
+        // (the legacy on-disk `kind.type` discriminator), not the typed `NodeKind`
+        // enum, so exhaustiveness cannot be compiler-enforced. The set of v1
+        // kind-type strings is closed and known: "rectangle", "frame", "image",
+        // "ellipse", "path", "text", "group", "component_instance". The wildcard
+        // arm intentionally covers the kinds that did NOT gain a `corners` field
+        // in v1->v2 (ellipse, path, text, group, component_instance) and any
+        // future or unknown kind strings, which are passed through unchanged for
+        // forward compatibility. When introducing v2->v3 or later migrations,
+        // re-enumerate the v1 kind strings explicitly if the new migration
+        // touches additional kinds.
         match kind_type.as_deref() {
             Some("rectangle") => migrate_rectangle_kind(kind, &node_id)?,
             Some("frame" | "image") => migrate_frame_or_image_kind(kind),
-            _ => {} // leave other kinds unchanged
+            // ellipse, path, text, group, component_instance, or unknown.
+            _ => {}
         }
     }
 
