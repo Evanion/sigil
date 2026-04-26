@@ -99,7 +99,7 @@ export function parseCornersInput(input: CornersInput): Corners | null {
       // with the Rust `parse_per_corner_array` validation. Round/Bevel/Notch/Scoop
       // do not carry a `smoothing` field; an attacker (or buggy caller) MUST NOT
       // be able to silently smuggle one through.
-      if ("smoothing" in (c as Record<string, unknown>)) return null;
+      if ("smoothing" in (c as unknown as Record<string, unknown>)) return null;
       if (!Number.isFinite(c.radii.x) || c.radii.x < 0 || c.radii.x > MAX_CORNER_RADIUS)
         return null;
       if (!Number.isFinite(c.radii.y) || c.radii.y < 0 || c.radii.y > MAX_CORNER_RADIUS)

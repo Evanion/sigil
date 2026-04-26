@@ -109,8 +109,9 @@ export function handleCornersFieldChange(
 
   // ── Build the new corners tuple ───────────────────────────────────────
   // When corners are not all-equal-round, update only the target corner and
-  // preserve the types and values of the others.
-  const newCorners: [Corner, Corner, Corner, Corner] = [
+  // preserve the types and values of the others. Build as a mutable tuple,
+  // mutate the target slot, then assign to a `Corners` (readonly) view.
+  const draft: [Corner, Corner, Corner, Corner] = [
     { ...existingCorners[0], radii: { x: existingCorners[0].radii.x, y: existingCorners[0].radii.y } },
     { ...existingCorners[1], radii: { x: existingCorners[1].radii.x, y: existingCorners[1].radii.y } },
     { ...existingCorners[2], radii: { x: existingCorners[2].radii.x, y: existingCorners[2].radii.y } },
@@ -127,8 +128,10 @@ export function handleCornersFieldChange(
     axis === "x"
       ? { x: value, y: target.radii.y }
       : { x: target.radii.x, y: value };
-  newCorners[idx] = { ...target, radii: newRadii };
+  draft[idx] = { ...target, radii: newRadii };
 
   // ── Per-corner array ──────────────────────────────────────────────────
-  store.setCorners(uuid, newCorners as unknown as Corners);
+  // RF-019: single conversion via `Corners` (readonly tuple) — no double cast.
+  const newCorners: Corners = draft;
+  store.setCorners(uuid, newCorners);
 }
