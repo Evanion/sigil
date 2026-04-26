@@ -1,4 +1,5 @@
 import type { PropertySchema } from "../schema/types";
+import { MAX_CORNER_RADIUS } from "../../store/corners-input";
 
 /**
  * Property schema for the "Design" panel — Layout sub-tab.
@@ -59,10 +60,13 @@ export const designSchema: PropertySchema = {
       name: "Corner Radius",
       when: ["rectangle", "frame", "image"],
       fields: [
-        { key: "kind.corners.0.radii.x", label: "TL", type: "number", step: 1, min: 0 },
-        { key: "kind.corners.1.radii.x", label: "TR", type: "number", step: 1, min: 0 },
-        { key: "kind.corners.2.radii.x", label: "BR", type: "number", step: 1, min: 0 },
-        { key: "kind.corners.3.radii.x", label: "BL", type: "number", step: 1, min: 0 },
+        // `max` is bounded by MAX_CORNER_RADIUS — symmetric with the Rust
+        // validate.rs constant. Per CLAUDE.md §11 "Constants Must Be
+        // Enforced": every NumberInput max must be a named constant.
+        { key: "kind.corners.0.radii.x", label: "TL", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
+        { key: "kind.corners.1.radii.x", label: "TR", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
+        { key: "kind.corners.2.radii.x", label: "BR", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
+        { key: "kind.corners.3.radii.x", label: "BL", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
       ],
     },
     {
