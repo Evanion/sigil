@@ -126,7 +126,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, Security, BE
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit ebe5736) — manual `Deserialize` for both types routes through fallible constructors (`CornerRadii::new`, `Corner::round/bevel/notch/scoop/try_superellipse`); fields made `pub(crate)`; duplicate keys rejected at every level (x, y, type, radii, smoothing); NaN/Inf rejected at deserialize time
 - **Location:** `crates/core/src/node.rs:773-794`
 - **Issue:** Use `#[derive(Deserialize)]` with public fields. `deny_unknown_fields` does NOT reject duplicate keys (serde_json silently last-writer-wins). Direct `serde_json::from_str::<CornerRadii>` accepts NaN/inf/out-of-range. Per "No Derive Deserialize on Validated Types".
 - **Recommendation:** Implement `Deserialize` manually for `Corner`/`CornerRadii` routing through validating constructors with duplicate-key tracking. Make fields private with accessors.
@@ -135,7 +135,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Compliance, Logic, BE, Security
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit 0cb2af4) — replaced `.unwrap()` calls with `if let Corner::Superellipse { smoothing, .. }` pattern matches; invariant is now compiler-enforced
 - **Location:** `crates/core/src/validate.rs:618, 620`
 - **Issue:** `corners[0].smoothing().unwrap()` and `c.smoothing().unwrap()` in `validate_corners` violate CLAUDE.md §1 "no `unwrap()` or `expect()` in core crate". SAFETY comment doesn't exempt the rule.
 - **Recommendation:** Replace with `if let Corner::Superellipse { smoothing, .. } = corners[0]` pattern match, eliminating `.unwrap()` calls. Makes invariant compiler-enforced.
@@ -144,7 +144,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, BE
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit a823370) — enumerated all NodeKind variants explicitly in `SetCorners::validate`/`apply` and the GraphQL kind canonicalization path; future variants will force compile errors at every site
 - **Location:** `crates/core/src/commands/style_commands.rs:223-246` (SetCorners), `crates/server/src/graphql/mutation.rs:359`
 - **Issue:** Wildcard `other =>` arms on `NodeKind` matches violate rust-defensive "NodeKind Variants Must Have Complete Validation Coverage". Silent breakage if a new corner-bearing variant is added.
 - **Recommendation:** Enumerate all NodeKind variants explicitly so future variants force a compile error here.
@@ -162,7 +162,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Logic
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit 4139ddf) for the Rust path — `parse_per_corner_array` now rejects stray `smoothing` on non-superellipse entries with a typed error. TS mirror flagged for Cluster 5 (frontend mediums batch).
 - **Location:** `crates/core/src/corners_input.rs:99-128` (`parse_per_corner_array`), `frontend/src/store/corners-input.ts`
 - **Issue:** Per-corner array form silently ignores stray `smoothing` field on non-superellipse shapes. Shorthand form rejects it. Violates "Validation Must Be Symmetric Across All Transports".
 - **Recommendation:** Reject `smoothing` on non-superellipse entries in per-corner array. Mirror in TS.
@@ -207,7 +207,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Data Scientist
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit faf4ef6) — round-trip serde tests pin the canonical persisted form (verbose 4-Corner array) and verify the existing shorthand-input deserializer accepts the per-corner array unchanged. The 6× growth is an intentional property of the verbose canonical form; the shorthand emission optimization is captured as a follow-up note in spec §14 performance section. Tests now guard against silent regression of either direction.
 - **Location:** `crates/core/src/migrations.rs:55-58` (default v2 emission)
 - **Issue:** Default-Round-uniform rectangles serialize as 4 identical 50-byte objects = ~180 chars vs old ~28 — 6× growth uncompressed. At 1000 rectangles: +150 KB JSON.
 - **Recommendation:** Add `Serialize` shorthand: emit `"corners":{"shape":"round","radius":r}` when all 4 corners identical Round with x==y. Deserializer already accepts shorthand.
@@ -279,7 +279,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** DevOps
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit f1c7ece) — added `crates/server/tests/integration_v1_workfile_migration.rs` with two `#[tokio::test]` cases. The positive test lays down a v1 manifest+page on disk, calls `load_workfile`, asserts `migrated_from = Some(1)`, constructs `ServerState::new_with_document_and_workfile_migrated`, signals dirty (mirroring `main.rs` exactly), waits for the persistence task debounce, and asserts (a) on-disk manifest+page are now v2 and (b) `.backup-v1/` contains v1 originals. The negative test verifies a v2-only workfile produces `migrated_from = None` and no `.backup-v1/` is created. Pins `CURRENT_SCHEMA_VERSION == 2` to flag if the schema target changes.
 - **Location:** `.github/workflows/ci.yml`, `crates/server/tests/` (gap)
 - **Issue:** No fixture-based v1→v2 integration test. The `core::deserialize_page` ↔ `server::load_workfile` boundary is where regressions hide.
 - **Recommendation:** Add `crates/server` integration test with checked-in `tests/fixtures/legacy-v1.sigil/` containing v1 nodes; assert `load_workfile` succeeds and round-trips to v2 on save.
@@ -328,7 +328,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** BE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit 0cb2af4) — extracted `pub(crate) fn validate_radius_value` and `pub(crate) fn validate_smoothing` in `validate.rs`. `corners_input.rs` now calls these helpers; the local `check_radius_value`/`check_smoothing_value` duplicates are removed. Single source of truth per CLAUDE.md §5.
 - **Location:** `crates/core/src/corners_input.rs` vs `crates/core/src/validate.rs`
 - **Issue:** `check_radius_value` and `check_smoothing_value` duplicate logic of `validate_radius_component`. Per CLAUDE.md §5 "Define all validation artifacts in `validate.rs`".
 - **Recommendation:** Extract single `pub(crate) fn validate_radius_value` in `validate.rs`, call from both sites.
@@ -337,7 +337,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** BE
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit bb651c9) — added `test_set_corners_rejects_radius_above_max` and `test_set_corners_rejects_smoothing_above_max` exercising MAX_CORNER_RADIUS and MAX_CORNER_SMOOTHING enforcement at the FieldOperation boundary directly.
 - **Location:** `crates/core/src/commands/style_commands.rs` (SetCorners tests)
 - **Issue:** No direct `test_set_corners_rejects_radius_above_max` / `test_set_corners_rejects_smoothing_above_max`. Constants are transitively enforced via `validate_corners`, but FieldOperation-level test would make the contract explicit.
 - **Recommendation:** Add direct enforcement tests at the FieldOperation boundary.
@@ -346,7 +346,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Data Scientist
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit 1786f9a) — `default_corners` is now `pub const fn`. Construction uses struct literal with `0.0` (sound for the default case; documented inline that the public constructor `CornerRadii::new` is fallible and cannot run in const context).
 - **Location:** `crates/core/src/node.rs:828-833` (`default_corners`)
 - **Issue:** Not `const fn`. Allocates per-call (cheap, but easy to avoid).
 - **Recommendation:** Make `pub const fn default_corners()` or expose `pub const DEFAULT_CORNERS: [Corner; 4]`.
@@ -373,7 +373,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Security
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved (commit d032e04) — `migrations.rs` module-level doc now records the O(n) migration cost bounded by the deserialization envelope `MAX_FILE_SIZE`. No separate per-migration size check is needed because the page has already been parsed under that limit.
 - **Location:** `crates/core/src/migrations.rs` (no pre-migration size check)
 - **Issue:** Migration walks unbounded within `MAX_FILE_SIZE` envelope. Acceptable but worth documenting.
 - **Recommendation:** Document explicitly that migration cost is O(n) bounded by `MAX_FILE_SIZE`.
@@ -386,7 +386,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Security
 - **Severity:** Info
-- **Status:** open
+- **Status:** resolved (commit d032e04) — added a compile-time `const _: () = assert!(MAX_JSON_NESTING_DEPTH == 128, ...)` in `serialize.rs::deserialize_page_with_version`. If `MAX_JSON_NESTING_DEPTH` is ever changed without an audit of `serde_json`'s default recursion limit, the build will fail rather than silently diverging from the upstream default.
 - **Location:** `crates/core/src/serialize.rs:87-88`
 - **Issue:** Comment notes serde_json default 128-recursion limit matches `MAX_JSON_NESTING_DEPTH`. No compile-time/runtime assertion.
 - **Recommendation:** Optional: pin serde_json version with CI check, or add explicit depth assertion.
@@ -395,7 +395,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** Architect, BE
 - **Severity:** Info
-- **Status:** open
+- **Status:** resolved (commit d032e04) — `migrate_to_v2` wildcard arm now documents the closed set of v1 kind-type strings (ellipse, path, text, group, component_instance) and the rationale for the wildcard (forward compatibility on unknown kinds; the listed kinds did not gain a `corners` field in v1→v2). Future migrations that touch additional kinds must re-enumerate. Compile-time exhaustiveness is impossible for a free-form `serde_json::Value` string match — the related fix on the typed `NodeKind` matches in core FieldOperations was committed separately as 4eca688.
 - **Location:** `crates/core/src/migrations.rs:31`
 - **Issue:** Wildcard `_ => {}` arm on string-typed kind dispatch. Less risky than NodeKind match (free-form Value), but a new corner-bearing variant added in v3 wouldn't trigger compile error.
 - **Recommendation:** Document v1→v2 scope in comment, or enumerate v1 kind-type strings explicitly.
