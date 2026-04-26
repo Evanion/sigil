@@ -193,6 +193,9 @@ impl FieldOperation for SetTextStyleField {
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
+        // Enumerate every non-Text variant explicitly so a new variant in
+        // core forces a compile error here (rust-defensive "NodeKind
+        // Variants Must Have Complete Validation Coverage", RF-039).
         match &mut node.kind {
             NodeKind::Text { text_style, .. } => {
                 match &self.field {
@@ -209,7 +212,13 @@ impl FieldOperation for SetTextStyleField {
                 }
                 Ok(())
             }
-            _ => Err(CoreError::ValidationError(format!(
+            NodeKind::Frame { .. }
+            | NodeKind::Rectangle { .. }
+            | NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. } => Err(CoreError::ValidationError(format!(
                 "SetTextStyleField requires a Text node (node {:?} is a different kind)",
                 self.node_id
             ))),

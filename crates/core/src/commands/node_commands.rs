@@ -182,11 +182,20 @@ impl FieldOperation for SetTextContent {
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
+        // Enumerate every non-Text variant explicitly so a new variant in
+        // core forces a compile error here (rust-defensive "NodeKind
+        // Variants Must Have Complete Validation Coverage", RF-040).
         match &mut node.kind {
             NodeKind::Text { content, .. } => {
                 content.clone_from(&self.new_content);
             }
-            _ => {
+            NodeKind::Frame { .. }
+            | NodeKind::Rectangle { .. }
+            | NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Image { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. } => {
                 return Err(CoreError::ValidationError(
                     "SetTextContent can only be applied to Text nodes".to_string(),
                 ));
