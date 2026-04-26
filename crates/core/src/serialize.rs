@@ -76,6 +76,20 @@ pub fn serialize_page(page: &SerializedPage) -> Result<String, CoreError> {
 /// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
 /// - `CoreError::SerializationError` if the JSON is malformed.
 pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
+    deserialize_page_with_version(json).map(|(page, _)| page)
+}
+
+/// Deserializes a page from JSON, returning both the parsed page and the
+/// on-disk schema version observed before any migration was applied.
+///
+/// This is used by the persistence layer to detect when a workfile required
+/// migration on load — e.g. to back up the original v1 files before the first
+/// migrated save and to mark the document dirty so the v2 form is persisted.
+///
+/// # Errors
+/// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
+/// - `CoreError::SerializationError` if the JSON is malformed.
+pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
     if json.len() > crate::validate::MAX_FILE_SIZE {
         return Err(CoreError::InputTooLarge(format!(
             "file size {} bytes exceeds maximum of {} bytes",
@@ -125,7 +139,7 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         validate_serialized_transition(transition)?;
     }
 
-    Ok(page)
+    Ok((page, version))
 }
 
 /// Converts arena nodes into serialized nodes, resolving `NodeId`s to UUIDs.
@@ -747,6 +761,31 @@ mod tests {
             result,
             Err(CoreError::UnsupportedSchemaVersion(999, _))
         ));
+    }
+
+    #[test]
+    fn test_deserialize_with_version_returns_v1_for_legacy_page() {
+        // A v1 page (no `corners` field, uses legacy `corner_radii`) should
+        // round-trip through migration and report its on-disk version as 1.
+        let json = r#"{
+            "schema_version": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Legacy",
+            "nodes": [],
+            "transitions": []
+        }"#;
+        let (page, version) = deserialize_page_with_version(json).expect("deserialize");
+        assert_eq!(version, 1, "should report on-disk version, not migrated");
+        assert_eq!(page.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_deserialize_with_version_returns_current_for_v2_page() {
+        let json = format!(
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "V2", "nodes": [], "transitions": []}}"#
+        );
+        let (_, version) = deserialize_page_with_version(&json).expect("deserialize");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
     }
 
     #[test]

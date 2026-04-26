@@ -49,11 +49,25 @@ async fn main() -> anyhow::Result<()> {
         let workfile_path = std::path::PathBuf::from(workfile_str);
         tracing::info!("loading workfile from {}", workfile_path.display());
 
-        let doc = agent_designer_server::workfile::load_workfile(&workfile_path)
+        let loaded = agent_designer_server::workfile::load_workfile(&workfile_path)
             .await
             .context("failed to load workfile")?;
 
-        ServerState::new_with_document_and_workfile(doc, workfile_path)
+        let migrated_from = loaded.migrated_from;
+        let state = ServerState::new_with_document_and_workfile_migrated(
+            loaded.document,
+            workfile_path,
+            migrated_from,
+        );
+
+        // RF-009: if the document was migrated on load, signal the persistence
+        // task that the document is dirty so the v2 form is flushed back to disk.
+        if migrated_from.is_some() {
+            tracing::info!("triggering migrated-form save after workfile load");
+            state.app.signal_dirty();
+        }
+
+        state
     } else {
         tracing::info!("no WORKFILE configured — running in-memory mode");
         // Create a default page so there's something to draw on

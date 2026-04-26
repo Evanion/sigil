@@ -68,11 +68,29 @@ impl ServerState {
     /// Used on startup when loading an existing workfile from disk.
     #[must_use]
     pub fn new_with_document_and_workfile(doc: Document, workfile_path: PathBuf) -> Self {
+        Self::new_with_document_and_workfile_migrated(doc, workfile_path, None)
+    }
+
+    /// Creates a `ServerState` with a pre-loaded document, workfile persistence,
+    /// and a migration flag.
+    ///
+    /// When `migrated_from` is `Some(v)`, the next save will populate
+    /// [`workfile::PreparedSave::migrated_from`] so the writer can apply
+    /// migration-specific behavior on the first save after load (RF-009).
+    #[must_use]
+    pub fn new_with_document_and_workfile_migrated(
+        doc: Document,
+        workfile_path: PathBuf,
+        migrated_from: Option<u32>,
+    ) -> Self {
         let document = Arc::new(Mutex::new(SendDocument(doc)));
-        let (dirty_tx, persistence_handle) = crate::persistence::spawn_persistence_task(
-            Arc::clone(&document),
-            workfile_path.clone(),
-        );
+        let migration_flag = Arc::new(Mutex::new(migrated_from));
+        let (dirty_tx, persistence_handle) =
+            crate::persistence::spawn_persistence_task_with_migration_flag(
+                Arc::clone(&document),
+                workfile_path.clone(),
+                Arc::clone(&migration_flag),
+            );
         let mut app =
             AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
