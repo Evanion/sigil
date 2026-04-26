@@ -25,7 +25,7 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
           min={props.field.min}
           max={props.field.max}
           suffix={props.field.suffix}
-          aria-label={props.field.label}
+          aria-label={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
       <Match when={props.field.type === "slider"}>
@@ -39,7 +39,7 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
             const v = parseFloat(e.currentTarget.value);
             if (Number.isFinite(v)) props.onChange(v);
           }}
-          aria-label={props.field.label}
+          aria-label={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
       <Match when={props.field.type === "text"}>
@@ -47,7 +47,7 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
           value={typeof props.value === "string" ? props.value : ""}
           onValueChange={(v) => props.onChange(v)}
           prefix={props.field.label}
-          aria-label={props.field.label}
+          aria-label={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
       <Match when={props.field.type === "select" && props.field.options}>
@@ -60,14 +60,14 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
               label: o.label,
             })) ?? []
           }
-          aria-label={props.field.label}
+          aria-label={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
       <Match when={props.field.type === "toggle"}>
         <Toggle
           checked={Boolean(props.value)}
           onCheckedChange={(v) => props.onChange(v)}
-          aria-label={props.field.label}
+          aria-label={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
     </Switch>

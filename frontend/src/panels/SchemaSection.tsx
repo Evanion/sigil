@@ -1,4 +1,4 @@
-import { createSignal, For, Show, type Component } from "solid-js";
+import { createSignal, createUniqueId, For, Show, type Component } from "solid-js";
 import type { SectionDef } from "./schema/types";
 import { FieldRenderer } from "./FieldRenderer";
 import type { DocumentNode } from "../types/document";
@@ -36,6 +36,10 @@ function resolveValue(node: DocumentNode, key: string): unknown {
 
 export const SchemaSection: Component<SchemaSectionProps> = (props) => {
   const [collapsed, setCollapsed] = createSignal(props.section.collapsed ?? false);
+  // RF-022: stable id linking the disclosure trigger to its content. Required
+  // by WAI-ARIA Disclosure pattern so screen readers can announce the
+  // controlled region.
+  const fieldsId = createUniqueId();
 
   return (
     <div class="sigil-schema-section">
@@ -43,6 +47,7 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
         <button
           class="sigil-schema-section__toggle"
           aria-expanded={!collapsed()}
+          aria-controls={fieldsId}
           aria-label={`${collapsed() ? "Expand" : "Collapse"} ${props.section.name}`}
           onClick={() => setCollapsed(!collapsed())}
         >
@@ -51,7 +56,7 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
         </button>
       </div>
       <Show when={!collapsed()}>
-        <div class="sigil-schema-section__fields">
+        <div id={fieldsId} class="sigil-schema-section__fields">
           <For each={props.section.fields}>
             {(field) => (
               <div
