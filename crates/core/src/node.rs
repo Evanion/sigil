@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::component::OverrideValue;
+use crate::error::CoreError;
 use crate::id::{ComponentId, NodeId};
 
 // Re-export path types for backwards compatibility
@@ -770,21 +771,109 @@ impl Default for Constraints {
 /// Horizontal and vertical radii for a single corner.
 /// CSS-style elliptical border-radius — `x` is along the top/bottom edge,
 /// `y` is along the left/right edge.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+///
+/// Fields are `pub(crate)` to ensure all external construction routes through
+/// [`CornerRadii::new`], which validates against `MAX_CORNER_RADIUS` and
+/// rejects NaN/infinity. `Deserialize` is implemented manually (not derived)
+/// to route through the validating constructor and reject duplicate keys —
+/// see RF-012.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct CornerRadii {
-    pub x: f64,
-    pub y: f64,
+    pub(crate) x: f64,
+    pub(crate) y: f64,
+}
+
+impl CornerRadii {
+    /// Constructs a `CornerRadii`, validating each component.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if `x` or `y` is NaN, infinite,
+    /// negative, or exceeds `MAX_CORNER_RADIUS`.
+    pub fn new(x: f64, y: f64) -> Result<Self, CoreError> {
+        crate::validate::validate_radius_value(x, "radii.x")?;
+        crate::validate::validate_radius_value(y, "radii.y")?;
+        Ok(Self { x, y })
+    }
+
+    /// Horizontal radius — along the top/bottom edge.
+    #[must_use]
+    pub fn x(&self) -> f64 {
+        self.x
+    }
+
+    /// Vertical radius — along the left/right edge.
+    #[must_use]
+    pub fn y(&self) -> f64 {
+        self.y
+    }
+}
+
+impl<'de> Deserialize<'de> for CornerRadii {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct CornerRadiiVisitor;
+
+        impl<'de> Visitor<'de> for CornerRadiiVisitor {
+            type Value = CornerRadii;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str("a CornerRadii object with fields 'x' and 'y'")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<CornerRadii, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut x: Option<f64> = None;
+                let mut y: Option<f64> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "x" => {
+                            if x.is_some() {
+                                return Err(de::Error::custom("duplicate field 'x'"));
+                            }
+                            x = Some(map.next_value()?);
+                        }
+                        "y" => {
+                            if y.is_some() {
+                                return Err(de::Error::custom("duplicate field 'y'"));
+                            }
+                            y = Some(map.next_value()?);
+                        }
+                        unknown => {
+                            return Err(de::Error::custom(format!(
+                                "unknown field '{unknown}', expected 'x' or 'y'"
+                            )));
+                        }
+                    }
+                }
+                let x = x.ok_or_else(|| de::Error::missing_field("x"))?;
+                let y = y.ok_or_else(|| de::Error::missing_field("y"))?;
+                CornerRadii::new(x, y).map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_map(CornerRadiiVisitor)
+    }
 }
 
 /// Shape applied to a single corner.
 /// Tagged enum serialized as `{"type": "<variant>", ...}`.
 ///
 /// Superellipse carries an additional `smoothing` field (0.0..=1.0).
-/// Other variants have no extra fields — `deny_unknown_fields` on each
-/// variant prevents silent acceptance of misapplied parameters.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+/// Other variants have no extra fields. Fields on each variant are
+/// `pub(crate)` to ensure all external construction routes through
+/// [`Corner::new_round`], etc., which validate against the limits in
+/// `validate.rs`. `Deserialize` is implemented manually (not derived)
+/// to route through the validating constructors and reject duplicate
+/// keys — see RF-012.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Corner {
     Round { radii: CornerRadii },
     Bevel { radii: CornerRadii },
@@ -794,6 +883,41 @@ pub enum Corner {
 }
 
 impl Corner {
+    /// Constructs a `Corner::Round`. The `radii` are assumed to have already
+    /// been validated by `CornerRadii::new`.
+    #[must_use]
+    pub fn round(radii: CornerRadii) -> Self {
+        Corner::Round { radii }
+    }
+
+    /// Constructs a `Corner::Bevel`.
+    #[must_use]
+    pub fn bevel(radii: CornerRadii) -> Self {
+        Corner::Bevel { radii }
+    }
+
+    /// Constructs a `Corner::Notch`.
+    #[must_use]
+    pub fn notch(radii: CornerRadii) -> Self {
+        Corner::Notch { radii }
+    }
+
+    /// Constructs a `Corner::Scoop`.
+    #[must_use]
+    pub fn scoop(radii: CornerRadii) -> Self {
+        Corner::Scoop { radii }
+    }
+
+    /// Constructs a `Corner::Superellipse`, validating `smoothing`.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if `smoothing` is NaN, infinite,
+    /// or outside `[MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]`.
+    pub fn try_superellipse(radii: CornerRadii, smoothing: f64) -> Result<Self, CoreError> {
+        crate::validate::validate_smoothing(smoothing)?;
+        Ok(Corner::Superellipse { radii, smoothing })
+    }
+
     /// The radii of this corner, regardless of shape.
     #[must_use]
     pub fn radii(&self) -> CornerRadii {
@@ -819,6 +943,113 @@ impl Corner {
             Corner::Superellipse { smoothing, .. } => Some(*smoothing),
             _ => None,
         }
+    }
+}
+
+impl<'de> Deserialize<'de> for Corner {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct CornerVisitor;
+
+        impl<'de> Visitor<'de> for CornerVisitor {
+            type Value = Corner;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                f.write_str(
+                    "a Corner object with field 'type' (round|bevel|notch|scoop|superellipse), \
+                     'radii', and 'smoothing' (superellipse only)",
+                )
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Corner, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut variant_type: Option<String> = None;
+                let mut radii: Option<CornerRadii> = None;
+                let mut smoothing: Option<f64> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "type" => {
+                            if variant_type.is_some() {
+                                return Err(de::Error::custom("duplicate field 'type'"));
+                            }
+                            variant_type = Some(map.next_value()?);
+                        }
+                        "radii" => {
+                            if radii.is_some() {
+                                return Err(de::Error::custom("duplicate field 'radii'"));
+                            }
+                            radii = Some(map.next_value()?);
+                        }
+                        "smoothing" => {
+                            if smoothing.is_some() {
+                                return Err(de::Error::custom("duplicate field 'smoothing'"));
+                            }
+                            smoothing = Some(map.next_value()?);
+                        }
+                        unknown => {
+                            return Err(de::Error::custom(format!(
+                                "unknown field '{unknown}', expected 'type', 'radii', or 'smoothing'"
+                            )));
+                        }
+                    }
+                }
+                let variant_type = variant_type.ok_or_else(|| de::Error::missing_field("type"))?;
+                let radii = radii.ok_or_else(|| de::Error::missing_field("radii"))?;
+                match variant_type.as_str() {
+                    "round" => {
+                        if smoothing.is_some() {
+                            return Err(de::Error::custom(
+                                "'smoothing' is only valid on 'superellipse' corners, not 'round'",
+                            ));
+                        }
+                        Ok(Corner::round(radii))
+                    }
+                    "bevel" => {
+                        if smoothing.is_some() {
+                            return Err(de::Error::custom(
+                                "'smoothing' is only valid on 'superellipse' corners, not 'bevel'",
+                            ));
+                        }
+                        Ok(Corner::bevel(radii))
+                    }
+                    "notch" => {
+                        if smoothing.is_some() {
+                            return Err(de::Error::custom(
+                                "'smoothing' is only valid on 'superellipse' corners, not 'notch'",
+                            ));
+                        }
+                        Ok(Corner::notch(radii))
+                    }
+                    "scoop" => {
+                        if smoothing.is_some() {
+                            return Err(de::Error::custom(
+                                "'smoothing' is only valid on 'superellipse' corners, not 'scoop'",
+                            ));
+                        }
+                        Ok(Corner::scoop(radii))
+                    }
+                    "superellipse" => {
+                        let smoothing = smoothing.ok_or_else(|| {
+                            de::Error::custom("'superellipse' requires 'smoothing' field")
+                        })?;
+                        Corner::try_superellipse(radii, smoothing).map_err(de::Error::custom)
+                    }
+                    other => Err(de::Error::custom(format!(
+                        "unknown corner type '{other}', \
+                         expected one of: round, bevel, notch, scoop, superellipse"
+                    ))),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(CornerVisitor)
     }
 }
 
@@ -2907,5 +3138,188 @@ mod tests {
         } else {
             panic!("expected Image variant");
         }
+    }
+
+    // ── RF-012: manual Deserialize for CornerRadii / Corner ────────────
+
+    #[test]
+    fn test_corner_radii_new_validates_fields() {
+        // valid
+        assert!(CornerRadii::new(8.0, 12.0).is_ok());
+        // NaN
+        assert!(CornerRadii::new(f64::NAN, 0.0).is_err());
+        assert!(CornerRadii::new(0.0, f64::NAN).is_err());
+        // infinity
+        assert!(CornerRadii::new(f64::INFINITY, 0.0).is_err());
+        // negative
+        assert!(CornerRadii::new(-1.0, 0.0).is_err());
+        // above max
+        assert!(CornerRadii::new(crate::validate::MAX_CORNER_RADIUS + 1.0, 0.0).is_err());
+    }
+
+    #[test]
+    fn test_corner_radii_accessors() {
+        let r = CornerRadii::new(4.0, 6.0).expect("valid");
+        assert_eq!(r.x(), 4.0);
+        assert_eq!(r.y(), 6.0);
+    }
+
+    #[test]
+    fn test_corner_radii_deserialize_rejects_duplicate_x() {
+        let json = r#"{"x": 1, "x": 2, "y": 3}"#;
+        let result: Result<CornerRadii, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected duplicate-key rejection");
+        assert!(
+            format!("{err}").contains("duplicate field 'x'"),
+            "error must mention duplicate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_radii_deserialize_rejects_duplicate_y() {
+        let json = r#"{"x": 1, "y": 2, "y": 3}"#;
+        let result: Result<CornerRadii, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected duplicate-key rejection");
+        assert!(
+            format!("{err}").contains("duplicate field 'y'"),
+            "error must mention duplicate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_radii_deserialize_rejects_unknown_field() {
+        let json = r#"{"x": 1, "y": 2, "z": 3}"#;
+        let result: Result<CornerRadii, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected unknown-field rejection");
+        assert!(
+            format!("{err}").contains("unknown field"),
+            "error must mention unknown field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_radii_deserialize_rejects_negative() {
+        let json = r#"{"x": -1, "y": 2}"#;
+        let result: Result<CornerRadii, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected negative-value rejection");
+        assert!(
+            format!("{err}").contains("non-negative"),
+            "error must mention non-negative, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_radii_deserialize_rejects_above_max() {
+        let json = format!(
+            r#"{{"x": {}, "y": 0}}"#,
+            crate::validate::MAX_CORNER_RADIUS + 1.0
+        );
+        let result: Result<CornerRadii, _> = serde_json::from_str(&json);
+        let err = result.expect_err("expected above-max rejection");
+        assert!(
+            format!("{err}").contains("MAX_CORNER_RADIUS"),
+            "error must mention MAX_CORNER_RADIUS, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_round() {
+        let json = r#"{"type": "round", "radii": {"x": 4, "y": 4}}"#;
+        let c: Corner = serde_json::from_str(json).expect("parse");
+        assert!(matches!(c, Corner::Round { .. }));
+    }
+
+    #[test]
+    fn test_corner_deserialize_superellipse_requires_smoothing() {
+        let json = r#"{"type": "superellipse", "radii": {"x": 4, "y": 4}}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected missing-smoothing rejection");
+        assert!(
+            format!("{err}").contains("smoothing"),
+            "error must mention smoothing, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_round_rejects_smoothing() {
+        let json = r#"{"type": "round", "radii": {"x": 4, "y": 4}, "smoothing": 0.5}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected stray-smoothing rejection");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing") && msg.contains("round"),
+            "error must mention smoothing and round, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_duplicate_type() {
+        let json = r#"{"type": "round", "type": "bevel", "radii": {"x": 4, "y": 4}}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected duplicate-type rejection");
+        assert!(
+            format!("{err}").contains("duplicate field 'type'"),
+            "error must mention duplicate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_duplicate_radii() {
+        let json = r#"{"type": "round", "radii": {"x": 4, "y": 4}, "radii": {"x": 5, "y": 5}}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected duplicate-radii rejection");
+        assert!(
+            format!("{err}").contains("duplicate field 'radii'"),
+            "error must mention duplicate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_duplicate_smoothing() {
+        let json = r#"{
+            "type": "superellipse",
+            "radii": {"x": 4, "y": 4},
+            "smoothing": 0.5,
+            "smoothing": 0.6
+        }"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected duplicate-smoothing rejection");
+        assert!(
+            format!("{err}").contains("duplicate field 'smoothing'"),
+            "error must mention duplicate, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_unknown_field() {
+        let json = r#"{"type": "round", "radii": {"x": 4, "y": 4}, "extra": 1}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected unknown-field rejection");
+        assert!(
+            format!("{err}").contains("unknown field"),
+            "error must mention unknown field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_rejects_unknown_type() {
+        let json = r#"{"type": "triangle", "radii": {"x": 4, "y": 4}}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected unknown-type rejection");
+        assert!(
+            format!("{err}").contains("unknown corner type"),
+            "error must mention unknown type, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_corner_deserialize_superellipse_rejects_smoothing_above_max() {
+        let json = r#"{"type": "superellipse", "radii": {"x": 4, "y": 4}, "smoothing": 1.5}"#;
+        let result: Result<Corner, _> = serde_json::from_str(json);
+        let err = result.expect_err("expected smoothing-above-max rejection");
+        assert!(
+            format!("{err}").contains("smoothing"),
+            "error must mention smoothing, got: {err}"
+        );
     }
 }

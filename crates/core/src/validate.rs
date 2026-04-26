@@ -610,8 +610,12 @@ pub fn validate_corners(corners: &[Corner; 4]) -> Result<(), CoreError> {
     // `smoothing()` and unwrapping — the discriminant is in the type system,
     // so a non-`Superellipse` corner here would be a compile-time-impossible
     // contradiction with the `superellipse_count == 4` check above.
-    if let (4, Corner::Superellipse { smoothing: first, .. }) =
-        (superellipse_count, &corners[0])
+    if let (
+        4,
+        Corner::Superellipse {
+            smoothing: first, ..
+        },
+    ) = (superellipse_count, &corners[0])
     {
         for (i, c) in corners.iter().enumerate().skip(1) {
             if let Corner::Superellipse { smoothing: s, .. } = c {
@@ -655,6 +659,29 @@ pub(crate) fn validate_radius_value(value: f64, label: &str) -> Result<(), CoreE
     if value > MAX_CORNER_RADIUS {
         return Err(CoreError::ValidationError(format!(
             "{label} exceeds MAX_CORNER_RADIUS ({MAX_CORNER_RADIUS}), got {value}"
+        )));
+    }
+    Ok(())
+}
+
+/// Validates a single smoothing value against finite + range bounds.
+///
+/// Shared by `validate_corners`, the corners-input parser, and
+/// `Corner::try_superellipse` so the rules cannot diverge.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` when:
+/// - `s` is NaN or infinite.
+/// - `s` is outside `[MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]`.
+pub(crate) fn validate_smoothing(s: f64) -> Result<(), CoreError> {
+    if !s.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "smoothing must be finite (no NaN or infinity), got {s}"
+        )));
+    }
+    if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(&s) {
+        return Err(CoreError::ValidationError(format!(
+            "smoothing must be in [{MIN_CORNER_SMOOTHING}, {MAX_CORNER_SMOOTHING}], got {s}"
         )));
     }
     Ok(())
@@ -1382,8 +1409,7 @@ mod tests {
 
     #[test]
     fn test_validate_radius_value_rejects_infinity() {
-        let err =
-            validate_radius_value(f64::INFINITY, "x").expect_err("Infinity must be rejected");
+        let err = validate_radius_value(f64::INFINITY, "x").expect_err("Infinity must be rejected");
         assert!(
             format!("{err}").contains("finite"),
             "error must mention 'finite', got: {err}"
@@ -1392,8 +1418,7 @@ mod tests {
 
     #[test]
     fn test_validate_radius_value_rejects_negative() {
-        let err =
-            validate_radius_value(-1.0, "x").expect_err("negative value must be rejected");
+        let err = validate_radius_value(-1.0, "x").expect_err("negative value must be rejected");
         assert!(
             format!("{err}").contains("non-negative"),
             "error must mention 'non-negative', got: {err}"

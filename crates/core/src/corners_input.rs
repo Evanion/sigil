@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::CoreError;
 use crate::node::{Corner, CornerRadii};
-use crate::validate::{MAX_CORNER_SMOOTHING, MIN_CORNER_SMOOTHING, validate_radius_value};
+use crate::validate::{validate_radius_value, validate_smoothing};
 
 /// Parses a GraphQL/MCP corners input blob into a canonical `[Corner; 4]`.
 ///
@@ -57,17 +57,14 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
                     "superellipse shorthand requires 'smoothing' field".into(),
                 )
             })?;
-        check_smoothing_value(smoothing)?;
+        validate_smoothing(smoothing)?;
 
         let radii_array = if let Some(r) = obj.get("radius") {
             let scalar = r
                 .as_f64()
                 .ok_or_else(|| CoreError::ValidationError("'radius' must be a number".into()))?;
             validate_radius_value(scalar, "radius")?;
-            [CornerRadii {
-                x: scalar,
-                y: scalar,
-            }; 4]
+            [CornerRadii::new(scalar, scalar)?; 4]
         } else if let Some(arr) = obj.get("radii").and_then(Value::as_array) {
             parse_radii_array(arr)?
         } else {
@@ -76,7 +73,13 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
             ));
         };
 
-        Ok(radii_array.map(|radii| Corner::Superellipse { radii, smoothing }))
+        // smoothing already validated by `validate_smoothing` above; the
+        // map below cannot fail.
+        let mut corners = [Corner::round(CornerRadii::new(0.0, 0.0)?); 4];
+        for (i, radii) in radii_array.iter().enumerate() {
+            corners[i] = Corner::try_superellipse(*radii, smoothing)?;
+        }
+        Ok(corners)
     } else {
         if obj.get("smoothing").is_some() {
             return Err(CoreError::ValidationError(format!(
@@ -87,10 +90,7 @@ fn parse_shorthand_or_shape_level(obj: &Value) -> Result<[Corner; 4], CoreError>
             CoreError::ValidationError("uniform shorthand requires 'radius' field".into())
         })?;
         validate_radius_value(radius, "radius")?;
-        let radii = CornerRadii {
-            x: radius,
-            y: radius,
-        };
+        let radii = CornerRadii::new(radius, radius)?;
         let corner = build_non_superellipse_corner(shape, radii)?;
         Ok([corner; 4])
     }
@@ -103,9 +103,7 @@ fn parse_per_corner_array(arr: &[Value]) -> Result<[Corner; 4], CoreError> {
             arr.len()
         )));
     }
-    let mut out: [Corner; 4] = [Corner::Round {
-        radii: CornerRadii { x: 0.0, y: 0.0 },
-    }; 4];
+    let mut out: [Corner; 4] = [Corner::round(CornerRadii::new(0.0, 0.0)?); 4];
     for (i, entry) in arr.iter().enumerate() {
         let shape = entry.get("shape").and_then(Value::as_str).ok_or_else(|| {
             CoreError::ValidationError(format!("corners[{i}] missing 'shape' field"))
@@ -162,34 +160,15 @@ fn parse_single_radii(v: &Value) -> Result<CornerRadii, CoreError> {
         .and_then(Value::as_f64)
         .ok_or_else(|| CoreError::ValidationError("radii entry missing 'y'".into()))?;
     validate_radius_value(y, "radii.y")?;
-    Ok(CornerRadii { x, y })
-}
-
-/// Guards a smoothing value at the parser boundary.
-///
-/// # Errors
-/// Returns `CoreError::ValidationError` when `s` is not finite or not in
-/// `[MIN_CORNER_SMOOTHING, MAX_CORNER_SMOOTHING]`.
-fn check_smoothing_value(s: f64) -> Result<(), CoreError> {
-    if !s.is_finite() {
-        return Err(CoreError::ValidationError(format!(
-            "smoothing must be finite (no NaN or infinity), got {s}"
-        )));
-    }
-    if !(MIN_CORNER_SMOOTHING..=MAX_CORNER_SMOOTHING).contains(&s) {
-        return Err(CoreError::ValidationError(format!(
-            "smoothing must be in [{MIN_CORNER_SMOOTHING}, {MAX_CORNER_SMOOTHING}], got {s}"
-        )));
-    }
-    Ok(())
+    CornerRadii::new(x, y)
 }
 
 fn build_non_superellipse_corner(shape: &str, radii: CornerRadii) -> Result<Corner, CoreError> {
     match shape {
-        "round" => Ok(Corner::Round { radii }),
-        "bevel" => Ok(Corner::Bevel { radii }),
-        "notch" => Ok(Corner::Notch { radii }),
-        "scoop" => Ok(Corner::Scoop { radii }),
+        "round" => Ok(Corner::round(radii)),
+        "bevel" => Ok(Corner::bevel(radii)),
+        "notch" => Ok(Corner::notch(radii)),
+        "scoop" => Ok(Corner::scoop(radii)),
         "superellipse" => Err(CoreError::ValidationError(
             "superellipse must be constructed via the shape-level form".into(),
         )),
@@ -389,9 +368,9 @@ mod tests {
 
     #[test]
     fn test_parse_corners_input_rejects_nan_smoothing() {
-        // serde_json::Number cannot represent NaN, so test check_smoothing_value
+        // serde_json::Number cannot represent NaN, so test validate_smoothing
         // directly for the NaN case.
-        let err = super::check_smoothing_value(f64::NAN)
+        let err = crate::validate::validate_smoothing(f64::NAN)
             .expect_err("expected rejection for NaN smoothing");
         assert!(
             format!("{err}").contains("finite"),

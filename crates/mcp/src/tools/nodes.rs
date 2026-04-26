@@ -1582,8 +1582,8 @@ mod tests {
             let agent_designer_core::Corner::Round { radii } = corner else {
                 panic!("expected round corner, got {corner:?}");
             };
-            assert_eq!(radii.x, 12.0);
-            assert_eq!(radii.y, 12.0);
+            assert_eq!(radii.x(), 12.0);
+            assert_eq!(radii.y(), 12.0);
         }
     }
 
@@ -1614,8 +1614,8 @@ mod tests {
             let agent_designer_core::Corner::Superellipse { radii, smoothing } = corner else {
                 panic!("expected superellipse, got {corner:?}");
             };
-            assert_eq!(radii.x, 20.0);
-            assert_eq!(radii.y, 20.0);
+            assert_eq!(radii.x(), 20.0);
+            assert_eq!(radii.y(), 20.0);
             assert_eq!(*smoothing, 0.6);
         }
     }

@@ -1540,9 +1540,18 @@ mod tests {
             ver = CURRENT_SCHEMA_VERSION
         );
         let result = deserialize_page(&json);
+        // After RF-012, `CornerRadii::new` validates radii during
+        // deserialization, so the error is reported as a SerializationError
+        // wrapping the validation message (rather than a separate
+        // ValidationError step after deserialize). Either form is acceptable —
+        // the message must reference the limit.
+        let msg = match &result {
+            Err(CoreError::ValidationError(m) | CoreError::SerializationError(m)) => m.clone(),
+            other => panic!("expected validation/serialization error, got: {other:?}"),
+        };
         assert!(
-            matches!(result, Err(CoreError::ValidationError(ref m)) if m.contains("MAX_CORNER_RADIUS")),
-            "expected MAX_CORNER_RADIUS error, got: {result:?}"
+            msg.contains("MAX_CORNER_RADIUS"),
+            "expected MAX_CORNER_RADIUS error, got: {msg}"
         );
     }
 
