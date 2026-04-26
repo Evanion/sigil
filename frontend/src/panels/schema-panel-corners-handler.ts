@@ -1,19 +1,25 @@
 /**
  * Corners MUTATION_MAP handler extracted from SchemaPanel for testability.
  *
- * Called when the user edits a `kind.corners.<idx>.radii.x` field in the
- * SchemaPanel. Computes the new Corners tuple and dispatches the correct
- * setCorners call form:
+ * Called when the user edits a `kind.corners.<idx>.radii.x` or
+ * `kind.corners.<idx>.radii.y` field in the SchemaPanel. Computes the new
+ * Corners tuple and dispatches the correct setCorners call form:
  *
  *   - Superellipse: shape-level `{ type: "superellipse", radius, smoothing }`
- *   - All-round uniform: scalar shorthand (a single number)
+ *   - All-round uniform (x edits only): scalar shorthand (a single number)
  *   - Otherwise: per-corner Corners tuple
  *
  * Rules from spec-14a:
  * - Preserves the existing `type` of every corner — never silently converts
  *   bevel/notch/scoop to round.
+ * - Preserves the orthogonal axis when editing a single axis — editing `.x`
+ *   does NOT overwrite a pre-existing `.y` (and vice versa). Elliptical
+ *   corners (x ≠ y, set via MCP/GraphQL) survive single-axis edits intact.
  * - Superellipse is all-or-nothing: per-corner arrays with superellipse are
  *   rejected by setCorners, so we use shape-level form for all four corners.
+ *   The shape-level form is uniform (radius collapses to x = y = radius) per
+ *   spec §7 superellipse uniformity rule, so an x-edit on superellipse
+ *   intentionally collapses any pre-existing per-axis asymmetry.
  * - Validates with `Number.isFinite` per CLAUDE.md floating-point rules.
  * - Returns early (no call) for invalid or non-finite values — no silent clamping.
  */
@@ -45,13 +51,19 @@ export function handleCornersFieldChange(
   // Guard: only rectangle, frame, image have corners.
   if (!CORNER_BEARING_KINDS.has(node.kind.type)) return;
 
-  // Parse the corner index from the key: "kind.corners.<idx>.radii.x"
+  // Parse the corner index AND the axis from the key:
+  // "kind.corners.<idx>.radii.<axis>" where axis ∈ {"x", "y"}.
   const afterPrefix = key.slice("kind.corners.".length);
-  const idxStr = afterPrefix.split(".")[0] ?? "";
+  const parts = afterPrefix.split(".");
+  const idxStr = parts[0] ?? "";
+  const axis = parts[2];
   const idx = parseInt(idxStr, 10);
 
   // Validate index — must be 0, 1, 2, or 3.
   if (!Number.isFinite(idx) || idx < 0 || idx > 3) return;
+
+  // Validate axis — must be "x" or "y".
+  if (axis !== "x" && axis !== "y") return;
 
   // Validate value — must be a finite, non-negative number.
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return;
@@ -105,8 +117,17 @@ export function handleCornersFieldChange(
     { ...existingCorners[3], radii: { x: existingCorners[3].radii.x, y: existingCorners[3].radii.y } },
   ];
 
-  // Replace only the target index — preserve the corner type.
-  newCorners[idx] = { ...existingCorners[idx], radii: { x: value, y: value } };
+  // Replace only the target axis on the target corner — preserve the corner
+  // type AND the orthogonal axis. A single-axis edit must not silently
+  // overwrite a pre-existing per-axis value (RF-008): elliptical corners
+  // (x ≠ y) set via MCP/GraphQL must survive .x edits with their .y intact,
+  // and vice versa.
+  const target = existingCorners[idx];
+  const newRadii =
+    axis === "x"
+      ? { x: value, y: target.radii.y }
+      : { x: target.radii.x, y: value };
+  newCorners[idx] = { ...target, radii: newRadii };
 
   // ── Per-corner array ──────────────────────────────────────────────────
   store.setCorners(uuid, newCorners as unknown as Corners);

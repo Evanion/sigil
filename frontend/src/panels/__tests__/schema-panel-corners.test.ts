@@ -327,6 +327,103 @@ describe("handleCornersFieldChange", () => {
     expect(store.setCorners).toHaveBeenCalledWith("uuid-image", 4);
   });
 
+  // ── Case 6: orthogonal-axis preservation (RF-008) ───────────────────
+
+  it("preserves existing y radius when editing only .x on a per-corner array", () => {
+    // Start with an elliptical corner 0 ({x: 8, y: 4}) — set this way via
+    // MCP/GraphQL since the schema only exposes .x edits today. The other
+    // corners are different so we land in the per-corner array branch
+    // (not the uniform-scalar shorthand).
+    const ellipticalCorner: Corner = { type: "round", radii: { x: 8, y: 4 } };
+    const store = makeStore();
+    const node = makeRectNode([
+      ellipticalCorner,
+      roundCorner(0),
+      roundCorner(0),
+      roundCorner(0),
+    ]);
+    handleCornersFieldChange(
+      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      "uuid-rect",
+      "kind.corners.0.radii.x",
+      10,
+      node,
+    );
+    const [, arg] = store.setCorners.mock.calls[0] as [string, unknown];
+    expect(Array.isArray(arg)).toBe(true);
+    const arr = arg as Corner[];
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.x).toBe(10);
+    // The pre-existing y MUST survive — this is the data-loss bug fixed
+    // by RF-008.
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.y).toBe(4);
+  });
+
+  it("preserves existing x radius when editing only .y on a per-corner array", () => {
+    // Symmetric case — even though the current schema only exposes .x
+    // editors, the handler must be robust to future .y editors so it
+    // does not regress when the schema grows.
+    const ellipticalCorner: Corner = { type: "round", radii: { x: 7, y: 3 } };
+    const store = makeStore();
+    const node = makeRectNode([
+      ellipticalCorner,
+      roundCorner(0),
+      roundCorner(0),
+      roundCorner(0),
+    ]);
+    handleCornersFieldChange(
+      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      "uuid-rect",
+      "kind.corners.0.radii.y",
+      9,
+      node,
+    );
+    const [, arg] = store.setCorners.mock.calls[0] as [string, unknown];
+    expect(Array.isArray(arg)).toBe(true);
+    const arr = arg as Corner[];
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.x).toBe(7);
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.y).toBe(9);
+  });
+
+  it("preserves existing y radius when editing only .x on a Bevel corner", () => {
+    // Same preservation rule applies to non-Round corner types
+    // (Bevel/Notch/Scoop also carry CornerRadii per spec §7).
+    const bevelEllip: Corner = { type: "bevel", radii: { x: 12, y: 6 } };
+    const store = makeStore();
+    const node = makeRectNode([
+      bevelEllip,
+      roundCorner(0),
+      roundCorner(0),
+      roundCorner(0),
+    ]);
+    handleCornersFieldChange(
+      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      "uuid-rect",
+      "kind.corners.0.radii.x",
+      14,
+      node,
+    );
+    const [, arg] = store.setCorners.mock.calls[0] as [string, unknown];
+    const arr = arg as Corner[];
+    expect(arr[0]?.type).toBe("bevel");
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.x).toBe(14);
+    expect((arr[0] as { radii: { x: number; y: number } }).radii.y).toBe(6);
+  });
+
+  it("does not call setCorners when axis component is unrecognised", () => {
+    const store = makeStore();
+    const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
+    handleCornersFieldChange(
+      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      "uuid-rect",
+      "kind.corners.0.radii.z",
+      10,
+      node,
+    );
+    expect(store.setCorners).not.toHaveBeenCalled();
+  });
+
+  // ── Case 7: non-corner kind ──────────────────────────────────────────
+
   it("should not call setCorners for a non-corner kind (ellipse)", () => {
     const store = makeStore();
     const node = {
