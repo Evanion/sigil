@@ -270,7 +270,7 @@ Per CLAUDE.md §7, all Critical and High findings MUST be resolved before merge.
 
 - **Source:** DevOps
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved (commit 964d434) — `sigil-cli` now exposes `migrate <path>` and `migrate <path> --check`. Implementation lives in `cli/src/migrate.rs` (clap-driven dispatch in `cli/src/main.rs`), with four integration tests in `cli/tests/integration_migrate.rs` covering the happy path (writes v2 + creates `.backup-v1/`), already-current noop (no backup), check mode (read-only, no backup), and the malformed-page abort path (manifest left at v1, no backup). Default mode mirrors the server's RF-010 one-shot backup convention and the atomic write-temp-then-rename file write pattern. The existing `sigil-cli` (no args) version-print is preserved. CI smoke workflow remains a follow-up (out of scope per the RF-028 prompt).
 - **Location:** `cli/` (gap)
 - **Issue:** No CLI tool to migrate or validate-migrate a `.sigil/` directory. Operators must start the server to find out if migration succeeds.
 - **Recommendation:** Add `sigil-cli migrate <path>` subcommand running `migrate_to_v2` against each page file with success/error reporting. Enables CI smoke job.
