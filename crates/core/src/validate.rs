@@ -1323,9 +1323,10 @@ mod tests {
 
     #[test]
     fn test_corner_constants_have_expected_values() {
-        assert_eq!(MAX_CORNER_RADIUS, 100_000.0);
-        assert_eq!(MIN_CORNER_SMOOTHING, 0.0);
-        assert_eq!(MAX_CORNER_SMOOTHING, 1.0);
+        // Exact bit equality: constants are compile-time literals with no lossy ops.
+        assert_eq!(MAX_CORNER_RADIUS.to_bits(), 100_000.0_f64.to_bits());
+        assert_eq!(MIN_CORNER_SMOOTHING.to_bits(), 0.0_f64.to_bits());
+        assert_eq!(MAX_CORNER_SMOOTHING.to_bits(), 1.0_f64.to_bits());
     }
 
     // ── validate_corners ───────────────────────────────────────────────

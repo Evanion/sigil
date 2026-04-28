@@ -327,14 +327,14 @@ mod tests {
 
     // ── RF-005: malformed legacy corner_radii must error, not silently coerce ──
 
-    fn legacy_rectangle_with_radii(corner_radii: Value) -> Value {
+    fn legacy_rectangle_with_radii(corner_radii: &Value) -> Value {
         json!({
             "schema_version": 1,
             "id": "00000000-0000-0000-0000-000000000001",
             "name": "Page 1",
             "nodes": [{
                 "id": "00000000-0000-0000-0000-000000000002",
-                "kind": { "type": "rectangle", "corner_radii": corner_radii },
+                "kind": { "type": "rectangle", "corner_radii": corner_radii.clone() },
                 "name": "Rect",
                 "parent": null,
                 "children": [],
@@ -350,7 +350,7 @@ mod tests {
 
     #[test]
     fn test_migrate_v2_rejects_string_corner_radii() {
-        let page = legacy_rectangle_with_radii(json!("broken"));
+        let page = legacy_rectangle_with_radii(&json!("broken"));
         let result = migrate_to_v2(page);
         match result {
             Err(MigrationError::InvalidLegacyCornerRadii { node_id, raw_value }) => {
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_migrate_v2_rejects_null_in_corner_radii() {
         // A non-numeric element inside the array (one slot is null).
-        let page = legacy_rectangle_with_radii(json!([1.0, null, 3.0, 4.0]));
+        let page = legacy_rectangle_with_radii(&json!([1.0, null, 3.0, 4.0]));
         let result = migrate_to_v2(page);
         assert!(
             matches!(result, Err(MigrationError::InvalidLegacyCornerRadii { .. })),
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn test_migrate_v2_rejects_wrong_arity_corner_radii() {
         // Only three elements instead of four.
-        let page = legacy_rectangle_with_radii(json!([1.0, 2.0, 3.0]));
+        let page = legacy_rectangle_with_radii(&json!([1.0, 2.0, 3.0]));
         let result = migrate_to_v2(page);
         assert!(
             matches!(result, Err(MigrationError::InvalidLegacyCornerRadii { .. })),
@@ -393,7 +393,7 @@ mod tests {
         // serde_json's Number type rejects NaN/inf at parse time, but we still
         // guard against it for defense-in-depth via the finiteness check.
         // Use a stringified number instead — should be rejected.
-        let page = legacy_rectangle_with_radii(json!([1.0, 2.0, 3.0, "4.0"]));
+        let page = legacy_rectangle_with_radii(&json!([1.0, 2.0, 3.0, "4.0"]));
         let result = migrate_to_v2(page);
         assert!(
             matches!(result, Err(MigrationError::InvalidLegacyCornerRadii { .. })),
@@ -439,7 +439,7 @@ mod tests {
     fn test_migrate_v2_accepts_explicit_null_corner_radii_as_zeros() {
         // Explicit null is treated like absence — defaults to zeros, no error.
         // (Legacy producers occasionally serialize Option<None> as null.)
-        let page = legacy_rectangle_with_radii(Value::Null);
+        let page = legacy_rectangle_with_radii(&Value::Null);
         let migrated = migrate_to_v2(page).expect("null should default");
         let corners = migrated["nodes"][0]["kind"]["corners"]
             .as_array()

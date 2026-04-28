@@ -187,7 +187,7 @@ mod tests {
     fn test_uniform_shorthand_scalar_radius() {
         let input = json!({ "shape": "round", "radius": 8 });
         let corners = parse_corners_input(&input).expect("parse");
-        for c in corners.iter() {
+        for c in &corners {
             assert!(matches!(
                 c,
                 Corner::Round {
@@ -214,10 +214,11 @@ mod tests {
     fn test_shape_level_superellipse_with_scalar_radius() {
         let input = json!({ "shape": "superellipse", "radius": 8, "smoothing": 0.6 });
         let corners = parse_corners_input(&input).expect("parse");
-        for c in corners.iter() {
+        for c in &corners {
             match c {
                 Corner::Superellipse { radii, smoothing } => {
-                    assert_eq!(*smoothing, 0.6);
+                    // Exact bit equality: literal 0.6 round-trips through serde_json without lossy ops.
+                    assert_eq!(smoothing.to_bits(), 0.6f64.to_bits());
                     assert_eq!(*radii, CornerRadii { x: 8.0, y: 8.0 });
                 }
                 _ => panic!("expected Superellipse"),
