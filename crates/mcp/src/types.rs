@@ -590,15 +590,17 @@ mod tests {
     fn test_transform_input_rotation_defaults_to_zero() {
         let json = r#"{"x": 10.0, "y": 20.0, "width": 100.0, "height": 50.0}"#;
         let input: TransformInput = serde_json::from_str(json).expect("valid JSON");
-        assert_eq!(input.rotation, 0.0);
+        // Exact bit equality: serde default produces a literal 0.0, no lossy ops.
+        assert_eq!(input.rotation.to_bits(), 0.0_f64.to_bits());
     }
 
     #[test]
     fn test_transform_input_scale_defaults_to_one() {
         let json = r#"{"x": 0.0, "y": 0.0, "width": 10.0, "height": 10.0}"#;
         let input: TransformInput = serde_json::from_str(json).expect("valid JSON");
-        assert_eq!(input.scale_x, 1.0);
-        assert_eq!(input.scale_y, 1.0);
+        // Exact bit equality: serde default produces a literal 1.0, no lossy ops.
+        assert_eq!(input.scale_x.to_bits(), 1.0_f64.to_bits());
+        assert_eq!(input.scale_y.to_bits(), 1.0_f64.to_bits());
     }
 
     #[test]

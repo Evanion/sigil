@@ -793,7 +793,7 @@ mod tests {
     #[test]
     fn test_convert_style_value_f64_rejects_invalid_token_name() {
         let input = StyleValueInput::TokenRef {
-            name: "".to_string(),
+            name: String::new(),
         };
         assert!(convert_style_value_f64("test_field", &input).is_err());
     }

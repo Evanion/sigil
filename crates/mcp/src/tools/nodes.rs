@@ -1063,10 +1063,11 @@ mod tests {
         );
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let created = result.unwrap();
-        assert_eq!(created.node.transform.x, 10.0);
-        assert_eq!(created.node.transform.y, 20.0);
-        assert_eq!(created.node.transform.width, 100.0);
-        assert_eq!(created.node.transform.height, 50.0);
+        // Exact bit equality: literals pass through serde without lossy ops.
+        assert_eq!(created.node.transform.x.to_bits(), 10.0_f64.to_bits());
+        assert_eq!(created.node.transform.y.to_bits(), 20.0_f64.to_bits());
+        assert_eq!(created.node.transform.width.to_bits(), 100.0_f64.to_bits());
+        assert_eq!(created.node.transform.height.to_bits(), 50.0_f64.to_bits());
     }
 
     #[test]
@@ -1582,8 +1583,9 @@ mod tests {
             let agent_designer_core::Corner::Round { radii } = corner else {
                 panic!("expected round corner, got {corner:?}");
             };
-            assert_eq!(radii.x(), 12.0);
-            assert_eq!(radii.y(), 12.0);
+            // Exact bit equality: literals pass through serde without lossy ops.
+            assert_eq!(radii.x().to_bits(), 12.0_f64.to_bits());
+            assert_eq!(radii.y().to_bits(), 12.0_f64.to_bits());
         }
     }
 
@@ -1614,9 +1616,10 @@ mod tests {
             let agent_designer_core::Corner::Superellipse { radii, smoothing } = corner else {
                 panic!("expected superellipse, got {corner:?}");
             };
-            assert_eq!(radii.x(), 20.0);
-            assert_eq!(radii.y(), 20.0);
-            assert_eq!(*smoothing, 0.6);
+            // Exact bit equality: literals pass through serde without lossy ops.
+            assert_eq!(radii.x().to_bits(), 20.0_f64.to_bits());
+            assert_eq!(radii.y().to_bits(), 20.0_f64.to_bits());
+            assert_eq!(smoothing.to_bits(), 0.6_f64.to_bits());
         }
     }
 
