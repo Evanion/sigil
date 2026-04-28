@@ -1428,8 +1428,9 @@ mod tests {
         .expect("create test node");
         match &node.kind {
             NodeKind::Rectangle { corners } => {
-                assert_eq!(corners[0].radii().x, 4.0);
-                assert_eq!(corners[1].radii().x, 4.0);
+                // Exact bit equality: literals constructed without lossy ops.
+                assert_eq!(corners[0].radii().x.to_bits(), 4.0_f64.to_bits());
+                assert_eq!(corners[1].radii().x.to_bits(), 4.0_f64.to_bits());
             }
             other => panic!("expected Rectangle, got {other:?}"),
         }
@@ -3167,8 +3168,9 @@ mod tests {
     #[test]
     fn test_corner_radii_accessors() {
         let r = CornerRadii::new(4.0, 6.0).expect("valid");
-        assert_eq!(r.x(), 4.0);
-        assert_eq!(r.y(), 6.0);
+        // Exact bit equality: constructor stores literals verbatim, no lossy ops.
+        assert_eq!(r.x().to_bits(), 4.0_f64.to_bits());
+        assert_eq!(r.y().to_bits(), 6.0_f64.to_bits());
     }
 
     #[test]

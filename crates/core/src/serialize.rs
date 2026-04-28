@@ -755,8 +755,17 @@ mod tests {
         let expected_radii = [4.0_f64, 8.0, 12.0, 16.0];
         for (i, corner) in corners.iter().enumerate() {
             let radii = corner.radii();
-            assert_eq!(radii.x, expected_radii[i], "corner {i} x");
-            assert_eq!(radii.y, expected_radii[i], "corner {i} y");
+            // Exact bit equality: literals round-trip through serde_json without lossy ops.
+            assert_eq!(
+                radii.x.to_bits(),
+                expected_radii[i].to_bits(),
+                "corner {i} x"
+            );
+            assert_eq!(
+                radii.y.to_bits(),
+                expected_radii[i].to_bits(),
+                "corner {i} y"
+            );
             assert!(
                 matches!(corner, crate::node::Corner::Round { .. }),
                 "corner {i} should be Round, got {corner:?}"
@@ -802,8 +811,7 @@ mod tests {
     #[test]
     fn test_deserialize_accepts_current_schema_version() {
         let json = format!(
-            r#"{{"schema_version": {}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#,
-            CURRENT_SCHEMA_VERSION
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#
         );
         let result = deserialize_page(&json);
         assert!(result.is_ok());
@@ -1435,7 +1443,7 @@ mod tests {
     fn test_deserialize_rejects_mixed_superellipse_round_corners() {
         let json = format!(
             r#"{{
-                "schema_version": {},
+                "schema_version": {CURRENT_SCHEMA_VERSION},
                 "id": "00000000-0000-0000-0000-000000000001",
                 "name": "Page",
                 "nodes": [{{
@@ -1459,8 +1467,7 @@ mod tests {
                     "locked": false
                 }}],
                 "transitions": []
-            }}"#,
-            CURRENT_SCHEMA_VERSION
+            }}"#
         );
         let result = deserialize_page(&json);
         match result {
@@ -1480,7 +1487,7 @@ mod tests {
     fn test_deserialize_rejects_inconsistent_superellipse_smoothing() {
         let json = format!(
             r#"{{
-                "schema_version": {},
+                "schema_version": {CURRENT_SCHEMA_VERSION},
                 "id": "00000000-0000-0000-0000-000000000001",
                 "name": "Page",
                 "nodes": [{{
@@ -1504,8 +1511,7 @@ mod tests {
                     "locked": false
                 }}],
                 "transitions": []
-            }}"#,
-            CURRENT_SCHEMA_VERSION
+            }}"#
         );
         let result = deserialize_page(&json);
         assert!(
@@ -1514,7 +1520,7 @@ mod tests {
         );
     }
 
-    /// Hand-crafted workfile with corner radius above MAX_CORNER_RADIUS must
+    /// Hand-crafted workfile with corner radius above `MAX_CORNER_RADIUS` must
     /// be rejected.
     #[test]
     fn test_deserialize_rejects_corner_radius_above_max() {
@@ -1522,7 +1528,7 @@ mod tests {
         let huge = MAX_CORNER_RADIUS + 1.0;
         let json = format!(
             r#"{{
-                "schema_version": {ver},
+                "schema_version": {CURRENT_SCHEMA_VERSION},
                 "id": "00000000-0000-0000-0000-000000000001",
                 "name": "Page",
                 "nodes": [{{
@@ -1547,8 +1553,7 @@ mod tests {
                     "locked": false
                 }}],
                 "transitions": []
-            }}"#,
-            ver = CURRENT_SCHEMA_VERSION
+            }}"#
         );
         let result = deserialize_page(&json);
         // After RF-012, `CornerRadii::new` validates radii during
@@ -1571,7 +1576,7 @@ mod tests {
     fn test_deserialize_accepts_uniform_round_corners() {
         let json = format!(
             r#"{{
-                "schema_version": {},
+                "schema_version": {CURRENT_SCHEMA_VERSION},
                 "id": "00000000-0000-0000-0000-000000000001",
                 "name": "Page",
                 "nodes": [{{
@@ -1595,8 +1600,7 @@ mod tests {
                     "locked": false
                 }}],
                 "transitions": []
-            }}"#,
-            CURRENT_SCHEMA_VERSION
+            }}"#
         );
         let result = deserialize_page(&json);
         assert!(result.is_ok(), "uniform round must be accepted: {result:?}");
