@@ -148,6 +148,16 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - File names derived from user input (page names, component names) must use deterministic collision-free identifiers (e.g., UUID) rather than sanitized user strings.
 - On graceful shutdown, flush all dirty documents to disk before exiting.
 
+#### Schema Migration Persistence Contract
+
+When the server loads a workfile that requires a schema version upgrade (v1→v2, etc.), the load path MUST satisfy three obligations before returning success:
+
+1. **Force persistence.** The loaded document must be marked dirty (or written synchronously at end of load) so the next persistence tick writes the upgraded schema to disk. A migrated document that lives only in memory is a silent migration — server restart re-runs it, and the v1 file lingers indefinitely.
+2. **Back up the legacy artifacts.** Before the first migrated write overwrites any file in the workfile directory, the original v(N-1) `manifest.json` and `pages/*.json` MUST be copied to a sibling `.backup-v(N-1)/` directory. Migration is one-way; an unintended round-trip mutation must be recoverable. The backup is a one-shot — re-running the server on an already-migrated workfile MUST NOT touch the existing backup.
+3. **Plumb a `migrated_from` signal end-to-end.** The `LoadedWorkfile` type (or equivalent) MUST carry an `Option<u32>` indicating the source schema version; the persistence task MUST read this signal and trigger the dirty-flag and backup obligations.
+
+A CI smoke test MUST exercise each new migration path against a checked-in legacy fixture and assert: (a) `load_workfile` succeeds, (b) the post-load persistence tick produces a v(N) on-disk file, (c) the `.backup-v(N-1)/` directory exists and contains the original fixtures.
+
 ### `agent-designer-mcp`
 
 - Owns the MCP tool/resource definitions.
@@ -156,15 +166,16 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - All state-mutating MCP tool calls MUST trigger both persistence (signal_dirty) AND real-time broadcast to all connected clients. Calling only signal_dirty without broadcasting leaves human clients and other agents desynchronized — they will not see the MCP agent's changes until the next reconnect or poll. The broadcast obligation for MCP is identical to the obligation for server-originated mutations in the Broadcast Semantics section above.
 - When running over stdio transport, all diagnostic output MUST go to stderr, never stdout. Writing tracing or log output to stdout corrupts the protocol framing — the MCP client interprets any stdout bytes as protocol messages. Configure the `tracing` subscriber to write exclusively to stderr when the transport is stdio. The transport mode must be detectable at startup (e.g., via a `--stdio` flag or env var) to apply the correct subscriber configuration.
 
-#### MCP Broadcast Payload Shape Contract
+#### Broadcast Payload Shape Contract (MCP and GraphQL)
 
-Before implementing any MCP tool that broadcasts, the implementer MUST read `frontend/src/operations/apply-remote.ts` and verify that the broadcast payload matches what the frontend dispatcher expects. The fields `op_type`, `path`, and `value` are not free-form — they are consumed by a dispatcher that switches on exact string values. Mismatched values cause the operation to be silently ignored by all connected clients.
+Before implementing any handler that broadcasts (MCP tool or GraphQL mutation), the implementer MUST read `frontend/src/operations/apply-remote.ts` and verify that the broadcast payload matches what the frontend dispatcher expects. The fields `op_type`, `path`, and `value` are not free-form — they are consumed by a dispatcher that switches on exact string values. Mismatched values cause the operation to be silently ignored by all connected clients.
 
 Rules:
 - `op_type` must exactly match the string the frontend `applyRemoteOperation` dispatcher switches on (e.g., `"create_node"`, `"delete_node"` — not shortened aliases).
 - `value` shape must match what the frontend handler for that `op_type` destructures (e.g., `reparent` expects `{parentUuid, position}` — not a bare string).
+- **Broadcast `value` must be sourced from post-mutation document state, not from the raw API input.** When an API accepts shorthand or polymorphic input forms (e.g., scalar-as-shorthand, partial-object-as-shorthand), the server-side handler MUST canonicalize the broadcast `value` by reading the post-apply state from the document — not by forwarding the request's input JSON. Forwarding raw input breaks shorthand-to-canonical contracts: connected frontends decode only the canonical form, and silently drop the shorthand. This rule applies symmetrically to GraphQL mutations, MCP tool calls, and any future transport that broadcasts.
 - When adding a new operation type to an MCP tool, add the corresponding handler in `applyRemoteOperation` in the same PR. A broadcast without a handler is a no-op.
-- When changing the frontend handler for an operation type, search all MCP tools for broadcasts of that `op_type` and update them in the same PR.
+- When changing the frontend handler for an operation type, search all MCP tools and GraphQL mutations for broadcasts of that `op_type` and update them in the same PR.
 - Entity-creation broadcasts (`create_node`, `create_page`, `create_component`, etc.) MUST include the entity's stable UUID in the `value` payload under the key `"id"`. The frontend handler cannot create the entity in the local store without its identity — a payload missing `"id"` produces a silent discard. This applies to both MCP and GraphQL broadcast paths.
 
 ---
@@ -195,6 +206,7 @@ Rules:
 - Plain class instances are not reactive in Solid.js. Wrapping a method call in an arrow function (`() => myClass.getValue()`) does NOT create a reactive binding — Solid's tracking only works with signals, stores, and memos. When bridging non-reactive state (plain classes, third-party libraries, imperative managers) into Solid's reactive graph, create explicit Solid signals that mirror the external state and update them after every mutation to the external object. Never expose a plain class method as a "reactive accessor" without a backing signal — it will return stale values and the UI will not update. This obligation applies in both directions: (1) reading from the class requires a signal-backed accessor, and (2) every mutation to the class's internal state — including async operations, callbacks, and event handlers — MUST call the corresponding signal setter immediately after the mutation. A mutation without a setter call is invisible to the reactive graph.
 - Never call Solid.js `onCleanup` inside a DOM event handler, `setTimeout` callback, `Promise.then`, or any async context. `onCleanup` registers with the reactive owner active at call time — outside a reactive root it silently no-ops, leaving timers alive after component destroy. Store handles at component scope and register cleanup synchronously during setup.
 - When the UI assigns stable IDs to list items (UUIDs for gradient stops, layer entries, etc.) for DOM keying and selection tracking, those IDs must be preserved through prop callbacks and store updates until the persistence boundary (GraphQL mutation, server serialization). Stripping IDs before calling a prop callback causes the next render to regenerate new IDs, breaking selection, focus, and CSS transitions. Strip only at the outbound mutation call site.
+- Validation constants (`MAX_*`, `MIN_*`, `LIMIT_*`) and validation predicates (regex patterns, allowed-character sets, type-discriminator string sets) that are used by more than one frontend module MUST be defined in a single source-of-truth module (typically `frontend/src/store/<domain>-input.ts` or `frontend/src/types/validation.ts`) and imported by every consumer. Module-private duplicates in `apply-remote.ts`, panel handlers, or schema files are forbidden — they diverge silently. The single source-of-truth module MUST be the same module that exposes the shorthand parser for the same domain (if one exists), so the constants and the parser stay co-located. Mirrors the Rust §5 `validate.rs` rule for TypeScript.
 
 ---
 
@@ -305,6 +317,18 @@ Any spec that introduces a new canvas tool MUST include a section titled **"Tool
 - Whether the tool stays active after one use or returns to select.
 - How the tool interacts with document-level keyboard handlers during its active phase.
 
+### Staged Feature Delivery Contract
+
+When a spec is split into sub-plans (e.g., Spec 14 → Plans 14a/14b/14c/14d) and the first sub-plan ships data-layer changes without the UI, renderer, or visible affordances that consume them, the sub-plan's PR description MUST include a section titled **"Deferred-to-later-plan inventory"** enumerating:
+
+1. Every user-visible capability introduced by the data layer that is NOT yet reachable from the UI.
+2. Every existing UI that would visibly degrade (silent rejection, no shape selector, ignored field) until a later plan lands.
+3. The specific later plan that owns each deferred item, with a one-line justification of why the staged delivery is safe (e.g., "no public release between sub-plans" or "feature flag prevents user exposure").
+
+The same inventory MUST be cross-referenced in the parent spec's deferred-findings table. Reviewers seeing a data-layer PR are explicitly instructed to NOT file new findings for items present in this inventory — they are pre-disclosed deferrals.
+
+When the dependent UI sub-plan is filed, its PR description MUST reference this inventory and confirm each item is now addressed. Merging the data-layer PR without the inventory is incomplete.
+
 ---
 
 ## 11. Defensive Coding Rules
@@ -347,6 +371,10 @@ The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` 
 
 Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
 
+This obligation extends to **migrations** (any function that transforms data between schema versions): a present-but-malformed legacy field (wrong type, NaN, infinity, out-of-arity) MUST produce a typed migration error, not be coerced to a default. A truly absent field MAY default with a comment naming the default. The distinction between "missing" and "malformed" must be made explicit in code.
+
+The obligation also extends to **partial updates of multi-field values**: when a UI control or API edits one field of a composite value (e.g., one axis of a 2D point, one corner of a 4-corner array, one cell of a matrix), the handler MUST preserve every field it did not explicitly edit. Reading the other fields' current values and writing them back unchanged is required; relying on a default value for an un-edited field silently overwrites data set by another path (MCP, another panel, undo/redo).
+
 ### No Fire-and-Forget Mutations
 
 Every mutation call (GraphQL mutation, REST POST/PUT/DELETE, WebSocket command) that modifies server state MUST handle the response or rejection. Calling a mutation without awaiting the result or attaching an error handler is a bug — it silently drops failures and leaves the UI in a state that diverges from the server. At minimum: log the error AND revert any optimistic local state change. For user-initiated operations: display a visible error notification. This applies to both frontend TypeScript and any future backend-to-backend calls.
@@ -372,6 +400,8 @@ When deleting a module, trait, struct, or function that carries non-trivial logi
 When a validation check exists at one API boundary (GraphQL resolver, MCP tool handler, REST endpoint), the same check MUST exist at every other boundary that accepts the same input type. When adding or modifying a validation rule, search all transport layers for the same input type and update them in the same PR. Asymmetric validation means one transport silently accepts input that another rejects, which is a security inconsistency.
 
 The frontend store layer (functions in `document-store-solid.tsx` that call GraphQL mutations) is also a transport boundary — it must validate inputs against the same constants as the server before making the network call.
+
+Symmetry also applies **within a single parser** that accepts multiple input shapes (shorthand scalar, shorthand object, full per-item array). Every branch of a polymorphic parser MUST apply the same validation rules to the same logical field. If the shorthand branch rejects an out-of-domain field (e.g., `smoothing` on a non-superellipse shape), the per-item-array branch MUST reject it identically — silently dropping the field in one branch and rejecting it in the other is a data-integrity inconsistency, even though both branches live in the same function. When adding a validation check to one branch of a polymorphic parser, add it to every other branch in the same commit.
 
 ### Migrations Must Remove All Superseded Code
 

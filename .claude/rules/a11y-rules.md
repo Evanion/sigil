@@ -28,3 +28,16 @@ If a keyboard equivalent cannot ship in the same PR due to technical constraints
 ### 2D Canvas Widgets Must Have Complete ARIA Slider Semantics
 
 Any `<canvas>` element (or its wrapper) used as a 2D interactive control (color picker area, gradient map, rotation dial, hue ring) MUST implement the full WAI-ARIA slider pattern for each axis it exposes: `role="slider"`, `aria-label` naming the controlled value, `aria-valuenow` set to the current numeric value (updated on every change), `aria-valuemin` and `aria-valuemax` reflecting the axis range, and `aria-valuetext` providing a human-readable string. A canvas widget with `role="slider"` but without `aria-valuenow` is non-functional for screen readers — the role declares intent but provides no state. If a 2D widget exposes two axes, expose two complementary ARIA widgets rather than a single slider. Arrow key navigation must move the focus point in the corresponding axis.
+
+### Composite-Widget ARIA Patterns Must Be Complete
+
+When implementing a UI affordance that maps to a documented WAI-ARIA design pattern (Disclosure, Combobox, Tabs, Tree, Toolbar, Menu), the implementation MUST satisfy every required attribute named in the WAI-ARIA Authoring Practices for that pattern. Partial implementations (the trigger has `aria-expanded` but no `aria-controls`; a custom tab has `role="tab"` but no `aria-selected`) are non-functional for screen readers — the role declares intent but the missing state attribute leaves the user unable to navigate.
+
+For the patterns most common in this codebase:
+
+- **Disclosure** (any expand/collapse toggle): trigger MUST have `aria-expanded` AND `aria-controls={fieldsId}`, and the controlled region MUST have a matching `id`. Generate the id with `createUniqueId()`.
+- **Slider** (numeric input represented as a draggable handle or a canvas region): `role="slider"`, `aria-label`, `aria-valuenow`, `aria-valuemin`, `aria-valuemax`, `aria-valuetext`. (Already covered by the 2D Canvas Widgets rule; restated here for completeness.)
+- **Label association**: a visible text node ("TL", "Top-left") and the input it labels MUST NOT both be announced. Pick ONE: either give the visible text `aria-hidden="true"` and the input an `aria-label`, OR give the visible text an `id` and the input an `aria-labelledby` pointing at it. Never both.
+- **Abbreviated labels**: any visible abbreviation (2-3 letter acronym, single-glyph icon) used to label an input MUST have a full-spoken accessible name. Either add a full-text `aria-label` to the input (preferred when the abbreviation is purely visual), or wire `aria-labelledby` to a `<span class="sr-only">` containing the full text adjacent to the abbreviation.
+
+When introducing a new affordance, name the WAI-ARIA pattern in the PR description and link to the relevant Authoring Practices section. Reviewers MUST verify every required attribute named there is present.
