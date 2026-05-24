@@ -8,6 +8,7 @@ export interface SliderProps {
   min?: number;
   max?: number;
   step?: number;
+  disabled?: boolean;
 }
 
 /**
@@ -47,6 +48,7 @@ export function Slider(props: SliderProps) {
     "min",
     "max",
     "step",
+    "disabled",
   ]);
 
   return (
@@ -56,6 +58,7 @@ export function Slider(props: SliderProps) {
       minValue={local.min}
       maxValue={local.max}
       step={local.step}
+      disabled={local.disabled}
       aria-label={local.ariaLabel}
     >
       <KobalteSlider.Track>

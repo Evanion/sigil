@@ -70,6 +70,31 @@ describe("Slider", () => {
     expect(Number.isFinite(callArg)).toBe(true);
   });
 
+  it("should remove the thumb from the tab order when disabled", () => {
+    // Kobalte's slider does not set aria-disabled on the thumb; instead the
+    // thumb's tabIndex becomes undefined when disabled (see Kobalte source
+    // slider-thumb.tsx line 226), and the root carries data-disabled. We
+    // verify both observable signals here.
+    const { container } = render(() => (
+      <Slider value={50} onChange={() => {}} disabled ariaLabel="Test" />
+    ));
+    const thumb = container.querySelector('span[role="slider"]');
+    expect(thumb?.hasAttribute("tabindex")).toBe(false);
+    const root = container.querySelector("[data-disabled]");
+    expect(root).toBeTruthy();
+  });
+
+  it("should not call onChange when disabled and interacted via keyboard", () => {
+    const handler = vi.fn();
+    const { container } = render(() => (
+      <Slider value={50} onChange={handler} disabled min={0} max={100} ariaLabel="Test" />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    thumb.focus();
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("should reject non-finite values via Number.isFinite guard and warn", async () => {
     // Import the helper directly so we can exercise it without depending on
     // Kobalte producing NaN (which it never does in practice — this is the
