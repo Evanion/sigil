@@ -5,6 +5,8 @@ export interface SliderProps {
   value: number;
   onChange: (value: number) => void;
   ariaLabel: string;
+  /** Human-readable description of the current value for screen readers. */
+  ariaValueText?: string;
   min?: number;
   max?: number;
   step?: number;
@@ -45,6 +47,7 @@ export function Slider(props: SliderProps) {
     "value",
     "onChange",
     "ariaLabel",
+    "ariaValueText",
     "min",
     "max",
     "step",
@@ -63,7 +66,15 @@ export function Slider(props: SliderProps) {
     >
       <KobalteSlider.Track>
         <KobalteSlider.Fill />
-        <KobalteSlider.Thumb>
+        {/*
+          Override aria-valuetext on the thumb directly when ariaValueText is
+          provided. Kobalte's `getValueLabel` only feeds Slider.ValueLabel —
+          not the thumb's aria-valuetext (which comes from
+          state.getThumbValueLabel via numberFormatter). The thumb's
+          render props spread `{...others}` after its own aria-valuetext, so
+          a wrapper-provided value wins.
+        */}
+        <KobalteSlider.Thumb aria-valuetext={local.ariaValueText}>
           <KobalteSlider.Input />
         </KobalteSlider.Thumb>
       </KobalteSlider.Track>

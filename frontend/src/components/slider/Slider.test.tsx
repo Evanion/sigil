@@ -95,6 +95,31 @@ describe("Slider", () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it("should set aria-valuetext on the thumb from ariaValueText prop", () => {
+    const { container } = render(() => (
+      <Slider
+        value={75}
+        onChange={() => {}}
+        ariaLabel="Smoothing"
+        ariaValueText="75 percent smoothing"
+        min={0}
+        max={100}
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]');
+    expect(thumb?.getAttribute("aria-valuetext")).toBe("75 percent smoothing");
+  });
+
+  it("should default aria-valuetext to the formatted value when ariaValueText not provided", () => {
+    const { container } = render(() => (
+      <Slider value={42} onChange={() => {}} ariaLabel="Test" min={0} max={100} />
+    ));
+    const thumb = container.querySelector('span[role="slider"]');
+    // Kobalte's default getThumbValueLabel uses Intl.NumberFormat decimal,
+    // which formats whole numbers as the bare digits.
+    expect(thumb?.getAttribute("aria-valuetext")).toBe("42");
+  });
+
   it("should reject non-finite values via Number.isFinite guard and warn", async () => {
     // Import the helper directly so we can exercise it without depending on
     // Kobalte producing NaN (which it never does in practice — this is the
