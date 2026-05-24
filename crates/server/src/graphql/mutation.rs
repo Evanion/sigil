@@ -25,7 +25,7 @@ use agent_designer_core::commands::page_commands::{
 };
 use agent_designer_core::commands::style_commands::validate_transform;
 use agent_designer_core::commands::style_commands::{
-    SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+    SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
 use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
 use agent_designer_core::commands::token_commands::{
@@ -88,12 +88,40 @@ fn acquire_document_lock(
 /// The `builder` closure captures the parsed input data and constructs the
 /// appropriate `FieldOperation` struct after UUID-to-NodeId resolution
 /// (which requires the document lock).
+///
+/// Most operations build their broadcast payload eagerly from the input
+/// JSON (see `broadcast`). For operations whose canonical wire-format
+/// differs from the user input — currently only `SetField` on `path = "kind"`,
+/// where the user may submit the shorthand corners form — `post_apply_value`
+/// is set to a closure that produces the canonical post-apply value from
+/// the document AFTER `apply()` has succeeded. The caller in
+/// `apply_operations` invokes this closure under the same lock acquisition
+/// and replaces `broadcast.value` with its result before publishing.
+///
+/// Per `.claude/rules/rust-defensive.md` "Side-Effect Artifacts Must Be
+/// Constructed After Precondition Verification", this defers the
+/// kind-path payload construction until after validation+apply have been
+/// confirmed. This addresses RF-001 (frontend dispatcher rejected raw
+/// shorthand) and partially addresses RF-004 (other paths still build
+/// their broadcast value eagerly because their input shape already
+/// matches what `frontend/src/operations/apply-remote.ts` expects).
 struct ParsedOp {
     /// Builds the `FieldOperation` after UUID→NodeId resolution inside the lock.
     #[allow(clippy::type_complexity)]
     builder: Box<dyn FnOnce(&agent_designer_core::Document) -> Result<Box<dyn FieldOperation>>>,
-    /// The broadcast payload for this operation (built eagerly from input data).
+    /// The broadcast payload for this operation. For paths whose input shape
+    /// already matches the frontend dispatcher's expected `value` shape, this
+    /// is built eagerly from the input JSON. For paths that need a canonical
+    /// post-apply representation (e.g. `kind` with shorthand corners),
+    /// `broadcast.value` is overwritten with the result of `post_apply_value`
+    /// after `apply()` succeeds.
     broadcast: OperationPayload,
+    /// Optional builder that produces the canonical broadcast `value` from
+    /// the post-apply document. Required when the user-input shape differs
+    /// from the frontend dispatcher's expected wire format.
+    #[allow(clippy::type_complexity)]
+    post_apply_value:
+        Option<Box<dyn FnOnce(&agent_designer_core::Document) -> Result<serde_json::Value>>>,
 }
 
 /// Parses all operation inputs into `ParsedOp` structs.
@@ -165,6 +193,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "name" => {
@@ -179,6 +208,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(RenameNode { node_id, new_name }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "visible" => {
@@ -196,6 +226,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "locked" => {
@@ -213,6 +244,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.fills" => {
@@ -237,6 +269,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetFills { node_id, new_fills }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.strokes" => {
@@ -264,6 +297,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.effects" => {
@@ -291,6 +325,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.opacity" => {
@@ -317,6 +352,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "style.blend_mode" => {
@@ -334,55 +370,79 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind" => {
-            // Extract corner_radii from the kind JSON for SetCornerRadii
-            let corner_radii: Vec<f64> = value
-                .get("corner_radii")
-                .ok_or_else(|| async_graphql::Error::new("kind value must contain corner_radii"))?
-                .as_array()
-                .ok_or_else(|| async_graphql::Error::new("corner_radii must be an array"))?
-                .iter()
-                .map(|v| {
-                    v.as_f64().ok_or_else(|| {
-                        async_graphql::Error::new("corner_radii elements must be numbers")
+            // Value must be: { "type": "<kind>", "corners": <corners-input> }
+            // where <corners-input> is accepted by parse_corners_input (object or array).
+            let kind_type = value
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| async_graphql::Error::new("kind value must include 'type' field"))?;
+            match kind_type {
+                "rectangle" | "frame" | "image" => {
+                    let corners_value = value.get("corners").ok_or_else(|| {
+                        async_graphql::Error::new(format!(
+                            "{kind_type} kind value must include 'corners' field"
+                        ))
+                    })?;
+                    let new_corners =
+                        agent_designer_core::corners_input::parse_corners_input(corners_value)
+                            .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
+                    // RF-001 / RF-004: the broadcast `value` for `path = "kind"`
+                    // must be the canonical post-apply `NodeKind` JSON (mirroring
+                    // `set_corners_impl` in `crates/mcp/src/tools/nodes.rs`).
+                    // The user may submit shorthand corners input
+                    // (`{shape:"round", radius:N}`), but `apply-remote.ts` case
+                    // `"kind"` requires the canonical 4-element corners array.
+                    // We defer broadcast value construction until after `apply()`
+                    // succeeds and read it from the post-apply node.
+                    Ok(ParsedOp {
+                        builder: Box::new(move |doc| {
+                            let node_id = doc
+                                .arena
+                                .id_by_uuid(&parsed_uuid)
+                                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                            Ok(Box::new(SetCorners {
+                                node_id,
+                                new_corners,
+                            }) as Box<dyn FieldOperation>)
+                        }),
+                        broadcast,
+                        post_apply_value: Some(Box::new(move |doc| {
+                            let node_id = doc.arena.id_by_uuid(&parsed_uuid).ok_or_else(|| {
+                                async_graphql::Error::new("node not found after apply")
+                            })?;
+                            let node = doc.arena.get(node_id).map_err(|e| {
+                                async_graphql::Error::new(format!(
+                                    "failed to read post-apply node: {e}"
+                                ))
+                            })?;
+                            serde_json::to_value(&node.kind).map_err(|e| {
+                                async_graphql::Error::new(format!(
+                                    "failed to serialise post-apply kind: {e}"
+                                ))
+                            })
+                        })),
                     })
-                })
-                .collect::<Result<Vec<_>>>()?;
-            if corner_radii.len() != 4 {
-                return Err(async_graphql::Error::new(
-                    "corner_radii must have exactly 4 elements",
-                ));
-            }
-            for (i, &r) in corner_radii.iter().enumerate() {
-                if !r.is_finite() {
-                    return Err(async_graphql::Error::new(format!(
-                        "corner_radii[{i}] must be finite"
-                    )));
                 }
-                if r < 0.0 {
-                    return Err(async_graphql::Error::new(format!(
-                        "corner_radii[{i}] must be non-negative"
-                    )));
+                // Explicitly enumerate the non-corner-bearing variants so that
+                // adding a new variant in core forces a compile error here once
+                // a corresponding string is added (RF-014). The wildcard arm
+                // remains as a guard against malformed (unknown) `type` values
+                // — it is unreachable for known v2 kinds.
+                "ellipse" | "path" | "text" | "group" | "component_instance" => {
+                    Err(async_graphql::Error::new(format!(
+                        "kind type '{kind_type}' does not carry corners; \
+                         SetField on path 'kind' is only supported for \
+                         rectangle, frame, and image"
+                    )))
                 }
+                other => Err(async_graphql::Error::new(format!(
+                    "kind type '{other}' is not a known node kind"
+                ))),
             }
-            let new_radii: [f64; 4] = [
-                corner_radii[0],
-                corner_radii[1],
-                corner_radii[2],
-                corner_radii[3],
-            ];
-            Ok(ParsedOp {
-                builder: Box::new(move |doc| {
-                    let node_id = doc
-                        .arena
-                        .id_by_uuid(&parsed_uuid)
-                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-                    Ok(Box::new(SetCornerRadii { node_id, new_radii }) as Box<dyn FieldOperation>)
-                }),
-                broadcast,
-            })
         }
         "kind.content" => {
             if let Some(s) = value.as_str()
@@ -406,6 +466,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_family" => {
@@ -432,6 +493,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_size" => {
@@ -452,6 +514,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_weight" => {
@@ -469,6 +532,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.font_style" => {
@@ -486,6 +550,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.line_height" => {
@@ -506,6 +571,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.letter_spacing" => {
@@ -526,6 +592,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_align" => {
@@ -543,6 +610,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_decoration" => {
@@ -560,6 +628,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_color" => {
@@ -580,6 +649,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         "kind.text_style.text_shadow" => {
@@ -611,6 +681,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     }) as Box<dyn FieldOperation>)
                 }),
                 broadcast,
+                post_apply_value: None,
             })
         }
         _ => Err(async_graphql::Error::new(format!(
@@ -691,6 +762,7 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -729,6 +801,7 @@ fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
             Ok(Box::new(DeleteNode { node_id, page_id }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -778,6 +851,7 @@ fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -819,6 +893,7 @@ fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -845,6 +920,7 @@ fn parse_create_page(input: &CreatePageInput) -> Result<ParsedOp> {
             Ok(Box::new(CreatePage { page_id, name }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -870,6 +946,7 @@ fn parse_delete_page(input: &DeletePageInput) -> Result<ParsedOp> {
             Ok(Box::new(DeletePage { page_id }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -896,6 +973,7 @@ fn parse_rename_page(input: &RenamePageInput) -> Result<ParsedOp> {
             Ok(Box::new(RenamePage { page_id, new_name }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -932,6 +1010,7 @@ fn parse_reorder_page(input: &ReorderPageInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -990,6 +1069,7 @@ fn parse_add_token(input: &AddTokenInput) -> Result<ParsedOp> {
     Ok(ParsedOp {
         builder: Box::new(move |_doc| Ok(Box::new(AddToken { token }) as Box<dyn FieldOperation>)),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -1051,6 +1131,7 @@ fn parse_update_token(input: &UpdateTokenInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -1074,6 +1155,7 @@ fn parse_remove_token(input: &RemoveTokenInput) -> Result<ParsedOp> {
             }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -1102,6 +1184,7 @@ fn parse_rename_token(input: &RenameTokenInput) -> Result<ParsedOp> {
             Ok(Box::new(RenameToken { old_name, new_name }) as Box<dyn FieldOperation>)
         }),
         broadcast,
+        post_apply_value: None,
     })
 }
 
@@ -1169,10 +1252,6 @@ impl MutationRoot {
             parsed.push(parse_operation_input(op_input)?);
         }
 
-        // Collect broadcast payloads before consuming parsed ops
-        let broadcast_ops: Vec<OperationPayload> =
-            parsed.iter().map(|p| p.broadcast.clone()).collect();
-
         // Second pass: build, validate, and apply sequentially under lock.
         // UUID→NodeId resolution happens inside the lock scope.
         // Operations are applied sequentially because later operations may
@@ -1180,14 +1259,29 @@ impl MutationRoot {
         //
         // RF-001: The batch is atomic — if any operation fails, the document
         // is restored to its pre-batch state via snapshot rollback.
-        {
+        //
+        // RF-001 / RF-004: broadcast payloads for paths whose canonical
+        // wire-format differs from the user input (currently `path = "kind"`
+        // with shorthand corners) are produced from the post-apply document
+        // via `post_apply_value`. All broadcast payloads are collected AFTER
+        // their corresponding apply has succeeded, so a failed batch never
+        // emits a partial broadcast.
+        let broadcast_ops: Vec<OperationPayload> = {
             let mut doc_guard = acquire_document_lock(state);
 
             // Snapshot the document state for rollback on partial failure
             let snapshot = doc_guard.0.clone();
 
+            let mut collected: Vec<OperationPayload> = Vec::with_capacity(parsed.len());
+
             for p in parsed {
-                let build_result = (p.builder)(&doc_guard);
+                let ParsedOp {
+                    builder,
+                    mut broadcast,
+                    post_apply_value,
+                } = p;
+
+                let build_result = builder(&doc_guard);
                 let op = match build_result {
                     Ok(op) => op,
                     Err(e) => {
@@ -1209,8 +1303,24 @@ impl MutationRoot {
                     doc_guard.0 = snapshot;
                     return Err(e);
                 }
+
+                // After apply succeeds, overwrite broadcast.value with the
+                // canonical post-apply representation if one was registered.
+                if let Some(post_apply_value) = post_apply_value {
+                    match post_apply_value(&doc_guard) {
+                        Ok(canonical) => broadcast.value = Some(canonical),
+                        Err(e) => {
+                            doc_guard.0 = snapshot;
+                            return Err(e);
+                        }
+                    }
+                }
+
+                collected.push(broadcast);
             }
-        }
+
+            collected
+        };
 
         // Signal dirty + broadcast
         state.app.signal_dirty();
@@ -1256,7 +1366,10 @@ mod tests {
         let node_uuid = uuid::Uuid::new_v4();
         let cmd = CreateNode {
             uuid: node_uuid,
-            kind: NodeKind::Frame { layout: None },
+            kind: NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             name: name.to_string(),
             page_id: None,
             initial_transform: None,
@@ -1379,11 +1492,24 @@ mod tests {
         let parent_uuid = create_test_frame_direct(&state, "Parent");
 
         let child_uuid = uuid::Uuid::new_v4().to_string();
+        // NodeKind::Frame now requires corners — serialize the full kind JSON and escape
+        // it for embedding as a GraphQL string argument (all double-quotes become \").
+        let frame_kind = serde_json::json!({
+            "type": "frame",
+            "layout": null,
+            "corners": [
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}},
+                {"type": "round", "radii": {"x": 0, "y": 0}}
+            ]
+        });
+        let frame_kind_escaped = frame_kind.to_string().replace('"', "\\\"");
         let query = format!(
             r#"mutation {{
                 applyOperations(
                     operations: [
-                        {{ createNode: {{ nodeUuid: "{child_uuid}", kind: "{{\"type\": \"frame\"}}", name: "Child" }} }},
+                        {{ createNode: {{ nodeUuid: "{child_uuid}", kind: "{frame_kind_escaped}", name: "Child" }} }},
                         {{ reparent: {{ nodeUuid: "{child_uuid}", newParentUuid: "{parent_uuid}", position: 0 }} }}
                     ],
                     userId: "test-user"
@@ -2433,6 +2559,116 @@ mod tests {
         assert!(
             !res.errors.is_empty(),
             "setField with malformed StyleValue::Expression should be rejected"
+        );
+    }
+
+    // ── Corner shape tests ────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_set_field_kind_accepts_new_corners_shape() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Create a frame node (SetCorners supports Frame, Rectangle, Image).
+        let uuid = create_test_frame_direct(&state, "FrameForCorners");
+
+        // Per-corner array form: four different corner shapes.
+        // parse_corners_input uses "shape" and "radii" keys.
+        let corners_json = serde_json::json!([
+            { "shape": "round",  "radii": { "x": 4.0,  "y": 4.0  } },
+            { "shape": "bevel",  "radii": { "x": 8.0,  "y": 8.0  } },
+            { "shape": "notch",  "radii": { "x": 12.0, "y": 12.0 } },
+            { "shape": "scoop",  "radii": { "x": 16.0, "y": 16.0 } }
+        ]);
+        let kind_value = serde_json::json!({
+            "type": "frame",
+            "corners": corners_json
+        });
+        let kind_value_str = kind_value.to_string();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind", value: {kind_value_str:?} }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Verify corners were updated in the document.
+        let doc = state.app.document.lock().unwrap();
+        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            agent_designer_core::node::NodeKind::Frame { corners, .. } => {
+                assert!(
+                    matches!(corners[0], agent_designer_core::node::Corner::Round { .. }),
+                    "corners[0] should be Round"
+                );
+                assert!(
+                    matches!(corners[1], agent_designer_core::node::Corner::Bevel { .. }),
+                    "corners[1] should be Bevel"
+                );
+                assert!(
+                    matches!(corners[2], agent_designer_core::node::Corner::Notch { .. }),
+                    "corners[2] should be Notch"
+                );
+                assert!(
+                    matches!(corners[3], agent_designer_core::node::Corner::Scoop { .. }),
+                    "corners[3] should be Scoop"
+                );
+            }
+            _ => panic!("expected Frame node"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_set_field_kind_rejects_superellipse_in_per_corner_array() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        let uuid = create_test_frame_direct(&state, "FrameForBadCorners");
+
+        // Per-corner array with superellipse — parse_corners_input rejects this.
+        // Superellipse must use the shape-level (object) form, not per-corner.
+        let bad_corners_json = serde_json::json!([
+            { "shape": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.5 },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round",        "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        let kind_value = serde_json::json!({
+            "type": "frame",
+            "corners": bad_corners_json
+        });
+        let kind_value_str = kind_value.to_string();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "kind", value: {kind_value_str:?} }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "superellipse in per-corner array form should be rejected"
+        );
+        // Error message should mention superellipse or shape-level form.
+        let err_msg = res.errors[0].message.to_lowercase();
+        assert!(
+            err_msg.contains("superellipse") || err_msg.contains("shape-level"),
+            "error message should mention superellipse or shape-level, got: {}",
+            res.errors[0].message
         );
     }
 }

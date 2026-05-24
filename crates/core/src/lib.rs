@@ -7,9 +7,11 @@ pub mod boolean;
 pub mod command;
 pub mod commands;
 pub mod component;
+pub mod corners_input;
 pub mod document;
 pub mod error;
 pub mod id;
+pub mod migrations;
 pub mod node;
 pub mod path;
 pub mod prototype;
@@ -26,11 +28,12 @@ pub use id::{ComponentId, NodeId, PageId, TokenId};
 
 // ── Re-exports: Node model ────────────────────────────────────────────
 pub use node::{
-    AlignItems, BlendMode, Color, ConicGradientDef, Constraints, Effect, Fill, FillRule,
-    FlexLayout, FontStyle, GradientDef, GradientStop, GridLayout, GridPlacement, GridSpan,
-    GridTrack, JustifyContent, JustifyItems, LayoutDirection, LayoutMode, Node, NodeKind, Padding,
-    PathData, PinConstraint, Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap, StrokeJoin,
-    Style, StyleValue, TextAlign, TextDecoration, TextShadow, TextSizing, TextStyle, Transform,
+    AlignItems, BlendMode, Color, ConicGradientDef, Constraints, Corner, CornerRadii, Effect, Fill,
+    FillRule, FlexLayout, FontStyle, GradientDef, GradientStop, GridLayout, GridPlacement,
+    GridSpan, GridTrack, JustifyContent, JustifyItems, LayoutDirection, LayoutMode, Node, NodeKind,
+    Padding, PathData, PinConstraint, Point, ScaleMode, Stroke, StrokeAlignment, StrokeCap,
+    StrokeJoin, Style, StyleValue, TextAlign, TextDecoration, TextShadow, TextSizing, TextStyle,
+    Transform,
 };
 
 // ── Re-exports: Path ─────────────────────────────────────────────────
@@ -81,19 +84,19 @@ pub use component::{
 pub use validate::{
     BEZIER_APPROXIMATION_SEGMENTS, CURRENT_SCHEMA_VERSION, DEFAULT_MAX_NODES,
     MAX_ALIAS_CHAIN_DEPTH, MAX_ASSET_REF_LEN, MAX_BATCH_SIZE, MAX_BOOLEAN_OP_POINTS,
-    MAX_CHILDREN_PER_NODE, MAX_COMPONENTS_PER_DOCUMENT, MAX_EFFECTS_PER_STYLE,
-    MAX_EXPRESSION_AST_DEPTH, MAX_FILE_SIZE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
-    MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_FUNCTION_ARGS, MAX_GRADIENT_STOPS, MAX_GRID_TRACKS,
-    MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN, MAX_OVERRIDES_PER_INSTANCE, MAX_PAGE_NAME_LEN,
-    MAX_PAGES_PER_DOCUMENT, MAX_PROPERTIES_PER_COMPONENT, MAX_SEGMENTS_PER_SUBPATH,
-    MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TEXT_SHADOW_BLUR,
-    MAX_TOKEN_DESCRIPTION_LEN, MAX_TOKEN_EXPRESSION_LENGTH, MAX_TOKEN_FONT_FAMILIES,
-    MAX_TOKEN_NAME_LEN, MAX_TOKENS_PER_CONTEXT, MAX_TRANSITION_DURATION,
-    MAX_TRANSITIONS_PER_DOCUMENT, MAX_VARIANTS_PER_COMPONENT, MIN_FONT_SIZE, MIN_FONT_WEIGHT,
-    MIN_GROUP_MEMBERS, validate_asset_ref, validate_collection_size, validate_conic_gradient,
-    validate_finite, validate_floats_in_value, validate_grid_track, validate_node_name,
-    validate_page_name, validate_style_value_expression, validate_text_content,
-    validate_token_name,
+    MAX_CHILDREN_PER_NODE, MAX_COMPONENTS_PER_DOCUMENT, MAX_CORNER_RADIUS, MAX_CORNER_SMOOTHING,
+    MAX_EFFECTS_PER_STYLE, MAX_EXPRESSION_AST_DEPTH, MAX_FILE_SIZE, MAX_FILLS_PER_STYLE,
+    MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_FUNCTION_ARGS, MAX_GRADIENT_STOPS,
+    MAX_GRID_TRACKS, MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN, MAX_OVERRIDES_PER_INSTANCE,
+    MAX_PAGE_NAME_LEN, MAX_PAGES_PER_DOCUMENT, MAX_PROPERTIES_PER_COMPONENT,
+    MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN,
+    MAX_TEXT_SHADOW_BLUR, MAX_TOKEN_DESCRIPTION_LEN, MAX_TOKEN_EXPRESSION_LENGTH,
+    MAX_TOKEN_FONT_FAMILIES, MAX_TOKEN_NAME_LEN, MAX_TOKENS_PER_CONTEXT, MAX_TRANSITION_DURATION,
+    MAX_TRANSITIONS_PER_DOCUMENT, MAX_VARIANTS_PER_COMPONENT, MIN_CORNER_SMOOTHING, MIN_FONT_SIZE,
+    MIN_FONT_WEIGHT, MIN_GROUP_MEMBERS, validate_asset_ref, validate_collection_size,
+    validate_conic_gradient, validate_corners, validate_finite, validate_floats_in_value,
+    validate_grid_track, validate_node_name, validate_page_name, validate_style_value_expression,
+    validate_text_content, validate_token_name,
 };
 
 #[must_use]

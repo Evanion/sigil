@@ -38,7 +38,15 @@ function makeNode(overrides?: Partial<DocumentNode>): DocumentNode {
   return {
     id: { index: 0, generation: 0 },
     uuid: "node-1",
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: "Rectangle 1",
     parent: null,
     children: [],

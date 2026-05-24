@@ -48,17 +48,24 @@ function makeMockStore(): ToolStore & {
   };
 }
 
+const DEFAULT_CORNERS = [
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+] as const;
+
 /** Rectangle kind factory matching the plan. */
 function rectangleKindFactory(): NodeKind {
   return {
     type: "rectangle" as const,
-    corner_radii: [0, 0, 0, 0] as [number, number, number, number],
+    corners: DEFAULT_CORNERS,
   };
 }
 
 /** Frame kind factory matching the plan. */
 function frameKindFactory(): NodeKind {
-  return { type: "frame" as const, layout: null };
+  return { type: "frame" as const, layout: null, corners: DEFAULT_CORNERS };
 }
 
 /** Ellipse kind factory matching the plan. */
@@ -314,7 +321,11 @@ describe("createShapeTool", () => {
       tool.onPointerUp(makeEvent(100, 100));
 
       expect(store.createNodeCalls).toHaveLength(1);
-      expect(store.createNodeCalls[0].kind).toEqual({ type: "frame", layout: null });
+      expect(store.createNodeCalls[0].kind).toEqual({
+        type: "frame",
+        layout: null,
+        corners: DEFAULT_CORNERS,
+      });
       expect(store.createNodeCalls[0].name).toBe("Frame 1");
     });
 
@@ -348,7 +359,7 @@ describe("createShapeTool", () => {
       expect(store.createNodeCalls).toHaveLength(1);
       expect(store.createNodeCalls[0].kind).toEqual({
         type: "rectangle",
-        corner_radii: [0, 0, 0, 0],
+        corners: DEFAULT_CORNERS,
       });
     });
   });

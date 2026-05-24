@@ -68,14 +68,16 @@ Never split a read-then-write into two separate lock acquisitions. Acquiring a r
 
 Dropping a lock guard (`MutexGuard`, `RwLockWriteGuard`) releases the lock — it does NOT revert mutations made while the lock was held. If a batch of N mutations is applied under a single lock acquisition and mutation K fails, mutations 0 through K-1 remain applied after the guard drops. The lock only serializes access; it provides no undo semantics. When a batch must be atomic (all-or-nothing), the code must implement explicit rollback: track completed mutations, and on failure, reverse them before releasing the lock. This also applies to TypeScript: holding a reference to an object during a sequence of mutations does not provide transactional semantics.
 
-### NodeKind Variants Must Have Complete Validation Coverage
+### Discriminated-Union Dispatch Must Be Exhaustive Across All Crates
 
-When a new `NodeKind` variant is added to `crates/core/`, the same PR MUST add a corresponding arm to every dispatch site that branches on `NodeKind`. The mandatory sites are:
-1. `CreateNode::validate` — must validate all fields introduced by the variant's associated data.
-2. The workfile deserialization path — must call the same validation.
-3. Any `match kind { ... }` in the core crate.
+When a new variant is added to a discriminated enum used as a dispatch discriminant — `NodeKind`, `Corner`, `Fill`, `Effect`, or any future enum whose variants drive `match` arms in business logic — the same PR MUST add a corresponding arm to **every dispatch site that branches on that enum in the entire workspace**, not just in `crates/core/`. The mandatory sites for a `NodeKind`-class enum are:
 
-A `match` that uses a catch-all (`_ =>`) arm for a `NodeKind` dispatch is a bug — it silently ignores new variants. All `NodeKind` matches in `crates/core/` must be exhaustive with no wildcard arms.
+1. The variant's `validate` path (e.g., `CreateNode::validate` for `NodeKind`, `validate_corners` for `Corner`).
+2. The workfile deserialization path.
+3. Every `match` on the enum in any crate (`core`, `server`, `mcp`, `state`) — discoverable via `cargo clippy --workspace`.
+4. The frontend's mirror type (`frontend/src/types/document.ts`) and every consumer of the mirror.
+
+A `match` that uses a catch-all (`_ =>`) arm in any crate is a bug. The exception is `serde_json::Value` string matches (where exhaustiveness is impossible) — those MUST list every accepted string explicitly and document the closed set; a wildcard arm in such a match must have a comment naming the closed set it covers (see the v1 workfile migration kind dispatch for the canonical example).
 
 ### CSS-Rendered String Fields Must Reject CSS-Significant Characters
 

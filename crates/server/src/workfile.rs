@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use agent_designer_core::serialize::{
-    SerializedPage, deserialize_page, page_to_serialized, serialize_page,
+    SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
 };
 use agent_designer_core::{Document, Node, NodeId, Page, PageId};
 use anyhow::{Context, Result, bail};
@@ -95,6 +95,26 @@ pub struct PreparedSave {
     pub manifest_json: String,
     /// Pairs of `(filename, serialized_page_json)` for each page.
     pub pages: Vec<(String, String)>,
+    /// When `Some(v)`, this save is the first persisted write after a v→current
+    /// schema migration on load. Set by the persistence task from the migration
+    /// flag (RF-009) so writers can apply migration-specific behavior on the
+    /// first save. Cleared by the persistence task once the save completes.
+    pub migrated_from: Option<u32>,
+}
+
+/// Result of loading a workfile from disk.
+///
+/// Carries the in-memory [`Document`] along with a flag indicating whether
+/// the on-disk files required a schema migration. When migration occurred,
+/// the server signals the persistence task that the document is dirty so the
+/// migrated form is written back to disk (RF-009).
+#[derive(Debug)]
+pub struct LoadedWorkfile {
+    /// The document reconstructed from the workfile.
+    pub document: Document,
+    /// `Some(v)` if any page on disk was at schema version `v < CURRENT_SCHEMA_VERSION`
+    /// and required migration. `None` if all pages were already at the current version.
+    pub migrated_from: Option<u32>,
 }
 
 /// Synchronously serializes the document into a [`PreparedSave`].
@@ -122,6 +142,7 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
     Ok(PreparedSave {
         manifest_json,
         pages,
+        migrated_from: None,
     })
 }
 
@@ -142,6 +163,85 @@ async fn atomic_write(path: &Path, content: &str) -> Result<()> {
     Ok(())
 }
 
+/// Subdirectory under the workfile that holds an immutable copy of the original
+/// pre-migration files (manifest + pages). Written exactly once on the first
+/// save after a v1→current migration on load (RF-010).
+const BACKUP_DIR_NAME: &str = ".backup-v1";
+
+/// Backs up the current `manifest.json` and `pages/*.json` files to `.backup-v1/`
+/// before they are overwritten by a migrated save (RF-010).
+///
+/// This is a one-shot operation: the function is a no-op if the backup directory
+/// already exists, ensuring we never overwrite the original v1 snapshot. Each
+/// file is copied via the atomic write-to-temp-then-rename pattern to prevent
+/// partially-written backups on crash.
+///
+/// # Errors
+///
+/// Returns an error if reading the source files fails or writing the backup
+/// fails. Errors from this function abort the save so the migration flag stays
+/// armed for the next attempt.
+async fn backup_v1_files(workfile_path: &Path, original_version: u32) -> Result<()> {
+    let backup_root = workfile_path.join(BACKUP_DIR_NAME);
+
+    // Idempotent: if a previous backup exists, leave it alone.
+    if tokio::fs::metadata(&backup_root).await.is_ok() {
+        tracing::debug!(
+            "backup directory already exists, skipping: {}",
+            backup_root.display()
+        );
+        return Ok(());
+    }
+
+    let backup_pages_dir = backup_root.join("pages");
+    tokio::fs::create_dir_all(&backup_pages_dir)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create backup directory: {}",
+                backup_pages_dir.display()
+            )
+        })?;
+
+    // Back up manifest.json if it exists.
+    let manifest_src = workfile_path.join("manifest.json");
+    if tokio::fs::metadata(&manifest_src).await.is_ok() {
+        let manifest_content = tokio::fs::read_to_string(&manifest_src)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to read manifest for backup: {}",
+                    manifest_src.display()
+                )
+            })?;
+        atomic_write(&backup_root.join("manifest.json"), &manifest_content).await?;
+    }
+
+    // Back up each existing page file.
+    let pages_src_dir = workfile_path.join("pages");
+    if tokio::fs::metadata(&pages_src_dir).await.is_ok() {
+        let mut entries = tokio::fs::read_dir(&pages_src_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json")
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            {
+                let content = tokio::fs::read_to_string(&path).await.with_context(|| {
+                    format!("failed to read page for backup: {}", path.display())
+                })?;
+                atomic_write(&backup_pages_dir.join(name), &content).await?;
+            }
+        }
+    }
+
+    tracing::info!(
+        "backed up v{original_version} workfile to {} before first migrated save",
+        backup_root.display()
+    );
+
+    Ok(())
+}
+
 /// Writes a [`PreparedSave`] to the `.sigil/` directory on disk.
 ///
 /// This is the async half of the save pipeline. Call [`prepare_save`] first
@@ -153,10 +253,20 @@ async fn atomic_write(path: &Path, content: &str) -> Result<()> {
 ///
 /// All file writes use atomic write-to-temp-then-rename to prevent partial writes.
 ///
+/// If `prepared.migrated_from` is `Some(v)`, the function first copies the
+/// existing on-disk files to `.backup-v1/` (RF-010) so the original pre-migration
+/// state is preserved. The backup is one-shot: subsequent saves skip the copy
+/// if the backup directory already exists.
+///
 /// # Errors
 ///
 /// Returns an error if directory creation or file writes fail.
 pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) -> Result<()> {
+    // RF-010: back up the original v1 files before the first migrated write.
+    if let Some(original_version) = prepared.migrated_from {
+        backup_v1_files(workfile_path, original_version).await?;
+    }
+
     let pages_dir = workfile_path.join("pages");
     tokio::fs::create_dir_all(&pages_dir).await?;
 
@@ -210,7 +320,7 @@ pub(crate) async fn save_workfile(doc: &Document, workfile_path: &Path) -> Resul
     write_prepared_save(&prepared, workfile_path).await
 }
 
-/// Loads a workfile from a `.sigil/` directory into a [`Document`].
+/// Loads a workfile from a `.sigil/` directory into a [`LoadedWorkfile`].
 ///
 /// Reads `manifest.json` for metadata, then loads each page from `pages/`.
 /// Pages are reordered to match the manifest's `page_order`. Pages on disk
@@ -219,11 +329,19 @@ pub(crate) async fn save_workfile(doc: &Document, workfile_path: &Path) -> Resul
 /// After all pages are loaded, a fixup pass resolves cross-page transition
 /// `target_node` UUIDs using the global arena.
 ///
+/// The returned [`LoadedWorkfile`] includes a `migrated_from` flag that is
+/// `Some(v)` if any page on disk required migration from a lower schema version.
+/// The server uses this to flush the migrated form back to disk (RF-009).
+///
 /// # Errors
 ///
 /// Returns an error if the directory doesn't exist, is a symlink, the manifest
 /// is invalid, file sizes exceed limits, or any page file fails to parse.
-pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
+/// Validates the workfile path and reads the manifest from disk.
+///
+/// Centralizes the symlink check, size check, and manifest validation so
+/// [`load_workfile`] stays under the per-function line limit.
+async fn read_and_validate_manifest(workfile_path: &Path) -> Result<Manifest> {
     // RF-010: use symlink_metadata to detect symlinks — reject symlinked workfile dirs
     let meta = tokio::fs::symlink_metadata(workfile_path)
         .await
@@ -259,7 +377,6 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
     let manifest: Manifest =
         serde_json::from_str(&manifest_json).context("failed to parse manifest.json")?;
 
-    // RF-009: validate manifest after deserialization
     manifest.validate()?;
 
     if manifest.schema_version > agent_designer_core::CURRENT_SCHEMA_VERSION {
@@ -270,6 +387,29 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
         );
     }
 
+    Ok(manifest)
+}
+
+/// Loads a workfile from a `.sigil/` directory into a [`LoadedWorkfile`].
+///
+/// Reads `manifest.json` for metadata, then loads each page from `pages/`.
+/// Pages are reordered to match the manifest's `page_order`. Pages on disk
+/// whose UUID is not in `page_order` are discarded with a warning.
+///
+/// After all pages are loaded, a fixup pass resolves cross-page transition
+/// `target_node` UUIDs using the global arena.
+///
+/// The returned [`LoadedWorkfile`] includes a `migrated_from` flag that is
+/// `Some(v)` if any page on disk required migration from a lower schema version.
+/// The server uses this to flush the migrated form back to disk (RF-009).
+///
+/// # Errors
+///
+/// Returns an error if the directory doesn't exist, is a symlink, the manifest
+/// is invalid, file sizes exceed limits, or any page file fails to parse.
+pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
+    let manifest = read_and_validate_manifest(workfile_path).await?;
+
     let mut doc = Document::new(manifest.name.clone());
 
     // RF-015: build set of expected page UUIDs from manifest for filtering
@@ -277,6 +417,12 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
 
     // Collect unresolved cross-page transition target_node UUIDs for RF-008 fixup
     let mut unresolved_targets: Vec<(usize, Uuid)> = Vec::new();
+
+    // RF-009: track the lowest on-disk schema version observed across all
+    // page files. If any page is below CURRENT_SCHEMA_VERSION, the document was
+    // migrated on load and the persistence layer must flush the migrated form
+    // back to disk so the on-disk files match the in-memory document.
+    let mut min_observed_version: Option<u32> = None;
 
     // Load pages from the pages/ directory
     let pages_dir = workfile_path.join("pages");
@@ -300,9 +446,18 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
                 let json = tokio::fs::read_to_string(&path)
                     .await
                     .with_context(|| format!("failed to read page: {}", path.display()))?;
-                let serialized_page = deserialize_page(&json).map_err(|e| {
-                    anyhow::anyhow!("failed to deserialize {}: {e}", path.display())
-                })?;
+                let (serialized_page, on_disk_version) = deserialize_page_with_version(&json)
+                    .map_err(|e| {
+                        anyhow::anyhow!("failed to deserialize {}: {e}", path.display())
+                    })?;
+
+                // Track the lowest on-disk version so the persistence layer can
+                // detect migration and back up original files before overwriting.
+                if on_disk_version < agent_designer_core::CURRENT_SCHEMA_VERSION {
+                    min_observed_version = Some(
+                        min_observed_version.map_or(on_disk_version, |v| v.min(on_disk_version)),
+                    );
+                }
 
                 // RF-015: only load pages whose UUID is in manifest.page_order
                 if !expected_pages.contains(&serialized_page.id) {
@@ -341,7 +496,17 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<Document> {
         doc.arena.len()
     );
 
-    Ok(doc)
+    if let Some(v) = min_observed_version {
+        tracing::info!(
+            "workfile contained pages at schema v{v} (current: v{}); document was migrated on load",
+            agent_designer_core::CURRENT_SCHEMA_VERSION
+        );
+    }
+
+    Ok(LoadedWorkfile {
+        document: doc,
+        migrated_from: min_observed_version,
+    })
 }
 
 /// Reconstructs a page and its nodes from a [`SerializedPage`] into the document.
@@ -528,7 +693,10 @@ mod tests {
             .await
             .expect("save workfile");
 
-        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load workfile")
+            .document;
         assert_eq!(loaded.metadata.name, "Empty Project");
         assert!(loaded.pages.is_empty());
     }
@@ -550,7 +718,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             Uuid::new_v4(),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             "Frame 1".to_string(),
         )
         .expect("create node");
@@ -562,7 +733,10 @@ mod tests {
             .await
             .expect("save workfile");
 
-        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load workfile")
+            .document;
         assert_eq!(loaded.metadata.name, "With Page");
         assert_eq!(loaded.pages.len(), 1);
         assert_eq!(loaded.pages[0].name, "Home");
@@ -597,7 +771,10 @@ mod tests {
             .await
             .expect("save workfile");
 
-        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load workfile")
+            .document;
         assert_eq!(loaded.pages.len(), 2);
         assert_eq!(loaded.pages[0].name, "Alpha");
         assert_eq!(loaded.pages[1].name, "Beta");
@@ -633,7 +810,10 @@ mod tests {
         let parent = Node::new(
             NodeId::new(0, 0),
             Uuid::new_v4(),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: agent_designer_core::node::default_corners(),
+            },
             "Parent".to_string(),
         )
         .expect("create parent");
@@ -646,7 +826,7 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::new_v4(),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: agent_designer_core::node::default_corners(),
             },
             "Child".to_string(),
         )
@@ -659,7 +839,10 @@ mod tests {
             .await
             .expect("save workfile");
 
-        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load workfile")
+            .document;
 
         assert_eq!(loaded.arena.len(), 2);
         assert_eq!(loaded.pages.len(), 1);
@@ -936,8 +1119,217 @@ mod tests {
         .await
         .expect("write orphan page");
 
-        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load workfile")
+            .document;
         assert_eq!(loaded.pages.len(), 1);
         assert_eq!(loaded.pages[0].name, "Kept");
+    }
+
+    /// RF-009: a v2 workfile loads with `migrated_from = None`.
+    #[tokio::test]
+    async fn test_load_workfile_returns_no_migration_flag_for_current_schema() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("current.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let mut doc = Document::new("Current".to_string());
+        let page_id = PageId::new(Uuid::new_v4());
+        doc.add_page(Page::new(page_id, "Page".to_string()).expect("page"))
+            .expect("add page");
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("save workfile");
+
+        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        assert_eq!(
+            loaded.migrated_from, None,
+            "current-version workfile should not signal migration"
+        );
+    }
+
+    /// RF-009: a workfile containing a v1 page reports `migrated_from = Some(1)`.
+    /// This is the signal `main.rs` uses to mark the document dirty so the
+    /// migrated form is flushed back to disk.
+    #[tokio::test]
+    async fn test_load_workfile_returns_migration_flag_for_v1_page() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("v1.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create dirs");
+
+        let page_uuid = Uuid::new_v4();
+
+        // Hand-write a manifest pointing to the v1 page.
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "Legacy Doc".to_string(),
+            page_order: vec![page_uuid],
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
+        tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
+            .await
+            .expect("write manifest");
+
+        // Hand-write a v1 page (no `corners`, uses legacy `corner_radii`).
+        let page_json = serde_json::json!({
+            "schema_version": 1,
+            "id": page_uuid.to_string(),
+            "name": "Legacy Page",
+            "nodes": [],
+            "transitions": []
+        });
+        tokio::fs::write(
+            pages_dir.join(format!("{page_uuid}.json")),
+            page_json.to_string(),
+        )
+        .await
+        .expect("write page");
+
+        let loaded = load_workfile(&workfile_path).await.expect("load workfile");
+        assert_eq!(
+            loaded.migrated_from,
+            Some(1),
+            "v1 page should produce migrated_from = Some(1)"
+        );
+        assert_eq!(loaded.document.metadata.name, "Legacy Doc");
+    }
+
+    /// RF-010: when `prepared.migrated_from` is set, the writer copies the
+    /// existing `manifest.json` and `pages/*.json` files to `.backup-v1/`
+    /// before overwriting them.
+    #[tokio::test]
+    async fn test_write_prepared_save_creates_backup_when_migrated() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("backup.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create dirs");
+
+        // Lay down a synthetic v1 manifest + page on disk.
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            r#"{"schema_version": 1, "name": "Original", "page_order": []}"#,
+        )
+        .await
+        .expect("write original manifest");
+        let original_page_uuid = Uuid::new_v4();
+        tokio::fs::write(
+            pages_dir.join(format!("{original_page_uuid}.json")),
+            r#"{"schema_version": 1, "id": "00000000-0000-0000-0000-000000000099", "name": "Old", "nodes": [], "transitions": []}"#,
+        )
+        .await
+        .expect("write original page");
+
+        // Build a PreparedSave with migrated_from set.
+        let doc = Document::new("Migrated".to_string());
+        let mut prepared = prepare_save(&doc).expect("prepare save");
+        prepared.migrated_from = Some(1);
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        // Verify backup directory exists.
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_ok(),
+            ".backup-v1/ should exist after migrated save"
+        );
+
+        // Verify backup contains the original manifest with v1 contents.
+        let backup_manifest = tokio::fs::read_to_string(backup_root.join("manifest.json"))
+            .await
+            .expect("read backup manifest");
+        assert!(
+            backup_manifest.contains("\"schema_version\": 1"),
+            "backup should preserve original v1 manifest, got: {backup_manifest}"
+        );
+        assert!(
+            backup_manifest.contains("Original"),
+            "backup should preserve original manifest contents"
+        );
+
+        // Verify backup contains the original page file.
+        let backup_page = backup_root
+            .join("pages")
+            .join(format!("{original_page_uuid}.json"));
+        assert!(
+            tokio::fs::metadata(&backup_page).await.is_ok(),
+            "backup should preserve original page file"
+        );
+
+        // Verify the live manifest was overwritten with the new v2 form.
+        let live_manifest = tokio::fs::read_to_string(workfile_path.join("manifest.json"))
+            .await
+            .expect("read live manifest");
+        assert!(
+            live_manifest.contains("Migrated"),
+            "live manifest should reflect new document"
+        );
+    }
+
+    /// RF-010: a second migrated save must not overwrite the existing backup —
+    /// the backup is a one-shot snapshot of the original v1 state.
+    #[tokio::test]
+    async fn test_write_prepared_save_does_not_overwrite_existing_backup() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("idempotent.sigil");
+        let backup_root = workfile_path.join(".backup-v1");
+        tokio::fs::create_dir_all(&backup_root)
+            .await
+            .expect("create dirs");
+
+        // Pre-existing backup with sentinel content.
+        tokio::fs::write(backup_root.join("manifest.json"), "ORIGINAL_BACKUP")
+            .await
+            .expect("write sentinel");
+
+        let doc = Document::new("Doc".to_string());
+        let mut prepared = prepare_save(&doc).expect("prepare save");
+        prepared.migrated_from = Some(1);
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        let backup_manifest = tokio::fs::read_to_string(backup_root.join("manifest.json"))
+            .await
+            .expect("read backup");
+        assert_eq!(
+            backup_manifest, "ORIGINAL_BACKUP",
+            "existing backup must not be overwritten"
+        );
+    }
+
+    /// RF-010: when `migrated_from` is `None`, the writer must NOT create a
+    /// `.backup-v1/` directory — backups only happen on the first migrated save.
+    #[tokio::test]
+    async fn test_write_prepared_save_does_not_create_backup_when_not_migrated() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("normal.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create dir");
+
+        let doc = Document::new("Normal".to_string());
+        let prepared = prepare_save(&doc).expect("prepare save");
+        // migrated_from defaults to None.
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write prepared save");
+
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_err(),
+            ".backup-v1/ should not be created for non-migrated saves"
+        );
     }
 }

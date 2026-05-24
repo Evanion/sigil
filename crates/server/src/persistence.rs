@@ -25,6 +25,14 @@ use crate::workfile;
 /// Default debounce interval (in milliseconds) before flushing to disk.
 pub const SAVE_DEBOUNCE_MS: u64 = 500;
 
+/// Shared one-shot flag indicating that the next save is the first persisted
+/// write after a schema migration on load (RF-009).
+///
+/// When `Some(v)`, the next call to [`do_save`] takes the value and populates
+/// [`workfile::PreparedSave::migrated_from`] so the writer can apply
+/// migration-specific behavior on the first save after load.
+pub type MigrationFlag = Arc<Mutex<Option<u32>>>;
+
 /// Spawns the background persistence task.
 ///
 /// Returns a tuple of:
@@ -39,6 +47,19 @@ pub const SAVE_DEBOUNCE_MS: u64 = 500;
 pub fn spawn_persistence_task(
     document: Arc<Mutex<SendDocument>>,
     workfile_path: PathBuf,
+) -> (mpsc::Sender<()>, JoinHandle<()>) {
+    spawn_persistence_task_with_migration_flag(document, workfile_path, Arc::new(Mutex::new(None)))
+}
+
+/// Variant of [`spawn_persistence_task`] that accepts a [`MigrationFlag`].
+///
+/// On the first save after construction, the task takes the flag's value and
+/// passes it to [`workfile::write_prepared_save`] via [`workfile::PreparedSave::migrated_from`]
+/// so the writer can apply migration-specific behavior on the first save.
+pub fn spawn_persistence_task_with_migration_flag(
+    document: Arc<Mutex<SendDocument>>,
+    workfile_path: PathBuf,
+    migration_flag: MigrationFlag,
 ) -> (mpsc::Sender<()>, JoinHandle<()>) {
     let (tx, mut rx) = mpsc::channel::<()>(16);
 
@@ -59,7 +80,7 @@ pub fn spawn_persistence_task(
                         if msg.is_none() {
                             // Channel closed during debounce. Do a final save
                             // before shutting down.
-                            do_save(&document, &workfile_path).await;
+                            do_save(&document, &workfile_path, &migration_flag).await;
                             return;
                         }
                         // Signal received — restart the debounce timer by
@@ -68,7 +89,7 @@ pub fn spawn_persistence_task(
                 }
             }
 
-            do_save(&document, &workfile_path).await;
+            do_save(&document, &workfile_path, &migration_flag).await;
         }
     });
 
@@ -76,9 +97,13 @@ pub fn spawn_persistence_task(
 }
 
 /// Serializes the document under the lock, then writes to disk outside it.
-async fn do_save(document: &Arc<Mutex<SendDocument>>, workfile_path: &Path) {
+async fn do_save(
+    document: &Arc<Mutex<SendDocument>>,
+    workfile_path: &Path,
+    migration_flag: &MigrationFlag,
+) {
     // Phase 1: synchronous — acquire lock, serialize, drop lock.
-    let prepared = {
+    let mut prepared = {
         let guard = match document.lock() {
             Ok(g) => g,
             Err(poisoned) => {
@@ -96,13 +121,43 @@ async fn do_save(document: &Arc<Mutex<SendDocument>>, workfile_path: &Path) {
         // guard is dropped here — lock released before any await.
     };
 
+    // Take the migration flag (if any) before going async so a successful save
+    // clears it and subsequent saves don't repeat migration-specific behavior.
+    // If the write fails we put it back so the next save retries.
+    let migrated_from = match migration_flag.lock() {
+        Ok(mut g) => g.take(),
+        Err(poisoned) => {
+            tracing::error!("migration flag lock poisoned during save — recovering");
+            poisoned.into_inner().take()
+        }
+    };
+    prepared.migrated_from = migrated_from;
+
     // Phase 2: async — write files to disk without holding the lock.
     match workfile::write_prepared_save(&prepared, workfile_path).await {
         Ok(()) => tracing::debug!("document saved to {}", workfile_path.display()),
-        Err(e) => tracing::error!(
-            "failed to write workfile to {}: {e}",
-            workfile_path.display()
-        ),
+        Err(e) => {
+            tracing::error!(
+                "failed to write workfile to {}: {e}",
+                workfile_path.display()
+            );
+            // Restore the migration flag so the next attempt re-tries.
+            if let Some(v) = migrated_from {
+                match migration_flag.lock() {
+                    Ok(mut g) => {
+                        if g.is_none() {
+                            *g = Some(v);
+                        }
+                    }
+                    Err(poisoned) => {
+                        let mut g = poisoned.into_inner();
+                        if g.is_none() {
+                            *g = Some(v);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -162,6 +217,51 @@ mod tests {
         // Give the task a moment to notice the closed channel.
         sleep(Duration::from_millis(50)).await;
         // No assertion needed — we're verifying no panic / hang.
+    }
+
+    /// RF-009/RF-010: when the persistence task is constructed with a migration
+    /// flag and a dirty signal arrives, the resulting save must (1) consume the
+    /// migration flag exactly once and (2) populate the `.backup-v1/` directory.
+    #[tokio::test]
+    async fn test_persistence_consumes_migration_flag_and_creates_backup() {
+        let doc = Arc::new(Mutex::new(SendDocument(Document::new(
+            "Migrated".to_string(),
+        ))));
+        let dir = tempfile::tempdir().unwrap();
+        let workfile_path = dir.path().join("migrated.sigil");
+        tokio::fs::create_dir_all(&workfile_path).await.unwrap();
+
+        // Lay down a synthetic v1 manifest so the backup has something to capture.
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            r#"{"schema_version": 1, "name": "Original", "page_order": []}"#,
+        )
+        .await
+        .unwrap();
+
+        let migration_flag: MigrationFlag = Arc::new(Mutex::new(Some(1)));
+        let (tx, _handle) = spawn_persistence_task_with_migration_flag(
+            doc,
+            workfile_path.clone(),
+            Arc::clone(&migration_flag),
+        );
+
+        tx.try_send(()).unwrap();
+        sleep(Duration::from_millis(SAVE_DEBOUNCE_MS + 200)).await;
+
+        // Backup directory should exist after the migrated save.
+        let backup_root = workfile_path.join(".backup-v1");
+        assert!(
+            tokio::fs::metadata(&backup_root).await.is_ok(),
+            ".backup-v1/ should be created on the first migrated save"
+        );
+
+        // Migration flag should be cleared so subsequent saves don't re-back-up.
+        let flag_state = migration_flag.lock().unwrap();
+        assert!(
+            flag_state.is_none(),
+            "migration flag should be cleared after successful save"
+        );
     }
 
     #[tokio::test]

@@ -47,7 +47,15 @@ function makeTestNode(overrides: Record<string, unknown> = {}): Record<string, u
     locked: false,
     transform: deepClone(DEFAULT_TRANSFORM),
     style: deepClone(DEFAULT_STYLE),
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     parentUuid: null,
     childrenUuids: [],
     ...overrides,

@@ -341,17 +341,24 @@ impl SigilMcpServer {
             .map_err(|e| e.to_mcp_error())
     }
 
-    /// Sets a rectangle node's corner radii.
+    /// Sets a node's corner shapes (rectangle, frame, or image).
     #[tool(
-        name = "set_corner_radii",
-        description = "Set corner radii on a rectangle node. Pass exactly 4 values: \
-                        [top-left, top-right, bottom-right, bottom-left]. Each must be >= 0."
+        name = "set_corners",
+        description = "Set corner shapes on a rectangle, frame, or image node. \
+                        The 'corners' field accepts three forms: \
+                        (1) a uniform object { shape: 'round'|'bevel'|'notch'|'scoop', radius: n }; \
+                        (2) a shape-level superellipse object \
+                        { shape: 'superellipse', radius: n, smoothing: 0.0..1.0 }; \
+                        (3) an array of exactly 4 corner objects in order \
+                        [top-left, top-right, bottom-right, bottom-left], each \
+                        { shape: 'round'|'bevel'|'notch'|'scoop', radii: { x: n, y: n } }. \
+                        The per-corner array does NOT accept 'superellipse' — use form 2."
     )]
-    fn set_corner_radii(
+    fn set_corners(
         &self,
-        Parameters(input): Parameters<crate::types::SetCornerRadiiInput>,
+        Parameters(input): Parameters<crate::types::SetCornersInput>,
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
-        crate::tools::nodes::set_corner_radii_impl(&self.state, &input.uuid, &input.radii)
+        crate::tools::nodes::set_corners_impl(&self.state, &input.uuid, &input.corners)
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }

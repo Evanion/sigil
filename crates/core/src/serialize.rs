@@ -5,9 +5,21 @@ use uuid::Uuid;
 
 use crate::error::CoreError;
 use crate::id::NodeId;
+use crate::migrations::migrate_to_v2;
 use crate::node::Node;
 use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
+
+// RF-040: serde_json enforces a default recursion limit of 128, matching
+// `MAX_JSON_NESTING_DEPTH`. If serde_json changes this default we must add
+// explicit depth checking. The compile-time assertion below pins the
+// expected value of our constant; if it is ever changed without a
+// corresponding audit of serde_json's behavior we will see a compile error
+// rather than silently diverging from the upstream default.
+const _: () = assert!(
+    crate::validate::MAX_JSON_NESTING_DEPTH == 128,
+    "MAX_JSON_NESTING_DEPTH must match serde_json's default recursion limit (128)"
+);
 
 /// A serializable representation of a page (file format).
 ///
@@ -75,6 +87,20 @@ pub fn serialize_page(page: &SerializedPage) -> Result<String, CoreError> {
 /// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
 /// - `CoreError::SerializationError` if the JSON is malformed.
 pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
+    deserialize_page_with_version(json).map(|(page, _)| page)
+}
+
+/// Deserializes a page from JSON, returning both the parsed page and the
+/// on-disk schema version observed before any migration was applied.
+///
+/// This is used by the persistence layer to detect when a workfile required
+/// migration on load — e.g. to back up the original v1 files before the first
+/// migrated save and to mark the document dirty so the v2 form is persisted.
+///
+/// # Errors
+/// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
+/// - `CoreError::SerializationError` if the JSON is malformed.
+pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
     if json.len() > crate::validate::MAX_FILE_SIZE {
         return Err(CoreError::InputTooLarge(format!(
             "file size {} bytes exceeds maximum of {} bytes",
@@ -83,8 +109,8 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         )));
     }
 
-    // NOTE: serde_json enforces a default recursion limit of 128, matching MAX_JSON_NESTING_DEPTH.
-    // If serde_json changes this default, we must add explicit depth checking.
+    // RF-040: serde_json's default 128-recursion limit is asserted at module
+    // scope to match MAX_JSON_NESTING_DEPTH; see top of file.
 
     // Check schema version first (partial parse)
     let raw: serde_json::Value = serde_json::from_str(json)
@@ -104,7 +130,16 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         ));
     }
 
-    let page: SerializedPage = serde_json::from_value(raw)
+    // Apply schema migrations in version order.
+    // Each migrate_to_vN function is idempotent on already-migrated input.
+    let migrated = if version < 2 {
+        migrate_to_v2(raw)
+            .map_err(|e| CoreError::SerializationError(format!("v1→v2 migration failed: {e}")))?
+    } else {
+        raw
+    };
+
+    let page: SerializedPage = serde_json::from_value(migrated)
         .map_err(|e| CoreError::SerializationError(format!("failed to deserialize page: {e}")))?;
 
     // Validate collection sizes
@@ -115,7 +150,7 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
         validate_serialized_transition(transition)?;
     }
 
-    Ok(page)
+    Ok((page, version))
 }
 
 /// Converts arena nodes into serialized nodes, resolving `NodeId`s to UUIDs.
@@ -396,9 +431,37 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
         {
             validate_grid_layout_limits(layout, MAX_GRID_TRACKS)?;
         }
+
+        // RF-003: For corner-bearing kinds (Rectangle, Frame, Image), enforce
+        // the cross-field invariants (bounded radii, finite smoothing,
+        // superellipse uniformity, smoothing parity) at the deserialization
+        // boundary. A hand-edited workfile with mixed Superellipse + Round
+        // corners must be rejected here.
+        if matches!(
+            node.kind.get("type").and_then(|v| v.as_str()),
+            Some("rectangle" | "frame" | "image")
+        ) && let Some(corners_value) = node.kind.get("corners")
+        {
+            validate_corners_in_value(corners_value)?;
+        }
     }
 
     Ok(())
+}
+
+/// Deserializes a `[Corner; 4]` from a `serde_json::Value` and runs
+/// `validate::validate_corners` against it.
+///
+/// Used by `validate_deserialized_page` to enforce cross-field invariants on
+/// hand-edited workfiles before they enter the document.
+fn validate_corners_in_value(corners_value: &serde_json::Value) -> Result<(), CoreError> {
+    use crate::node::Corner;
+    use crate::validate::validate_corners;
+
+    let corners: [Corner; 4] = serde_json::from_value(corners_value.clone()).map_err(|e| {
+        CoreError::SerializationError(format!("failed to deserialize corners array: {e}"))
+    })?;
+    validate_corners(&corners)
 }
 
 /// Validates a serialized transition's timing values.
@@ -587,7 +650,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             uuid,
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             name.to_string(),
         )
         .expect("create test node");
@@ -653,6 +719,61 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_migrates_legacy_v1_rectangle_to_corners() {
+        // v1 workfile with legacy `corner_radii: [4, 8, 12, 16]` on a rectangle.
+        // Migration must produce a Rectangle with Corner::Round entries whose
+        // radii match the legacy asymmetric-uniform mapping (x = y = legacy radius).
+        let legacy_json = r#"{
+            "schema_version": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Legacy",
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000002",
+                "kind": { "type": "rectangle", "corner_radii": [4.0, 8.0, 12.0, 16.0] },
+                "name": "Rect",
+                "parent": null,
+                "children": [],
+                "transform": {"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1},
+                "style": {"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]},
+                "constraints": {"horizontal":"start","vertical":"start"},
+                "visible": true,
+                "locked": false
+            }],
+            "transitions": []
+        }"#;
+
+        let page = deserialize_page(legacy_json).expect("load migrated page");
+        assert_eq!(page.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(page.nodes.len(), 1);
+
+        let kind: NodeKind =
+            serde_json::from_value(page.nodes[0].kind.clone()).expect("deserialize migrated kind");
+        let corners = match kind {
+            NodeKind::Rectangle { corners } => corners,
+            other => panic!("expected Rectangle, got {other:?}"),
+        };
+        let expected_radii = [4.0_f64, 8.0, 12.0, 16.0];
+        for (i, corner) in corners.iter().enumerate() {
+            let radii = corner.radii();
+            // Exact bit equality: literals round-trip through serde_json without lossy ops.
+            assert_eq!(
+                radii.x.to_bits(),
+                expected_radii[i].to_bits(),
+                "corner {i} x"
+            );
+            assert_eq!(
+                radii.y.to_bits(),
+                expected_radii[i].to_bits(),
+                "corner {i} y"
+            );
+            assert!(
+                matches!(corner, crate::node::Corner::Round { .. }),
+                "corner {i} should be Round, got {corner:?}"
+            );
+        }
+    }
+
+    #[test]
     fn test_deserialize_rejects_future_schema_version() {
         let json = r#"{"schema_version": 999, "id": "00000000-0000-0000-0000-000000000001", "name": "Future", "nodes": [], "transitions": []}"#;
         let result = deserialize_page(json);
@@ -663,10 +784,34 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_with_version_returns_v1_for_legacy_page() {
+        // A v1 page (no `corners` field, uses legacy `corner_radii`) should
+        // round-trip through migration and report its on-disk version as 1.
+        let json = r#"{
+            "schema_version": 1,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Legacy",
+            "nodes": [],
+            "transitions": []
+        }"#;
+        let (page, version) = deserialize_page_with_version(json).expect("deserialize");
+        assert_eq!(version, 1, "should report on-disk version, not migrated");
+        assert_eq!(page.schema_version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn test_deserialize_with_version_returns_current_for_v2_page() {
+        let json = format!(
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "V2", "nodes": [], "transitions": []}}"#
+        );
+        let (_, version) = deserialize_page_with_version(&json).expect("deserialize");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    #[test]
     fn test_deserialize_accepts_current_schema_version() {
         let json = format!(
-            r#"{{"schema_version": {}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#,
-            CURRENT_SCHEMA_VERSION
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#
         );
         let result = deserialize_page(&json);
         assert!(result.is_ok());
@@ -754,7 +899,7 @@ mod tests {
                 NodeId::new(0, 0),
                 child_uuid,
                 NodeKind::Rectangle {
-                    corner_radii: [8.0, 8.0, 8.0, 8.0],
+                    corners: crate::node::corner_radii_to_corners([8.0, 8.0, 8.0, 8.0]),
                 },
                 "Rounded Rect".to_string(),
             )
@@ -1287,5 +1432,177 @@ mod tests {
             result.is_ok(),
             "valid grid layout should be accepted: {result:?}"
         );
+    }
+
+    // ── RF-003: corner cross-field invariants at deserialization boundary ──
+
+    /// Hand-crafted v2 workfile with mixed Superellipse + Round corners.
+    /// `validate_corners` must reject this — superellipse must be applied
+    /// uniformly to all four corners.
+    #[test]
+    fn test_deserialize_rejects_mixed_superellipse_round_corners() {
+        let json = format!(
+            r#"{{
+                "schema_version": {CURRENT_SCHEMA_VERSION},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{
+                        "type": "rectangle",
+                        "corners": [
+                            {{"type": "superellipse", "radii": {{"x": 8.0, "y": 8.0}}, "smoothing": 0.6}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}}
+                        ]
+                    }},
+                    "name": "Mixed",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#
+        );
+        let result = deserialize_page(&json);
+        match result {
+            Err(CoreError::ValidationError(ref msg)) => {
+                assert!(
+                    msg.contains("superellipse must be applied uniformly"),
+                    "expected superellipse uniformity error, got: {msg}"
+                );
+            }
+            other => panic!("expected ValidationError, got: {other:?}"),
+        }
+    }
+
+    /// Hand-crafted v2 workfile with mismatched superellipse smoothing — the
+    /// parity rule must reject differing smoothing values across corners.
+    #[test]
+    fn test_deserialize_rejects_inconsistent_superellipse_smoothing() {
+        let json = format!(
+            r#"{{
+                "schema_version": {CURRENT_SCHEMA_VERSION},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{
+                        "type": "rectangle",
+                        "corners": [
+                            {{"type": "superellipse", "radii": {{"x": 8.0, "y": 8.0}}, "smoothing": 0.6}},
+                            {{"type": "superellipse", "radii": {{"x": 8.0, "y": 8.0}}, "smoothing": 0.4}},
+                            {{"type": "superellipse", "radii": {{"x": 8.0, "y": 8.0}}, "smoothing": 0.6}},
+                            {{"type": "superellipse", "radii": {{"x": 8.0, "y": 8.0}}, "smoothing": 0.6}}
+                        ]
+                    }},
+                    "name": "BadSmooth",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#
+        );
+        let result = deserialize_page(&json);
+        assert!(
+            matches!(result, Err(CoreError::ValidationError(ref m)) if m.contains("smoothing must match")),
+            "expected smoothing parity error, got: {result:?}"
+        );
+    }
+
+    /// Hand-crafted workfile with corner radius above `MAX_CORNER_RADIUS` must
+    /// be rejected.
+    #[test]
+    fn test_deserialize_rejects_corner_radius_above_max() {
+        use crate::validate::MAX_CORNER_RADIUS;
+        let huge = MAX_CORNER_RADIUS + 1.0;
+        let json = format!(
+            r#"{{
+                "schema_version": {CURRENT_SCHEMA_VERSION},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{
+                        "type": "frame",
+                        "layout": null,
+                        "corners": [
+                            {{"type": "round", "radii": {{"x": {huge}, "y": 0}}}},
+                            {{"type": "round", "radii": {{"x": 0, "y": 0}}}},
+                            {{"type": "round", "radii": {{"x": 0, "y": 0}}}},
+                            {{"type": "round", "radii": {{"x": 0, "y": 0}}}}
+                        ]
+                    }},
+                    "name": "BadRadius",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#
+        );
+        let result = deserialize_page(&json);
+        // After RF-012, `CornerRadii::new` validates radii during
+        // deserialization, so the error is reported as a SerializationError
+        // wrapping the validation message (rather than a separate
+        // ValidationError step after deserialize). Either form is acceptable —
+        // the message must reference the limit.
+        let msg = match &result {
+            Err(CoreError::ValidationError(m) | CoreError::SerializationError(m)) => m.clone(),
+            other => panic!("expected validation/serialization error, got: {other:?}"),
+        };
+        assert!(
+            msg.contains("MAX_CORNER_RADIUS"),
+            "expected MAX_CORNER_RADIUS error, got: {msg}"
+        );
+    }
+
+    /// Sanity check: a uniform Round corner array is accepted.
+    #[test]
+    fn test_deserialize_accepts_uniform_round_corners() {
+        let json = format!(
+            r#"{{
+                "schema_version": {CURRENT_SCHEMA_VERSION},
+                "id": "00000000-0000-0000-0000-000000000001",
+                "name": "Page",
+                "nodes": [{{
+                    "id": "00000000-0000-0000-0000-000000000002",
+                    "kind": {{
+                        "type": "rectangle",
+                        "corners": [
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}},
+                            {{"type": "round", "radii": {{"x": 4.0, "y": 4.0}}}}
+                        ]
+                    }},
+                    "name": "OK",
+                    "parent": null,
+                    "children": [],
+                    "transform": {{"x":0,"y":0,"width":100,"height":100,"rotation":0,"scale_x":1,"scale_y":1}},
+                    "style": {{"fills":[],"strokes":[],"opacity":1.0,"blend_mode":"normal","effects":[]}},
+                    "constraints": {{"horizontal":"start","vertical":"start"}},
+                    "visible": true,
+                    "locked": false
+                }}],
+                "transitions": []
+            }}"#
+        );
+        let result = deserialize_page(&json);
+        assert!(result.is_ok(), "uniform round must be accepted: {result:?}");
     }
 }

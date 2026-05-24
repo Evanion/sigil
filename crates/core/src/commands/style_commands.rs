@@ -4,9 +4,11 @@ use crate::command::FieldOperation;
 use crate::document::Document;
 use crate::error::CoreError;
 use crate::id::NodeId;
-use crate::node::{BlendMode, Constraints, Effect, Fill, NodeKind, Stroke, StyleValue, Transform};
+use crate::node::{
+    BlendMode, Constraints, Corner, Effect, Fill, NodeKind, Stroke, StyleValue, Transform,
+};
 use crate::validate::{
-    MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE,
+    MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_STROKES_PER_STYLE, validate_corners,
     validate_style_value_expression, validate_token_name,
 };
 
@@ -325,61 +327,58 @@ impl FieldOperation for SetEffects {
     }
 }
 
-/// Validates that all four corner radii are finite and non-negative.
+/// Replaces all four corner shapes on a `Rectangle`, `Frame`, or `Image` node.
 ///
-/// # Errors
-///
-/// Returns [`CoreError::ValidationError`] if any radius is NaN, infinity, or negative.
-fn validate_corner_radii(radii: &[f64; 4]) -> Result<(), CoreError> {
-    for (i, &r) in radii.iter().enumerate() {
-        if !r.is_finite() {
-            return Err(CoreError::ValidationError(format!(
-                "corner_radii[{i}] must be finite (no NaN or infinity), got {r}"
-            )));
-        }
-        if r < 0.0 {
-            return Err(CoreError::ValidationError(format!(
-                "corner_radii[{i}] must be non-negative, got {r}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Sets the corner radii on a rectangle node.
-///
-/// Fails if the target node is not a `NodeKind::Rectangle`.
+/// `new_corners` must pass [`validate_corners`]:
+/// - All radii finite, non-negative, and ≤ `MAX_CORNER_RADIUS`.
+/// - Superellipse smoothing finite and in `[0.0, 1.0]`.
+/// - If any corner is `Superellipse`, all four must be.
+/// - If all four are `Superellipse`, smoothing must match across them.
 #[derive(Debug)]
-pub struct SetCornerRadii {
-    /// The target node (must be a rectangle).
+pub struct SetCorners {
+    /// The target node (must be `Rectangle`, `Frame`, or `Image`).
     pub node_id: NodeId,
-    /// The new corner radii to apply (top-left, top-right, bottom-right, bottom-left).
-    pub new_radii: [f64; 4],
+    /// The new corners to apply (top-left, top-right, bottom-right, bottom-left).
+    pub new_corners: [Corner; 4],
 }
 
-impl FieldOperation for SetCornerRadii {
+impl FieldOperation for SetCorners {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
-        validate_corner_radii(&self.new_radii)?;
+        validate_corners(&self.new_corners)?;
         let node = doc.arena.get(self.node_id)?;
-        if !matches!(node.kind, NodeKind::Rectangle { .. }) {
-            return Err(CoreError::ValidationError(format!(
-                "SetCornerRadii requires a Rectangle node, got a different kind (node {:?})",
-                self.node_id
-            )));
+        // Explicitly enumerate every NodeKind variant — adding a new variant
+        // in core forces a compile error here so the validator stays in sync
+        // (rust-defensive "NodeKind Variants Must Have Complete Validation
+        // Coverage", RF-014). No wildcard arm.
+        match &node.kind {
+            NodeKind::Rectangle { .. } | NodeKind::Frame { .. } | NodeKind::Image { .. } => Ok(()),
+            non_corner @ (NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Text { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. }) => Err(CoreError::ValidationError(format!(
+                "SetCorners requires Rectangle, Frame, or Image node, got {:?}",
+                std::mem::discriminant(non_corner)
+            ))),
         }
-        Ok(())
     }
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
         match &mut node.kind {
-            NodeKind::Rectangle { corner_radii } => {
-                *corner_radii = self.new_radii;
+            NodeKind::Rectangle { corners }
+            | NodeKind::Frame { corners, .. }
+            | NodeKind::Image { corners, .. } => {
+                *corners = self.new_corners;
                 Ok(())
             }
-            _ => Err(CoreError::ValidationError(format!(
-                "SetCornerRadii requires a Rectangle node, got a different kind (node {:?})",
-                self.node_id
+            non_corner @ (NodeKind::Ellipse { .. }
+            | NodeKind::Path { .. }
+            | NodeKind::Text { .. }
+            | NodeKind::Group
+            | NodeKind::ComponentInstance { .. }) => Err(CoreError::ValidationError(format!(
+                "SetCorners requires Rectangle, Frame, or Image node, got {:?}",
+                std::mem::discriminant(non_corner)
             ))),
         }
     }
@@ -419,7 +418,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(2),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame".to_string(),
         )
         .expect("create node");
@@ -437,7 +439,7 @@ mod tests {
             NodeId::new(0, 0),
             make_uuid(1),
             NodeKind::Rectangle {
-                corner_radii: [0.0; 4],
+                corners: crate::node::default_corners(),
             },
             "Rect".to_string(),
         )
@@ -717,56 +719,321 @@ mod tests {
         assert!(op_h.validate(&doc).is_err());
     }
 
-    // ── SetCornerRadii ────────────────────────────────────────────────
+    // ── SetCorners ────────────────────────────────────────────────────
 
     #[test]
-    fn test_set_corner_radii_validate_and_apply() {
+    fn test_set_corners_validate_and_apply() {
         let (mut doc, node_id) = setup_doc_with_rect();
-        let new_radii = [4.0, 8.0, 4.0, 8.0];
-
-        let op = SetCornerRadii { node_id, new_radii };
+        let new_corners = [
+            Corner::Round {
+                radii: crate::node::CornerRadii { x: 4.0, y: 4.0 },
+            },
+            Corner::Bevel {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+            },
+            Corner::Notch {
+                radii: crate::node::CornerRadii { x: 12.0, y: 12.0 },
+            },
+            Corner::Scoop {
+                radii: crate::node::CornerRadii { x: 16.0, y: 16.0 },
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners,
+        };
 
         op.validate(&doc).expect("validate");
         op.apply(&mut doc).expect("apply");
-        let after = match &doc.arena.get(node_id).expect("get").kind {
-            NodeKind::Rectangle { corner_radii } => *corner_radii,
+
+        match &doc.arena.get(node_id).unwrap().kind {
+            NodeKind::Rectangle { corners } => assert_eq!(*corners, new_corners),
             _ => panic!("expected Rectangle"),
-        };
-        assert_eq!(after, new_radii);
+        }
     }
 
     #[test]
-    fn test_set_corner_radii_rejects_nan() {
-        let (doc, node_id) = setup_doc_with_rect();
-        let op = SetCornerRadii {
+    fn test_set_corners_applies_to_frame() {
+        let (mut doc, node_id) = setup_doc_with_frame();
+
+        let new_corners = [Corner::Round {
+            radii: crate::node::CornerRadii { x: 12.0, y: 12.0 },
+        }; 4];
+        let op = SetCorners {
             node_id,
-            new_radii: [f64::NAN, 0.0, 0.0, 0.0],
+            new_corners,
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        match &doc.arena.get(node_id).unwrap().kind {
+            NodeKind::Frame { corners, .. } => assert_eq!(*corners, new_corners),
+            _ => panic!("expected Frame"),
+        }
+    }
+
+    #[test]
+    fn test_set_corners_applies_to_image() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Image {
+                asset_ref: "asset-1".to_string(),
+                corners: crate::node::default_corners(),
+            },
+            "Image".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        let new_corners = [Corner::Bevel {
+            radii: crate::node::CornerRadii { x: 6.0, y: 6.0 },
+        }; 4];
+        let op = SetCorners {
+            node_id,
+            new_corners,
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        match &doc.arena.get(node_id).unwrap().kind {
+            NodeKind::Image { corners, .. } => assert_eq!(*corners, new_corners),
+            _ => panic!("expected Image"),
+        }
+    }
+
+    #[test]
+    fn test_set_corners_rejects_non_rect_shaped_node() {
+        let mut doc = Document::new("Test".to_string());
+        let node = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(4),
+            NodeKind::Group,
+            "Group".to_string(),
+        )
+        .expect("create node");
+        let node_id = doc.arena.insert(node).expect("insert");
+
+        let op = SetCorners {
+            node_id,
+            new_corners: crate::node::default_corners(),
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected non-rect-shaped rejection");
+        assert!(matches!(err, crate::error::CoreError::ValidationError(_)));
+    }
+
+    #[test]
+    fn test_set_corners_rejects_nan_radius() {
+        let (doc, node_id) = setup_doc_with_rect();
+        let mut corners = crate::node::default_corners();
+        corners[0] = Corner::Round {
+            radii: crate::node::CornerRadii {
+                x: f64::NAN,
+                y: 0.0,
+            },
+        };
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
         };
         assert!(op.validate(&doc).is_err());
-
-        let op2 = SetCornerRadii {
-            node_id,
-            new_radii: [0.0, 0.0, 0.0, f64::NAN],
-        };
-        assert!(op2.validate(&doc).is_err());
     }
 
     #[test]
-    fn test_set_corner_radii_rejects_negative() {
+    fn test_set_corners_rejects_negative_radius() {
         let (doc, node_id) = setup_doc_with_rect();
-        let op = SetCornerRadii {
+        let mut corners = crate::node::default_corners();
+        corners[0] = Corner::Round {
+            radii: crate::node::CornerRadii { x: -1.0, y: 0.0 },
+        };
+        let op = SetCorners {
             node_id,
-            new_radii: [4.0, -1.0, 4.0, 4.0],
+            new_corners: corners,
         };
         assert!(op.validate(&doc).is_err());
     }
 
     #[test]
-    fn test_set_corner_radii_on_non_rectangle_fails() {
-        let (doc, frame_id) = setup_doc_with_frame();
-        let op = SetCornerRadii {
-            node_id: frame_id,
-            new_radii: [4.0; 4],
+    fn test_set_corners_rejects_radius_above_max() {
+        // RF-035: explicit FieldOperation-level max enforcement test.
+        let (doc, node_id) = setup_doc_with_rect();
+        let mut corners = crate::node::default_corners();
+        corners[0] = Corner::Round {
+            radii: crate::node::CornerRadii {
+                x: crate::validate::MAX_CORNER_RADIUS + 1.0,
+                y: 0.0,
+            },
+        };
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected MAX_CORNER_RADIUS error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("MAX_CORNER_RADIUS"),
+            "expected MAX_CORNER_RADIUS in error message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_set_corners_rejects_smoothing_above_max() {
+        // RF-035: explicit FieldOperation-level max enforcement test for smoothing.
+        let (doc, node_id) = setup_doc_with_rect();
+        let above = crate::validate::MAX_CORNER_SMOOTHING + 0.5;
+        let corners = [
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: above,
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected MAX_CORNER_SMOOTHING error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("smoothing"),
+            "expected smoothing in error message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_set_corners_rejects_infinite_radius() {
+        let (doc, node_id) = setup_doc_with_rect();
+        let mut corners = crate::node::default_corners();
+        corners[2] = Corner::Round {
+            radii: crate::node::CornerRadii {
+                x: f64::INFINITY,
+                y: 0.0,
+            },
+        };
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_set_corners_rejects_mixed_superellipse() {
+        let (doc, node_id) = setup_doc_with_rect();
+        let corners = [
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.5,
+            },
+            Corner::Round {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+            },
+            Corner::Round {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+            },
+            Corner::Round {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op.validate(&doc).expect_err("expected uniformity error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("superellipse must be applied uniformly"),
+            "msg: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_set_corners_rejects_superellipse_smoothing_mismatch() {
+        let (doc, node_id) = setup_doc_with_rect();
+        let corners = [
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.3,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.7,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.3,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.3,
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        let err = op
+            .validate(&doc)
+            .expect_err("expected smoothing parity error");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("superellipse smoothing must match"),
+            "msg: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_set_corners_accepts_uniform_superellipse_with_asymmetric_radii() {
+        let (doc, node_id) = setup_doc_with_rect();
+        let corners = [
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 4.0, y: 8.0 },
+                smoothing: 0.6,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 16.0, y: 16.0 },
+                smoothing: 0.6,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 16.0, y: 4.0 },
+                smoothing: 0.6,
+            },
+            Corner::Superellipse {
+                radii: crate::node::CornerRadii { x: 8.0, y: 8.0 },
+                smoothing: 0.6,
+            },
+        ];
+        let op = SetCorners {
+            node_id,
+            new_corners: corners,
+        };
+        assert!(op.validate(&doc).is_ok());
+    }
+
+    #[test]
+    fn test_set_corners_rejects_missing_node() {
+        let doc = Document::new("Test".to_string());
+        let op = SetCorners {
+            node_id: NodeId::new(999, 0),
+            new_corners: crate::node::default_corners(),
         };
         assert!(op.validate(&doc).is_err());
     }

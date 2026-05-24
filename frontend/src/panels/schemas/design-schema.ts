@@ -1,4 +1,5 @@
 import type { PropertySchema } from "../schema/types";
+import { MAX_CORNER_RADIUS } from "../../store/corners-input";
 
 /**
  * Property schema for the "Design" panel — Layout sub-tab.
@@ -20,21 +21,27 @@ export const designSchema: PropertySchema = {
     {
       name: "Transform",
       fields: [
+        // RF-024: ariaLabel expands abbreviated labels for screen readers.
+        // The visible glyph stays compact (Figma-style); SR users hear the
+        // full word.
         {
           key: "transform.x",
           label: "X",
+          ariaLabel: "X position",
           type: "number",
           step: 1,
         },
         {
           key: "transform.y",
           label: "Y",
+          ariaLabel: "Y position",
           type: "number",
           step: 1,
         },
         {
           key: "transform.width",
           label: "W",
+          ariaLabel: "Width",
           type: "number",
           step: 1,
           min: 0,
@@ -42,6 +49,7 @@ export const designSchema: PropertySchema = {
         {
           key: "transform.height",
           label: "H",
+          ariaLabel: "Height",
           type: "number",
           step: 1,
           min: 0,
@@ -49,6 +57,7 @@ export const designSchema: PropertySchema = {
         {
           key: "transform.rotation",
           label: "R",
+          ariaLabel: "Rotation",
           type: "number",
           step: 0.1,
           suffix: "deg",
@@ -57,12 +66,49 @@ export const designSchema: PropertySchema = {
     },
     {
       name: "Corner Radius",
-      when: "rectangle",
+      when: ["rectangle", "frame", "image"],
       fields: [
-        { key: "kind.corner_radii.0", label: "TL", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.1", label: "TR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.2", label: "BR", type: "number", step: 1, min: 0 },
-        { key: "kind.corner_radii.3", label: "BL", type: "number", step: 1, min: 0 },
+        // `max` is bounded by MAX_CORNER_RADIUS — symmetric with the Rust
+        // validate.rs constant. Per CLAUDE.md §11 "Constants Must Be
+        // Enforced": every NumberInput max must be a named constant.
+        // RF-024: ariaLabel expands the 2-letter compass labels so screen
+        // readers announce the full corner name instead of "TL", "TR", etc.
+        {
+          key: "kind.corners.0.radii.x",
+          label: "TL",
+          ariaLabel: "Top-left corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.1.radii.x",
+          label: "TR",
+          ariaLabel: "Top-right corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.2.radii.x",
+          label: "BR",
+          ariaLabel: "Bottom-right corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.3.radii.x",
+          label: "BL",
+          ariaLabel: "Bottom-left corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
       ],
     },
     {
@@ -71,6 +117,7 @@ export const designSchema: PropertySchema = {
         {
           key: "constraints.horizontal",
           label: "H",
+          ariaLabel: "Horizontal constraint",
           type: "select",
           options: [
             { value: "start", label: "Start" },
@@ -82,6 +129,7 @@ export const designSchema: PropertySchema = {
         {
           key: "constraints.vertical",
           label: "V",
+          ariaLabel: "Vertical constraint",
           type: "select",
           options: [
             { value: "start", label: "Start" },

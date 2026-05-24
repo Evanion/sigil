@@ -79,11 +79,20 @@ impl FieldOperation for SetOverride {
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
+        // Enumerate every non-ComponentInstance variant explicitly so a new
+        // variant in core forces a compile error here (rust-defensive
+        // "NodeKind Variants Must Have Complete Validation Coverage", RF-041).
         match &mut node.kind {
             crate::node::NodeKind::ComponentInstance { overrides, .. } => {
                 overrides.set(self.key.clone(), self.new_value.clone(), self.new_source)?;
             }
-            _ => {
+            crate::node::NodeKind::Frame { .. }
+            | crate::node::NodeKind::Rectangle { .. }
+            | crate::node::NodeKind::Ellipse { .. }
+            | crate::node::NodeKind::Path { .. }
+            | crate::node::NodeKind::Text { .. }
+            | crate::node::NodeKind::Image { .. }
+            | crate::node::NodeKind::Group => {
                 return Err(CoreError::ValidationError(
                     "SetOverride: node is not a ComponentInstance".to_string(),
                 ));
@@ -105,6 +114,7 @@ pub struct RemoveOverride {
 impl FieldOperation for RemoveOverride {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         let node = doc.arena.get(self.node_id)?;
+        // Enumerate every non-ComponentInstance variant explicitly (RF-041).
         match &node.kind {
             crate::node::NodeKind::ComponentInstance { overrides, .. } => {
                 if overrides.get(&self.key).is_none() {
@@ -114,7 +124,13 @@ impl FieldOperation for RemoveOverride {
                     )));
                 }
             }
-            _ => {
+            crate::node::NodeKind::Frame { .. }
+            | crate::node::NodeKind::Rectangle { .. }
+            | crate::node::NodeKind::Ellipse { .. }
+            | crate::node::NodeKind::Path { .. }
+            | crate::node::NodeKind::Text { .. }
+            | crate::node::NodeKind::Image { .. }
+            | crate::node::NodeKind::Group => {
                 return Err(CoreError::ValidationError(
                     "RemoveOverride: node is not a ComponentInstance".to_string(),
                 ));
@@ -125,13 +141,20 @@ impl FieldOperation for RemoveOverride {
 
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         let node = doc.arena.get_mut(self.node_id)?;
+        // Enumerate every non-ComponentInstance variant explicitly (RF-041).
         match &mut node.kind {
             crate::node::NodeKind::ComponentInstance { overrides, .. } => {
                 overrides.remove(&self.key).ok_or_else(|| {
                     CoreError::ValidationError(format!("override not found for key {:?}", self.key))
                 })?;
             }
-            _ => {
+            crate::node::NodeKind::Frame { .. }
+            | crate::node::NodeKind::Rectangle { .. }
+            | crate::node::NodeKind::Ellipse { .. }
+            | crate::node::NodeKind::Path { .. }
+            | crate::node::NodeKind::Text { .. }
+            | crate::node::NodeKind::Image { .. }
+            | crate::node::NodeKind::Group => {
                 return Err(CoreError::ValidationError(
                     "RemoveOverride: node is not a ComponentInstance".to_string(),
                 ));
@@ -341,7 +364,10 @@ mod tests {
         let node = Node::new(
             NodeId::new(0, 0),
             make_uuid(1),
-            NodeKind::Frame { layout: None },
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
             "Frame".to_string(),
         )
         .expect("valid");

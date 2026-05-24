@@ -246,7 +246,7 @@ pub struct SetFieldInput {
 pub struct CreateNodeInput {
     /// Pre-generated UUID for the new node.
     pub node_uuid: String,
-    /// Node kind as JSON (e.g., `{"type": "rectangle", "corner_radii": [0,0,0,0]}`).
+    /// Node kind as JSON (e.g., `{"type": "rectangle", "corners": [{"type":"round","radii":{"x":0,"y":0}}, ...]}`).
     pub kind: String,
     /// Display name for the new node.
     pub name: String,

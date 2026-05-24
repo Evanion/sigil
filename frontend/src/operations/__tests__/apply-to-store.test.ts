@@ -40,7 +40,15 @@ describe("applyOperationToStore — set_field", () => {
           blend_mode: "normal",
           effects: [],
         },
-        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        kind: {
+          type: "rectangle",
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
         name: "Rect",
         visible: true,
         locked: false,
@@ -173,17 +181,33 @@ describe("applyOperationToStore — set_field", () => {
     expect(setter).toHaveBeenCalled();
   });
 
-  it("applies kind set_field operation (corner radii)", () => {
+  it("applies kind set_field operation (corners)", () => {
     const setter = vi.fn() as unknown as StoreStateSetter;
     const reader: StoreStateReader = {
       getNode: () => ({
         uuid: "node-1",
-        kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+        kind: {
+          type: "rectangle",
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
       }),
     };
     const op = makeOp({
       path: "kind",
-      value: { type: "rectangle", corner_radii: [8, 8, 8, 8] },
+      value: {
+        type: "rectangle",
+        corners: [
+          { type: "round", radii: { x: 8, y: 8 } },
+          { type: "round", radii: { x: 8, y: 8 } },
+          { type: "round", radii: { x: 8, y: 8 } },
+          { type: "round", radii: { x: 8, y: 8 } },
+        ],
+      },
     });
 
     applyOperationToStore(op, setter, reader);
@@ -224,7 +248,15 @@ describe("applyOperationToStore — create_node", () => {
     const nodeData = {
       uuid: "new-uuid",
       name: "Rect 1",
-      kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+      kind: {
+        type: "rectangle",
+        corners: [
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+        ],
+      },
       transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
       style: {
         fills: [],
@@ -289,7 +321,15 @@ describe("applyOperationToStore — create_node", () => {
       uuid: "child-uuid",
       name: "Child",
       parentUuid: "parent-uuid",
-      kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+      kind: {
+        type: "rectangle",
+        corners: [
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+          { type: "round", radii: { x: 0, y: 0 } },
+        ],
+      },
       transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
       style: {
         fills: [],

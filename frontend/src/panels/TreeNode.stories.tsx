@@ -49,7 +49,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     setFills: () => {},
     setStrokes: () => {},
     setEffects: () => {},
-    setCornerRadii: () => {},
+    setCorners: () => {},
     setTextContent: () => {},
     setTextStyle: () => {},
     batchSetTransform: () => {},
@@ -84,7 +84,15 @@ function makeNode(
   return {
     id: { index: 0, generation: 0 },
     uuid,
-    kind: { type: kindType, corner_radii: [0, 0, 0, 0] } as DocumentNode["kind"],
+    kind: {
+      type: kindType,
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    } as DocumentNode["kind"],
     name,
     parent: null,
     children: [],

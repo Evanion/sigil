@@ -9,7 +9,7 @@ use agent_designer_core::{
     MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
     commands::style_commands::{
-        SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
+        SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
     },
     commands::tree_commands::{ReorderChildren, ReparentNode},
     validate_floats_in_value,
@@ -31,9 +31,12 @@ use crate::types::{CreateNodeResult, MutationResult, NodeInfo, TransformInfo, Tr
 /// Returns `McpToolError::InvalidInput` if the string does not match a known kind.
 pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
     match kind {
-        "frame" => Ok(NodeKind::Frame { layout: None }),
+        "frame" => Ok(NodeKind::Frame {
+            layout: None,
+            corners: agent_designer_core::node::default_corners(),
+        }),
         "rectangle" => Ok(NodeKind::Rectangle {
-            corner_radii: [0.0; 4],
+            corners: agent_designer_core::node::default_corners(),
         }),
         "ellipse" => Ok(NodeKind::Ellipse {
             arc_start: 0.0,
@@ -947,46 +950,33 @@ pub fn set_effects_impl(
     })
 }
 
-/// Sets a rectangle node's corner radii.
+/// Sets a node's corner shapes.
 ///
-/// Validates that exactly 4 elements are provided, all finite and non-negative.
+/// The `corners_value` JSON is parsed via `corners_input::parse_corners_input` which expands
+/// the three accepted input shapes (uniform object shorthand, shape-level superellipse,
+/// per-corner array) into `[Corner; 4]`. The per-corner array form rejects
+/// `Corner::Superellipse` variants — superellipse must arrive through the shape-level shorthand.
 ///
 /// # Errors
 ///
-/// - `McpToolError::InvalidInput` if radii count is not 4, or any value is NaN/infinity/negative.
+/// - `McpToolError::InvalidInput` if the shorthand is malformed, any numeric is non-finite or
+///   negative, smoothing is out of `[0.0, 1.0]`, or a per-corner array contains a superellipse.
 /// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
-/// - `McpToolError::CoreError` on engine-level failures (e.g. node is not a rectangle).
-pub fn set_corner_radii_impl(
+/// - `McpToolError::CoreError` on engine-level failures (e.g. node is not a corner-bearing kind).
+pub fn set_corners_impl(
     state: &AppState,
     uuid_str: &str,
-    radii: &[f64],
+    corners_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
-    if radii.len() != 4 {
-        return Err(McpToolError::InvalidInput(format!(
-            "corner radii must have exactly 4 elements, got {}",
-            radii.len()
-        )));
-    }
-    for (i, &r) in radii.iter().enumerate() {
-        if !r.is_finite() {
-            return Err(McpToolError::InvalidInput(format!(
-                "radii[{i}] must be finite (no NaN or infinity), got {r}"
-            )));
-        }
-        if r < 0.0 {
-            return Err(McpToolError::InvalidInput(format!(
-                "radii[{i}] must be non-negative, got {r}"
-            )));
-        }
-    }
-    let new_radii: [f64; 4] = [radii[0], radii[1], radii[2], radii[3]];
+    let new_corners = agent_designer_core::corners_input::parse_corners_input(corners_value)
+        .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
 
     let node_uuid: Uuid = uuid_str
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
+    let kind_json = {
         let mut doc = acquire_document_lock(state);
 
         let node_id = doc
@@ -994,23 +984,29 @@ pub fn set_corner_radii_impl(
             .id_by_uuid(&node_uuid)
             .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let cmd = SetCornerRadii { node_id, new_radii };
+        let cmd = SetCorners {
+            node_id,
+            new_corners,
+        };
         cmd.validate(&doc)?;
         cmd.apply(&mut doc)?;
-    }
+
+        let node = doc.arena.get(node_id)?;
+        serde_json::to_value(&node.kind)?
+    };
 
     super::broadcast::broadcast_and_persist(
         state,
         MutationEventKind::NodeUpdated,
         &node_uuid.to_string(),
         "set_field",
-        "kind.corner_radii",
-        Some(serde_json::json!(radii)),
+        "kind",
+        Some(kind_json),
     );
 
     Ok(MutationResult {
         success: true,
-        message: format!("Corner radii set on node {uuid_str}"),
+        message: format!("Corners set on node {uuid_str}"),
     })
 }
 
@@ -1067,10 +1063,11 @@ mod tests {
         );
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let created = result.unwrap();
-        assert_eq!(created.node.transform.x, 10.0);
-        assert_eq!(created.node.transform.y, 20.0);
-        assert_eq!(created.node.transform.width, 100.0);
-        assert_eq!(created.node.transform.height, 50.0);
+        // Exact bit equality: literals pass through serde without lossy ops.
+        assert_eq!(created.node.transform.x.to_bits(), 10.0_f64.to_bits());
+        assert_eq!(created.node.transform.y.to_bits(), 20.0_f64.to_bits());
+        assert_eq!(created.node.transform.width.to_bits(), 100.0_f64.to_bits());
+        assert_eq!(created.node.transform.height.to_bits(), 50.0_f64.to_bits());
     }
 
     #[test]
@@ -1451,95 +1448,6 @@ mod tests {
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
-    // ── set_corner_radii_impl ─────────────────────────────────────────
-
-    #[test]
-    fn test_set_corner_radii_impl_on_rectangle() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
-
-        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 8.0, 4.0, 8.0]);
-        assert!(result.is_ok(), "expected ok, got: {result:?}");
-        assert!(result.unwrap().success);
-
-        // Verify radii were applied.
-        let doc = crate::server::acquire_document_lock(&state);
-        let node_id = doc
-            .arena
-            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
-            .unwrap();
-        let node = doc.arena.get(node_id).unwrap();
-        match &node.kind {
-            agent_designer_core::NodeKind::Rectangle { corner_radii } => {
-                assert_eq!(*corner_radii, [4.0, 8.0, 4.0, 8.0]);
-            }
-            _ => panic!("expected rectangle"),
-        }
-    }
-
-    #[test]
-    fn test_set_corner_radii_impl_rejects_non_rectangle() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
-
-        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0, 4.0, 4.0]);
-        assert!(result.is_err());
-        // Rectangle check now comes from core's validate() via From<CoreError>
-        let err = result.unwrap_err();
-        assert!(
-            matches!(
-                &err,
-                McpToolError::CoreError(agent_designer_core::CoreError::ValidationError(msg))
-                    if msg.contains("Rectangle") || msg.contains("rectangle")
-            ),
-            "error should mention rectangle requirement, got: {err}"
-        );
-    }
-
-    #[test]
-    fn test_set_corner_radii_impl_rejects_wrong_count() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
-
-        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, 4.0]);
-        assert!(result.is_err());
-        assert!(
-            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("4 elements")),
-            "error should mention 4 elements"
-        );
-    }
-
-    #[test]
-    fn test_set_corner_radii_impl_rejects_negative() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
-
-        let result = set_corner_radii_impl(&state, &created.uuid, &[4.0, -1.0, 4.0, 4.0]);
-        assert!(result.is_err());
-        assert!(
-            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("non-negative")),
-            "error should mention non-negative"
-        );
-    }
-
-    #[test]
-    fn test_set_corner_radii_impl_rejects_nan() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
-
-        let result = set_corner_radii_impl(&state, &created.uuid, &[f64::NAN, 0.0, 0.0, 0.0]);
-        assert!(result.is_err());
-        assert!(
-            matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
-            "error should mention finiteness"
-        );
-    }
-
     // ── set_fills_impl ────────────────────────────────────────────────
 
     #[test]
@@ -1646,5 +1554,113 @@ mod tests {
         let result = set_effects_impl(&state, &created.uuid, &effects_json);
         assert!(result.is_ok());
         assert!(result.unwrap().success);
+    }
+
+    // ── set_corners_impl ──────────────────────────────────────────────
+
+    #[test]
+    fn test_set_corners_uniform_shorthand() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        // Uniform shorthand: object form with shape + radius
+        let corners_json = serde_json::json!({ "shape": "round", "radius": 12.0 });
+        let result = set_corners_impl(&state, &created.uuid, &corners_json);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+        assert!(result.unwrap().success);
+
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_id = doc
+            .arena
+            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        let agent_designer_core::NodeKind::Rectangle { corners } = &node.kind else {
+            panic!("expected rectangle");
+        };
+        for corner in corners {
+            let agent_designer_core::Corner::Round { radii } = corner else {
+                panic!("expected round corner, got {corner:?}");
+            };
+            // Exact bit equality: literals pass through serde without lossy ops.
+            assert_eq!(radii.x().to_bits(), 12.0_f64.to_bits());
+            assert_eq!(radii.y().to_bits(), 12.0_f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn test_set_corners_superellipse_shorthand() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let corners_json = serde_json::json!({
+            "shape": "superellipse",
+            "radius": 20.0,
+            "smoothing": 0.6
+        });
+        let result = set_corners_impl(&state, &created.uuid, &corners_json);
+        assert!(result.is_ok(), "expected ok, got: {result:?}");
+
+        let doc = crate::server::acquire_document_lock(&state);
+        let node_id = doc
+            .arena
+            .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
+            .unwrap();
+        let node = doc.arena.get(node_id).unwrap();
+        let agent_designer_core::NodeKind::Rectangle { corners } = &node.kind else {
+            panic!("expected rectangle");
+        };
+        for corner in corners {
+            let agent_designer_core::Corner::Superellipse { radii, smoothing } = corner else {
+                panic!("expected superellipse, got {corner:?}");
+            };
+            // Exact bit equality: literals pass through serde without lossy ops.
+            assert_eq!(radii.x().to_bits(), 20.0_f64.to_bits());
+            assert_eq!(radii.y().to_bits(), 20.0_f64.to_bits());
+            assert_eq!(smoothing.to_bits(), 0.6_f64.to_bits());
+        }
+    }
+
+    #[test]
+    fn test_set_corners_per_corner_array_rejects_superellipse() {
+        let (state, page_id) = make_state_with_page();
+        let created =
+            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+
+        let corners_json = serde_json::json!([
+            { "shape": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.5 },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
+            { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } }
+        ]);
+        let err = set_corners_impl(&state, &created.uuid, &corners_json).unwrap_err();
+        match err {
+            McpToolError::InvalidInput(msg) => {
+                assert!(
+                    msg.contains("superellipse"),
+                    "expected superellipse rejection message, got: {msg}"
+                );
+            }
+            other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_set_corners_invalid_uuid() {
+        let state = AppState::new();
+        let corners_json = serde_json::json!({ "shape": "round", "radius": 4.0 });
+        let err = set_corners_impl(&state, "not-a-uuid", &corners_json).unwrap_err();
+        assert!(matches!(err, McpToolError::InvalidUuid(_)));
+    }
+
+    #[test]
+    fn test_set_corners_node_not_found() {
+        let state = AppState::new();
+        let missing = Uuid::new_v4().to_string();
+        let corners_json = serde_json::json!({ "shape": "round", "radius": 4.0 });
+        let err = set_corners_impl(&state, &missing, &corners_json).unwrap_err();
+        assert!(matches!(err, McpToolError::NodeNotFound(_)));
     }
 }

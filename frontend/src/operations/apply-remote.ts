@@ -39,6 +39,19 @@ type DeepMutable<T> = {
   -readonly [K in keyof T]: T[K] extends object ? DeepMutable<T[K]> : T[K];
 };
 
+// ── Corner shape validation constants ─────────────────────────────────
+// RF-031: Consolidated — import from the canonical source in corners-input.ts
+// instead of redefining locally. The previous local copies drifted silently
+// when the Rust source-of-truth changed; a single import site prevents that.
+import {
+  MAX_CORNER_RADIUS,
+  MIN_CORNER_SMOOTHING,
+  MAX_CORNER_SMOOTHING,
+} from "../store/corners-input";
+
+/** Valid discriminator strings for the Corner union type. */
+const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
+
 // ── Remote payload types ──────────────────────────────────────────────
 
 /**
@@ -381,9 +394,125 @@ function applyFieldSet(
     case "style.blend_mode":
       setState("nodes", nodeUuid, "style", "blend_mode", value as BlendMode);
       break;
-    case "kind":
-      setState("nodes", nodeUuid, "kind", value as NodeKind);
+    case "kind": {
+      // RF-030: log structured payload at every early-return so silent drops
+      // are observable in dev tools / production logs. The local helper
+      // captures the nodeUuid + reason and short context.
+      const reject = (reason: string, ctx?: Record<string, unknown>): void => {
+        console.warn("Remote set_field kind: rejected", { nodeUuid, reason, ...ctx });
+      };
+
+      // Defensive validation: reject non-object / null / array values.
+      if (typeof value !== "object" || value === null || Array.isArray(value)) {
+        reject("kind_value_not_object");
+        return;
+      }
+      const payload = value as Record<string, unknown>;
+
+      // Reject cross-kind replacements — prevents rectangle→frame corruption.
+      if (payload["type"] !== node.kind.type) {
+        reject("kind_type_mismatch", { incoming: payload["type"], existing: node.kind.type });
+        return;
+      }
+
+      // For corner-bearing kinds, validate the corners array before committing.
+      if (
+        payload["type"] === "rectangle" ||
+        payload["type"] === "frame" ||
+        payload["type"] === "image"
+      ) {
+        const rawCorners = payload["corners"];
+        if (!Array.isArray(rawCorners) || rawCorners.length !== 4) {
+          reject("corners_not_array_of_4");
+          return;
+        }
+        let superellipseCount = 0;
+        let firstSuperellipseSmoothing: number | null = null;
+        for (let i = 0; i < rawCorners.length; i++) {
+          const c = rawCorners[i];
+          if (typeof c !== "object" || c === null) {
+            reject("corner_not_object", { index: i });
+            return;
+          }
+          const corner = c as Record<string, unknown>;
+          const cornerType = corner["type"];
+          if (typeof cornerType !== "string" || !VALID_CORNER_TYPES.has(cornerType)) {
+            reject("corner_invalid_type", { index: i, cornerType });
+            return;
+          }
+          const radii = corner["radii"];
+          if (typeof radii !== "object" || radii === null) {
+            reject("corner_radii_not_object", { index: i });
+            return;
+          }
+          const rx = (radii as Record<string, unknown>)["x"];
+          const ry = (radii as Record<string, unknown>)["y"];
+          if (typeof rx !== "number" || !Number.isFinite(rx)) {
+            reject("corner_radius_x_not_finite", { index: i, rx });
+            return;
+          }
+          if (rx < 0 || rx > MAX_CORNER_RADIUS) {
+            reject("corner_radius_x_out_of_range", { index: i, rx });
+            return;
+          }
+          if (typeof ry !== "number" || !Number.isFinite(ry)) {
+            reject("corner_radius_y_not_finite", { index: i, ry });
+            return;
+          }
+          if (ry < 0 || ry > MAX_CORNER_RADIUS) {
+            reject("corner_radius_y_out_of_range", { index: i, ry });
+            return;
+          }
+          if (cornerType === "superellipse") {
+            superellipseCount += 1;
+            const smoothing = corner["smoothing"];
+            if (typeof smoothing !== "number" || !Number.isFinite(smoothing)) {
+              reject("superellipse_smoothing_not_finite", { index: i, smoothing });
+              return;
+            }
+            if (smoothing < MIN_CORNER_SMOOTHING || smoothing > MAX_CORNER_SMOOTHING) {
+              reject("superellipse_smoothing_out_of_range", { index: i, smoothing });
+              return;
+            }
+            if (firstSuperellipseSmoothing === null) {
+              firstSuperellipseSmoothing = smoothing;
+            }
+          }
+        }
+        // Superellipse uniformity: if any corner is superellipse, all four must be.
+        if (superellipseCount > 0 && superellipseCount < 4) {
+          reject("superellipse_partial_uniformity", { superellipseCount });
+          return;
+        }
+        // Superellipse smoothing parity: all four smoothings must be identical.
+        // Object.is gives bitwise equality for finite numbers (NaN already rejected above).
+        if (superellipseCount === 4 && firstSuperellipseSmoothing !== null) {
+          for (let i = 0; i < rawCorners.length; i++) {
+            const corner = rawCorners[i] as Record<string, unknown>;
+            const smoothing = corner["smoothing"] as number;
+            if (!Object.is(smoothing, firstSuperellipseSmoothing)) {
+              reject("superellipse_smoothing_parity_violation", {
+                index: i,
+                smoothing,
+                expected: firstSuperellipseSmoothing,
+              });
+              return;
+            }
+          }
+        }
+      }
+
+      setState(
+        produce((s) => {
+          const n = s.nodes[nodeUuid];
+          // Double-check type hasn't changed between the read above and the write now.
+          if (!n || n.kind.type !== payload["type"]) return;
+          (s.nodes[nodeUuid] as DeepMutable<StoreDocumentNode>).kind =
+            payload as DeepMutable<NodeKind>;
+        }),
+      );
       break;
+    }
     case "kind.content":
       if (node.kind.type === "text") {
         setState(
@@ -393,20 +522,6 @@ function applyFieldSet(
               // produce() provides mutable access — DeepMutable strips readonly
               const mutableKind = n.kind as DeepMutable<typeof n.kind>;
               mutableKind.content = value as string;
-            }
-          }),
-        );
-      }
-      break;
-    case "kind.corner_radii":
-      if (node.kind.type === "rectangle") {
-        setState(
-          produce((s) => {
-            const n = s.nodes[nodeUuid];
-            if (n && n.kind.type === "rectangle") {
-              // produce() provides mutable access — DeepMutable strips readonly
-              const mutableKind = n.kind as DeepMutable<typeof n.kind>;
-              mutableKind.corner_radii = value as [number, number, number, number];
             }
           }),
         );
@@ -508,7 +623,15 @@ function applyCreateNode(
   const node: StoreDocumentNode = {
     id: PLACEHOLDER_NODE_ID,
     uuid,
-    kind: (raw["kind"] as NodeKind) ?? { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: (raw["kind"] as NodeKind) ?? {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: (raw["name"] as string) ?? "",
     parent: null,
     children: [],

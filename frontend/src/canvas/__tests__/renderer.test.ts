@@ -48,7 +48,15 @@ function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
   return {
     id: { index: 1, generation: 0 },
     uuid: "test-uuid-1",
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: "Test Node",
     parent: null,
     children: [],

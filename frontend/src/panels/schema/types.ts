@@ -7,6 +7,12 @@ export interface FieldDef {
   readonly key: string;
   /** Display label. */
   readonly label: string;
+  /**
+   * Accessible label override. Use when the visible `label` is a 2-letter
+   * abbreviation (e.g., "TL", "BR", "X", "W") that screen readers cannot
+   * pronounce meaningfully. Falls back to `label` when omitted.
+   */
+  readonly ariaLabel?: string;
   /** Field editor type. */
   readonly type: FieldType;
   /** Layout hint — grid columns this field spans. Default: 1. */

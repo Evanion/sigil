@@ -60,7 +60,15 @@ export function NumberInput(props: NumberInputProps) {
       </Show>
       <div class="sigil-number-input__group">
         <Show when={local.prefix}>
-          <span class="sigil-number-input__prefix">{local.prefix}</span>
+          {/*
+            RF-023: aria-hidden so the prefix glyph is not announced as a
+            duplicate of the input's accessible label. The label is provided
+            via NumberField.Label or the NumberField's aria-label prop; the
+            prefix is decorative (Figma-style "X" / "TL" badge).
+          */}
+          <span class="sigil-number-input__prefix" aria-hidden="true">
+            {local.prefix}
+          </span>
         </Show>
         <NumberField.Input class="sigil-number-input__input" />
         <Show when={local.suffix}>

@@ -16,7 +16,15 @@ function makeNode(uuid: string, overrides?: Partial<StoreDocumentNode>): StoreDo
   return {
     id: PLACEHOLDER_NODE_ID,
     uuid,
-    kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+    kind: {
+      type: "rectangle",
+      corners: [
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+        { type: "round", radii: { x: 0, y: 0 } },
+      ],
+    },
     name: "Test Node",
     parent: null,
     children: [],
@@ -357,7 +365,15 @@ describe("applyRemoteTransaction", () => {
           tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
-        const newKind: NodeKind = { type: "rectangle", corner_radii: [8, 8, 8, 8] };
+        const newKind: NodeKind = {
+          type: "rectangle",
+          corners: [
+            { type: "round", radii: { x: 8, y: 8 } },
+            { type: "round", radii: { x: 8, y: 8 } },
+            { type: "round", radii: { x: 8, y: 8 } },
+            { type: "round", radii: { x: 8, y: 8 } },
+          ],
+        };
 
         applyRemoteTransaction(
           makeTx({}, [makeOp({ path: "kind", value: newKind })]),
@@ -384,7 +400,15 @@ describe("applyRemoteTransaction", () => {
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
           uuid: "new-node-1",
-          kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+          kind: {
+            type: "rectangle",
+            corners: [
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+            ],
+          },
           name: "New Rect",
           transform: { x: 10, y: 20, width: 50, height: 50, rotation: 0, scale_x: 1, scale_y: 1 },
           style: {
@@ -433,7 +457,15 @@ describe("applyRemoteTransaction", () => {
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
           uuid: "new-child",
-          kind: { type: "rectangle", corner_radii: [0, 0, 0, 0] },
+          kind: {
+            type: "rectangle",
+            corners: [
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+              { type: "round", radii: { x: 0, y: 0 } },
+            ],
+          },
           name: "New Child",
           parent: "parent-1",
           children: [],

@@ -68,9 +68,50 @@ Every class in `frontend/` that lives outside Solid's component tree and registe
 
 Any store function that accepts a style field name and value as separate arguments MUST use a discriminated union type — not `(field: string, value: unknown)`. The discriminated union enforces field-value type relationships at compile time. A `(field: string, value: unknown)` signature is a typed hole.
 
+### Default-Value Factories for Mutable Containers Must Construct Independent Instances
+
+Any function returning a default instance of a mutable container (array, object with mutable nested objects) MUST construct each element with a fresh allocation. The shorthand `Array(n).fill(x)`, `[x, x, x, x]`, or `Array.from({length: n}, () => x)` where `x` is itself an object produces N references to the SAME object — mutating one element mutates all of them. This is a latent footgun for any future positional in-place mutation, even if today's callers happen to treat the array as immutable.
+
+Pattern: `Array.from({length: n}, () => makeFresh())` where `makeFresh` allocates the nested object too — NOT `Array(n).fill(makeOnce())`. Every default-factory function MUST have a test that asserts `result[i] !== result[j]` for at least one pair of distinct indices AND, for arrays of objects with nested mutable fields, asserts that `result[i].nestedField !== result[j].nestedField`. A docstring claim of "fresh tuple, callers may mutate without aliasing" is not enforcement — the test is.
+
+Applies equally to Rust factory functions returning `[T; N]` of types containing `Box`, `Vec`, or other heap-allocated content (`Vec::clone` on each element is correct; `[v.clone(); N]` evaluates `v.clone()` once and then bit-copies — incorrect for types containing `Rc`/`Arc` if interior mutability is in play). Applies equally to shorthand parsers that synthesize an array of N defaults from a scalar or partial-object input.
+
+### Discriminated Unions Must Have a Type-Level Exhaustiveness Sentinel
+
+Every TypeScript discriminated union used for runtime dispatch (`Corner`, `Fill`, `Effect`, `NodeKind` mirror, any `type X = A | B | C` with a discriminant field) MUST have a colocated type-level test that exhaustively switches on the discriminant and ends with a `default: const _exhaustive: never = x;` sentinel. The test goes in a `.test-d.ts` file (vitest type-test) so adding a new variant without updating downstream dispatch sites fails `tsc --noEmit` rather than silently shipping a runtime no-op.
+
+Pattern:
+
+```ts
+function _cornerExhaustive(c: Corner): string {
+  switch (c.type) {
+    case 'round': return 'round';
+    case 'bevel': return 'bevel';
+    case 'notch': return 'notch';
+    case 'scoop': return 'scoop';
+    case 'superellipse': return 'superellipse';
+    default: { const _x: never = c; return _x; }
+  }
+}
+```
+
+The exhaustiveness sentinel must include every set/map/array that branches on the discriminant — `VALID_CORNER_TYPES`, `CORNER_BEARING_KINDS`, renderer dispatch tables — by referencing them in the test body so a new variant fails the test if any one of them is out of date.
+
 ### Defensive Message Parsing
 
 Every `JSON.parse` call on data from an external source (WebSocket, fetch, postMessage, file read) must be wrapped in try-catch. Parse failures must be handled gracefully — log and discard, never crash the application. After parsing, validate the shape of the parsed object before type-casting. This applies to both frontend TypeScript and any future Node.js code.
+
+### Internal Mutation Entry Points Must Diagnose Their Own No-Ops
+
+Every store function or remote-operation handler that can early-return without mutating MUST emit a `console.warn` (for invariant-class no-ops) or `console.error` (for type-system invariant violations) identifying the rejection cause, the target entity, and a structured payload of the relevant context. Examples that require a diagnostic:
+
+- Target node missing from store (e.g., `setCorners` called with stale uuid).
+- Target kind does not accept the field (e.g., `setCorners` on a Text node).
+- Input failed shape parsing (e.g., `parseCornersInput` returns null).
+- Broadcast handler rejects payload after validation (every early-return in `apply-remote.ts`).
+- Discriminated-union narrowing fallback fires (e.g., `??` default for a field the type system says must be present).
+
+"It compiled and ran but did nothing" is the worst diagnostic outcome of a remote-operation pipeline — there is no error trail in production and no test failure in development. The warn/error message MUST be structured (an object payload, not a sentence) so it can be queried and aggregated in logs. Mirrors the CLAUDE.md §11 "No Silent Clamping" rule for the **receiving** side of an internal API.
 
 ### Overlay-Mode Keyboard Handlers Must Use stopPropagation at the Overlay Root
 

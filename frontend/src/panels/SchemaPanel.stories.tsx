@@ -46,7 +46,7 @@ function createMockStore(
     setFills: () => {},
     setStrokes: () => {},
     setEffects: () => {},
-    setCornerRadii: () => {},
+    setCorners: () => {},
     setTextContent: () => {},
     setTextStyle: () => {},
     batchSetTransform: () => {},
@@ -76,7 +76,15 @@ const UUID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
 const sampleNode = {
   id: { index: 0, generation: 0 },
   uuid: UUID,
-  kind: { type: "rectangle", corner_radii: [8, 8, 8, 8] },
+  kind: {
+    type: "rectangle",
+    corners: [
+      { type: "round", radii: { x: 8, y: 8 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+    ],
+  },
   name: "Blue Card",
   parent: null,
   children: [],

@@ -4,6 +4,7 @@ import type { DocumentStoreAPI } from "../store/document-store-solid";
 import type { PropertySchema } from "./schema/types";
 import { SchemaSection } from "./SchemaSection";
 import type { DocumentNode } from "../types/document";
+import { handleCornersFieldChange } from "./schema-panel-corners-handler";
 import "./SchemaPanel.css";
 
 interface SchemaPanelProps {
@@ -74,21 +75,9 @@ const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> 
     },
   },
   {
-    prefix: "kind.corner_radii.",
+    prefix: "kind.corners.",
     handler: (store, uuid, key, value, node) => {
-      if (node.kind.type !== "rectangle") return;
-      const idx = parseInt(key.slice("kind.corner_radii.".length), 10);
-      if (idx < 0 || idx > 3 || !Number.isFinite(idx)) return;
-      const current = (node.kind as { corner_radii: readonly number[] }).corner_radii;
-      const newRadii: [number, number, number, number] = [
-        current[0] ?? 0,
-        current[1] ?? 0,
-        current[2] ?? 0,
-        current[3] ?? 0,
-      ];
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return;
-      newRadii[idx] = value;
-      store.setCornerRadii(uuid, newRadii);
+      handleCornersFieldChange(store, uuid, key, value, node);
     },
   },
   {
