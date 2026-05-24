@@ -1,6 +1,7 @@
 import { type Component, Switch, Match } from "solid-js";
 import type { FieldDef } from "./schema/types";
 import { NumberInput } from "../components/number-input/NumberInput";
+import { Slider } from "../components/slider/Slider";
 import { TextInput } from "../components/text-input/TextInput";
 import { Select } from "../components/select/Select";
 import { Toggle } from "../components/toggle/Toggle";
@@ -29,17 +30,13 @@ export const FieldRenderer: Component<FieldRendererProps> = (props) => {
         />
       </Match>
       <Match when={props.field.type === "slider"}>
-        <input
-          type="range"
+        <Slider
           value={typeof props.value === "number" ? props.value : 0}
+          onChange={(v) => props.onChange(v)}
           min={props.field.min ?? 0}
           max={props.field.max ?? 100}
           step={props.field.step ?? 1}
-          onInput={(e) => {
-            const v = parseFloat(e.currentTarget.value);
-            if (Number.isFinite(v)) props.onChange(v);
-          }}
-          aria-label={props.field.ariaLabel ?? props.field.label}
+          ariaLabel={props.field.ariaLabel ?? props.field.label}
         />
       </Match>
       <Match when={props.field.type === "text"}>
