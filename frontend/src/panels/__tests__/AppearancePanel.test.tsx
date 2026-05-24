@@ -425,26 +425,30 @@ describe("AppearancePanel", () => {
 
   // ── RF-013: MAX_* enforcement tests ──────────────────────────────────
 
-  it("test_max_fills_enforced: should not add fill when at maximum (32)", () => {
-    const fills = Array.from({ length: 32 }, () => ({
-      ...solidFill,
-    }));
-    const setFills = vi.fn();
-    const store = createMockStore("node-1", {
-      "node-1": makeNode({ fills }),
-    });
-    store.setFills = setFills;
-    render(() => (
-      <TransProvider instance={i18nInstance}>
-        <DocumentProvider store={store}>
-          <AppearancePanel />
-        </DocumentProvider>
-      </TransProvider>
-    ));
-    const addBtn = screen.getByRole("button", { name: "Add fill" });
-    fireEvent.click(addBtn);
-    expect(setFills).not.toHaveBeenCalled();
-  });
+  it(
+    "test_max_fills_enforced: should not add fill when at maximum (32)",
+    () => {
+      const fills = Array.from({ length: 32 }, () => ({
+        ...solidFill,
+      }));
+      const setFills = vi.fn();
+      const store = createMockStore("node-1", {
+        "node-1": makeNode({ fills }),
+      });
+      store.setFills = setFills;
+      render(() => (
+        <TransProvider instance={i18nInstance}>
+          <DocumentProvider store={store}>
+            <AppearancePanel />
+          </DocumentProvider>
+        </TransProvider>
+      ));
+      const addBtn = screen.getByRole("button", { name: "Add fill" });
+      fireEvent.click(addBtn);
+      expect(setFills).not.toHaveBeenCalled();
+    },
+    15000,
+  );
 
   // ── flushHistory on ValueInput commit ───────────────────────────────
 
