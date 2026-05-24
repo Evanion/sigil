@@ -1,5 +1,6 @@
 import { Slider as KobalteSlider } from "@kobalte/core/slider";
 import { splitProps } from "solid-js";
+import "./Slider.css";
 
 export interface SliderProps {
   /** Current numeric value (single thumb). */
@@ -26,6 +27,8 @@ export interface SliderProps {
   max?: number;
   step?: number;
   disabled?: boolean;
+  /** Additional CSS class merged with the base `sigil-slider` class. */
+  class?: string;
 }
 
 /**
@@ -91,7 +94,14 @@ export function Slider(props: SliderProps) {
     "max",
     "step",
     "disabled",
+    "class",
   ]);
+
+  const className = (): string => {
+    const classes = ["sigil-slider"];
+    if (local.class) classes.push(local.class);
+    return classes.join(" ");
+  };
 
   // Gesture tracking: onChangeStart fires once per gesture. A gesture starts
   // on pointerdown OR the first keydown; it ends in emitChangeEnd. The
@@ -111,6 +121,7 @@ export function Slider(props: SliderProps) {
 
   return (
     <KobalteSlider
+      class={className()}
       value={[local.value]}
       onChange={(vals) => emitChange(vals, local.onChange)}
       onChangeEnd={(vals) => emitChangeEnd(vals, local.onChangeEnd, endGesture)}
@@ -120,8 +131,8 @@ export function Slider(props: SliderProps) {
       disabled={local.disabled}
       aria-label={local.ariaLabel}
     >
-      <KobalteSlider.Track>
-        <KobalteSlider.Fill />
+      <KobalteSlider.Track class="sigil-slider__track">
+        <KobalteSlider.Fill class="sigil-slider__fill" />
         {/*
           Override aria-valuetext on the thumb directly when ariaValueText is
           provided. Kobalte's `getValueLabel` only feeds Slider.ValueLabel —
@@ -137,6 +148,7 @@ export function Slider(props: SliderProps) {
           History Entries".
         */}
         <KobalteSlider.Thumb
+          class="sigil-slider__thumb"
           aria-valuetext={local.ariaValueText}
           onPointerDown={startGesture}
           onKeyDown={startGesture}

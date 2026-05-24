@@ -271,6 +271,29 @@ describe("Slider", () => {
     }
   });
 
+  it("should apply the base sigil-slider class on root", () => {
+    const { container } = render(() => (
+      <Slider value={0} onChange={() => {}} ariaLabel="Test" min={0} max={100} />
+    ));
+    const root = container.querySelector(".sigil-slider");
+    expect(root).toBeTruthy();
+  });
+
+  it("should merge custom class prop with base class", () => {
+    const { container } = render(() => (
+      <Slider
+        value={0}
+        onChange={() => {}}
+        ariaLabel="Test"
+        min={0}
+        max={100}
+        class="custom-class"
+      />
+    ));
+    const root = container.querySelector(".sigil-slider.custom-class");
+    expect(root).toBeTruthy();
+  });
+
   it("should reject non-finite values via Number.isFinite guard and warn", async () => {
     // Import the helper directly so we can exercise it without depending on
     // Kobalte producing NaN (which it never does in practice — this is the
