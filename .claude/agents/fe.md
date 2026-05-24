@@ -14,7 +14,7 @@ You work exclusively in `frontend/`. You do not modify Rust crates.
 | Layer | Technology |
 |---|---|
 | UI framework | Solid.js 1.9 (panels, toolbar, dialogs) |
-| Headless components | Kobalte (`@kobalte/core`) — accessible primitives |
+| Headless components | Kobalte (`@kobalte/core`) — accessible primitives (NOT for Popover/Dialog — use native HTML) |
 | Icons | Lucide (`lucide-solid`) — tree-shakeable |
 | Design tokens | Open Props + CSS custom properties (dark theme in `styles/theme.css`) |
 | Canvas | HTML5 Canvas 2D (vanilla — NOT managed by Solid) |
@@ -66,7 +66,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - Components use `.tsx` extension. Non-JSX modules stay `.ts`.
 - Use `splitProps` for separating local props from pass-through props
 - Use Solid's `createSignal`, `createMemo`, `createEffect` for reactivity — not manual pub/sub
-- Wrap Kobalte primitives for all interactive components (Button, Tooltip, Popover, Select, etc.)
+- Wrap Kobalte primitives for interactive components (Button, Tooltip, Select, DropdownMenu, etc.) — except Popover and Dialog, which use native HTML implementations (see CLAUDE.md Section 5)
 - Never use `innerHTML` in JSX — use `textContent` or children
 - Components go in `src/components/<name>/` with `.tsx`, `.css`, `.stories.tsx`, `.test.tsx`
 - Use `<Index>` for lists that support add/remove/reorder (fills, strokes, effects, layers). Use `<For>` only for read-only or append-only lists. See CLAUDE.md section 5.
@@ -83,6 +83,7 @@ urql exchanges are a pipeline — order matters. The `subscriptionExchange` MUST
 - When capturing a "before" value for undo or rollback, read it BEFORE calling `produce()` or `setState()`. Reading after the mutation returns the new value, not the old one. Pattern: `const before = node.field; setState(produce(s => { s.field = newValue; })); trackUndo(before);`.
 - `onCleanup` must be called synchronously during component setup — never inside DOM event handlers, setTimeout callbacks, or Promise.then. Outside a reactive owner, onCleanup silently no-ops, leaving timers and event listeners alive after the component is destroyed.
 - Frontend-assigned stable IDs on list items must flow through the full prop callback chain. Strip them only at the store's outbound mutation boundary, not before calling onUpdate/onChange props — regenerating IDs per render causes identity churn.
+- When a display layer derives a value via a lossy transform from storage (HSL↔sRGB with S=0 collapse, font-weight keyword↔number, gamut clipping), carry a "last-typed" cache. See frontend-defensive.md "Display Layers Must Preserve User Intent Across Lossy Transforms".
 
 ### Styling Conventions
 
@@ -109,7 +110,7 @@ The canvas is an imperative rendering island — Solid does not manage it:
 - Text must meet WCAG 2.2 AA contrast ratios (4.5:1 for normal text, 3:1 for large text)
 - Status changes must use ARIA live regions for screen reader announcement
 - Include `:focus-visible` styles and `prefers-reduced-motion` media queries
-- Kobalte primitives provide WAI-ARIA compliance — use them for all interactive components
+- Kobalte primitives provide WAI-ARIA compliance — use them for interactive components except Popover and Dialog (which use native HTML with equivalent a11y)
 
 ### Canvas DPR Handling
 

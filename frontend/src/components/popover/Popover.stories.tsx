@@ -54,3 +54,13 @@ export const Right: Story = {
     </Popover>
   ),
 };
+
+export const Modal: Story = {
+  render: () => (
+    <Popover trigger={<Button>Modal Popover</Button>} modal>
+      <p style={{ margin: "0", color: "var(--text-1)" }}>
+        This is a manual popover (no light dismiss). Press Escape or use close logic to dismiss.
+      </p>
+    </Popover>
+  ),
+};

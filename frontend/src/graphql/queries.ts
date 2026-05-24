@@ -28,6 +28,18 @@ export const PAGES_QUERY = `
   }
 `;
 
+export const TOKENS_QUERY = `
+  query Tokens {
+    tokens {
+      id
+      name
+      tokenType
+      value
+      description
+    }
+  }
+`;
+
 export const NODE_QUERY = `
   query Node($uuid: String!) {
     node(uuid: $uuid) {

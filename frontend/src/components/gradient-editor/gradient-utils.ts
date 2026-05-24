@@ -6,7 +6,15 @@
  * "Floating-Point Validation". All functions are pure — no side effects.
  */
 
-import type { Color, ColorSrgb, GradientStop, Point, StyleValue } from "../../types/document";
+import type {
+  Color,
+  ColorSrgb,
+  GradientStop,
+  Point,
+  StyleValue,
+  Token,
+} from "../../types/document";
+import { resolveStyleValueColor } from "../../store/token-store";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -159,9 +167,16 @@ export function interpolateStopColor(stops: readonly GradientStop[], position: n
  * All numeric values are guarded with Number.isFinite() before CSS interpolation
  * per CLAUDE.md "Floating-Point Validation".
  */
-export function resolveStopColorCSS(color: StyleValue<Color>): string {
-  if (color.type === "literal" && color.value.space === "srgb") {
-    const c = color.value;
+export function resolveStopColorCSS(
+  color: StyleValue<Color>,
+  tokens: Record<string, Token> = {},
+): string {
+  // Resolve token refs via the token store, falling back to opaque black
+  const defaultColor: Color = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
+  const resolved = resolveStyleValueColor(color, tokens, defaultColor);
+
+  if (resolved.space === "srgb") {
+    const c = resolved;
     // Guard all channels individually
     const r = Number.isFinite(c.r) ? Math.round(c.r * 255) : 0;
     const g = Number.isFinite(c.g) ? Math.round(c.g * 255) : 0;
@@ -169,7 +184,7 @@ export function resolveStopColorCSS(color: StyleValue<Color>): string {
     const a = Number.isFinite(c.a) ? c.a : 1;
     return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(a)})`;
   }
-  // Fallback for token refs and non-sRGB spaces
+  // Fallback for non-sRGB spaces
   return "rgba(0, 0, 0, 1)";
 }
 

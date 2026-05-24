@@ -86,7 +86,9 @@ describe("parseCornersInput — shape-level superellipse", () => {
       expect(c.type).toBe("superellipse");
       expect(c.radii.x).toBe(16);
       expect(c.radii.y).toBe(16);
-      expect((c as import("../../types/document").CornerSuperellipse).smoothing).toBe(DEFAULT_SMOOTHING);
+      expect((c as import("../../types/document").CornerSuperellipse).smoothing).toBe(
+        DEFAULT_SMOOTHING,
+      );
     }
   });
 
@@ -117,19 +119,35 @@ describe("parseCornersInput — shape-level superellipse", () => {
   });
 
   it("should reject smoothing below MIN_CORNER_SMOOTHING — test_min_corner_smoothing_enforced", () => {
-    expect(parseCornersInput({ type: "superellipse", radius: 8, smoothing: MIN_CORNER_SMOOTHING - 0.01 })).toBeNull();
+    expect(
+      parseCornersInput({
+        type: "superellipse",
+        radius: 8,
+        smoothing: MIN_CORNER_SMOOTHING - 0.01,
+      }),
+    ).toBeNull();
   });
 
   it("should reject smoothing above MAX_CORNER_SMOOTHING — test_max_corner_smoothing_enforced", () => {
-    expect(parseCornersInput({ type: "superellipse", radius: 8, smoothing: MAX_CORNER_SMOOTHING + 0.01 })).toBeNull();
+    expect(
+      parseCornersInput({
+        type: "superellipse",
+        radius: 8,
+        smoothing: MAX_CORNER_SMOOTHING + 0.01,
+      }),
+    ).toBeNull();
   });
 
   it("should accept smoothing at MIN_CORNER_SMOOTHING boundary", () => {
-    expect(parseCornersInput({ type: "superellipse", radius: 8, smoothing: MIN_CORNER_SMOOTHING })).not.toBeNull();
+    expect(
+      parseCornersInput({ type: "superellipse", radius: 8, smoothing: MIN_CORNER_SMOOTHING }),
+    ).not.toBeNull();
   });
 
   it("should accept smoothing at MAX_CORNER_SMOOTHING boundary", () => {
-    expect(parseCornersInput({ type: "superellipse", radius: 8, smoothing: MAX_CORNER_SMOOTHING })).not.toBeNull();
+    expect(
+      parseCornersInput({ type: "superellipse", radius: 8, smoothing: MAX_CORNER_SMOOTHING }),
+    ).not.toBeNull();
   });
 
   it("should reject NaN smoothing — test_nan_smoothing_rejected", () => {
@@ -346,7 +364,13 @@ describe("parseCornersInput — returns null for null/undefined inputs", () => {
   });
 
   it("should return null for wrong-length array (more than 4)", () => {
-    const long = [roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8), roundCorner(8, 8)] as unknown as Corners;
+    const long = [
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+      roundCorner(8, 8),
+    ] as unknown as Corners;
     expect(parseCornersInput(long)).toBeNull();
   });
 });

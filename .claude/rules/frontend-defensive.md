@@ -8,6 +8,20 @@ These rules apply to all frontend code in `frontend/` — Solid.js reactivity, s
 
 When a value flows from a producer (signal, computed memo, callback prop, store field) to a renderer or side-effecting consumer, the connection MUST be verified by a test that exercises the full path: trigger the producer, assert the consumer's output. A pipeline that compiles and type-checks but whose downstream consumer receives a voided or disconnected value is a silent no-op — the compiler cannot detect broken wiring. This pattern recurs: a signal read but assigned to `_` or not forwarded; a callback prop defined but never passed to the child; a store field populated but the renderer reads a different field. Every new reactive connection introduced in a PR must have at least one integration or component test that asserts the consumer receives and acts on the value. Unit-testing the producer in isolation is not sufficient — the wiring itself must be tested.
 
+### Display Layers Must Preserve User Intent Across Lossy Transforms
+
+When a UI control displays a value that is derived from stored state via a lossy or non-bijective transform (HSL↔sRGB where achromatic colors collapse hue, OkLCH↔sRGB with gamut clipping, font-weight keyword↔numeric mapping, line-height unit coercion, angle modulus normalization), the component MUST carry a "last-typed" cache alongside the derived display value. When the derived value is in the collapsed/lossy region, the display and edit handlers MUST read from the cache instead of re-deriving, and MUST update the cache from user input.
+
+A reactive display that re-derives every render will re-collapse the user's typed value on the next tick, erasing their edit before the commit ever reaches the store. The compiler cannot detect this — every individual link in the reactive chain works; the bug is in the round-trip. This pattern is distinct from "reactive wiring" bugs.
+
+Checklist for any new display↔storage transform:
+1. Identify every coordinate in the display space whose inverse image under the storage→display transform has cardinality > 1 (the "collapsed region" — e.g., H is undefined when S=0).
+2. Store the last user-supplied value for each such coordinate in component-local state.
+3. When reading for render, use the cached value if the derived value falls in the collapsed region.
+4. Add a regression test: enter a value in the collapsed region, assert that the displayed value on the next render matches the entry (not the round-tripped collapse).
+
+Precedent: RF-D01 (PR #57 color picker — HSL hue/saturation lost on achromatic colors).
+
 ### User-Initiated Mutations Must Use Optimistic Updates
 
 Every mutation triggered by a direct user action (drag-and-drop, rename, toggle, delete) that modifies server state MUST apply the expected state change to the local store immediately, before the server responds. Waiting for a server round-trip before updating the UI creates perceptible lag that violates the "feels like Figma" UX requirement. The optimistic update contract:
@@ -29,6 +43,22 @@ Every `setTimeout`, `setInterval`, `requestAnimationFrame`, `addEventListener`, 
 ### Continuous-Value Controls Must Coalesce History Entries
 
 Any UI control that fires change events at high frequency during a single user gesture (color picker during drag, slider during drag, canvas transform during drag, numeric scrub) MUST coalesce those events into a single history/undo entry. The pattern: capture the pre-gesture snapshot on gesture start (pointerdown, focus), apply intermediate values to the store without creating history entries, and commit a single history entry on gesture end (pointerup, blur, dialog close). Creating a discrete undo entry per intermediate value floods the undo stack — the user must press Ctrl+Z dozens of times to undo a single drag. This obligation applies to both the client-side history manager and server-side mutations. If the control does not expose gesture start/end events, the implementer must add them or wrap the control to provide them before wiring it to a tracked mutation.
+
+### Effects That Call Helper Functions Inherit the Helper's Reactive Reads
+
+Solid's `createEffect` tracks every reactive read that occurs during the effect's execution, including reads inside functions called transitively. An effect written as `createEffect(() => { const _ = props.value; helperFn(); })` does NOT track only `props.value` — if `helperFn()` reads signals or store fields, the effect subscribes to those too and re-runs whenever any of them change. This silently breaks intended "run only when X changes" semantics.
+
+Specifically, never call a function from inside an effect when the function:
+1. Reads signals, stores, or memos that are NOT the intended trigger for the effect, AND
+2. Fires external side effects (callback props, event emission, network calls, history commits).
+
+The correct pattern is to separate the two concerns:
+- One function reads only non-reactive state or the intended trigger and performs state mirroring (e.g., `announceCommit()` — updates an internal signal for SR announcements).
+- A second function performs the external side effect (e.g., `commitColor()` — calls `props.onCommit`).
+
+The effect calls only the first. The second is invoked exclusively from explicit user-event handlers (pointerup, blur, Enter). This keeps the side-effect path under the caller's control and out of the reactive graph.
+
+If a helper function must be called from both an effect and a user-event handler, factor the reactive reads into a pre-computed argument that the caller passes in, so the helper body contains no reactive reads.
 
 ### Imperative Canvas Classes Must Expose a `destroy()` Method
 
@@ -95,6 +125,19 @@ For any operation with an apply/undo pair (commands, transactions, client-side O
 
 When an operation fails and the error handler reverts local state, the revert mechanism MUST NOT produce side effects that are visible to the user as new operations. Specifically: error rollback must not create undo entries, redo entries, toast notifications of success, or broadcast events to other clients. If the system's primary revert API (e.g., `undo()`) produces such side effects, the error path must use a dedicated rollback API that suppresses them (e.g., `rollbackLast()`, `revertWithoutHistory()`). The general principle: from the user's perspective, a failed operation that was rolled back should be as if it never happened — no trace in the undo stack, no trace in the redo stack, no trace in the activity log.
 
+This obligation extends to optimistic updates. When a mutation uses the optimistic update pattern (apply locally, then send to server), and the server call fails, the error handler MUST remove the undo entry that was created for the optimistic local change before reverting the store. A rollback that reverts the store but leaves the undo entry produces a ghost undo step — the user presses Ctrl+Z and the operation appears to succeed (the entry is popped) but nothing changes (the state was already reverted). The rollback API must support entry removal without triggering a new undo/redo cycle.
+
 ### History Commits Must Contain At Least One Operation
 
 Never commit an empty entry to a history/undo stack. Before finalizing a transaction, batch, or compound operation, check that it contains at least one operation. If all operations were skipped (e.g., all targets were missing, all values were unchanged), cancel the transaction instead of committing it. An empty history entry creates a "ghost" undo step — the user presses Ctrl+Z and nothing happens, which breaks their mental model of the undo stack. This applies to both the backend command history and the frontend client-side history manager.
+
+### Business Logic Must Not Live in Inline JSX Handlers
+
+Any logic in a JSX event handler (`onInput`, `onChange`, `onClick`, `onPointerDown`, etc.) that does more than (a) read the event value, (b) call a single named function, or (c) set a single signal/store value MUST be extracted into a named, exported function in a same-concern utility file (e.g., `*-helpers.ts`, `*-utils.ts`). "Business logic" includes: input sanitization, validation, formatting, transformation, computation, and any conditional branching beyond a simple null/undefined guard.
+
+The extracted function:
+1. Must be a named export (not a default export) so it is discoverable via import search.
+2. Must have at least one unit test that exercises its core behavior and edge cases.
+3. Must be imported by all call sites that need the same logic — duplication of the function body across components is a bug, subject to the same reasoning as the Rust rule "inline copies diverge silently."
+
+This rule is the TypeScript counterpart to the Rust convention "Define all validation artifacts in `validate.rs`." Inline anonymous functions in JSX are not independently testable, not discoverable by other developers, and get copy-pasted when the same logic is needed elsewhere.

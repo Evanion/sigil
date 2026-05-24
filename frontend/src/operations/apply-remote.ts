@@ -20,7 +20,16 @@ import type {
   NodeKind,
   StyleValue,
   NodeId,
+  Token,
+  TokenValue,
+  TokenType,
 } from "../types/document";
+import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
+import {
+  isValidStyleValue,
+  isValidColor,
+  isValidFiniteNumber,
+} from "../store/style-value-validate";
 
 /**
  * Recursively strips `readonly` from all properties.
@@ -102,6 +111,7 @@ export interface MutablePage {
 export interface StoreState {
   nodes: Record<string, StoreDocumentNode>;
   pages: MutablePage[];
+  tokens: Record<string, Token>;
 }
 
 // ── Placeholder for new nodes ─────────────────────────────────────────
@@ -192,9 +202,129 @@ function applyRemoteOperation(
     case "reorder_page":
       applyReorderPage(op.nodeUuid, op.value, setState);
       break;
+    case "create_token":
+      applyCreateToken(op.value, setState);
+      break;
+    case "update_token":
+      applyUpdateToken(op.value, setState);
+      break;
+    case "delete_token":
+      applyDeleteToken(op.value, setState);
+      break;
+    case "rename_token":
+      applyRenameToken(op.value, setState);
+      break;
     default:
       console.warn(`Unknown remote operation type: ${op.type}`);
   }
+}
+
+// ── Internal: shape validators for style payloads ─────────────────────
+
+/**
+ * RF-017: Validate a `Fill` object's embedded StyleValues before acceptance.
+ * Only validates fields that carry StyleValues (solid color, gradient stop
+ * colors). Returns true if all embedded StyleValues shape-match.
+ */
+function isValidFill(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const f = v as Record<string, unknown>;
+  switch (f["type"]) {
+    case "solid":
+      return isValidStyleValue(f["color"], isValidColor);
+    case "linear_gradient":
+    case "radial_gradient": {
+      const gradient = f["gradient"];
+      if (typeof gradient !== "object" || gradient === null) return false;
+      const stops = (gradient as Record<string, unknown>)["stops"];
+      if (!Array.isArray(stops)) return false;
+      for (const stop of stops) {
+        if (typeof stop !== "object" || stop === null) return false;
+        if (!isValidStyleValue((stop as Record<string, unknown>)["color"], isValidColor)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case "conic_gradient": {
+      const gradient = f["gradient"];
+      if (typeof gradient !== "object" || gradient === null) return false;
+      const stops = (gradient as Record<string, unknown>)["stops"];
+      if (!Array.isArray(stops)) return false;
+      for (const stop of stops) {
+        if (typeof stop !== "object" || stop === null) return false;
+        if (!isValidStyleValue((stop as Record<string, unknown>)["color"], isValidColor)) {
+          return false;
+        }
+      }
+      return true;
+    }
+    case "image":
+      // Image fills carry no StyleValues.
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isValidFillsPayload(v: unknown): v is Fill[] {
+  if (!Array.isArray(v)) return false;
+  for (const fill of v) {
+    if (!isValidFill(fill)) return false;
+  }
+  return true;
+}
+
+/**
+ * RF-017: Validate a `Stroke` object's embedded StyleValues.
+ * Both `color` (StyleValue<Color>) and `width` (StyleValue<number>) must match.
+ */
+function isValidStroke(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const s = v as Record<string, unknown>;
+  return (
+    isValidStyleValue(s["color"], isValidColor) &&
+    isValidStyleValue(s["width"], isValidFiniteNumber)
+  );
+}
+
+function isValidStrokesPayload(v: unknown): v is Stroke[] {
+  if (!Array.isArray(v)) return false;
+  for (const stroke of v) {
+    if (!isValidStroke(stroke)) return false;
+  }
+  return true;
+}
+
+/**
+ * RF-017: Validate an `Effect` object's embedded StyleValues.
+ * Drop/inner shadow: color + blur + spread; layer/background blur: radius.
+ */
+function isValidEffect(v: unknown): boolean {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  switch (e["type"]) {
+    case "drop_shadow":
+    case "inner_shadow":
+      return (
+        isValidStyleValue(e["color"], isValidColor) &&
+        isValidStyleValue(e["blur"], isValidFiniteNumber) &&
+        isValidStyleValue(e["spread"], isValidFiniteNumber)
+      );
+    case "layer_blur":
+    case "background_blur":
+      return isValidStyleValue(e["radius"], isValidFiniteNumber);
+    default:
+      return false;
+  }
+}
+
+function isValidEffectsPayload(v: unknown): v is Effect[] {
+  if (!Array.isArray(v)) return false;
+  for (const effect of v) {
+    if (!isValidEffect(effect)) return false;
+  }
+  return true;
 }
 
 // ── Internal: set_field ───────────────────────────────────────────────
@@ -229,15 +359,36 @@ function applyFieldSet(
       setState("nodes", nodeUuid, "locked", value as boolean);
       break;
     case "style.fills":
+      // RF-017: validate every StyleValue embedded in each fill before accepting
+      if (!isValidFillsPayload(value)) {
+        console.warn(`Remote set_field style.fills: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "fills", value as Fill[]);
       break;
     case "style.strokes":
+      // RF-017: validate every StyleValue embedded in each stroke before accepting
+      if (!isValidStrokesPayload(value)) {
+        console.warn(`Remote set_field style.strokes: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "strokes", value as Stroke[]);
       break;
     case "style.effects":
+      // RF-017: validate every StyleValue embedded in each effect before accepting
+      if (!isValidEffectsPayload(value)) {
+        console.warn(`Remote set_field style.effects: invalid payload shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "effects", value as Effect[]);
       break;
     case "style.opacity":
+      // RF-017: validate opacity as a StyleValue<number> — literal must be a
+      // finite number; expressions bounded by MAX_EXPRESSION_LENGTH.
+      if (!isValidStyleValue(value, isValidFiniteNumber)) {
+        console.warn(`Remote set_field style.opacity: invalid StyleValue<number> shape, skipping`);
+        return;
+      }
       setState("nodes", nodeUuid, "style", "opacity", value as StyleValue<number>);
       break;
     case "style.blend_mode":
@@ -380,6 +531,30 @@ function applyFieldSet(
       // Handle kind.text_style.* sub-field paths
       if (path.startsWith("kind.text_style.") && node.kind.type === "text") {
         const subField = path.slice("kind.text_style.".length);
+        // RF-017: validate StyleValue-typed text style fields before accepting.
+        // font_size, line_height, letter_spacing are StyleValue<number>;
+        // text_color is StyleValue<Color>. Other fields (font_family,
+        // font_weight, font_style, text_align, text_decoration, text_shadow)
+        // are plain values and pass through without StyleValue validation.
+        if (
+          subField === "font_size" ||
+          subField === "line_height" ||
+          subField === "letter_spacing"
+        ) {
+          if (!isValidStyleValue(value, isValidFiniteNumber)) {
+            console.warn(
+              `Remote set_field kind.text_style.${subField}: invalid StyleValue<number> shape, skipping`,
+            );
+            return;
+          }
+        } else if (subField === "text_color") {
+          if (!isValidStyleValue(value, isValidColor)) {
+            console.warn(
+              `Remote set_field kind.text_style.text_color: invalid StyleValue<Color> shape, skipping`,
+            );
+            return;
+          }
+        }
         setState(
           produce((s) => {
             const n = s.nodes[nodeUuid];
@@ -753,6 +928,174 @@ function applyReorderPage(
       if (page) {
         s.pages.splice(position, 0, page);
       }
+    }),
+  );
+}
+
+// ── Internal: create_token ────────────────────────────────────────────
+
+function applyCreateToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote create_token: missing or invalid token data");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+
+  const name = raw["name"];
+  if (!name || typeof name !== "string") {
+    console.warn("Remote create_token: missing or non-string name");
+    return;
+  }
+
+  const id = raw["id"];
+  if (!id || typeof id !== "string") {
+    console.warn("Remote create_token: missing or non-string id");
+    return;
+  }
+
+  const tokenType = raw["token_type"] ?? raw["tokenType"];
+  if (typeof tokenType !== "string") {
+    console.warn("Remote create_token: missing or non-string token_type");
+    return;
+  }
+  // F-14: Validate tokenType against allowlist
+  if (!VALID_TOKEN_TYPES.has(tokenType)) {
+    console.warn(`Remote create_token: unknown token_type "${tokenType}"`);
+    return;
+  }
+
+  const tokenValue = raw["value"];
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote create_token: missing or invalid value shape");
+    return;
+  }
+
+  const description = typeof raw["description"] === "string" ? raw["description"] : null;
+
+  const token: Token = {
+    id: id,
+    name,
+    token_type: tokenType as TokenType,
+    value: tokenValue as TokenValue,
+    description,
+  };
+
+  setState(
+    produce((s) => {
+      // Guard against duplicates — last-writer-wins for remote ops
+      s.tokens[name] = token;
+    }),
+  );
+}
+
+// ── Internal: update_token ────────────────────────────────────────────
+
+function applyUpdateToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote update_token: missing or invalid payload");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+
+  const name = raw["name"];
+  if (!name || typeof name !== "string") {
+    console.warn("Remote update_token: missing or non-string name");
+    return;
+  }
+
+  const tokenValue = raw["value"];
+  // F-08: Shape-validate token value
+  if (!isValidTokenValue(tokenValue)) {
+    console.warn("Remote update_token: missing or invalid value shape");
+    return;
+  }
+
+  const description =
+    "description" in raw
+      ? typeof raw["description"] === "string"
+        ? raw["description"]
+        : null
+      : undefined;
+
+  setState(
+    produce((s) => {
+      const existing = s.tokens[name];
+      if (!existing) {
+        console.warn(`Remote update_token: token "${name}" not found in store, skipping`);
+        return;
+      }
+      s.tokens[name] = {
+        ...existing,
+        value: tokenValue as TokenValue,
+        description: description !== undefined ? description : existing.description,
+      };
+    }),
+  );
+}
+
+// ── Internal: delete_token ────────────────────────────────────────────
+
+function applyDeleteToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  // The name can come either as the value payload or as a string field within it
+  let name: string | null = null;
+
+  if (typeof value === "string") {
+    name = value;
+  } else if (value && typeof value === "object") {
+    const raw = value as Record<string, unknown>;
+    if (typeof raw["name"] === "string") {
+      name = raw["name"];
+    }
+  }
+
+  if (!name) {
+    console.warn("Remote delete_token: missing token name");
+    return;
+  }
+
+  const tokenName = name;
+  setState(
+    produce((s) => {
+      Reflect.deleteProperty(s.tokens, tokenName);
+    }),
+  );
+}
+
+// ── Internal: rename_token ───────────────────────────────────────────
+
+function applyRenameToken(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (!value || typeof value !== "object") {
+    console.warn("Remote rename_token: missing or invalid payload");
+    return;
+  }
+
+  const raw = value as Record<string, unknown>;
+  const oldName = raw["old_name"];
+  const newName = raw["new_name"];
+
+  if (typeof oldName !== "string" || typeof newName !== "string") {
+    console.warn("Remote rename_token: missing old_name or new_name");
+    return;
+  }
+
+  // No-op if names are the same
+  if (oldName === newName) {
+    return;
+  }
+
+  setState(
+    produce((s) => {
+      const existing = s.tokens[oldName];
+      if (!existing) {
+        console.warn(`Remote rename_token: token "${oldName}" not found in store, skipping`);
+        return;
+      }
+      // Move token to new key with updated name
+      s.tokens[newName] = { ...existing, name: newName };
+      Reflect.deleteProperty(s.tokens, oldName);
     }),
   );
 }

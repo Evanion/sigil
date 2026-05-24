@@ -56,6 +56,14 @@ function renderWithI18n(ui: () => JSX.Element) {
 describe("FillRow", () => {
   beforeEach(async () => {
     i18nInstance = await createTestI18n();
+    // jsdom does not implement the native popover API — stub the methods so
+    // ValueInput's Popover component does not throw on mount.
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
   });
 
   afterEach(() => {
@@ -106,16 +114,29 @@ describe("FillRow", () => {
     expect(handle?.getAttribute("aria-hidden")).toBe("true");
   });
 
-  it("should render a color swatch span inside a trigger button for solid fills", () => {
+  it("should render a Fill color ValueInput combobox for solid fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
       <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
-    const swatch = document.querySelector(".sigil-color-swatch");
-    expect(swatch).toBeTruthy();
-    expect(swatch?.tagName.toLowerCase()).toBe("span");
-    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    expect(combobox).toBeTruthy();
+    // The ValueInput exposes a color swatch trigger button alongside the combobox.
+    // The swatch is now rendered by the shared Popover component — query by role.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
+    expect(swatchBtn).toBeTruthy();
+  });
+
+  it("should render the hex color of the solid fill in the combobox value", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    renderWithI18n(() => (
+      <FillRow fill={solidFill} index={0} onUpdate={onUpdate} onRemove={onRemove} />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    // Solid red => #ff0000
+    expect(combobox.textContent).toContain("#ff0000");
   });
 
   it("should render a remove button with aria-label", () => {
@@ -221,7 +242,31 @@ describe("FillRow", () => {
     expect(swatch).toBeNull();
   });
 
-  it("should show gradient swatch instead of color swatch for gradient fills", () => {
+  // ── flushHistory wiring via onCommit prop ────────────────────────────
+
+  it("should invoke onCommit when the color ValueInput commits via Enter", () => {
+    const onUpdate = vi.fn();
+    const onRemove = vi.fn();
+    const onCommit = vi.fn();
+    renderWithI18n(() => (
+      <FillRow
+        fill={solidFill}
+        index={0}
+        onUpdate={onUpdate}
+        onRemove={onRemove}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Fill color" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    // ValueInput fires onCommit on Enter — the FillRow forwards to props.onCommit
+    // so AppearancePanel can call store.flushHistory().
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
+  });
+
+  it("should show gradient swatch instead of ValueInput for gradient fills", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     renderWithI18n(() => (
@@ -229,8 +274,9 @@ describe("FillRow", () => {
     ));
     const gradientSwatch = document.querySelector(".sigil-gradient-swatch");
     expect(gradientSwatch).toBeTruthy();
-    // Should not have the regular color swatch
-    const colorSwatch = document.querySelector(".sigil-color-swatch");
-    expect(colorSwatch).toBeNull();
+    // Gradient fills should not expose the Fill color combobox — the gradient
+    // editor replaces the per-fill color control.
+    const fillColor = screen.queryByRole("combobox", { name: "Fill color" });
+    expect(fillColor).toBeNull();
   });
 });

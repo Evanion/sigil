@@ -84,6 +84,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -106,7 +107,7 @@ describe("applyRemoteTransaction", () => {
   describe("legacy fallback", () => {
     it("should call fetchPages when operations array is empty", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [] });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -130,6 +131,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newTransform: Transform = {
@@ -160,6 +162,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -181,6 +184,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -202,6 +206,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -223,6 +228,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newFills: Fill[] = [
@@ -250,6 +256,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newStrokes: Stroke[] = [
@@ -280,6 +287,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newEffects: Effect[] = [
@@ -310,6 +318,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -331,6 +340,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -352,6 +362,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newKind: NodeKind = {
@@ -384,6 +395,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: {},
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
@@ -440,6 +452,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "parent-1": parent, "existing-child": makeNode("existing-child") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
@@ -485,6 +498,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: {},
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -522,6 +536,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: {},
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -567,6 +582,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: {},
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -604,6 +620,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -636,6 +653,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "parent-1": parent, "node-1": child, "node-2": makeNode("node-2") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -665,6 +683,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "old-parent": oldParent, "new-parent": newParent, "node-1": child },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -705,6 +724,7 @@ describe("applyRemoteTransaction", () => {
             "child-c": makeNode("child-c", { parentUuid: "parent-1" }),
           },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -736,6 +756,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -762,6 +783,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -785,6 +807,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: {},
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -809,6 +832,7 @@ describe("applyRemoteTransaction", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -828,7 +852,7 @@ describe("applyRemoteTransaction", () => {
 
     it("should handle NaN seq gracefully", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [] });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -856,6 +880,7 @@ describe("applyRemoteTransaction", () => {
             "node-2": makeNode("node-2"),
           },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -880,7 +905,7 @@ describe("applyRemoteTransaction", () => {
   describe("seq parsing", () => {
     it("should return parsed seq number from transaction", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [] });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(

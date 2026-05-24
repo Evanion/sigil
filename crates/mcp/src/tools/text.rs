@@ -8,7 +8,7 @@ use agent_designer_core::{
     Color, FieldOperation, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow,
     commands::node_commands::SetTextContent,
     commands::text_style_commands::{SetTextStyleField, TextStyleField},
-    validate_text_content, validate_token_name,
+    validate_style_value_expression, validate_text_content, validate_token_name,
 };
 use agent_designer_state::{AppState, MutationEventKind, OperationPayload};
 use uuid::Uuid;
@@ -40,6 +40,11 @@ fn convert_style_value_f64(
         StyleValueInput::TokenRef { name } => {
             validate_token_name(name).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
             Ok(StyleValue::TokenRef { name: name.clone() })
+        }
+        StyleValueInput::Expression { expr } => {
+            validate_style_value_expression(expr)
+                .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
+            Ok(StyleValue::Expression { expr: expr.clone() })
         }
     }
 }
@@ -120,6 +125,11 @@ fn convert_style_value_color(
         StyleValueInput::TokenRef { name } => {
             validate_token_name(name).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
             Ok(StyleValue::TokenRef { name: name.clone() })
+        }
+        StyleValueInput::Expression { expr } => {
+            validate_style_value_expression(expr)
+                .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
+            Ok(StyleValue::Expression { expr: expr.clone() })
         }
     }
 }

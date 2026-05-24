@@ -6,10 +6,42 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { render } from "../renderer";
+import { render, clampOpacity } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
 import type { SnapGuide } from "../snap-engine";
+
+// ── RF-024: clampOpacity ─────────────────────────────────────────────────
+
+describe("clampOpacity (RF-024)", () => {
+  it("returns the value unchanged when within [0, 1]", () => {
+    expect(clampOpacity(0)).toBe(0);
+    expect(clampOpacity(0.5)).toBe(0.5);
+    expect(clampOpacity(1)).toBe(1);
+  });
+
+  it("clamps values below 0 to 0", () => {
+    expect(clampOpacity(-0.1)).toBe(0);
+    expect(clampOpacity(-100)).toBe(0);
+  });
+
+  it("clamps values above 1 to 1", () => {
+    expect(clampOpacity(1.5)).toBe(1);
+    expect(clampOpacity(42)).toBe(1);
+  });
+
+  it("returns 1 for NaN (debug-visible fallback)", () => {
+    expect(clampOpacity(NaN)).toBe(1);
+  });
+
+  it("returns 1 for +Infinity", () => {
+    expect(clampOpacity(Number.POSITIVE_INFINITY)).toBe(1);
+  });
+
+  it("returns 1 for -Infinity", () => {
+    expect(clampOpacity(Number.NEGATIVE_INFINITY)).toBe(1);
+  });
+});
 
 /** Create a minimal DocumentNode for testing. */
 function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {

@@ -13,6 +13,20 @@ You are a fast compliance checker. Your job is to verify that code changes compl
 4. Report ONLY clear rule violations with high confidence (≥ 90%).
 5. Do NOT report code quality issues, design opinions, or suggestions — only CLAUDE.md rule violations.
 
+## Mandatory Greps (run these before narrative review)
+
+For every file in the diff:
+
+1. If the file is `.ts`/`.tsx` in `frontend/` and defines a function calling `Math.{sqrt|pow|log|asin|acos|max|min}`:
+   → verify the first statement is a `Number.isFinite(` guard on every numeric parameter.
+   → cite: CLAUDE.md §11 "Math Helpers Must Guard Their Domain".
+2. If the diff adds a `createStore`, `createSignal`, or store-seeding effect that reads from a prop on mount:
+   → verify a component test exists that asserts synchronous render of the seeded value.
+   → cite: frontend-defensive.md "Reactive Pipelines Must Be Verified End-to-End".
+3. If the diff removes a union variant, enum value, or route:
+   → grep the repo for the removed token. If any match remains outside the diff, flag it.
+   → cite: CLAUDE.md §11 "Migrations Must Remove All Superseded Code".
+
 ## What to Check
 
 Scan the diff against ALL sections of CLAUDE.md:

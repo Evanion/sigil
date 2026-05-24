@@ -103,6 +103,7 @@ function createMockStore(setCornersSpy: ReturnType<typeof vi.fn>): DocumentStore
       },
       pages: [],
       nodes: { [RECT_UUID]: makeRectNode() },
+      tokens: {},
     },
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
@@ -144,6 +145,11 @@ function createMockStore(setCornersSpy: ReturnType<typeof vi.fn>): DocumentStore
     undo: vi.fn(),
     redo: vi.fn(),
     flushHistory: vi.fn(),
+    createToken: vi.fn(),
+    updateToken: vi.fn(),
+    deleteToken: vi.fn(),
+    renameToken: vi.fn(),
+    resolveToken: () => null,
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }
@@ -187,9 +193,7 @@ describe("RF-018: SchemaPanel → setCorners integration", () => {
     // handler emits a uniform scalar shorthand (a single number 20).
     expect(setCornersSpy.mock.calls.length).toBeGreaterThan(mountTimeCalls);
     const userCalls = setCornersSpy.mock.calls.slice(mountTimeCalls);
-    const matched = userCalls.find(
-      (call) => call[0] === RECT_UUID && call[1] === 20,
-    );
+    const matched = userCalls.find((call) => call[0] === RECT_UUID && call[1] === 20);
     expect(matched).toBeDefined();
   });
 

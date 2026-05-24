@@ -17,7 +17,7 @@ import { AlphaStrip } from "./AlphaStrip";
 import { ColorSpaceSwitcher } from "./ColorSpaceSwitcher";
 import { GradientEditor } from "./GradientEditor";
 import type { GradientStop } from "../../types/document";
-import type { ColorSpace } from "./types";
+import type { ColorDisplayMode } from "./types";
 
 // ── Story meta ──────────────────────────────────────────────────────────
 
@@ -185,7 +185,7 @@ export const Alpha: Story = {
  */
 export const SpaceSwitcher: Story = {
   render: () => {
-    const [space, setSpace] = createSignal<ColorSpace>("srgb");
+    const [space, setSpace] = createSignal<ColorDisplayMode>("srgb");
 
     return (
       <div

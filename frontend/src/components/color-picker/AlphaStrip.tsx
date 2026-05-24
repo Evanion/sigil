@@ -6,11 +6,15 @@
  * or uses arrow keys to select an alpha value in [0, 1].
  *
  * DPR handling follows the same pattern as ColorArea and HueStrip.
+ *
+ * Width is fluid — the strip fills its container and uses a ResizeObserver
+ * to size the canvas backing store to match the rendered width.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import "./Strip.css";
 
-export const STRIP_WIDTH = 240;
+/** Default width before ResizeObserver fires. */
+const DEFAULT_STRIP_WIDTH = 240;
 export const STRIP_HEIGHT = 14;
 
 export interface AlphaStripProps {
@@ -33,6 +37,24 @@ export function AlphaStrip(props: AlphaStripProps) {
   let containerRef: HTMLDivElement | undefined;
   const [isDragging, setIsDragging] = createSignal(false);
 
+  // ── Measured container width ────────────────────────────────────────
+  const [measuredWidth, setMeasuredWidth] = createSignal(DEFAULT_STRIP_WIDTH);
+
+  onMount(() => {
+    if (!containerRef) return;
+    const w = containerRef.clientWidth;
+    if (w > 0) setMeasuredWidth(w);
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newW = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (Number.isFinite(newW) && newW > 0) setMeasuredWidth(newW);
+      }
+    });
+    ro.observe(containerRef);
+    onCleanup(() => ro.disconnect());
+  });
+
   // ── DPR signal ────────────────────────────────────────────────────────
   const [dpr, setDpr] = createSignal(window.devicePixelRatio || 1);
 
@@ -48,9 +70,10 @@ export function AlphaStrip(props: AlphaStripProps) {
     const canvas = canvasRef;
     if (!canvas) return;
 
+    const stripWidth = measuredWidth();
     const currentDpr = dpr();
-    const pixelWidth = STRIP_WIDTH * currentDpr;
-    const pixelHeight = STRIP_HEIGHT * currentDpr;
+    const pixelWidth = Math.round(stripWidth * currentDpr);
+    const pixelHeight = Math.round(STRIP_HEIGHT * currentDpr);
 
     if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
       canvas.width = pixelWidth;
@@ -64,14 +87,14 @@ export function AlphaStrip(props: AlphaStripProps) {
 
     // RF-024: Checkerboard is rendered via CSS background on the container
     // (see Strip.css .sigil-strip--alpha). The canvas only draws the gradient
-    // overlay on top, avoiding 240 fillRect calls per color change.
-    ctx.clearRect(0, 0, STRIP_WIDTH, STRIP_HEIGHT);
+    // overlay on top, avoiding fillRect calls per color change.
+    ctx.clearRect(0, 0, stripWidth, STRIP_HEIGHT);
 
-    const gradient = ctx.createLinearGradient(0, 0, STRIP_WIDTH, 0);
+    const gradient = ctx.createLinearGradient(0, 0, stripWidth, 0);
     gradient.addColorStop(0, "transparent");
     gradient.addColorStop(1, props.colorCss);
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, STRIP_WIDTH, STRIP_HEIGHT);
+    ctx.fillRect(0, 0, stripWidth, STRIP_HEIGHT);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
@@ -88,6 +111,7 @@ export function AlphaStrip(props: AlphaStripProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX)) return;
+    e.preventDefault();
     if (e.currentTarget instanceof Element) {
       e.currentTarget.setPointerCapture(e.pointerId);
     }
@@ -145,7 +169,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(props.alpha * 100)}
-      style={{ width: `${STRIP_WIDTH}px`, height: `${STRIP_HEIGHT}px` }}
+      style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -155,7 +179,7 @@ export function AlphaStrip(props: AlphaStripProps) {
         ref={canvasRef}
         class="sigil-strip__canvas"
         aria-hidden="true"
-        style={{ width: `${STRIP_WIDTH}px`, height: `${STRIP_HEIGHT}px` }}
+        style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       >
         Opacity selection strip
       </canvas>

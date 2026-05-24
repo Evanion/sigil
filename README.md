@@ -107,8 +107,8 @@ Licensed under the Business Source License 1.1 (BSL 1.1). See [LICENSE](LICENSE)
 
 **Additional Use Grant:** You may use the Licensed Work for single-user, single-instance use (one user and their AI agents connecting to one running instance).
 
-**Change Date:** Three years from each release date.
+**Change Date:** Four years from the date each version is publicly distributed.
 
 **Change License:** Apache License, Version 2.0.
 
-Multi-user deployments (Team and Enterprise tiers) require a commercial license. Contact [TODO: contact info] for licensing inquiries.
+Multi-user deployments (Team and Enterprise tiers) require a commercial license. Contact evanion@icloud.com for licensing inquiries.

@@ -1,15 +1,37 @@
-.sigil-dialog__overlay {
-  position: fixed;
-  inset: 0;
-  background: var(--overlay-bg);
-  z-index: var(--z-dialog-overlay);
-}
+/* Native <dialog> element — showModal() puts it in the browser's top layer.
+   The ::backdrop pseudo-element replaces the separate overlay div. */
 
 .sigil-dialog {
+  /* Reset browser defaults */
+  border: none;
+  padding: 0;
+  max-width: none;
+  max-height: none;
+  background: transparent;
+
+  /* Make the dialog element itself fill the viewport so clicks on it
+     (outside the inner content) act as backdrop clicks.
+     IMPORTANT: use display: none by default to respect the native dialog
+     hidden state. The [open] attribute is set by showModal(). */
+  display: none;
+}
+
+.sigil-dialog[open] {
+  display: flex;
   position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  align-items: center;
+  justify-content: center;
+}
+
+.sigil-dialog::backdrop {
+  background: var(--overlay-bg);
+}
+
+/* The actual visible dialog content */
+.sigil-dialog__inner {
   background: var(--surface-2);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-3);
@@ -17,7 +39,6 @@
   min-width: 400px;
   max-width: 90vw;
   max-height: 85vh;
-  z-index: var(--z-dialog);
   display: flex;
   flex-direction: column;
 }
@@ -34,12 +55,14 @@
   font-size: var(--font-size-1);
   font-weight: var(--font-weight-6);
   color: var(--text-1);
+  margin: 0;
 }
 
 .sigil-dialog__description {
   font-size: var(--font-size-0);
   color: var(--text-2);
   margin-top: var(--size-1);
+  margin-bottom: 0;
   padding: 0 var(--size-4);
 }
 

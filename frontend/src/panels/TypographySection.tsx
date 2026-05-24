@@ -42,11 +42,13 @@ import type {
   TextShadow,
 } from "../types/document";
 import { useDocument } from "../store/document-context";
-import { TextInput } from "../components/text-input/TextInput";
 import { NumberInput } from "../components/number-input/NumberInput";
 import { Select } from "../components/select/Select";
 import { ToggleButton } from "../components/toggle-button/ToggleButton";
 import { ColorSwatch } from "../components/color-picker";
+import ValueInput from "../components/value-input/ValueInput";
+import { SystemFontProvider } from "../components/value-input/font-provider";
+import { showToast } from "../components/toast/Toast";
 import {
   AlignLeft,
   AlignCenter,
@@ -57,7 +59,16 @@ import {
   Strikethrough,
 } from "lucide-solid";
 import { validateCssIdentifier } from "../validation/css-identifiers";
+import {
+  formatColorStyleValue,
+  formatNumberStyleValue,
+  parseColorInput,
+  parseNumberInput,
+} from "./panel-value-helpers";
 import "./TypographySection.css";
+
+/** Single shared instance — SystemFontProvider is stateless. */
+const systemFontProvider = new SystemFontProvider();
 
 // ── Validation constants ─────────────────────────────────────────────
 
@@ -72,6 +83,24 @@ const MAX_SHADOW_OFFSET = 1000;
 
 /** RF-018: Minimum shadow offset value in pixels. */
 const MIN_SHADOW_OFFSET = -1000;
+
+// RF-005: Frontend UX bounds for text style numeric fields. The Rust server
+// only enforces `line_height > 0` and `letter_spacing finite` (see
+// crates/core/src/validate.rs :: validate_text_style_line_height /
+// validate_text_style_letter_spacing); these constants add a practical upper
+// bound for user feedback so absurdly large values are caught before they
+// hit the network. `MIN_LINE_HEIGHT` is a UX minimum — the server still
+// enforces `> 0` authoritatively, but `0.1` matches the old NumberInput
+// `min` and avoids unusably small line heights.
+
+/** Minimum line height multiplier (literal branch only). */
+export const MIN_LINE_HEIGHT = 0.1;
+/** Maximum line height multiplier (literal branch only). */
+export const MAX_LINE_HEIGHT = 10;
+/** Minimum letter spacing in pixels (literal branch only). */
+export const MIN_LETTER_SPACING = -100;
+/** Maximum letter spacing in pixels (literal branch only). */
+export const MAX_LETTER_SPACING = 100;
 
 /** Default text shadow values when toggling shadow on. */
 const DEFAULT_TEXT_SHADOW: TextShadow = {
@@ -134,13 +163,11 @@ export const TypographySection: Component = () => {
     return kind.text_style.font_family;
   });
 
-  const fontSize = createMemo((): number => {
+  /** Font size as a display string for ValueInput. */
+  const fontSizeDisplay = createMemo((): string => {
     const kind = textKind();
-    if (!kind) return 16;
-    const sv = kind.text_style.font_size;
-    if (sv.type !== "literal") return 16;
-    const raw = sv.value;
-    return Number.isFinite(raw) ? raw : 16;
+    if (!kind) return "";
+    return formatNumberStyleValue(kind.text_style.font_size);
   });
 
   const fontWeight = createMemo((): number => {
@@ -156,23 +183,18 @@ export const TypographySection: Component = () => {
     return kind.text_style.font_style;
   });
 
-  const lineHeight = createMemo((): number => {
+  /** Line height as a display string for ValueInput. */
+  const lineHeightDisplay = createMemo((): string => {
     const kind = textKind();
-    // RF-032: Default 1.5 matches text-tool.ts default line height.
-    if (!kind) return 1.5;
-    const sv = kind.text_style.line_height;
-    if (sv.type !== "literal") return 1.5;
-    const raw = sv.value;
-    return Number.isFinite(raw) ? raw : 1.5;
+    if (!kind) return "";
+    return formatNumberStyleValue(kind.text_style.line_height);
   });
 
-  const letterSpacing = createMemo((): number => {
+  /** Letter spacing as a display string for ValueInput. */
+  const letterSpacingDisplay = createMemo((): string => {
     const kind = textKind();
-    if (!kind) return 0;
-    const sv = kind.text_style.letter_spacing;
-    if (sv.type !== "literal") return 0;
-    const raw = sv.value;
-    return Number.isFinite(raw) ? raw : 0;
+    if (!kind) return "";
+    return formatNumberStyleValue(kind.text_style.letter_spacing);
   });
 
   const textAlign = createMemo((): TextAlign => {
@@ -187,12 +209,11 @@ export const TypographySection: Component = () => {
     return kind.text_style.text_decoration;
   });
 
-  const textColor = createMemo((): Color => {
+  /** Text color as a display string for ValueInput. */
+  const textColorDisplay = createMemo((): string => {
     const kind = textKind();
-    if (!kind) return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
-    const sv = kind.text_style.text_color;
-    if (sv.type !== "literal") return { space: "srgb", r: 0, g: 0, b: 0, a: 1 };
-    return sv.value;
+    if (!kind) return "";
+    return formatColorStyleValue(kind.text_style.text_color);
   });
 
   const textShadow = createMemo((): TextShadow | null => {
@@ -240,20 +261,54 @@ export const TypographySection: Component = () => {
   function handleFontFamilyChange(value: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
+    // RF-007: Surface a visible message when the user attempts to bind a
+    // token or write an expression in the font_family field. The core
+    // `TextStylePatch["font_family"]` type is still a plain `string`, not
+    // a `StyleValue<string>`, so token refs cannot be persisted here —
+    // silently rejecting them left the user with a DOM revert and no
+    // diagnostic. TODO(spec-13c): Promote TextStylePatch.font_family to
+    // StyleValue<string> to enable token binding for font families.
+    if (value.includes("{") || value.includes("}")) {
+      showToast({
+        title: t("panels:typography.fontFamilyNoTokenBinding"),
+        variant: "info",
+      });
+      return;
+    }
     // RF-006: Reject font families containing CSS-significant characters.
-    if (!validateCssIdentifier(value)) return;
+    if (!validateCssIdentifier(value)) {
+      showToast({
+        title: t("panels:typography.fontFamilyInvalid"),
+        variant: "error",
+      });
+      return;
+    }
     store.setTextStyle(uuid, { field: "font_family", value });
   }
 
-  function handleFontSizeChange(value: number): void {
-    if (!Number.isFinite(value)) return;
-    if (value <= 0) return;
-    // RF-022: Reject font sizes above the upper bound.
-    if (value > MAX_FONT_SIZE) return;
+  function handleFontFamilyCommit(_value: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    store.flushHistory();
+  }
+
+  function handleFontSizeChange(raw: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, { field: "font_size", value: sv });
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    if (parsed.type === "literal") {
+      const v = parsed.value;
+      if (!Number.isFinite(v)) return;
+      if (v <= 0) return;
+      // RF-022: Reject font sizes above the upper bound.
+      if (v > MAX_FONT_SIZE) return;
+    }
+    store.setTextStyle(uuid, { field: "font_size", value: parsed });
+  }
+
+  function handleFontSizeCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    store.flushHistory();
   }
 
   function handleFontWeightChange(value: string): void {
@@ -273,20 +328,61 @@ export const TypographySection: Component = () => {
     announce(t("a11y:typography.fontStyle", { style: newStyle }));
   }
 
-  function handleLineHeightChange(value: number): void {
-    if (!Number.isFinite(value)) return;
+  function handleLineHeightChange(raw: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, { field: "line_height", value: sv });
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    if (parsed.type === "literal") {
+      if (!Number.isFinite(parsed.value)) return;
+      // RF-005: Reject literal values outside the UX-allowed range and
+      // surface a toast — do not silently drop, which revealed nothing to
+      // the user. Token refs and expressions are deferred to eval time.
+      if (parsed.value < MIN_LINE_HEIGHT || parsed.value > MAX_LINE_HEIGHT) {
+        showToast({
+          title: t("panels:typography.lineHeightOutOfRange", {
+            min: MIN_LINE_HEIGHT,
+            max: MAX_LINE_HEIGHT,
+          }),
+          variant: "error",
+        });
+        return;
+      }
+    }
+    store.setTextStyle(uuid, { field: "line_height", value: parsed });
   }
 
-  function handleLetterSpacingChange(value: number): void {
-    if (!Number.isFinite(value)) return;
+  function handleLineHeightCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    store.flushHistory();
+  }
+
+  function handleLetterSpacingChange(raw: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    const sv: StyleValue<number> = { type: "literal", value };
-    store.setTextStyle(uuid, { field: "letter_spacing", value: sv });
+    const parsed = parseNumberInput(raw);
+    if (!parsed) return;
+    if (parsed.type === "literal") {
+      if (!Number.isFinite(parsed.value)) return;
+      // RF-005: Same rationale as line_height — surface an out-of-range
+      // toast instead of a silent drop.
+      if (parsed.value < MIN_LETTER_SPACING || parsed.value > MAX_LETTER_SPACING) {
+        showToast({
+          title: t("panels:typography.letterSpacingOutOfRange", {
+            min: MIN_LETTER_SPACING,
+            max: MAX_LETTER_SPACING,
+          }),
+          variant: "error",
+        });
+        return;
+      }
+    }
+    store.setTextStyle(uuid, { field: "letter_spacing", value: parsed });
+  }
+
+  function handleLetterSpacingCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    store.flushHistory();
   }
 
   function handleTextAlignChange(align: TextAlign): void {
@@ -305,11 +401,17 @@ export const TypographySection: Component = () => {
     announce(t("a11y:typography.textDecoration", { decoration: newDecoration }));
   }
 
-  function handleTextColorChange(color: Color): void {
+  function handleTextColorChange(raw: string): void {
     const uuid = selectedUuid();
     if (!uuid || !textKind()) return;
-    const sv: StyleValue<Color> = { type: "literal", value: color };
-    store.setTextStyle(uuid, { field: "text_color", value: sv });
+    const parsed = parseColorInput(raw);
+    if (!parsed) return;
+    store.setTextStyle(uuid, { field: "text_color", value: parsed });
+  }
+
+  function handleTextColorCommit(_raw: string): void {
+    // RF-004: onChange already applied the value during the gesture.
+    store.flushHistory();
   }
 
   function handleShadowToggle(enabled: boolean): void {
@@ -429,9 +531,22 @@ export const TypographySection: Component = () => {
 
       {/* ── Font family + weight ───────────────────────────────────── */}
       <div class="sigil-typography-section__font-row">
-        <TextInput
+        {/*
+          TODO(spec-13c): Promote TextStylePatch.font_family to
+          StyleValue<string> so font families can bind to tokens. Until
+          that data-model change lands, we intentionally omit token
+          autocomplete (no `tokens` prop, no `font_family` accepted type)
+          and render a plain string input with system font suggestions.
+          Accepting `font_family` here would produce a token dropdown
+          that silently drops selections in handleFontFamilyChange.
+        */}
+        <ValueInput
           value={fontFamily()}
-          onValueChange={handleFontFamilyChange}
+          onChange={handleFontFamilyChange}
+          onCommit={handleFontFamilyCommit}
+          tokens={{}}
+          acceptedTypes={["string"]}
+          fontProvider={systemFontProvider}
           aria-label={t("panels:typography.fontFamily")}
           placeholder={t("panels:typography.fontFamily")}
           disabled={disabled()}
@@ -447,14 +562,13 @@ export const TypographySection: Component = () => {
 
       {/* ── Font size + italic toggle ──────────────────────────────── */}
       <div class="sigil-typography-section__size-row">
-        <NumberInput
-          value={fontSize()}
-          onValueChange={handleFontSizeChange}
+        <ValueInput
+          value={fontSizeDisplay()}
+          onChange={handleFontSizeChange}
+          onCommit={handleFontSizeCommit}
+          tokens={store.state.tokens}
+          acceptedTypes={["number", "dimension"]}
           aria-label={t("panels:typography.fontSize")}
-          step={1}
-          min={1}
-          max={MAX_FONT_SIZE}
-          suffix="px"
           disabled={disabled()}
         />
         <ToggleButton
@@ -469,21 +583,22 @@ export const TypographySection: Component = () => {
 
       {/* ── Line height + letter spacing ───────────────────────────── */}
       <div class="sigil-typography-section__spacing-row">
-        <NumberInput
-          value={lineHeight()}
-          onValueChange={handleLineHeightChange}
+        <ValueInput
+          value={lineHeightDisplay()}
+          onChange={handleLineHeightChange}
+          onCommit={handleLineHeightCommit}
+          tokens={store.state.tokens}
+          acceptedTypes={["number"]}
           aria-label={t("panels:typography.lineHeight")}
-          step={0.1}
-          min={0.1}
-          suffix={"\u00D7"}
           disabled={disabled()}
         />
-        <NumberInput
-          value={letterSpacing()}
-          onValueChange={handleLetterSpacingChange}
+        <ValueInput
+          value={letterSpacingDisplay()}
+          onChange={handleLetterSpacingChange}
+          onCommit={handleLetterSpacingCommit}
+          tokens={store.state.tokens}
+          acceptedTypes={["number", "dimension"]}
           aria-label={t("panels:typography.letterSpacing")}
-          step={0.1}
-          suffix="px"
           disabled={disabled()}
         />
       </div>
@@ -565,10 +680,14 @@ export const TypographySection: Component = () => {
         <span class="sigil-typography-section__color-label" aria-hidden="true">
           {t("panels:typography.color")}
         </span>
-        <ColorSwatch
-          color={textColor()}
-          onColorChange={handleTextColorChange}
+        <ValueInput
+          value={textColorDisplay()}
+          onChange={handleTextColorChange}
+          onCommit={handleTextColorCommit}
+          tokens={store.state.tokens}
+          acceptedTypes={["color"]}
           aria-label={t("panels:typography.textColor")}
+          disabled={disabled()}
         />
       </div>
 

@@ -125,10 +125,22 @@ export function handleCornersFieldChange(
   // preserve the types and values of the others. Build as a mutable tuple,
   // mutate the target slot, then assign to a `Corners` (readonly) view.
   const draft: [Corner, Corner, Corner, Corner] = [
-    { ...existingCorners[0], radii: { x: existingCorners[0].radii.x, y: existingCorners[0].radii.y } },
-    { ...existingCorners[1], radii: { x: existingCorners[1].radii.x, y: existingCorners[1].radii.y } },
-    { ...existingCorners[2], radii: { x: existingCorners[2].radii.x, y: existingCorners[2].radii.y } },
-    { ...existingCorners[3], radii: { x: existingCorners[3].radii.x, y: existingCorners[3].radii.y } },
+    {
+      ...existingCorners[0],
+      radii: { x: existingCorners[0].radii.x, y: existingCorners[0].radii.y },
+    },
+    {
+      ...existingCorners[1],
+      radii: { x: existingCorners[1].radii.x, y: existingCorners[1].radii.y },
+    },
+    {
+      ...existingCorners[2],
+      radii: { x: existingCorners[2].radii.x, y: existingCorners[2].radii.y },
+    },
+    {
+      ...existingCorners[3],
+      radii: { x: existingCorners[3].radii.x, y: existingCorners[3].radii.y },
+    },
   ];
 
   // Replace only the target axis on the target corner — preserve the corner
@@ -137,10 +149,7 @@ export function handleCornersFieldChange(
   // (x ≠ y) set via MCP/GraphQL must survive .x edits with their .y intact,
   // and vice versa.
   const target = existingCorners[idx];
-  const newRadii =
-    axis === "x"
-      ? { x: value, y: target.radii.y }
-      : { x: target.radii.x, y: value };
+  const newRadii = axis === "x" ? { x: value, y: target.radii.y } : { x: target.radii.x, y: value };
   draft[idx] = { ...target, radii: newRadii };
 
   // ── Per-corner array ──────────────────────────────────────────────────

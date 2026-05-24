@@ -1,0 +1,74 @@
+/* TokenSpacingList — dimension/number tokens with proportional bars */
+
+.sigil-token-spacing-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+  padding: var(--size-2);
+}
+
+.sigil-token-spacing-list__row {
+  display: flex;
+  align-items: center;
+  position: relative;
+  height: 32px;
+  padding: 0 var(--size-2);
+  border: 1px solid transparent;
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  transition: border-color 120ms;
+}
+
+.sigil-token-spacing-list__row:hover {
+  background: var(--surface-3);
+}
+
+.sigil-token-spacing-list__row--selected {
+  border-color: var(--accent);
+}
+
+.sigil-token-spacing-list__row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Proportional bar — positioned behind text */
+.sigil-token-spacing-list__bar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  opacity: 0.15;
+  border-radius: var(--button-radius);
+  pointer-events: none;
+  min-width: 2px;
+}
+
+/* Token short name */
+.sigil-token-spacing-list__name {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+}
+
+/* Token value */
+.sigil-token-spacing-list__value {
+  position: relative;
+  flex-shrink: 0;
+  font-size: var(--font-size-0);
+  color: var(--text-2);
+  margin-left: var(--size-2);
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-spacing-list__row {
+    transition: none;
+  }
+}

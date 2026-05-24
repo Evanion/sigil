@@ -26,6 +26,7 @@ function createMockStore(
       info: { name: "", page_count: 0, node_count: 0, can_undo: false, can_redo: false },
       pages: [],
       nodes,
+      tokens: {},
     },
     selectedNodeId,
     setSelectedNodeId,
@@ -67,6 +68,11 @@ function createMockStore(
     undo: () => {},
     redo: () => {},
     flushHistory: () => {},
+    createToken: () => {},
+    updateToken: () => {},
+    deleteToken: () => {},
+    renameToken: () => {},
+    resolveToken: () => null,
     destroy: () => {},
   } as DocumentStoreAPI;
 }

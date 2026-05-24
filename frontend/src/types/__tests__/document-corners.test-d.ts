@@ -15,9 +15,7 @@ describe("Corner types", () => {
 
   it("Corner is a discriminated union with 5 variants", () => {
     type Types = Corner["type"];
-    expectTypeOf<Types>().toEqualTypeOf<
-      "round" | "bevel" | "notch" | "scoop" | "superellipse"
-    >();
+    expectTypeOf<Types>().toEqualTypeOf<"round" | "bevel" | "notch" | "scoop" | "superellipse">();
   });
 
   it("Rectangle/Frame/Image carry corners: readonly Corner[] of length 4", () => {

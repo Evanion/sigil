@@ -6,11 +6,15 @@
  *
  * DPR handling follows the same pattern as ColorArea: DPR is composed into
  * setTransform rather than a standalone scale() call.
+ *
+ * Width is fluid — the strip fills its container and uses a ResizeObserver
+ * to size the canvas backing store to match the rendered width.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import "./Strip.css";
 
-export const STRIP_WIDTH = 240;
+/** Default width before ResizeObserver fires. */
+const DEFAULT_STRIP_WIDTH = 240;
 export const STRIP_HEIGHT = 14;
 
 export interface HueStripProps {
@@ -31,6 +35,24 @@ export function HueStrip(props: HueStripProps) {
   let containerRef: HTMLDivElement | undefined;
   const [isDragging, setIsDragging] = createSignal(false);
 
+  // ── Measured container width ────────────────────────────────────────
+  const [measuredWidth, setMeasuredWidth] = createSignal(DEFAULT_STRIP_WIDTH);
+
+  onMount(() => {
+    if (!containerRef) return;
+    const w = containerRef.clientWidth;
+    if (w > 0) setMeasuredWidth(w);
+
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newW = entry.contentBoxSize?.[0]?.inlineSize ?? entry.contentRect.width;
+        if (Number.isFinite(newW) && newW > 0) setMeasuredWidth(newW);
+      }
+    });
+    ro.observe(containerRef);
+    onCleanup(() => ro.disconnect());
+  });
+
   // ── DPR signal ────────────────────────────────────────────────────────
   const [dpr, setDpr] = createSignal(window.devicePixelRatio || 1);
 
@@ -46,9 +68,10 @@ export function HueStrip(props: HueStripProps) {
     const canvas = canvasRef;
     if (!canvas) return;
 
+    const stripWidth = measuredWidth();
     const currentDpr = dpr();
-    const pixelWidth = STRIP_WIDTH * currentDpr;
-    const pixelHeight = STRIP_HEIGHT * currentDpr;
+    const pixelWidth = Math.round(stripWidth * currentDpr);
+    const pixelHeight = Math.round(STRIP_HEIGHT * currentDpr);
 
     if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
       canvas.width = pixelWidth;
@@ -60,7 +83,7 @@ export function HueStrip(props: HueStripProps) {
 
     ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);
 
-    const gradient = ctx.createLinearGradient(0, 0, STRIP_WIDTH, 0);
+    const gradient = ctx.createLinearGradient(0, 0, stripWidth, 0);
     // 6-stop hue rainbow: 0°, 60°, 120°, 180°, 240°, 300°, 360°
     gradient.addColorStop(0 / 6, "hsl(0, 100%, 50%)");
     gradient.addColorStop(1 / 6, "hsl(60, 100%, 50%)");
@@ -71,7 +94,7 @@ export function HueStrip(props: HueStripProps) {
     gradient.addColorStop(6 / 6, "hsl(360, 100%, 50%)");
 
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, STRIP_WIDTH, STRIP_HEIGHT);
+    ctx.fillRect(0, 0, stripWidth, STRIP_HEIGHT);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   });
@@ -89,6 +112,7 @@ export function HueStrip(props: HueStripProps) {
   // ── Pointer events ────────────────────────────────────────────────────
   function handlePointerDown(e: PointerEvent) {
     if (!Number.isFinite(e.clientX)) return;
+    e.preventDefault();
     if (e.currentTarget instanceof Element) {
       e.currentTarget.setPointerCapture(e.pointerId);
     }
@@ -147,7 +171,7 @@ export function HueStrip(props: HueStripProps) {
       aria-valuemin={0}
       aria-valuemax={360}
       aria-valuenow={Math.round(props.hue)}
-      style={{ width: `${STRIP_WIDTH}px`, height: `${STRIP_HEIGHT}px` }}
+      style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -157,7 +181,7 @@ export function HueStrip(props: HueStripProps) {
         ref={canvasRef}
         class="sigil-strip__canvas"
         aria-hidden="true"
-        style={{ width: `${STRIP_WIDTH}px`, height: `${STRIP_HEIGHT}px` }}
+        style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       >
         Hue selection strip
       </canvas>

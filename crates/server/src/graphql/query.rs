@@ -2,7 +2,7 @@ use async_graphql::{Context, Object, Result};
 
 use crate::state::ServerState;
 
-use super::types::{DocumentInfoGql, NodeGql, PageGql, node_to_gql};
+use super::types::{DocumentInfoGql, NodeGql, PageGql, TokenGql, node_to_gql};
 
 pub struct QueryRoot;
 
@@ -83,6 +83,23 @@ impl QueryRoot {
             .collect();
 
         Ok(result)
+    }
+
+    /// Get all design tokens in the document.
+    async fn tokens(&self, ctx: &Context<'_>) -> Result<Vec<TokenGql>> {
+        let state = ctx.data::<ServerState>()?;
+        let doc = state
+            .app
+            .document
+            .lock()
+            .map_err(|_| "document lock error")?;
+        // Collect under the lock, converting each token to a GraphQL representation.
+        let tokens: Vec<TokenGql> = doc
+            .token_context
+            .iter()
+            .map(|(_name, token)| TokenGql::from_core(token))
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(tokens)
     }
 
     /// Get a single node by UUID.

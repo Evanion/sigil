@@ -10,7 +10,7 @@ checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 
 [[package]]
 name = "agent-designer-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "assert_matches",
  "i_overlay",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "agent-designer-mcp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agent-designer-core",
  "agent-designer-state",
@@ -39,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "agent-designer-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agent-designer-core",
  "agent-designer-mcp",
@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "agent-designer-state"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agent-designer-core",
  "serde",
@@ -2154,7 +2154,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "sigil-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agent-designer-core",
  "anyhow",

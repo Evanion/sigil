@@ -10,6 +10,8 @@ import { StatusBar } from "./shell/StatusBar";
 import { AnnounceProvider } from "./shell/AnnounceProvider";
 import { TabRegion } from "./panels/TabRegion";
 import { registerDefaultPanels } from "./panels/register-panels";
+import { TokenEditorProvider } from "./panels/token-editor-context";
+import { TokenEditor } from "./panels/token-editor/TokenEditor";
 import "./App.css";
 
 /**
@@ -20,6 +22,12 @@ const AppShell: Component = () => {
   const store = createDocumentStoreSolid();
   registerDefaultPanels(store);
   const [announcement, setAnnouncement] = createSignal("");
+  const [tokenEditorOpen, setTokenEditorOpen] = createSignal(false);
+  const tokenEditorValue = {
+    isOpen: tokenEditorOpen,
+    open: () => setTokenEditorOpen(true),
+    close: () => setTokenEditorOpen(false),
+  };
 
   /** Push a message into the ARIA live region for screen readers. */
   function announce(message: string): void {
@@ -31,41 +39,44 @@ const AppShell: Component = () => {
   return (
     <DocumentProvider store={store}>
       <AnnounceProvider announce={announce}>
-        {/* DnD announcements handled by useDragDropMonitor in LayersTree (WCAG 2.1 SC 4.1.3). */}
-        <DragDropProvider>
-          <div class="app-shell">
-            {/* RF-018: Wrap Toolbar in grid-placed div */}
-            <div class="app-shell__toolbar">
-              <Toolbar />
+        <TokenEditorProvider value={tokenEditorValue}>
+          {/* DnD announcements handled by useDragDropMonitor in LayersTree (WCAG 2.1 SC 4.1.3). */}
+          <DragDropProvider>
+            <div class="app-shell">
+              {/* RF-018: Wrap Toolbar in grid-placed div */}
+              <div class="app-shell__toolbar">
+                <Toolbar />
+              </div>
+              <div
+                class="app-shell__left"
+                role="complementary"
+                aria-label={t("panels:regions.leftPanel")}
+              >
+                <TabRegion region="left" />
+              </div>
+              {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
+              <div class="app-shell__canvas" role="main">
+                <Canvas />
+              </div>
+              <div
+                class="app-shell__right"
+                role="complementary"
+                aria-label={t("panels:regions.rightPanel")}
+              >
+                <TabRegion region="right" />
+              </div>
+              {/* RF-018: Wrap StatusBar in grid-placed div */}
+              <div class="app-shell__status">
+                <StatusBar />
+              </div>
+              {/* RF-001: Visually-hidden ARIA live region for screen reader announcements */}
+              <div aria-live="polite" role="log" class="sr-only">
+                {announcement()}
+              </div>
             </div>
-            <div
-              class="app-shell__left"
-              role="complementary"
-              aria-label={t("panels:regions.leftPanel")}
-            >
-              <TabRegion region="left" />
-            </div>
-            {/* RF-006: role="main" on the canvas wrapper, not the canvas element */}
-            <div class="app-shell__canvas" role="main">
-              <Canvas />
-            </div>
-            <div
-              class="app-shell__right"
-              role="complementary"
-              aria-label={t("panels:regions.rightPanel")}
-            >
-              <TabRegion region="right" />
-            </div>
-            {/* RF-018: Wrap StatusBar in grid-placed div */}
-            <div class="app-shell__status">
-              <StatusBar />
-            </div>
-            {/* RF-001: Visually-hidden ARIA live region for screen reader announcements */}
-            <div aria-live="polite" role="log" class="sr-only">
-              {announcement()}
-            </div>
-          </div>
-        </DragDropProvider>
+            <TokenEditor isOpen={tokenEditorOpen()} onClose={() => setTokenEditorOpen(false)} />
+          </DragDropProvider>
+        </TokenEditorProvider>
       </AnnounceProvider>
     </DocumentProvider>
   );

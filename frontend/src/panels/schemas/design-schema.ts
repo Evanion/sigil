@@ -73,10 +73,42 @@ export const designSchema: PropertySchema = {
         // Enforced": every NumberInput max must be a named constant.
         // RF-024: ariaLabel expands the 2-letter compass labels so screen
         // readers announce the full corner name instead of "TL", "TR", etc.
-        { key: "kind.corners.0.radii.x", label: "TL", ariaLabel: "Top-left corner radius", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
-        { key: "kind.corners.1.radii.x", label: "TR", ariaLabel: "Top-right corner radius", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
-        { key: "kind.corners.2.radii.x", label: "BR", ariaLabel: "Bottom-right corner radius", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
-        { key: "kind.corners.3.radii.x", label: "BL", ariaLabel: "Bottom-left corner radius", type: "number", step: 1, min: 0, max: MAX_CORNER_RADIUS },
+        {
+          key: "kind.corners.0.radii.x",
+          label: "TL",
+          ariaLabel: "Top-left corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.1.radii.x",
+          label: "TR",
+          ariaLabel: "Top-right corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.2.radii.x",
+          label: "BR",
+          ariaLabel: "Bottom-right corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
+        {
+          key: "kind.corners.3.radii.x",
+          label: "BL",
+          ariaLabel: "Bottom-left corner radius",
+          type: "number",
+          step: 1,
+          min: 0,
+          max: MAX_CORNER_RADIUS,
+        },
       ],
     },
     {

@@ -704,14 +704,14 @@ describe("mutation operations — structural mutations (Task 5)", () => {
         uuid: "new-uuid",
         name: "Rect 1",
         kind: {
-      type: "rectangle",
-      corners: [
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-      ],
-    },
+          type: "rectangle",
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
         style: {
           fills: [],
@@ -738,14 +738,14 @@ describe("mutation operations — structural mutations (Task 5)", () => {
         uuid: "new-uuid",
         name: "Rect 1",
         kind: {
-      type: "rectangle",
-      corners: [
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-        { type: "round", radii: { x: 0, y: 0 } },
-      ],
-    },
+          type: "rectangle",
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
         transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
         style: {
           fills: [],

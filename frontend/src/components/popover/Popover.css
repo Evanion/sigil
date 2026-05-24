@@ -1,12 +1,14 @@
-/* Trigger button — Kobalte renders this as a <button> by default,
-   providing keyboard focus, Enter/Space activation, and ARIA semantics
-   (CLAUDE.md §5 Kobalte override rule). */
+/* Trigger button — renders as a <button> by default,
+   providing keyboard focus, Enter/Space activation, and ARIA semantics. */
 .sigil-popover-trigger {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   padding: 0;
   font: inherit;
+  color: var(--text-2);
   cursor: pointer;
 }
 
@@ -15,23 +17,88 @@
   outline-offset: 2px;
 }
 
+/* Native popover with CSS Anchor Positioning.
+   position-anchor, position-area, and position-try-fallbacks are set
+   inline by the component for dynamic anchor names and placement. */
 .sigil-popover {
+  position: absolute;
   background: var(--surface-3);
   color: var(--text-1);
   border: 1px solid var(--border-2);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-3);
   padding: var(--size-3);
-  z-index: var(--z-popover);
-  transform-origin: var(--kb-popover-content-transform-origin);
+  /* overflow: visible is required so the arrow (positioned outside the box)
+     is not clipped. Content scrolling is handled by the inner content wrapper. */
+  overflow: visible;
+
+  /* Reset default popover inset so anchor positioning works.
+     Keep a small margin from the anchor (gap) and viewport edges. */
+  inset: unset;
+  margin: var(--size-2);
+
+  /* Prevent the popover from being wider than the viewport minus margins */
+  max-width: calc(100vw - var(--size-4) * 2);
+  max-height: calc(100vh - var(--size-4) * 2);
+
   animation: sigil-popover-fade-in 150ms ease-out;
 }
 
-.sigil-popover__arrow {
-  fill: var(--surface-3);
+/* Override browser default popover backdrop */
+.sigil-popover::backdrop {
+  background: transparent;
 }
 
-/* Reduced motion */
+/* ── Arrow ─────────────────────────────────────────────────────────── */
+
+.sigil-popover__arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-2);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Arrow edge positioning. The cross-axis position (left for top/bottom,
+   top for left/right) is set by JavaScript in positionArrow() after the
+   popover opens, aligning the arrow with the trigger element's center. */
+
+/* Bottom placement: arrow at top edge, pointing up */
+.sigil-popover--bottom .sigil-popover__arrow {
+  top: -7px;
+  transform: rotate(45deg);
+  border-bottom-color: transparent;
+  border-right-color: transparent;
+}
+
+/* Top placement: arrow at bottom edge, pointing down */
+.sigil-popover--top .sigil-popover__arrow {
+  bottom: -7px;
+  transform: rotate(45deg);
+  border-top-color: transparent;
+  border-left-color: transparent;
+}
+
+/* Left placement: arrow at right edge, pointing right */
+.sigil-popover--left .sigil-popover__arrow {
+  right: -7px;
+  transform: rotate(45deg);
+  border-left-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/* Right placement: arrow at left edge, pointing left */
+.sigil-popover--right .sigil-popover__arrow {
+  left: -7px;
+  transform: rotate(45deg);
+  border-top-color: transparent;
+  border-right-color: transparent;
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────── */
+
 @media (prefers-reduced-motion: reduce) {
   .sigil-popover {
     animation: none;

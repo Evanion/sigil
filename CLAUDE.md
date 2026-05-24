@@ -14,6 +14,19 @@ These principles are the governing rules of this project. They explain the _why_
 - Prefer small, focused files with clear interfaces over large files that do too much.
 - CI builds must be fully reproducible — pin all tool versions to exact, immutable references (commit SHAs for Actions, version files for toolchains). No `latest` tags.
 
+### Design Decision Criteria
+
+When a design choice has multiple valid options — particularly when external convention and internal simplicity point in different directions — apply these criteria in order:
+
+1. **Correctness** — does the design produce correct behavior in all cases? Reject options with known edge-case failures regardless of convention or simplicity.
+2. **Robustness** — does the design minimize the surface area for bugs? Fewer code paths, fewer special cases, and fewer states mean fewer failure modes. Prefer the option that is hardest to use incorrectly.
+3. **Simplicity** — does the design produce simpler code? Simpler parsing, simpler validation, simpler testing. Code that is easier to understand is easier to maintain and easier to verify.
+4. **Convention** — does the design follow established external conventions? Convention reduces surprise for users and contributors. But convention is the tiebreaker, not the primary criterion — it applies only when the options above do not distinguish the candidates.
+
+When a design deviates from an external convention, the deviation MUST be documented in the spec or ADR with: (a) what the convention is and who uses it, (b) why the chosen design scores higher on correctness, robustness, or simplicity, and (c) what user-facing impact the deviation has (if any). A deviation without documentation is an unforced error — future contributors will "fix" it back to the convention without understanding why it was changed.
+
+This principle does NOT apply to user-facing interaction patterns (keyboard shortcuts, selection behavior, tool switching) where the user's muscle memory is the dominant concern. For interaction patterns, "follow Figma/Penpot conventions" remains the default — override only with strong usability evidence.
+
 ### Testing Standards
 
 - TDD is the default — write the failing test first, then implement.
@@ -200,7 +213,8 @@ Rules:
 - ESLint strict config.
 - Prettier for formatting.
 - Every frontend view must include ARIA landmark roles (`role="toolbar"`, `role="complementary"`, `role="main"`, `role="status"`). Interactive elements must be keyboard-navigable with `tabindex`. The `<canvas>` element must have `aria-label`. Accessibility is part of "done", not optional polish.
-- Never override Kobalte trigger or interactive primitives with non-interactive elements (`as="span"`, `as="div"`, `as="p"`). Kobalte renders triggers as `<button>` by default, which provides keyboard focus, Enter/Space activation, and ARIA semantics. Overriding with a non-interactive element removes all of these. If you need custom styling, use CSS on the default element or use `as="button"` explicitly.
+- Never override Kobalte trigger or interactive primitives with non-interactive elements (`as="span"`, `as="div"`, `as="p"`). Kobalte renders triggers as `<button>` by default, which provides keyboard focus, Enter/Space activation, and ARIA semantics. Overriding with a non-interactive element removes all of these. If you need custom styling, use CSS on the default element or use `as="button"` explicitly. Note: this rule applies to the Kobalte components still in use (Button, Select, DropdownMenu, ContextMenu, Menubar, NumberField, TextField, Toggle, Toast, Tooltip, Separator). Popover and Dialog do not use Kobalte — see the native popover/dialog rule below.
+- Use native HTML `popover` attribute and `<dialog>` element instead of Kobalte (or any library) Popover and Dialog components. Kobalte's Dialog sets `body.style.pointerEvents = "none"` for modal overlay, which breaks any portaled content not registered in its internal DismissableLayer stack. Solid's `<Portal>` breaks the Kobalte context chain, making nested overlays (popover inside dialog) unclickable. The native implementations avoid this: Popover uses `popover="auto"` for light dismiss, `popover="manual"` for programmatic control, with CSS Anchor Positioning (`anchor-name`, `position-anchor`, `position-area`, `position-try-fallbacks`) for viewport-aware placement — do not introduce JS-based positioning libraries (Floating UI, Popper, etc.). Dialog uses `<dialog>` with `showModal()` for browser-native focus trap, Escape handling, `::backdrop`, and top-layer rendering. Both use the browser's top-layer mechanism, which handles stacking correctly without JavaScript layer management. The project's native implementations are at `frontend/src/components/popover/Popover.tsx` and `frontend/src/components/dialog/Dialog.tsx` — use these, do not create alternatives.
 - Use `<Index>` (not `<For>`) for Solid.js lists that support reorder, insert, or delete. Solid's `<For>` keyed iteration destroys and recreates DOM nodes when items move positions — this loses focus, breaks CSS transitions, and causes visible flicker during drag-and-drop reorder. `<Index>` preserves DOM elements and updates them in place, which is correct for lists where the user can add, remove, or reorder items (fills, strokes, effects, layers, gradient stops). Reserve `<For>` for read-only lists where the data identity matters more than DOM stability.
 - Deep-cloning Solid store data requires `JSON.parse(JSON.stringify())` inside `produce()` callbacks — but `structuredClone` must be used everywhere else. Solid's `createStore` wraps objects in Proxy traps; `structuredClone` throws `DataCloneError` on these proxies. Inside a `produce()` callback (where the argument is a Solid proxy), use `JSON.parse(JSON.stringify(value))` and wrap it in try-catch. Outside `produce()` — when cloning plain objects, snapshots, or function arguments that are not store proxies — use `structuredClone`. Every `JSON.parse(JSON.stringify())` call site must have a comment: `// JSON clone: Solid proxy not structuredClone-safe`.
 - Plain class instances are not reactive in Solid.js. Wrapping a method call in an arrow function (`() => myClass.getValue()`) does NOT create a reactive binding — Solid's tracking only works with signals, stores, and memos. When bridging non-reactive state (plain classes, third-party libraries, imperative managers) into Solid's reactive graph, create explicit Solid signals that mirror the external state and update them after every mutation to the external object. Never expose a plain class method as a "reactive accessor" without a backing signal — it will return stale values and the UI will not update. This obligation applies in both directions: (1) reading from the class requires a signal-backed accessor, and (2) every mutation to the class's internal state — including async operations, callbacks, and event handlers — MUST call the corresponding signal setter immediately after the mutation. A mutation without a setter call is invisible to the reactive graph.
@@ -219,6 +233,14 @@ Types: `feat`, `fix`, `chore`, `ci`, `docs`, `refactor`, `test`
 Scopes: `core`, `server`, `mcp`, `frontend`, `cli`, `bindings`, `devops`
 
 Keep descriptions concise and lowercase. Reference spec numbers when implementing features: `feat(core): add node tree operations (spec-01)`.
+
+### Type semantics (enforced)
+
+- **`refactor`** — behavior-preserving rearrangement only. A `refactor` commit MUST NOT: introduce new types, add new fields, add new enum variants, change function signatures in a way that alters input/output domain, add new validation, or add/remove user-visible behavior. If the change does any of these, it is `feat` or `fix`, not `refactor`. Plan tasks labeled "refactor" that then introduce type changes indicate that the plan is mis-scoped — update the plan before opening the PR.
+- **`fix`** — corrects a defect in existing behavior. Does not introduce new features.
+- **`feat`** — adds new user-visible capability or a new type/field that expands the data model.
+
+This matters during review: reviewers calibrate scrutiny based on the commit type. A mislabeled `refactor` invites lighter review of code that actually changes behavior, which is how regressions slip through.
 
 ---
 
@@ -317,6 +339,17 @@ Any spec that introduces a new canvas tool MUST include a section titled **"Tool
 - Whether the tool stays active after one use or returns to select.
 - How the tool interacts with document-level keyboard handlers during its active phase.
 
+### Cross-Stack Type Extension Inventory
+
+Any spec that extends a shared wire-format type (a type that crosses the Rust↔TypeScript boundary via GraphQL, MCP, WebSocket, or file serialization) MUST include a section titled **"Transport Boundary Inventory"** that enumerates, for each affected type:
+
+- The Rust definition site (file and type name).
+- The TypeScript definition site (file and type name).
+- Every transport handler that serializes or deserializes the type: GraphQL resolvers, MCP tool handlers, WebSocket broadcast paths, `frontend/src/operations/apply-remote.ts` handlers, persistence paths, canvas renderer paths.
+- Every in-code consumer that pattern-matches on the type's discriminant (every `match` in Rust, every `switch` or `if/else` ladder in TypeScript).
+
+For each entry, the spec must state whether this PR updates it, or document why no update is needed. A spec that extends a shared type without this inventory is incomplete — the implementer has no checklist to verify end-to-end parity.
+
 ### Staged Feature Delivery Contract
 
 When a spec is split into sub-plans (e.g., Spec 14 → Plans 14a/14b/14c/14d) and the first sub-plan ships data-layer changes without the UI, renderer, or visible affordances that consume them, the sub-plan's PR description MUST include a section titled **"Deferred-to-later-plan inventory"** enumerating:
@@ -367,9 +400,24 @@ Never use `let _ = fallible_call()` in rollback or cleanup code paths. Suppresse
 
 The prohibition extends beyond rollback paths. Never use `.unwrap_or_default()` on a `Result` where the error represents a real failure (e.g., serialization failure). Prefer `match` with an explicit log branch. "Silent" also includes mapping a specific error to a generic variant — if a rollback error is mapped to `InvalidInput`, the diagnostic trail is corrupted. Create a typed variant (e.g., `RollbackFailed`) instead.
 
-### No Silent Clamping of Invalid Input
+### Handlers Must Surface Validation Failures to the User
 
-Never silently clamp, truncate, or coerce an invalid input value to a valid range (e.g., `position.max(0)`, `name.truncate(MAX_LEN)`). Silent clamping masks bugs in callers — they never learn their input was wrong, and the operation silently does something different from what was requested. Instead: validate at the boundary and return a typed error identifying the invalid value and the acceptable range. This applies to all languages (Rust and TypeScript) and all boundaries (API handlers, MCP tools, deserialization, UI callbacks). The only exception is explicit user-facing affordances (e.g., a slider that visually constrains its range) where clamping IS the intended UX.
+Never silently reject, clamp, truncate, or coerce an invalid input value. Four anti-patterns are banned:
+1. **Silent clamping** — `position.max(0)`, `name.truncate(MAX_LEN)`.
+2. **Silent rejection** — `if (!isValid(input)) return;` with no user feedback.
+3. **Silent swallowing** — `try { parse(input); } catch { /* ignore */ }`.
+4. **Silent discriminant collapse** — `if (delta > TOLERANCE) { return [0, 0, ...]; }` where the caller loses not just a value but the *identity* of a channel (e.g., hue set to 0 because saturation fell below a threshold). A coarse tolerance masquerading as a division-safety guard is a silent clamp — use the strict numerical guard (`delta > 0`) and document why.
+
+All four mask bugs in callers and leave the user unable to understand why their action had no effect. Instead, at every input boundary (API handler, MCP tool, deserialization, UI callback, panel commit handler):
+- Validate the input.
+- On failure, surface the error via the appropriate channel for that layer:
+  - **Rust API/MCP**: return a typed error identifying the invalid value and acceptable range.
+  - **Frontend panel/ValueInput handlers**: write a status message to the component's `aria-live` status region AND, for destructive intent (e.g., committing an invalid value), show a toast or inline error — not both silent paths.
+  - **Background parse attempts** (e.g., autocomplete match): fail silently is acceptable ONLY when the user will immediately receive feedback through another channel (the suggestion list didn't open, the swatch didn't appear) AND there is no persistence attempt.
+
+A handler that short-circuits on `parsed.type !== "literal"`, `value < 0`, or similar without updating a visible status region is a bug. If the input type legitimately cannot be represented (e.g., token ref to a field that doesn't support bindings), the status message must explain *why* — "Font family token binding not yet supported", "Stroke width must be ≥ 0", etc.
+
+The exception is explicit user-facing affordances (a slider that visually constrains its range) where clamping IS the intended UX.
 
 This obligation extends to **migrations** (any function that transforms data between schema versions): a present-but-malformed legacy field (wrong type, NaN, infinity, out-of-arity) MUST produce a typed migration error, not be coerced to a default. A truly absent field MAY default with a comment naming the default. The distinction between "missing" and "malformed" must be made explicit in code.
 
@@ -391,9 +439,19 @@ When a boolean or enum flag is set to temporarily change system behavior (suppre
 
 Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
 
-### Behavioral Inventory Before Deleting Implementation Code
+### Behavioral Inventory Before Deleting or Rewriting Implementation Code
 
-When deleting a module, trait, struct, or function that carries non-trivial logic (computation, validation, state transitions, coordinate transforms, invariant maintenance), the PR MUST include a behavioral inventory before deletion. Enumerate: (1) every side effect and computation the deleted code performs beyond simple CRUD, (2) for each item, whether it is preserved in the replacement code, moved to a different location, or intentionally removed with rationale. "The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. This rule exists because PR #39 deleted Command structs that contained bounding box computation, transform adjustment, and child ordering logic. The replacement FieldOperations omitted this behavior, causing four Critical regressions that were only caught during review.
+When a PR either (a) deletes a module, trait, struct, or function carrying non-trivial logic, OR (b) rewrites a frontend component such that net line delta exceeds ±30% or the implementation is substantially different (new internal architecture, new state model, extracted/combined helpers), the PR MUST include a behavioral inventory before the diff.
+
+The scope obligation is independent of how the PR is labeled. Plan-task labels such as "rename", "move", "refactor", or "extract" do NOT exempt the change from inventory if the actual diff meets the criteria above. The inventory is keyed on the diff, not the intent.
+
+The inventory enumerates:
+1. Every side effect and computation the outgoing code performs beyond simple CRUD — validation rules, min/max bounds, prefix/suffix labels, formatting, keyboard handlers, focus management, aria-live regions, autocomplete state, cursor preservation, CSS class contracts, event emission ordering.
+2. For each item: (a) preserved in the replacement, (b) moved to a different location (specify where), or (c) intentionally removed (with rationale).
+
+"The new code replaces the old code" is not sufficient — the replacement must be shown to cover the same behavioral surface. For frontend component rewrites, the inventory additionally satisfies the "Accessibility Behavior Must Be Audited During UI Rewrites" rule in `a11y-rules.md` — both items are enumerated in the same document.
+
+This rule exists because PR #39 deleted Command structs containing bounding box / transform / child ordering logic whose omission produced four Critical regressions, and because PR #57 rewrote EnhancedTokenInput → ValueInput without inventory and lost: min validation on line-height/letter-spacing (RF-005), prefix labels on shadow X/Y/Blur/Spread (RF-013), spinbutton semantics (RF-020), and aria-live discipline (RF-008).
 
 ### Validation Must Be Symmetric Across All Transports
 
@@ -420,3 +478,16 @@ When a list can be mutated (items added, removed, or reordered), the array index
 ### Math Helpers Must Guard Their Domain
 
 Any function that wraps a standard math operation with a constrained domain (`Math.pow`, `Math.sqrt`, `Math.log`, `Math.asin`, `Math.acos`) MUST validate that its input falls within the function's valid domain before calling it. Do not rely on callers to have pre-validated inputs — a helper function receives values from multiple call sites, and one caller passing an out-of-range value produces NaN that propagates silently through the entire computation chain. Required guards: `Math.sqrt(x)` requires `x >= 0`; `Math.pow(x, p)` with a fractional exponent requires `x >= 0`; `Math.log(x)` requires `x > 0`; `Math.asin(x)` and `Math.acos(x)` require `-1 <= x <= 1`. Return 0, clamp to the valid range, or throw — but do not allow NaN to escape the function. Document the choice in a comment.
+
+### Parallel Implementations Must Have Parity Tests
+
+When the same algorithm, function set, or computation is implemented in both Rust (`crates/core/`) and TypeScript (`frontend/`), the PR that introduces the second implementation MUST include cross-language parity tests. For each function or behavior implemented in both languages:
+1. Define a shared test vector file (JSON) in `tests/fixtures/parity/` containing input-output pairs.
+2. The Rust test suite must load the vectors and assert the Rust implementation produces the expected outputs.
+3. The TypeScript test suite must load the same vectors and assert the TypeScript implementation produces the expected outputs.
+
+Test vectors must cover: (a) normal inputs, (b) boundary values (0, 1, max), (c) the specific semantics most likely to diverge (scale/range of numeric values, argument order, naming conventions, edge case behavior). If a function intentionally differs between Rust and TypeScript (e.g., because the frontend uses a simplified approximation), document the divergence in a comment in both implementations and exclude it from parity vectors with a rationale.
+
+This rule exists because PR #55 (Spec 13d) shipped 6 Critical/High bugs where the TypeScript expression evaluator diverged from the Rust evaluator on function semantics — inverted size functions, different channel scales, different blend mode naming, and missing alpha compositing.
+
+This rule applies to **shared wire-format types**, not only algorithms. When a type that crosses the Rust↔TypeScript boundary (enums, discriminated unions, structs serialized via GraphQL/MCP/WebSocket) gains a new variant or field on one side, the same PR MUST: (1) add the variant on both sides, (2) add a parity fixture in `tests/fixtures/parity/` with one entry per variant covering the full encoding, (3) update every transport handler (GraphQL resolver, MCP tool, WebSocket broadcast, `apply-remote.ts`) to handle the new variant. A type whose Rust and TypeScript definitions have diverged variant sets is a bug regardless of whether an algorithm exists — deserialization will fail at runtime on the side missing the variant.

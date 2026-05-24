@@ -64,7 +64,12 @@ export interface StyleValueTokenRef {
   readonly name: string;
 }
 
-export type StyleValue<T> = StyleValueLiteral<T> | StyleValueTokenRef;
+export interface StyleValueExpression {
+  readonly type: "expression";
+  readonly expr: string;
+}
+
+export type StyleValue<T> = StyleValueLiteral<T> | StyleValueTokenRef | StyleValueExpression;
 
 // ── Color ─────────────────────────────────────────────────────────────
 
@@ -531,7 +536,8 @@ export type TokenValue =
   | { readonly type: "shadow"; readonly value: ShadowValue }
   | { readonly type: "gradient"; readonly gradient: GradientDef }
   | { readonly type: "typography"; readonly value: TypographyValue }
-  | { readonly type: "alias"; readonly name: string };
+  | { readonly type: "alias"; readonly name: string }
+  | { readonly type: "expression"; readonly expr: string };
 
 export interface Token {
   readonly id: TokenId;
@@ -612,12 +618,7 @@ export interface CornerSuperellipse {
   readonly smoothing: number;
 }
 
-export type Corner =
-  | CornerRound
-  | CornerBevel
-  | CornerNotch
-  | CornerScoop
-  | CornerSuperellipse;
+export type Corner = CornerRound | CornerBevel | CornerNotch | CornerScoop | CornerSuperellipse;
 
 export type Corners = readonly [Corner, Corner, Corner, Corner];
 

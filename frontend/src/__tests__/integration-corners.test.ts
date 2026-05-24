@@ -56,10 +56,7 @@ function makeRectNode(uuid: string): StoreDocumentNode {
   };
 }
 
-function makeTx(
-  ops: RemoteOperationPayload[],
-  userId = "remote-user",
-): RemoteTransactionPayload {
+function makeTx(ops: RemoteOperationPayload[], userId = "remote-user"): RemoteTransactionPayload {
   return {
     transactionId: "tx-integration",
     userId,
@@ -70,11 +67,7 @@ function makeTx(
   };
 }
 
-function makeSetFieldOp(
-  nodeUuid: string,
-  path: string,
-  value: unknown,
-): RemoteOperationPayload {
+function makeSetFieldOp(nodeUuid: string, path: string, value: unknown): RemoteOperationPayload {
   return {
     id: "op-integration",
     nodeUuid,
@@ -105,6 +98,7 @@ describe("integration: MCP broadcast → applyRemoteTransaction (corners)", () =
       const [state, setState] = createStore<StoreState>({
         nodes: { [RECT_UUID]: makeRectNode(RECT_UUID) },
         pages: [],
+        tokens: {},
       });
       const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -158,6 +152,7 @@ describe("integration: MCP broadcast → applyRemoteTransaction (corners)", () =
       const [state, setState] = createStore<StoreState>({
         nodes: { [RECT_UUID]: makeRectNode(RECT_UUID) },
         pages: [],
+        tokens: {},
       });
       const fetchPages = vi.fn().mockResolvedValue(undefined);
 

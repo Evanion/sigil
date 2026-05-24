@@ -12,10 +12,14 @@ import type {
   Stroke,
   Effect,
   BlendMode,
+  StyleValue,
   TextStyle,
+  Token,
+  TokenType,
+  TokenValue,
 } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
-import { PAGES_QUERY } from "../graphql/queries";
+import { PAGES_QUERY, TOKENS_QUERY } from "../graphql/queries";
 import { APPLY_OPERATIONS_MUTATION } from "../graphql/mutations";
 import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
@@ -32,11 +36,19 @@ import {
   createDeletePageOp,
   createRenamePageOp,
   createReorderPageOp,
+  createCreateTokenOp,
+  createUpdateTokenOp,
+  createDeleteTokenOp,
+  createRenameTokenOp,
 } from "../operations/operation-helpers";
 import type { TextStylePatch } from "./document-store-types";
 import { parseCornersInput } from "./corners-input";
 import type { CornersInput } from "./corners-input";
 import { defaultCorners } from "./default-corners";
+import { resolveToken as resolveTokenPure } from "./token-store";
+import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
+import { isValidExpressionLength } from "./style-value-validate";
+import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -71,6 +83,7 @@ export interface DocumentState {
   info: MutableDocumentInfo;
   pages: MutablePage[];
   nodes: Record<string, MutableDocumentNode>;
+  tokens: Record<string, Token>;
 }
 
 export type ToolType = "select" | "frame" | "rectangle" | "ellipse" | "text";
@@ -105,7 +118,7 @@ export interface DocumentStoreAPI {
   setLocked(uuid: string, locked: boolean): void;
   reparentNode(uuid: string, newParentUuid: string, position: number): void;
   reorderChildren(uuid: string, newPosition: number): void;
-  setOpacity(uuid: string, opacity: number): void;
+  setOpacity(uuid: string, opacity: StyleValue<number>): void;
   setBlendMode(uuid: string, blendMode: BlendMode): void;
   setFills(uuid: string, fills: Fill[]): void;
   setStrokes(uuid: string, strokes: Stroke[]): void;
@@ -125,6 +138,13 @@ export interface DocumentStoreAPI {
    * "Continuous-Value Controls Must Coalesce History Entries".
    */
   flushHistory(): void;
+
+  // Token mutations
+  createToken(name: string, tokenType: TokenType, value: TokenValue, description?: string): void;
+  updateToken(name: string, value: TokenValue, description?: string): void;
+  deleteToken(name: string): void;
+  renameToken(oldName: string, newName: string): void;
+  resolveToken(name: string): TokenValue | null;
 
   // Page mutations
   createPage(name: string): void;
@@ -155,6 +175,15 @@ const MAX_PAGES_PER_DOCUMENT = 100;
 
 /** Minimum pages per document — at least one page must exist. */
 const MIN_PAGES_PER_DOCUMENT = 1;
+
+/** Maximum token name length — matches crates/core/src/validate.rs MAX_TOKEN_NAME_LEN. */
+export const MAX_TOKEN_NAME_LENGTH = 256;
+
+/** Maximum tokens per context — matches crates/core/src/validate.rs MAX_TOKENS_PER_CONTEXT. */
+const MAX_TOKENS_PER_CONTEXT = 50_000;
+
+/** Maximum token description length — matches crates/core/src/validate.rs MAX_TOKEN_DESCRIPTION_LEN. */
+export const MAX_TOKEN_DESCRIPTION_LENGTH = 1_024;
 
 // RF-028: deepClone is imported from operations/interceptor as sharedDeepClone.
 // Alias it as deepClone for local use to keep call sites unchanged.
@@ -237,6 +266,61 @@ function parsePagesResponse(data: unknown): {
   }
 
   return { pages, nodes };
+}
+
+/**
+ * Parse the GraphQL `tokens` query response into a Record<string, Token>.
+ *
+ * The server returns tokens with `value` as a JSON value (parsed by urql)
+ * and `tokenType` as a string. We defensively validate shape per CLAUDE.md
+ * "Defensive Message Parsing".
+ */
+function parseTokensResponse(data: unknown): Record<string, Token> {
+  const tokens: Record<string, Token> = {};
+
+  if (!data || typeof data !== "object") return tokens;
+  const tokensRaw = (data as Record<string, unknown>)["tokens"];
+  if (!Array.isArray(tokensRaw)) return tokens;
+
+  for (const raw of tokensRaw) {
+    if (!raw || typeof raw !== "object") continue;
+    const t = raw as Record<string, unknown>;
+
+    const name = t["name"];
+    if (typeof name !== "string" || name.length === 0) continue;
+
+    const id = t["id"];
+    if (typeof id !== "string") continue;
+
+    const tokenType = t["tokenType"];
+    if (typeof tokenType !== "string") continue;
+    // F-14: Validate tokenType against allowlist
+    if (!VALID_TOKEN_TYPES.has(tokenType)) {
+      console.warn(
+        `parseTokensResponse: skipping token "${name}" with unknown type "${tokenType}"`,
+      );
+      continue;
+    }
+
+    const rawValue = t["value"];
+    // F-08: Shape-validate token value
+    if (!isValidTokenValue(rawValue)) {
+      console.warn(`parseTokensResponse: skipping token "${name}" with invalid value shape`);
+      continue;
+    }
+
+    const description = typeof t["description"] === "string" ? t["description"] : null;
+
+    tokens[name] = {
+      id,
+      name,
+      token_type: tokenType as TokenType,
+      value: rawValue as TokenValue,
+      description,
+    };
+  }
+
+  return tokens;
 }
 
 // ── Server operation mapping ──────────────────────────────────────────
@@ -373,15 +457,87 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
         },
       };
     }
+    case "create_token": {
+      const tokenData = op.value as {
+        name: string;
+        token_type: string;
+        value: unknown;
+        description: string | null;
+        id: string;
+      };
+      return {
+        addToken: {
+          tokenUuid: tokenData.id,
+          name: tokenData.name,
+          tokenType: tokenData.token_type,
+          value: JSON.stringify(tokenData.value),
+          description: tokenData.description,
+        },
+      };
+    }
+    case "update_token": {
+      const updateData = op.value as { name: string; value: unknown; description: string | null };
+      return {
+        updateToken: {
+          name: updateData.name,
+          value: JSON.stringify(updateData.value),
+          description: updateData.description,
+        },
+      };
+    }
+    case "delete_token":
+      return {
+        removeToken: {
+          name: op.nodeUuid,
+        },
+      };
+    case "rename_token": {
+      const renameData = op.value as { old_name: string; new_name: string };
+      return {
+        renameToken: {
+          oldName: renameData.old_name,
+          newName: renameData.new_name,
+        },
+      };
+    }
   }
 }
 
 // ── Store factory ─────────────────────────────────────────────────────
 
 export function createDocumentStoreSolid(): DocumentStoreAPI {
-  // RF-010: Visible error notifications deferred until toast/notification system
-  // is implemented. console.error provides diagnostic trail per CLAUDE.md
-  // minimum requirement.
+  // F-05: announceError dispatches a custom DOM event that AnnounceProvider
+  // listens for, providing visible error notifications to screen readers.
+  // Falls back to console.error if window is not available (tests).
+  function announceError(message: string): void {
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("sigil-announce-error", { detail: { message } }));
+    }
+  }
+
+  /**
+   * RF-022: Validate MAX_EXPRESSION_LENGTH at the outbound transport boundary.
+   *
+   * Returns true and announces an error if any StyleValue<*> in `values`
+   * carries an expression longer than MAX_EXPRESSION_LENGTH. Callers should
+   * early-return when this helper returns true — the mutation is rejected.
+   *
+   * Per CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports",
+   * the store layer is a transport boundary and must match Rust-side limits
+   * (see `StyleValue::Expression` validation in `crates/core/src/types/`).
+   */
+  function rejectOversizedExpression(
+    fieldLabel: string,
+    ...values: ReadonlyArray<StyleValue<unknown> | null | undefined>
+  ): boolean {
+    for (const sv of values) {
+      if (sv && sv.type === "expression" && !isValidExpressionLength(sv.expr)) {
+        announceError(`${fieldLabel}: expression exceeds ${MAX_EXPRESSION_LENGTH} characters`);
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Client session ID for self-echo suppression (RF-004)
   const clientSessionId = crypto.randomUUID();
@@ -396,6 +552,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     info: { name: "", page_count: 0, node_count: 0, can_undo: false, can_redo: false },
     pages: [],
     nodes: {},
+    tokens: {},
   });
 
   // ── History Manager ───────────────────────────────────────────────────
@@ -532,9 +689,27 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
   }
 
+  // ── Fetch tokens ─────────────────────────────────────────────────────
+
+  async function fetchTokens(): Promise<void> {
+    try {
+      const result = await client.query(gql(TOKENS_QUERY), {}).toPromise();
+      if (result.error) {
+        console.error("fetchTokens error:", result.error.message);
+        return;
+      }
+      if (!result.data) return;
+
+      const tokens = parseTokensResponse(result.data);
+      setState("tokens", reconcile(tokens));
+    } catch (err) {
+      console.error("fetchTokens exception:", err);
+    }
+  }
+
   // Track last received sequence number for future reconnect protocol (Plan 15d)
   // @ts-expect-error -- lastSeq is written but read will be used in reconnect/gap-fill protocol
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
   let _lastSeq = 0;
 
   // ── Subscription (RF-002: capture for cleanup, RF-004: self-echo) ───
@@ -564,6 +739,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   // Initial load
   void fetchPages();
+  void fetchTokens();
 
   // ── Send operations to server ──────────────────────────────────────
 
@@ -843,19 +1019,27 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
-  function setOpacity(uuid: string, opacity: number): void {
-    if (!Number.isFinite(opacity) || opacity < 0 || opacity > 1) return;
+  function setOpacity(uuid: string, opacity: StyleValue<number>): void {
+    // Validate literal values: 0..=1 range and finite.
+    // Token refs accepted unconditionally — their runtime value is validated
+    // by the renderer at evaluation time. Expressions additionally bounded by
+    // MAX_EXPRESSION_LENGTH (RF-022).
+    if (opacity.type === "literal") {
+      const v = opacity.value;
+      if (!Number.isFinite(v) || v < 0 || v > 1) return;
+    }
+    if (rejectOversizedExpression("opacity", opacity)) return;
 
     const node = state.nodes[uuid];
     if (!node) return;
 
-    interceptor.set(uuid, "style.opacity", { type: "literal", value: opacity });
+    interceptor.set(uuid, "style.opacity", opacity);
     // RF-026: Queue server op — sent when interceptor commits (coalesced)
     pendingServerOps.push({
       setField: {
         nodeUuid: uuid,
         path: "style.opacity",
-        value: JSON.stringify({ type: "literal", value: opacity }),
+        value: JSON.stringify(opacity),
       },
     });
   }
@@ -878,6 +1062,23 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setFills(uuid: string, fills: Fill[]): void {
     const node = state.nodes[uuid];
     if (!node) return;
+
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    // Validate every StyleValue embedded in each fill: solid `color`, and
+    // gradient stop `color` for gradient variants.
+    for (const fill of fills) {
+      if (fill.type === "solid") {
+        if (rejectOversizedExpression("fill color", fill.color)) return;
+      } else if (
+        fill.type === "linear_gradient" ||
+        fill.type === "radial_gradient" ||
+        fill.type === "conic_gradient"
+      ) {
+        for (const stop of fill.gradient.stops) {
+          if (rejectOversizedExpression("gradient stop color", stop.color)) return;
+        }
+      }
+    }
 
     let clonedFills: Fill[];
     try {
@@ -902,6 +1103,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const node = state.nodes[uuid];
     if (!node) return;
 
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    for (const stroke of strokes) {
+      if (rejectOversizedExpression("stroke color/width", stroke.color, stroke.width)) return;
+    }
+
     let clonedStrokes: Stroke[];
     try {
       clonedStrokes = deepClone(strokes);
@@ -924,6 +1130,24 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setEffects(uuid: string, effects: Effect[]): void {
     const node = state.nodes[uuid];
     if (!node) return;
+
+    // RF-022: Reject oversized expression strings at the transport boundary.
+    for (const effect of effects) {
+      if (effect.type === "drop_shadow" || effect.type === "inner_shadow") {
+        if (
+          rejectOversizedExpression(
+            "shadow color/blur/spread",
+            effect.color,
+            effect.blur,
+            effect.spread,
+          )
+        ) {
+          return;
+        }
+      } else if (effect.type === "layer_blur" || effect.type === "background_blur") {
+        if (rejectOversizedExpression("blur radius", effect.radius)) return;
+      }
+    }
 
     let clonedEffects: Effect[];
     try {
@@ -1041,6 +1265,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function setTextStyle(uuid: string, patch: TextStylePatch): void {
     const node = state.nodes[uuid];
     if (!node || node.kind.type !== "text") return;
+
+    // RF-022: Reject oversized expression strings at the transport boundary
+    // for the StyleValue-typed text style fields.
+    if (
+      patch.field === "font_size" ||
+      patch.field === "line_height" ||
+      patch.field === "letter_spacing" ||
+      patch.field === "text_color"
+    ) {
+      if (rejectOversizedExpression(`text ${patch.field}`, patch.value)) return;
+    }
 
     // RF-023: Wrap deepClone in try-catch — Solid proxy cloning may fail.
     let previousKind: typeof node.kind;
@@ -1391,6 +1626,405 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       setSelectedNodeIds(allChildUuids);
     }
     syncHistorySignals();
+  }
+
+  // ── Token Mutations ─────────────────────────────────────────────────
+
+  function createToken(
+    name: string,
+    tokenType: TokenType,
+    value: TokenValue,
+    description?: string,
+  ): void {
+    // F-01: Validate name against core's rules
+    const nameError = validateTokenName(name);
+    if (nameError !== null) {
+      announceError(`createToken: ${nameError}`);
+      return;
+    }
+
+    // Validate description length if provided
+    if (description !== undefined && description.length > MAX_TOKEN_DESCRIPTION_LENGTH) {
+      announceError(
+        `createToken: description length ${description.length} exceeds max ${MAX_TOKEN_DESCRIPTION_LENGTH}`,
+      );
+      return;
+    }
+
+    // Validate token count limit
+    if (Object.keys(state.tokens).length >= MAX_TOKENS_PER_CONTEXT) {
+      announceError(
+        `createToken: document already has ${Object.keys(state.tokens).length} tokens (max ${MAX_TOKENS_PER_CONTEXT})`,
+      );
+      return;
+    }
+
+    // Reject duplicate name
+    if (state.tokens[name] !== undefined) {
+      announceError(`createToken: token with name "${name}" already exists`);
+      return;
+    }
+
+    const tokenUuid = crypto.randomUUID();
+    const newToken: Token = {
+      id: tokenUuid,
+      name,
+      token_type: tokenType,
+      value,
+      description: description ?? null,
+    };
+
+    // Apply optimistically (no full snapshot needed — surgical rollback deletes the new key)
+    setState(
+      produce((s) => {
+        s.tokens[name] = newToken;
+      }),
+    );
+
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createCreateTokenOp(clientSessionId, {
+        name,
+        token_type: tokenType,
+        value,
+        description: description ?? null,
+        id: tokenUuid,
+      }),
+    );
+    syncHistorySignals();
+
+    // Send to server
+    client
+      .mutation(gql(APPLY_OPERATIONS_MUTATION), {
+        operations: [
+          {
+            addToken: {
+              tokenUuid,
+              name,
+              tokenType: tokenType,
+              value: JSON.stringify(value),
+              description: description ?? null,
+            },
+          },
+        ],
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("createToken server error:", r.error.message);
+          // F-05: Announce error to screen reader
+          announceError(`Failed to create token "${name}": ${r.error.message}`);
+          // Surgical rollback: remove only the optimistically-added key
+          setState(
+            produce((s) => {
+              Reflect.deleteProperty(s.tokens, name);
+            }),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("createToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to create token "${name}"`);
+        // Surgical rollback: remove only the optimistically-added key
+        setState(
+          produce((s) => {
+            Reflect.deleteProperty(s.tokens, name);
+          }),
+        );
+      });
+  }
+
+  function updateToken(name: string, value: TokenValue, description?: string): void {
+    // Validate the token exists
+    const existingToken = state.tokens[name];
+    if (existingToken === undefined) {
+      console.error(`updateToken: token "${name}" not found`);
+      return;
+    }
+
+    // Validate description length if provided
+    if (description !== undefined && description.length > MAX_TOKEN_DESCRIPTION_LENGTH) {
+      console.error(
+        `updateToken: description length ${description.length} exceeds max ${MAX_TOKEN_DESCRIPTION_LENGTH}`,
+      );
+      return;
+    }
+
+    // Capture before-value for undo BEFORE mutation (CLAUDE.md: capture snapshots before mutations)
+    // JSON clone: Solid proxy not structuredClone-safe
+    let previousValue: { value: TokenValue; description: string | null };
+    let tokenSnapshot: Token;
+    try {
+      previousValue = JSON.parse(
+        JSON.stringify({ value: existingToken.value, description: existingToken.description }),
+      ) as { value: TokenValue; description: string | null };
+      // Snapshot only the single token for surgical rollback
+      // JSON clone: Solid proxy not structuredClone-safe
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
+    } catch (err: unknown) {
+      console.error("updateToken: failed to snapshot token", err);
+      return;
+    }
+
+    const newDescription =
+      description !== undefined ? (description ?? null) : previousValue.description;
+
+    // Apply optimistically
+    setState(
+      produce((s) => {
+        const existing = s.tokens[name];
+        if (existing) {
+          s.tokens[name] = {
+            ...existing,
+            value,
+            description: newDescription,
+          };
+        }
+      }),
+    );
+
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createUpdateTokenOp(
+        clientSessionId,
+        name,
+        { name, value, description: newDescription },
+        { name, value: previousValue.value, description: previousValue.description },
+      ),
+    );
+    syncHistorySignals();
+
+    // Send to server
+    client
+      .mutation(gql(APPLY_OPERATIONS_MUTATION), {
+        operations: [
+          {
+            updateToken: {
+              name,
+              value: JSON.stringify(value),
+              description: newDescription,
+            },
+          },
+        ],
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("updateToken server error:", r.error.message);
+          // F-05: Announce error
+          announceError(`Failed to update token "${name}": ${r.error.message}`);
+          // Surgical rollback: restore only the single token
+          setState(
+            produce((s) => {
+              s.tokens[name] = tokenSnapshot;
+            }),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("updateToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to update token "${name}"`);
+        // Surgical rollback: restore only the single token
+        setState(
+          produce((s) => {
+            s.tokens[name] = tokenSnapshot;
+          }),
+        );
+      });
+  }
+
+  function deleteToken(name: string): void {
+    // Validate the token exists
+    const existingToken = state.tokens[name];
+    if (existingToken === undefined) {
+      console.error(`deleteToken: token "${name}" not found`);
+      return;
+    }
+
+    // Snapshot only the single token for rollback and undo (capture BEFORE mutation per CLAUDE.md)
+    // JSON clone: Solid proxy not structuredClone-safe
+    let tokenSnapshot: Token;
+    try {
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
+    } catch (err: unknown) {
+      console.error("deleteToken: failed to snapshot token", err);
+      return;
+    }
+
+    // Apply optimistically
+    setState(
+      produce((s) => {
+        Reflect.deleteProperty(s.tokens, name);
+      }),
+    );
+
+    // F-03: Track for undo/redo
+    interceptor.trackStructural(
+      createDeleteTokenOp(clientSessionId, {
+        name: tokenSnapshot.name,
+        token_type: tokenSnapshot.token_type,
+        value: tokenSnapshot.value,
+        description: tokenSnapshot.description,
+        id: tokenSnapshot.id,
+      }),
+    );
+    syncHistorySignals();
+
+    // Send to server
+    client
+      .mutation(gql(APPLY_OPERATIONS_MUTATION), {
+        operations: [{ removeToken: { name } }],
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("deleteToken server error:", r.error.message);
+          // F-05: Announce error
+          announceError(`Failed to delete token "${name}": ${r.error.message}`);
+          // Surgical rollback: re-insert only the deleted token
+          setState(
+            produce((s) => {
+              s.tokens[name] = tokenSnapshot;
+            }),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("deleteToken exception:", err);
+        // F-05: Announce error
+        announceError(`Failed to delete token "${name}"`);
+        // Surgical rollback: re-insert only the deleted token
+        setState(
+          produce((s) => {
+            s.tokens[name] = tokenSnapshot;
+          }),
+        );
+      });
+  }
+
+  function renameToken(oldName: string, newName: string): void {
+    // No-op if names are the same
+    if (oldName === newName) {
+      return;
+    }
+
+    // Validate new name
+    const nameError = validateTokenName(newName);
+    if (nameError !== null) {
+      announceError(`renameToken: ${nameError}`);
+      return;
+    }
+
+    // Validate source token exists
+    const existingToken = state.tokens[oldName];
+    if (existingToken === undefined) {
+      announceError(`renameToken: token "${oldName}" not found`);
+      return;
+    }
+
+    // Reject if new name is already taken
+    if (state.tokens[newName] !== undefined) {
+      announceError(`renameToken: token "${newName}" already exists`);
+      return;
+    }
+
+    // Capture snapshot BEFORE mutation (CLAUDE.md: capture snapshots before mutations)
+    // JSON clone: Solid proxy not structuredClone-safe
+    let tokenSnapshot: Token;
+    try {
+      tokenSnapshot = JSON.parse(JSON.stringify(existingToken)) as Token;
+    } catch (err: unknown) {
+      console.error("renameToken: failed to snapshot token", err);
+      return;
+    }
+
+    // Apply optimistically: move token to new key
+    setState(
+      produce((s) => {
+        const token = s.tokens[oldName];
+        if (token) {
+          s.tokens[newName] = { ...token, name: newName };
+          Reflect.deleteProperty(s.tokens, oldName);
+        }
+      }),
+    );
+
+    // Track for undo/redo: forward = old→new, inverse = new→old
+    interceptor.trackStructural(
+      createRenameTokenOp(
+        clientSessionId,
+        {
+          old_name: oldName,
+          new_name: newName,
+          token_type: tokenSnapshot.token_type,
+          value: tokenSnapshot.value,
+          description: tokenSnapshot.description,
+          id: tokenSnapshot.id,
+        },
+        {
+          old_name: newName,
+          new_name: oldName,
+          token_type: tokenSnapshot.token_type,
+          value: tokenSnapshot.value,
+          description: tokenSnapshot.description,
+          id: tokenSnapshot.id,
+        },
+      ),
+    );
+    syncHistorySignals();
+
+    // Send to server
+    client
+      .mutation(gql(APPLY_OPERATIONS_MUTATION), {
+        operations: [{ renameToken: { oldName, newName } }],
+        userId: clientSessionId,
+      })
+      .toPromise()
+      .then((r) => {
+        if (r.error) {
+          console.error("renameToken server error:", r.error.message);
+          announceError(`Failed to rename token "${oldName}": ${r.error.message}`);
+          // Surgical rollback: move back to old name
+          setState(
+            produce((s) => {
+              const token = s.tokens[newName];
+              if (token) {
+                s.tokens[oldName] = { ...token, name: oldName };
+                Reflect.deleteProperty(s.tokens, newName);
+              } else {
+                // Fallback: restore from snapshot
+                s.tokens[oldName] = tokenSnapshot;
+              }
+            }),
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        console.error("renameToken exception:", err);
+        announceError(`Failed to rename token "${oldName}"`);
+        // Surgical rollback: move back to old name
+        setState(
+          produce((s) => {
+            const token = s.tokens[newName];
+            if (token) {
+              s.tokens[oldName] = { ...token, name: oldName };
+              Reflect.deleteProperty(s.tokens, newName);
+            } else {
+              // Fallback: restore from snapshot
+              s.tokens[oldName] = tokenSnapshot;
+            }
+          }),
+        );
+      });
+  }
+
+  function resolveTokenLocal(name: string): TokenValue | null {
+    return resolveTokenPure(state.tokens, name);
   }
 
   // ── Page Mutations ──────────────────────────────────────────────────
@@ -1756,6 +2390,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     undo,
     redo,
     flushHistory,
+    createToken,
+    updateToken,
+    deleteToken,
+    renameToken,
+    resolveToken: resolveTokenLocal,
     createPage,
     deletePage,
     renamePage,

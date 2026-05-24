@@ -10,7 +10,7 @@
 
 use agent_designer_core::{
     FieldOperation, Token, TokenId, TokenType, TokenValue,
-    commands::token_commands::{AddToken, RemoveToken, UpdateToken},
+    commands::token_commands::{AddToken, RemoveToken, RenameToken, UpdateToken},
 };
 use agent_designer_state::{AppState, MutationEventKind};
 
@@ -235,6 +235,45 @@ pub fn delete_token_impl(
     })
 }
 
+/// Atomically renames a token from `old_name` to `new_name`.
+///
+/// Preserves the token's ID, value, type, and description.
+///
+/// # Errors
+///
+/// - `McpToolError::TokenNotFound` if no token with `old_name` exists.
+/// - `McpToolError::CoreError` if the new name is invalid or already taken.
+pub fn rename_token_impl(
+    state: &AppState,
+    old_name: &str,
+    new_name: &str,
+) -> Result<MutationResult, McpToolError> {
+    {
+        let mut doc = acquire_document_lock(state);
+        let cmd = RenameToken {
+            old_name: old_name.to_string(),
+            new_name: new_name.to_string(),
+        };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
+    }
+
+    super::broadcast::broadcast_token_and_persist(
+        state,
+        MutationEventKind::TokenUpdated,
+        old_name,
+        "rename_token",
+        Some(serde_json::json!({
+            "old_name": old_name,
+            "new_name": new_name,
+        })),
+    );
+    Ok(MutationResult {
+        success: true,
+        message: format!("Token '{old_name}' renamed to '{new_name}'"),
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -319,6 +358,39 @@ mod tests {
             ),
             "expected CoreError(TokenNotFound), got: {err}"
         );
+    }
+
+    #[test]
+    fn test_rename_token() {
+        let state = AppState::new();
+        let input = make_number_input("spacing.md", 16.0);
+        create_token_impl(&state, &input).expect("create token");
+
+        let result =
+            rename_token_impl(&state, "spacing.md", "spacing.medium").expect("rename token");
+        assert!(result.success);
+
+        // Old name should be gone
+        let tokens = list_tokens_impl(&state).expect("list");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0].name, "spacing.medium");
+    }
+
+    #[test]
+    fn test_rename_nonexistent_token_returns_error() {
+        let state = AppState::new();
+        let result = rename_token_impl(&state, "does.not.exist", "new.name");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rename_token_to_existing_name_returns_error() {
+        let state = AppState::new();
+        create_token_impl(&state, &make_number_input("a.token", 1.0)).expect("create a");
+        create_token_impl(&state, &make_number_input("b.token", 2.0)).expect("create b");
+
+        let result = rename_token_impl(&state, "a.token", "b.token");
+        assert!(result.is_err(), "should reject duplicate name");
     }
 
     #[test]

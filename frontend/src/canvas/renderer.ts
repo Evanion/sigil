@@ -10,13 +10,16 @@
  */
 
 import type {
+  BlendMode,
   ColorSrgb,
   ConicGradientDef,
   DocumentNode,
   Fill,
   GradientDef,
+  Token,
   Transform,
 } from "../types/document";
+import { resolveStyleValueColor, resolveStyleValueNumber } from "../store/token-store";
 import type { PreviewRect } from "../tools/shape-tool";
 import type { PreviewTransform } from "../tools/select-tool";
 import type { MarqueeRect } from "../tools/select-tool";
@@ -28,6 +31,30 @@ import { resolveStopColorCSS } from "../components/gradient-editor/gradient-util
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
+
+/**
+ * RF-024: Clamp a resolved opacity value to the rendering-safe range [0, 1].
+ *
+ * Literal opacity values are validated at the frontend store + Rust boundaries
+ * (see `validate_opacity` in crates/core/src/validate.rs). Token refs and
+ * expressions, by contrast, defer type-checking to evaluation time — an
+ * expression like `2 * {spacing.md}` might resolve to a value outside [0, 1],
+ * and the evaluator is not opacity-aware. This helper performs the final
+ * rendering-boundary clamp so an out-of-range evaluated result produces
+ * visually-sensible output (fully transparent or fully opaque) rather than
+ * an ignored `globalAlpha` assignment.
+ *
+ * Kept at the opacity-specific call site (NOT inside `resolveStyleValueNumber`,
+ * which is generic for all number fields — see Spec 13c §5 Consistency
+ * Guarantees). A non-finite input also returns 1 (fully opaque) so the
+ * rendered artifact is visible for debugging.
+ */
+export function clampOpacity(value: number): number {
+  if (!Number.isFinite(value)) return 1;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
 
 /** Selection highlight color. */
 const SELECTION_COLOR = "#0d99ff";
@@ -81,13 +108,17 @@ function srgbColorToRgba(c: ColorSrgb): string | null {
  * Stop positions are clamped to [0, 1] since Canvas gradient stops require this range.
  * This is an explicit user-facing affordance (Canvas API constraint), not silent clamping.
  */
-function addGradientStops(grad: CanvasGradient, gradient: GradientDef | ConicGradientDef): void {
+function addGradientStops(
+  grad: CanvasGradient,
+  gradient: GradientDef | ConicGradientDef,
+  tokens: Record<string, Token>,
+): void {
   for (const stop of gradient.stops) {
     if (!Number.isFinite(stop.position)) {
       continue;
     }
     const pos = Math.max(0, Math.min(1, stop.position));
-    grad.addColorStop(pos, resolveStopColorCSS(stop.color));
+    grad.addColorStop(pos, resolveStopColorCSS(stop.color, tokens));
   }
 }
 
@@ -111,13 +142,14 @@ function createLinearGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const sx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x;
   const sy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y;
   const ex = Number.isFinite(gradient.end.x) ? x + gradient.end.x * width : x + width;
   const ey = Number.isFinite(gradient.end.y) ? y + gradient.end.y * height : y + height;
   const grad = ctx.createLinearGradient(sx, sy, ex, ey);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -138,6 +170,7 @@ function createRadialGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const cx = Number.isFinite(gradient.start.x) ? x + gradient.start.x * width : x + width / 2;
   const cy = Number.isFinite(gradient.start.y) ? y + gradient.start.y * height : y + height / 2;
@@ -150,7 +183,7 @@ function createRadialGradientFill(
   // dx*dx + dy*dy is always >= 0, so Math.sqrt is safe here
   const r = Math.max(Math.sqrt(dx * dx + dy * dy), 0.001);
   const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -168,6 +201,7 @@ function createConicGradientFill(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): CanvasGradient {
   const cx = Number.isFinite(gradient.center.x) ? x + gradient.center.x * width : x + width / 2;
   const cy = Number.isFinite(gradient.center.y) ? y + gradient.center.y * height : y + height / 2;
@@ -175,7 +209,7 @@ function createConicGradientFill(
   // Math.PI / 180 is a constant multiplication — no domain guard needed.
   const angle = Number.isFinite(gradient.start_angle) ? (gradient.start_angle * Math.PI) / 180 : 0;
   const grad = ctx.createConicGradient(angle, cx, cy);
-  addGradientStops(grad, gradient);
+  addGradientStops(grad, gradient, tokens);
   return grad;
 }
 
@@ -192,20 +226,24 @@ function resolveFillStyle(
   y: number,
   width: number,
   height: number,
+  tokens: Record<string, Token>,
 ): string | CanvasGradient | null {
   switch (fill.type) {
     case "solid": {
-      if (fill.color.type === "literal" && fill.color.value.space === "srgb") {
-        return srgbColorToRgba(fill.color.value) ?? DEFAULT_FILL;
+      // Resolve token refs via the token store, falling back to DEFAULT_FILL
+      const defaultColor = { space: "srgb" as const, r: 0.878, g: 0.878, b: 0.878, a: 1 };
+      const resolved = resolveStyleValueColor(fill.color, tokens, defaultColor);
+      if (resolved.space === "srgb") {
+        return srgbColorToRgba(resolved) ?? DEFAULT_FILL;
       }
       return DEFAULT_FILL;
     }
     case "linear_gradient":
-      return createLinearGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createLinearGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "radial_gradient":
-      return createRadialGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createRadialGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "conic_gradient":
-      return createConicGradientFill(ctx, fill.gradient, x, y, width, height);
+      return createConicGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
     case "image":
       // Image fills are deferred to a later plan.
       return null;
@@ -224,13 +262,107 @@ function getEffectiveTransform(
 }
 
 /**
+ * Resolve the first stroke's color and width from a node's style.
+ * Returns null if no stroke with a valid literal color and positive finite width
+ * is found.
+ *
+ * RF-001: `Stroke` has no `type` discriminant — every entry is a solid stroke.
+ * RF-007: Stroke alignment (inside/outside/center) is not yet supported —
+ *         all strokes render as centered (canvas default). Deferred to WebGL.
+ * RF-008: Uses the shared `srgbColorToRgba` helper for channel validation and
+ *         CSS construction, avoiding duplication with fill resolution.
+ */
+function resolveStroke(node: DocumentNode): {
+  color: string;
+  width: number;
+} | null {
+  for (const stroke of node.style.strokes) {
+    const colorValue = stroke.color;
+    if (colorValue.type !== "literal") continue;
+    const resolved = colorValue.value;
+    if (resolved.space !== "srgb") continue;
+    const rgba = srgbColorToRgba(resolved);
+    if (rgba === null) continue;
+    const w = stroke.width.type === "literal" ? stroke.width.value : 1;
+    if (!Number.isFinite(w) || w <= 0) continue;
+    return { color: rgba, width: w };
+  }
+  return null;
+}
+
+/**
+ * RF-002 / RF-006: Map a `BlendMode` to the canvas `globalCompositeOperation`.
+ *
+ * Typed as `BlendMode` for exhaustiveness checking — every variant added to the
+ * BlendMode union must be handled here at compile time. Multi-word modes use
+ * underscores in the BlendMode union but hyphens in the canvas API.
+ */
+function blendModeToComposite(mode: BlendMode): GlobalCompositeOperation {
+  switch (mode) {
+    case "normal":
+      return "source-over";
+    case "multiply":
+      return "multiply";
+    case "screen":
+      return "screen";
+    case "overlay":
+      return "overlay";
+    case "darken":
+      return "darken";
+    case "lighten":
+      return "lighten";
+    case "color_dodge":
+      return "color-dodge";
+    case "color_burn":
+      return "color-burn";
+    case "hard_light":
+      return "hard-light";
+    case "soft_light":
+      return "soft-light";
+    case "difference":
+      return "difference";
+    case "exclusion":
+      return "exclusion";
+    case "hue":
+      return "hue";
+    case "saturation":
+      return "saturation";
+    case "color":
+      return "color";
+    case "luminosity":
+      return "luminosity";
+  }
+}
+
+/**
  * Draw a single node onto the canvas context.
  *
  * Assumes the viewport transform is already applied to the context.
  */
-function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: Transform): void {
+function drawNode(
+  ctx: CanvasRenderingContext2D,
+  node: DocumentNode,
+  transform: Transform,
+  tokens: Record<string, Token>,
+): void {
   const { x, y, width, height } = transform;
 
+  // Save context state so opacity/blend mode don't leak to other nodes.
+  // RF-024: clampOpacity + the save/restore pair are the rendering-boundary
+  // safety net for token-ref and expression opacity values.
+  ctx.save();
+
+  // Apply opacity — resolve token refs/expressions via the token store, then
+  // clamp to [0, 1] at the rendering boundary (RF-024). clampOpacity returns
+  // 1 for non-finite values so the artifact remains visible for debugging.
+  const resolvedOpacity = resolveStyleValueNumber(node.style.opacity, tokens, 1);
+  ctx.globalAlpha = clampOpacity(resolvedOpacity);
+
+  // Apply blend mode. blendModeToComposite is exhaustive over BlendMode, so
+  // every variant added to the type triggers a compile error here.
+  ctx.globalCompositeOperation = blendModeToComposite(node.style.blend_mode);
+
+  // Draw fill
   switch (node.kind.type) {
     case "frame":
     case "rectangle":
@@ -244,7 +376,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       } else {
         // Draw the shape once per fill (bottom-to-top = array order)
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.fillRect(x, y, width, height);
@@ -261,7 +393,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
         ctx.fill();
       } else {
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.beginPath();
@@ -277,28 +409,20 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       const fontStr = buildFontString(ts);
       ctx.font = fontStr;
 
-      // Text color comes from text_style.text_color, not from the node fill.
-      // Only sRGB literals are resolved here; token_refs and non-sRGB spaces
-      // fall back to opaque black matching Figma's default text colour.
+      // Text color: resolve token refs, falling back to opaque black.
+      const defaultTextColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
+      const resolvedTextColor = resolveStyleValueColor(ts.text_color, tokens, defaultTextColor);
       let textColor = "#000000";
-      if (ts.text_color.type === "literal" && ts.text_color.value.space === "srgb") {
-        textColor = srgbColorToRgba(ts.text_color.value) ?? "#000000";
+      if (resolvedTextColor.space === "srgb") {
+        textColor = srgbColorToRgba(resolvedTextColor) ?? "#000000";
       }
       ctx.fillStyle = textColor;
       ctx.textBaseline = "alphabetic";
 
-      // Resolve line height as an absolute pixel value.
-      // The spec stores line_height as a multiplier (e.g. 1.5 means 150% of fontSize).
-      // Guard with Number.isFinite per CLAUDE.md Floating-Point Validation.
-      // RF-031: Use shared constant instead of hardcoded 16.
-      const fontSize =
-        ts.font_size.type === "literal" && Number.isFinite(ts.font_size.value)
-          ? ts.font_size.value
-          : DEFAULT_FONT_SIZE_PX;
-      const lineHeightMultiplier =
-        ts.line_height.type === "literal" && Number.isFinite(ts.line_height.value)
-          ? ts.line_height.value
-          : 1.5;
+      // Resolve font size via token store, falling back to default.
+      const fontSize = resolveStyleValueNumber(ts.font_size, tokens, DEFAULT_FONT_SIZE_PX);
+      // Resolve line height multiplier via token store, falling back to 1.5.
+      const lineHeightMultiplier = resolveStyleValueNumber(ts.line_height, tokens, 1.5);
       const lh = lineHeightMultiplier * fontSize;
 
       const measurement = measureTextLines(
@@ -312,9 +436,15 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
 
       // Apply text shadow if present
       if (ts.text_shadow) {
+        const defaultShadowColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 0.3 };
+        const resolvedShadowColor = resolveStyleValueColor(
+          ts.text_shadow.color,
+          tokens,
+          defaultShadowColor,
+        );
         const shadowColor =
-          ts.text_shadow.color.type === "literal" && ts.text_shadow.color.value.space === "srgb"
-            ? (srgbColorToRgba(ts.text_shadow.color.value) ?? "rgba(0,0,0,0.3)")
+          resolvedShadowColor.space === "srgb"
+            ? (srgbColorToRgba(resolvedShadowColor) ?? "rgba(0,0,0,0.3)")
             : "rgba(0,0,0,0.3)";
         if (
           Number.isFinite(ts.text_shadow.offset_x) &&
@@ -378,7 +508,7 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
         ctx.fillRect(x, y, width, height);
       } else {
         for (const fill of node.style.fills) {
-          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height);
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
             ctx.fillRect(x, y, width, height);
@@ -388,6 +518,34 @@ function drawNode(ctx: CanvasRenderingContext2D, node: DocumentNode, transform: 
       break;
     }
   }
+
+  // Draw stroke (after fill, so stroke renders on top). resolveStroke already
+  // guards against non-finite / non-positive widths; the outer check here is
+  // redundant but documents the invariant at the call site.
+  const stroke = resolveStroke(node);
+  if (stroke && Number.isFinite(stroke.width) && stroke.width > 0) {
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = stroke.width;
+    // RF-007: stroke alignment / cap / join are deferred to the WebGL renderer.
+    // Canvas defaults (butt cap, miter join, centered alignment) are used.
+    ctx.lineCap = "butt";
+    ctx.lineJoin = "miter";
+    switch (node.kind.type) {
+      case "ellipse": {
+        ctx.beginPath();
+        ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      default: {
+        ctx.strokeRect(x, y, width, height);
+        break;
+      }
+    }
+  }
+
+  // Restore context state (resets globalAlpha, globalCompositeOperation)
+  ctx.restore();
 }
 
 /**
@@ -632,6 +790,7 @@ export function render(
   previewTransforms: readonly PreviewTransform[] = [],
   snapGuides: readonly SnapGuide[] = [],
   marqueeRect: MarqueeRect | null = null,
+  tokens: Record<string, Token> = {},
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -660,7 +819,7 @@ export function render(
       continue;
     }
     const effectiveTransform = getEffectiveTransform(node, previewMap);
-    drawNode(ctx, node, effectiveTransform);
+    drawNode(ctx, node, effectiveTransform, tokens);
   }
 
   // RF-006: selectedUuids is already a Set — no per-frame allocation needed.

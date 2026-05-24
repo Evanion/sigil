@@ -132,6 +132,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -158,6 +159,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "frame-1": makeFrameNode("frame-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -195,6 +197,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -222,6 +225,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -244,6 +248,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -267,6 +272,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -293,6 +299,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -319,6 +326,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -352,6 +360,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -389,6 +398,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -423,6 +433,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -459,6 +470,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -493,6 +505,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -527,6 +540,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -563,6 +577,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -597,6 +612,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -631,6 +647,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -690,13 +707,12 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "ellipse-1": ellipseNode },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         applyRemoteTransaction(
-          makeTx([
-            makeKindOp("ellipse-1", { type: "ellipse", arc_start: 45, arc_end: 270 }),
-          ]),
+          makeTx([makeKindOp("ellipse-1", { type: "ellipse", arc_start: 45, arc_end: 270 })]),
           LOCAL_USER,
           setState,
           (uuid) => state.nodes[uuid],
@@ -722,6 +738,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -757,6 +774,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -793,6 +811,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -827,6 +846,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -861,6 +881,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -898,6 +919,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -934,6 +956,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -968,6 +991,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1005,6 +1029,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1040,6 +1065,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1076,6 +1102,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1100,6 +1127,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1124,6 +1152,7 @@ describe("apply-remote corners handler (path='kind')", () => {
         const [state, setState] = createStore<StoreState>({
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
+          tokens: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1163,6 +1192,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           const [state, setState] = createStore<StoreState>({
             nodes: { "node-1": makeNode("node-1") },
             pages: [],
+            tokens: {},
           });
           const fetchPages = vi.fn().mockResolvedValue(undefined);
           applyRemoteTransaction(

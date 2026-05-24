@@ -82,7 +82,7 @@ const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> 
   },
   {
     prefix: "constraints.",
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- value will be used when setConstraints is wired
+
     handler: (_store, _uuid, key, _value) => {
       const field = key.slice("constraints.".length);
       if (field !== "horizontal" && field !== "vertical") return;

@@ -321,7 +321,11 @@ describe("createShapeTool", () => {
       tool.onPointerUp(makeEvent(100, 100));
 
       expect(store.createNodeCalls).toHaveLength(1);
-      expect(store.createNodeCalls[0].kind).toEqual({ type: "frame", layout: null, corners: DEFAULT_CORNERS });
+      expect(store.createNodeCalls[0].kind).toEqual({
+        type: "frame",
+        layout: null,
+        corners: DEFAULT_CORNERS,
+      });
       expect(store.createNodeCalls[0].name).toBe("Frame 1");
     });
 

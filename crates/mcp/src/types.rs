@@ -315,6 +315,15 @@ pub struct DeleteTokenInput {
     pub name: String,
 }
 
+/// Input for atomically renaming a design token.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RenameTokenInput {
+    /// Current name of the token to rename (e.g. "color.primary").
+    pub old_name: String,
+    /// Desired new name for the token (e.g. "color.brand").
+    pub new_name: String,
+}
+
 /// Input for setting a node's opacity.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct SetOpacityInput {
@@ -448,7 +457,7 @@ pub struct PartialTextStyle {
     pub text_shadow: Option<Option<TextShadowInput>>,
 }
 
-/// A style value that is either a literal or a token reference.
+/// A style value that is a literal, a token reference, or an expression.
 ///
 /// Mirrors the core `StyleValue<T>` enum with `JsonSchema` support.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -463,6 +472,14 @@ pub enum StyleValueInput<T> {
     TokenRef {
         /// Token name.
         name: String,
+    },
+    /// A token expression string evaluated at render time.
+    ///
+    /// The expression follows the same grammar as Spec 13d token expressions
+    /// (e.g., `"{spacing.md} * 2"`, `"darken({color.bg}, 10%)"`).
+    Expression {
+        /// The raw expression string.
+        expr: String,
     },
 }
 

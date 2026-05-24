@@ -117,7 +117,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       20,
@@ -129,14 +132,12 @@ describe("handleCornersFieldChange", () => {
 
   it("should call setCorners with uniform scalar when all 4 corners are equal round at non-zero", () => {
     const store = makeStore();
-    const node = makeRectNode([
-      roundCorner(10),
-      roundCorner(10),
-      roundCorner(10),
-      roundCorner(10),
-    ]);
+    const node = makeRectNode([roundCorner(10), roundCorner(10), roundCorner(10), roundCorner(10)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.2.radii.x",
       15,
@@ -154,7 +155,10 @@ describe("handleCornersFieldChange", () => {
     // All 4 currently at 5 — write 5 to index 0 → still all 5 → uniform
     const node = makeRectNode([roundCorner(5), roundCorner(5), roundCorner(5), roundCorner(5)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       5,
@@ -167,14 +171,12 @@ describe("handleCornersFieldChange", () => {
 
   it("should call setCorners with per-corner array when corners are unequal", () => {
     const store = makeStore();
-    const node = makeRectNode([
-      roundCorner(0),
-      roundCorner(10),
-      roundCorner(0),
-      roundCorner(0),
-    ]);
+    const node = makeRectNode([roundCorner(0), roundCorner(10), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       20,
@@ -193,14 +195,12 @@ describe("handleCornersFieldChange", () => {
   it("should preserve existing corner type when updating radii", () => {
     const bevelCorner: Corner = { type: "bevel", radii: { x: 5, y: 5 } };
     const store = makeStore();
-    const node = makeRectNode([
-      bevelCorner,
-      roundCorner(0),
-      roundCorner(0),
-      roundCorner(0),
-    ]);
+    const node = makeRectNode([bevelCorner, roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       12,
@@ -220,7 +220,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([supCorner, supCorner, supCorner, supCorner]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       16,
@@ -239,7 +242,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([supCorner, supCorner, supCorner, supCorner]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.2.radii.x",
       10,
@@ -255,7 +261,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       NaN,
@@ -268,7 +277,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       Infinity,
@@ -281,7 +293,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       -1,
@@ -294,7 +309,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       "not-a-number",
@@ -309,7 +327,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeFrameNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-frame",
       "kind.corners.0.radii.x",
       8,
@@ -322,7 +343,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeImageNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-image",
       "kind.corners.0.radii.x",
       4,
@@ -340,14 +364,12 @@ describe("handleCornersFieldChange", () => {
     // (not the uniform-scalar shorthand).
     const ellipticalCorner: Corner = { type: "round", radii: { x: 8, y: 4 } };
     const store = makeStore();
-    const node = makeRectNode([
-      ellipticalCorner,
-      roundCorner(0),
-      roundCorner(0),
-      roundCorner(0),
-    ]);
+    const node = makeRectNode([ellipticalCorner, roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       10,
@@ -368,14 +390,12 @@ describe("handleCornersFieldChange", () => {
     // does not regress when the schema grows.
     const ellipticalCorner: Corner = { type: "round", radii: { x: 7, y: 3 } };
     const store = makeStore();
-    const node = makeRectNode([
-      ellipticalCorner,
-      roundCorner(0),
-      roundCorner(0),
-      roundCorner(0),
-    ]);
+    const node = makeRectNode([ellipticalCorner, roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.y",
       9,
@@ -393,14 +413,12 @@ describe("handleCornersFieldChange", () => {
     // (Bevel/Notch/Scoop also carry CornerRadii per spec §7).
     const bevelEllip: Corner = { type: "bevel", radii: { x: 12, y: 6 } };
     const store = makeStore();
-    const node = makeRectNode([
-      bevelEllip,
-      roundCorner(0),
-      roundCorner(0),
-      roundCorner(0),
-    ]);
+    const node = makeRectNode([bevelEllip, roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.x",
       14,
@@ -417,7 +435,10 @@ describe("handleCornersFieldChange", () => {
     const store = makeStore();
     const node = makeRectNode([roundCorner(0), roundCorner(0), roundCorner(0), roundCorner(0)]);
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-rect",
       "kind.corners.0.radii.z",
       10,
@@ -451,7 +472,10 @@ describe("handleCornersFieldChange", () => {
       locked: false,
     } as unknown as DocumentNode;
     handleCornersFieldChange(
-      store as unknown as Pick<import("../../store/document-store-solid").DocumentStoreAPI, "setCorners">,
+      store as unknown as Pick<
+        import("../../store/document-store-solid").DocumentStoreAPI,
+        "setCorners"
+      >,
       "uuid-ellipse",
       "kind.corners.0.radii.x",
       10,

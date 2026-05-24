@@ -128,7 +128,9 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  width: 240px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* REQUIREMENT: any transition added here MUST include a prefers-reduced-motion override — CLAUDE.md §11 */

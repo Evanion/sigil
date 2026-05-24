@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { EffectCard } from "../EffectCard";
 import type { EffectDropShadow, EffectLayerBlur } from "../../types/document";
@@ -25,6 +25,17 @@ const dropShadowBlur12: EffectDropShadow = {
 };
 
 describe("EffectCard", () => {
+  // jsdom does not implement the native popover API — stub the methods so
+  // ValueInput's Popover component does not throw on mount.
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -82,50 +93,53 @@ describe("EffectCard", () => {
     expect(onRemove).toHaveBeenCalledWith(2);
   });
 
-  it("should render four NumberInputs for drop_shadow effects (color, X, Y, blur, spread)", () => {
+  it("should render four ValueInputs for drop_shadow effects (X, Y, blur, spread)", () => {
     render(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
-    // drop_shadow has: X offset, Y offset, blur, spread (4 number inputs)
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    expect(inputs.length).toBe(4);
+    // drop_shadow has: X offset, Y offset, blur, spread (4 numeric ValueInputs,
+    // plus a color ValueInput in the color row)
+    const numericFields = document
+      .querySelector(".sigil-effect-card__fields")
+      ?.querySelectorAll("[role='combobox']");
+    // 1 color + 4 numeric = 5 comboboxes inside the fields container
+    expect(numericFields?.length).toBe(5);
   });
 
-  it("should render X offset input showing correct value for drop_shadow", () => {
+  it("should render X offset ValueInput showing correct value for drop_shadow", () => {
     render(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
-    // X offset is 0, Y offset is 4 — find first two inputs in fields
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    // First input: X offset = 0
-    expect((inputs[0] as HTMLInputElement).value).toBe("0");
-    // Second input: Y offset = 4
-    expect((inputs[1] as HTMLInputElement).value).toBe("4");
+    // X = 0, Y = 4
+    const xInput = screen.getByRole("combobox", { name: "X offset" });
+    const yInput = screen.getByRole("combobox", { name: "Y offset" });
+    expect(xInput.textContent).toContain("0");
+    expect(yInput.textContent).toContain("4");
   });
 
-  it("should render blur and spread inputs for drop_shadow effects", () => {
+  it("should render blur and spread ValueInputs for drop_shadow effects", () => {
     render(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    // Third: blur = 8
-    expect((inputs[2] as HTMLInputElement).value).toBe("8");
-    // Fourth: spread = 0
-    expect((inputs[3] as HTMLInputElement).value).toBe("0");
+    const blur = screen.getByRole("combobox", { name: "Blur" });
+    const spread = screen.getByRole("combobox", { name: "Spread" });
+    expect(blur.textContent).toContain("8");
+    expect(spread.textContent).toContain("0");
   });
 
-  it("should render one NumberInput for layer_blur effects (radius)", () => {
+  it("should render one ValueInput for layer_blur effects (radius)", () => {
     render(() => <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />);
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    expect(inputs.length).toBe(1);
-    expect((inputs[0] as HTMLInputElement).value).toBe("4");
+    const radius = screen.getByRole("combobox", { name: "Radius" });
+    expect(radius.textContent).toContain("4");
   });
 
   it("should not render shadow-only fields for layer_blur effects", () => {
     render(() => <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />);
-    // layer_blur only has a radius field (1 input), no offset or spread inputs
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    expect(inputs.length).toBe(1);
+    // layer_blur only exposes radius — no offset, blur, or spread comboboxes.
+    expect(screen.queryByRole("combobox", { name: "X offset" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Y offset" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Blur" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Spread" })).toBeNull();
   });
 
   it("should call onUpdate when type is changed from drop_shadow to layer_blur", () => {
@@ -155,29 +169,79 @@ describe("EffectCard", () => {
   });
 
   it("should show blur value of 12 in the blur input for a drop_shadow with blur=12", () => {
-    // This test verifies that EffectCard correctly reads and displays the blur
-    // value from the effect prop. It does NOT test the type-switch coercion
-    // (which is integration-tested in the "should call onUpdate when type is
-    // changed" tests).
     const onUpdate = vi.fn();
     render(() => (
       <EffectCard effect={dropShadowBlur12} index={0} onUpdate={onUpdate} onRemove={vi.fn()} />
     ));
-    // The blur input is the third input in the fields section (X, Y, blur, spread)
-    const inputs = document.querySelectorAll(".sigil-effect-card__fields input");
-    expect(inputs.length).toBe(4);
-    // Third input (index 2) is the blur input — should show 12
-    expect((inputs[2] as HTMLInputElement).value).toBe("12");
+    const blur = screen.getByRole("combobox", { name: "Blur" });
+    expect(blur.textContent).toContain("12");
   });
 
-  it("should render a color swatch span inside a trigger button for drop_shadow effects", () => {
+  it("should render a Shadow color ValueInput with swatch trigger for drop_shadow effects", () => {
     render(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
-    // The swatch visual is a <span>; the Kobalte trigger <button> wraps it
-    const swatch = document.querySelector(".sigil-color-swatch");
-    expect(swatch).toBeTruthy();
-    expect(swatch?.tagName.toLowerCase()).toBe("span");
-    expect(swatch?.closest("button.sigil-popover-trigger")).toBeTruthy();
+    const combobox = screen.getByRole("combobox", { name: "Shadow color" });
+    expect(combobox).toBeTruthy();
+    // The swatch is now rendered by the shared Popover component as a trigger
+    // button — query by accessible role and label instead of CSS class.
+    const swatchBtn = screen.getByRole("button", { name: "Color preview, click to edit" });
+    expect(swatchBtn).toBeTruthy();
+  });
+
+  // ── flushHistory wiring via onCommit prop ────────────────────────────
+
+  it("should invoke onCommit when the shadow color ValueInput commits via Enter", () => {
+    const onCommit = vi.fn();
+    render(() => (
+      <EffectCard
+        effect={dropShadow}
+        index={0}
+        onUpdate={vi.fn()}
+        onRemove={vi.fn()}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Shadow color" });
+    // Event handlers live on the inner textbox div, not the outer combobox.
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    // ValueInput fires onCommit on Enter — EffectCard forwards to props.onCommit
+    // so EffectsPanel can call store.flushHistory().
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
+  });
+
+  it("should invoke onCommit when the blur ValueInput commits via Enter", () => {
+    const onCommit = vi.fn();
+    render(() => (
+      <EffectCard
+        effect={dropShadow}
+        index={0}
+        onUpdate={vi.fn()}
+        onRemove={vi.fn()}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Blur" });
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
+  });
+
+  it("should invoke onCommit when the radius ValueInput commits via Enter", () => {
+    const onCommit = vi.fn();
+    render(() => (
+      <EffectCard
+        effect={layerBlur}
+        index={0}
+        onUpdate={vi.fn()}
+        onRemove={vi.fn()}
+        onCommit={onCommit}
+      />
+    ));
+    const combobox = screen.getByRole("combobox", { name: "Radius" });
+    const textbox = combobox.querySelector('[role="textbox"]') as HTMLElement;
+    fireEvent.keyDown(textbox, { key: "Enter" });
+    expect(onCommit).toHaveBeenCalled();
   });
 });

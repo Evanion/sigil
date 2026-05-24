@@ -1,0 +1,89 @@
+/* TokenPreviewCardList — generic token preview cards with optional shadow preview */
+
+.sigil-token-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2);
+  padding: var(--size-2);
+}
+
+.sigil-token-preview-list__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+  padding: var(--size-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  background: var(--surface-2);
+  transition: border-color 120ms;
+}
+
+.sigil-token-preview-list__card:hover {
+  border-color: var(--border-2);
+}
+
+.sigil-token-preview-list__card--selected {
+  border-color: var(--accent);
+}
+
+.sigil-token-preview-list__card--selected:hover {
+  border-color: var(--accent);
+}
+
+.sigil-token-preview-list__card:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Shadow preview container */
+.sigil-token-preview-list__shadow-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 36px;
+  background: var(--surface-3);
+  border-radius: var(--button-radius);
+}
+
+/* Inner box that receives the box-shadow */
+.sigil-token-preview-list__shadow-inner {
+  width: 32px;
+  height: 24px;
+  background: var(--surface-4);
+  border-radius: var(--button-radius);
+}
+
+/* Info area */
+.sigil-token-preview-list__info {
+  display: flex;
+  align-items: baseline;
+  gap: var(--size-2);
+}
+
+/* Token short name */
+.sigil-token-preview-list__name {
+  font-size: var(--font-size-0);
+  color: var(--text-1);
+  font-weight: var(--font-weight-6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Token value text */
+.sigil-token-preview-list__value {
+  font-size: var(--font-size-00);
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Reduced motion (CLAUDE.md: CSS animations must respect reduced motion) */
+@media (prefers-reduced-motion: reduce) {
+  .sigil-token-preview-list__card {
+    transition: none;
+  }
+}

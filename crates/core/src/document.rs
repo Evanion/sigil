@@ -52,7 +52,7 @@ impl Page {
 }
 
 pub use crate::component::ComponentDef;
-pub use crate::token::TokenContext;
+pub use crate::tokens::TokenContext;
 
 /// Stub for layout engine — Plan 01b will fill this in.
 #[derive(Debug, Clone, Default)]

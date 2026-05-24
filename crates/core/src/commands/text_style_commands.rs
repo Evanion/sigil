@@ -8,6 +8,7 @@ use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecorat
 use crate::validate::{
     FONT_FAMILY_FORBIDDEN_CHARS, MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT,
     MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT, validate_finite,
+    validate_style_value_expression, validate_token_name,
 };
 
 /// Which field of `TextStyle` to update.
@@ -66,9 +67,9 @@ fn validate_shadow(shadow: &TextShadow) -> Result<(), CoreError> {
             shadow.blur_radius()
         )));
     }
-    // Validate color channels if literal (token refs are resolved at render time).
-    if let StyleValue::Literal { value } = shadow.color() {
-        match value {
+    // Expression variants defer semantic validation to evaluation time.
+    match shadow.color() {
+        StyleValue::Literal { value } => match value {
             Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
                 validate_finite("text_shadow.color.r", *r)?;
                 validate_finite("text_shadow.color.g", *g)?;
@@ -87,7 +88,117 @@ fn validate_shadow(shadow: &TextShadow) -> Result<(), CoreError> {
                 validate_finite("text_shadow.color.b", *b)?;
                 validate_finite("text_shadow.color.alpha", *alpha)?;
             }
+        },
+        StyleValue::TokenRef { name } => validate_token_name(name)?,
+        StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
+    }
+    Ok(())
+}
+
+fn validate_font_family(family: &str) -> Result<(), CoreError> {
+    if family.is_empty() {
+        return Err(CoreError::ValidationError(
+            "font_family must not be empty".to_string(),
+        ));
+    }
+    if family.len() > MAX_FONT_FAMILY_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+            family.len()
+        )));
+    }
+    if let Some(pos) = family.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains control character at byte position {pos}"
+        )));
+    }
+    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
+        return Err(CoreError::ValidationError(format!(
+            "font_family contains forbidden character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_font_size_field(sv: &StyleValue<f64>) -> Result<(), CoreError> {
+    match sv {
+        StyleValue::Literal { value } => {
+            validate_finite("font_size", *value)?;
+            if *value < MIN_FONT_SIZE || *value > MAX_FONT_SIZE {
+                return Err(CoreError::ValidationError(format!(
+                    "font_size {value} out of range [{MIN_FONT_SIZE}, {MAX_FONT_SIZE}]"
+                )));
+            }
+            Ok(())
         }
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
+    }
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_line_height_field(sv: &StyleValue<f64>) -> Result<(), CoreError> {
+    match sv {
+        StyleValue::Literal { value } => {
+            validate_finite("line_height", *value)?;
+            if *value <= 0.0 {
+                return Err(CoreError::ValidationError(format!(
+                    "line_height must be > 0, got {value}"
+                )));
+            }
+            Ok(())
+        }
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
+    }
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_letter_spacing_field(sv: &StyleValue<f64>) -> Result<(), CoreError> {
+    match sv {
+        StyleValue::Literal { value } => validate_finite("letter_spacing", *value),
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
+    }
+}
+
+/// Expression variants defer semantic validation to evaluation time.
+fn validate_text_color_field(sv: &StyleValue<Color>) -> Result<(), CoreError> {
+    match sv {
+        StyleValue::Literal { value } => match value {
+            Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
+                validate_finite("text_color.r", *r)?;
+                validate_finite("text_color.g", *g)?;
+                validate_finite("text_color.b", *b)?;
+                validate_finite("text_color.a", *a)?;
+                Ok(())
+            }
+            Color::Oklch { l, c, h, a } => {
+                validate_finite("text_color.l", *l)?;
+                validate_finite("text_color.c", *c)?;
+                validate_finite("text_color.h", *h)?;
+                validate_finite("text_color.a", *a)?;
+                Ok(())
+            }
+            Color::Oklab { l, a, b, alpha } => {
+                validate_finite("text_color.l", *l)?;
+                validate_finite("text_color.a", *a)?;
+                validate_finite("text_color.b", *b)?;
+                validate_finite("text_color.alpha", *alpha)?;
+                Ok(())
+            }
+        },
+        StyleValue::TokenRef { name } => validate_token_name(name),
+        StyleValue::Expression { expr } => validate_style_value_expression(expr),
+    }
+}
+
+fn validate_font_weight_field(w: u16) -> Result<(), CoreError> {
+    if !(MIN_FONT_WEIGHT..=MAX_FONT_WEIGHT).contains(&w) {
+        return Err(CoreError::ValidationError(format!(
+            "font_weight {w} out of range [{MIN_FONT_WEIGHT}, {MAX_FONT_WEIGHT}]"
+        )));
     }
     Ok(())
 }
@@ -102,85 +213,12 @@ impl FieldOperation for SetTextStyleField {
             )));
         }
         match &self.field {
-            TextStyleField::FontFamily(family) => {
-                if family.is_empty() {
-                    return Err(CoreError::ValidationError(
-                        "font_family must not be empty".to_string(),
-                    ));
-                }
-                if family.len() > MAX_FONT_FAMILY_LEN {
-                    return Err(CoreError::ValidationError(format!(
-                        "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-                        family.len()
-                    )));
-                }
-                if let Some(pos) = family.find(|c: char| c.is_control()) {
-                    return Err(CoreError::ValidationError(format!(
-                        "font_family contains control character at byte position {pos}"
-                    )));
-                }
-                if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
-                    return Err(CoreError::ValidationError(format!(
-                        "font_family contains forbidden character at byte position {pos}"
-                    )));
-                }
-            }
-            TextStyleField::FontSize(sv) => {
-                if let StyleValue::Literal { value } = sv {
-                    validate_finite("font_size", *value)?;
-                    if *value < MIN_FONT_SIZE || *value > MAX_FONT_SIZE {
-                        return Err(CoreError::ValidationError(format!(
-                            "font_size {value} out of range [{MIN_FONT_SIZE}, {MAX_FONT_SIZE}]"
-                        )));
-                    }
-                }
-            }
-            TextStyleField::FontWeight(w) => {
-                if *w < MIN_FONT_WEIGHT || *w > MAX_FONT_WEIGHT {
-                    return Err(CoreError::ValidationError(format!(
-                        "font_weight {w} out of range [{MIN_FONT_WEIGHT}, {MAX_FONT_WEIGHT}]"
-                    )));
-                }
-            }
-            TextStyleField::LineHeight(sv) => {
-                if let StyleValue::Literal { value } = sv {
-                    validate_finite("line_height", *value)?;
-                    if *value <= 0.0 {
-                        return Err(CoreError::ValidationError(format!(
-                            "line_height must be > 0, got {value}"
-                        )));
-                    }
-                }
-            }
-            TextStyleField::LetterSpacing(sv) => {
-                if let StyleValue::Literal { value } = sv {
-                    validate_finite("letter_spacing", *value)?;
-                }
-            }
-            TextStyleField::TextColor(sv) => {
-                if let StyleValue::Literal { value } = sv {
-                    match value {
-                        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => {
-                            validate_finite("text_color.r", *r)?;
-                            validate_finite("text_color.g", *g)?;
-                            validate_finite("text_color.b", *b)?;
-                            validate_finite("text_color.a", *a)?;
-                        }
-                        Color::Oklch { l, c, h, a } => {
-                            validate_finite("text_color.l", *l)?;
-                            validate_finite("text_color.c", *c)?;
-                            validate_finite("text_color.h", *h)?;
-                            validate_finite("text_color.a", *a)?;
-                        }
-                        Color::Oklab { l, a, b, alpha } => {
-                            validate_finite("text_color.l", *l)?;
-                            validate_finite("text_color.a", *a)?;
-                            validate_finite("text_color.b", *b)?;
-                            validate_finite("text_color.alpha", *alpha)?;
-                        }
-                    }
-                }
-            }
+            TextStyleField::FontFamily(family) => validate_font_family(family)?,
+            TextStyleField::FontSize(sv) => validate_font_size_field(sv)?,
+            TextStyleField::FontWeight(w) => validate_font_weight_field(*w)?,
+            TextStyleField::LineHeight(sv) => validate_line_height_field(sv)?,
+            TextStyleField::LetterSpacing(sv) => validate_letter_spacing_field(sv)?,
+            TextStyleField::TextColor(sv) => validate_text_color_field(sv)?,
             TextStyleField::TextShadow(Some(shadow)) => validate_shadow(shadow)?,
             // None removes the shadow; enum variants are always structurally valid.
             TextStyleField::TextShadow(None)
