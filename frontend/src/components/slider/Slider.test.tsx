@@ -15,8 +15,9 @@ import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { Slider } from "./Slider";
 
 beforeAll(() => {
-  const proto = (globalThis as typeof globalThis & { CSSStyleDeclaration?: typeof CSSStyleDeclaration })
-    .CSSStyleDeclaration?.prototype;
+  const proto = (
+    globalThis as typeof globalThis & { CSSStyleDeclaration?: typeof CSSStyleDeclaration }
+  ).CSSStyleDeclaration?.prototype;
   if (proto) {
     const original = proto.setProperty;
     proto.setProperty = function patchedSetProperty(
@@ -36,7 +37,8 @@ beforeAll(() => {
   // slider thumb calls setPointerCapture/hasPointerCapture/releasePointerCapture
   // unconditionally inside its pointerdown/pointermove/pointerup handlers.
   // Stub them so gesture tests can exercise the real Kobalte event flow.
-  const elProto = (globalThis as typeof globalThis & { Element?: typeof Element }).Element?.prototype;
+  const elProto = (globalThis as typeof globalThis & { Element?: typeof Element }).Element
+    ?.prototype;
   if (elProto) {
     const captured = new WeakMap<Element, Set<number>>();
     const getSet = (el: Element): Set<number> => {
@@ -54,10 +56,11 @@ beforeAll(() => {
         };
     }
     if (!("releasePointerCapture" in elProto)) {
-      (elProto as unknown as { releasePointerCapture: (id: number) => void }).releasePointerCapture =
-        function (this: Element, pointerId: number) {
-          getSet(this).delete(pointerId);
-        };
+      (
+        elProto as unknown as { releasePointerCapture: (id: number) => void }
+      ).releasePointerCapture = function (this: Element, pointerId: number) {
+        getSet(this).delete(pointerId);
+      };
     }
     if (!("hasPointerCapture" in elProto)) {
       (elProto as unknown as { hasPointerCapture: (id: number) => boolean }).hasPointerCapture =
@@ -100,7 +103,9 @@ describe("Slider", () => {
     thumb.focus();
     fireEvent.keyDown(thumb, { key: "ArrowRight" });
     expect(handler).toHaveBeenCalled();
-    const callArg = handler.mock.calls[0]![0];
+    const firstCall = handler.mock.calls[0];
+    expect(firstCall).toBeDefined();
+    const callArg = firstCall?.[0];
     expect(typeof callArg).toBe("number");
     expect(Number.isFinite(callArg)).toBe(true);
   });
@@ -225,7 +230,9 @@ describe("Slider", () => {
     fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
     fireEvent.pointerUp(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
     expect(endSpy).toHaveBeenCalled();
-    const endVal = endSpy.mock.calls[endSpy.mock.calls.length - 1]![0];
+    const lastCall = endSpy.mock.calls[endSpy.mock.calls.length - 1];
+    expect(lastCall).toBeDefined();
+    const endVal = lastCall?.[0];
     expect(typeof endVal).toBe("number");
     expect(Number.isFinite(endVal)).toBe(true);
   });
@@ -310,9 +317,10 @@ describe("Slider", () => {
       expect(handler).not.toHaveBeenCalled();
       expect(warnSpy).toHaveBeenCalled();
       // Each warn call's first arg names the wrapper and a structured payload.
-      const firstCall = warnSpy.mock.calls[0]!;
-      expect(firstCall[0]).toMatch(/Slider/);
-      expect(typeof firstCall[1]).toBe("object");
+      const firstCall = warnSpy.mock.calls[0];
+      expect(firstCall).toBeDefined();
+      expect(firstCall?.[0]).toMatch(/Slider/);
+      expect(typeof firstCall?.[1]).toBe("object");
 
       emitChange([42], handler);
       expect(handler).toHaveBeenCalledTimes(1);
