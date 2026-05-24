@@ -3,73 +3,13 @@
  *
  * Slider wrapper tests.
  *
- * jsdom 29 + css-tree throws on `calc(NaN%)` produced by Kobalte's slider
- * during the initial render (thumb index is -1 before its ref callback fires,
- * which makes the percent computation NaN; real browsers silently ignore the
- * resulting CSS, jsdom throws a SyntaxError). We patch
- * `CSSStyleDeclaration.prototype.setProperty` to swallow css-tree parse
- * errors so the test environment behaves like a real browser.
+ * jsdom 29 polyfills (CSSStyleDeclaration.setProperty tolerance for invalid
+ * CSS values, Element pointer-capture API) live in `frontend/vitest.setup.ts`
+ * and apply to every test file via vitest config.
  */
-import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { Slider } from "./Slider";
-
-beforeAll(() => {
-  const proto = (
-    globalThis as typeof globalThis & { CSSStyleDeclaration?: typeof CSSStyleDeclaration }
-  ).CSSStyleDeclaration?.prototype;
-  if (proto) {
-    const original = proto.setProperty;
-    proto.setProperty = function patchedSetProperty(
-      this: CSSStyleDeclaration,
-      property: string,
-      value: string | null,
-      priority?: string,
-    ): void {
-      try {
-        original.call(this, property, value as string, priority ?? "");
-      } catch {
-        // Real browsers silently ignore invalid CSS values; mirror that here.
-      }
-    };
-  }
-  // jsdom 29 does not implement PointerEvent pointer-capture APIs. Kobalte's
-  // slider thumb calls setPointerCapture/hasPointerCapture/releasePointerCapture
-  // unconditionally inside its pointerdown/pointermove/pointerup handlers.
-  // Stub them so gesture tests can exercise the real Kobalte event flow.
-  const elProto = (globalThis as typeof globalThis & { Element?: typeof Element }).Element
-    ?.prototype;
-  if (elProto) {
-    const captured = new WeakMap<Element, Set<number>>();
-    const getSet = (el: Element): Set<number> => {
-      let s = captured.get(el);
-      if (!s) {
-        s = new Set();
-        captured.set(el, s);
-      }
-      return s;
-    };
-    if (!("setPointerCapture" in elProto)) {
-      (elProto as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture =
-        function (this: Element, pointerId: number) {
-          getSet(this).add(pointerId);
-        };
-    }
-    if (!("releasePointerCapture" in elProto)) {
-      (
-        elProto as unknown as { releasePointerCapture: (id: number) => void }
-      ).releasePointerCapture = function (this: Element, pointerId: number) {
-        getSet(this).delete(pointerId);
-      };
-    }
-    if (!("hasPointerCapture" in elProto)) {
-      (elProto as unknown as { hasPointerCapture: (id: number) => boolean }).hasPointerCapture =
-        function (this: Element, pointerId: number) {
-          return getSet(this).has(pointerId);
-        };
-    }
-  }
-});
 
 describe("Slider", () => {
   afterEach(() => {
