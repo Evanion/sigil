@@ -10,8 +10,8 @@
  * `CSSStyleDeclaration.prototype.setProperty` to swallow css-tree parse
  * errors so the test environment behaves like a real browser.
  */
-import { describe, it, expect, afterEach, beforeAll } from "vitest";
-import { render, screen, cleanup } from "@solidjs/testing-library";
+import { describe, it, expect, afterEach, beforeAll, vi } from "vitest";
+import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { Slider } from "./Slider";
 
 beforeAll(() => {
@@ -45,5 +45,56 @@ describe("Slider", () => {
     // slider role. Use getAllByRole so we tolerate both.
     const sliders = screen.getAllByRole("slider");
     expect(sliders.length).toBeGreaterThan(0);
+  });
+
+  it("should display the current value via aria-valuenow on the thumb", () => {
+    const { container } = render(() => (
+      <Slider value={42} onChange={() => {}} min={0} max={100} ariaLabel="Test" />
+    ));
+    // The thumb is the span with role=slider (not the hidden <input>).
+    const thumb = container.querySelector('span[role="slider"]');
+    expect(thumb?.getAttribute("aria-valuenow")).toBe("42");
+  });
+
+  it("should call onChange with the single numeric value (not array)", () => {
+    const handler = vi.fn();
+    const { container } = render(() => (
+      <Slider value={50} onChange={handler} min={0} max={100} ariaLabel="Test" />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    thumb.focus();
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    expect(handler).toHaveBeenCalled();
+    const callArg = handler.mock.calls[0]![0];
+    expect(typeof callArg).toBe("number");
+    expect(Number.isFinite(callArg)).toBe(true);
+  });
+
+  it("should reject non-finite values via Number.isFinite guard and warn", async () => {
+    // Import the helper directly so we can exercise it without depending on
+    // Kobalte producing NaN (which it never does in practice — this is the
+    // wrapper-level defensive guard required by CLAUDE.md §11 Floating-Point
+    // Validation).
+    const { emitChange } = await import("./Slider");
+    const handler = vi.fn();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      emitChange([Number.NaN], handler);
+      emitChange([Number.POSITIVE_INFINITY], handler);
+      emitChange([Number.NEGATIVE_INFINITY], handler);
+      emitChange([], handler);
+      expect(handler).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalled();
+      // Each warn call's first arg names the wrapper and a structured payload.
+      const firstCall = warnSpy.mock.calls[0]!;
+      expect(firstCall[0]).toMatch(/Slider/);
+      expect(typeof firstCall[1]).toBe("object");
+
+      emitChange([42], handler);
+      expect(handler).toHaveBeenCalledTimes(1);
+      expect(handler).toHaveBeenCalledWith(42);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
