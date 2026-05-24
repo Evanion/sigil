@@ -24,3 +24,7 @@ Thumbs.db
 .playwright-mcp/
 *.png
 .superpowers/
+
+# claude-mem per-directory context files (auto-generated; root CLAUDE.md tracked)
+**/CLAUDE.md
+!/CLAUDE.md
