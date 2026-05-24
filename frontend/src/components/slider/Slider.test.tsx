@@ -17,20 +17,55 @@ import { Slider } from "./Slider";
 beforeAll(() => {
   const proto = (globalThis as typeof globalThis & { CSSStyleDeclaration?: typeof CSSStyleDeclaration })
     .CSSStyleDeclaration?.prototype;
-  if (!proto) return;
-  const original = proto.setProperty;
-  proto.setProperty = function patchedSetProperty(
-    this: CSSStyleDeclaration,
-    property: string,
-    value: string | null,
-    priority?: string,
-  ): void {
-    try {
-      original.call(this, property, value as string, priority ?? "");
-    } catch {
-      // Real browsers silently ignore invalid CSS values; mirror that here.
+  if (proto) {
+    const original = proto.setProperty;
+    proto.setProperty = function patchedSetProperty(
+      this: CSSStyleDeclaration,
+      property: string,
+      value: string | null,
+      priority?: string,
+    ): void {
+      try {
+        original.call(this, property, value as string, priority ?? "");
+      } catch {
+        // Real browsers silently ignore invalid CSS values; mirror that here.
+      }
+    };
+  }
+  // jsdom 29 does not implement PointerEvent pointer-capture APIs. Kobalte's
+  // slider thumb calls setPointerCapture/hasPointerCapture/releasePointerCapture
+  // unconditionally inside its pointerdown/pointermove/pointerup handlers.
+  // Stub them so gesture tests can exercise the real Kobalte event flow.
+  const elProto = (globalThis as typeof globalThis & { Element?: typeof Element }).Element?.prototype;
+  if (elProto) {
+    const captured = new WeakMap<Element, Set<number>>();
+    const getSet = (el: Element): Set<number> => {
+      let s = captured.get(el);
+      if (!s) {
+        s = new Set();
+        captured.set(el, s);
+      }
+      return s;
+    };
+    if (!("setPointerCapture" in elProto)) {
+      (elProto as unknown as { setPointerCapture: (id: number) => void }).setPointerCapture =
+        function (this: Element, pointerId: number) {
+          getSet(this).add(pointerId);
+        };
     }
-  };
+    if (!("releasePointerCapture" in elProto)) {
+      (elProto as unknown as { releasePointerCapture: (id: number) => void }).releasePointerCapture =
+        function (this: Element, pointerId: number) {
+          getSet(this).delete(pointerId);
+        };
+    }
+    if (!("hasPointerCapture" in elProto)) {
+      (elProto as unknown as { hasPointerCapture: (id: number) => boolean }).hasPointerCapture =
+        function (this: Element, pointerId: number) {
+          return getSet(this).has(pointerId);
+        };
+    }
+  }
 });
 
 describe("Slider", () => {
@@ -118,6 +153,122 @@ describe("Slider", () => {
     // Kobalte's default getThumbValueLabel uses Intl.NumberFormat decimal,
     // which formats whole numbers as the bare digits.
     expect(thumb?.getAttribute("aria-valuetext")).toBe("42");
+  });
+
+  it("should fire onChangeStart on pointer down", () => {
+    const startSpy = vi.fn();
+    const { container } = render(() => (
+      <Slider
+        value={50}
+        onChange={() => {}}
+        onChangeStart={startSpy}
+        min={0}
+        max={100}
+        ariaLabel="Test"
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("should fire onChangeStart on keyboard interaction (ArrowRight)", () => {
+    const startSpy = vi.fn();
+    const { container } = render(() => (
+      <Slider
+        value={50}
+        onChange={() => {}}
+        onChangeStart={startSpy}
+        min={0}
+        max={100}
+        ariaLabel="Test"
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    thumb.focus();
+    fireEvent.keyDown(thumb, { key: "ArrowRight" });
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("should fire onChangeStart only once per gesture (not per pointermove)", () => {
+    const startSpy = vi.fn();
+    const { container } = render(() => (
+      <Slider
+        value={50}
+        onChange={() => {}}
+        onChangeStart={startSpy}
+        min={0}
+        max={100}
+        ariaLabel="Test"
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    fireEvent.pointerMove(thumb, { pointerId: 1, clientX: 60, clientY: 0 });
+    fireEvent.pointerMove(thumb, { pointerId: 1, clientX: 70, clientY: 0 });
+    expect(startSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("should fire onChangeEnd at end of pointer interaction with the final value", () => {
+    const endSpy = vi.fn();
+    const { container } = render(() => (
+      <Slider
+        value={50}
+        onChange={() => {}}
+        onChangeEnd={endSpy}
+        min={0}
+        max={100}
+        ariaLabel="Test"
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    fireEvent.pointerUp(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    expect(endSpy).toHaveBeenCalled();
+    const endVal = endSpy.mock.calls[endSpy.mock.calls.length - 1]![0];
+    expect(typeof endVal).toBe("number");
+    expect(Number.isFinite(endVal)).toBe(true);
+  });
+
+  it("should reset gesture-start tracking after onChangeEnd", () => {
+    const startSpy = vi.fn();
+    const { container } = render(() => (
+      <Slider
+        value={50}
+        onChange={() => {}}
+        onChangeStart={startSpy}
+        min={0}
+        max={100}
+        ariaLabel="Test"
+      />
+    ));
+    const thumb = container.querySelector('span[role="slider"]') as HTMLElement;
+    // Gesture 1
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    fireEvent.pointerUp(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    // Gesture 2
+    fireEvent.pointerDown(thumb, { pointerId: 2, clientX: 50, clientY: 0 });
+    expect(startSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("emitChangeEnd helper rejects non-finite values and warns", async () => {
+    const { emitChangeEnd } = await import("./Slider");
+    const endHandler = vi.fn();
+    const resetSpy = vi.fn();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      emitChangeEnd([Number.NaN], endHandler, resetSpy);
+      // gesture reset must run regardless of value validity
+      expect(resetSpy).toHaveBeenCalledTimes(1);
+      expect(endHandler).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalled();
+
+      emitChangeEnd([7], endHandler, resetSpy);
+      expect(resetSpy).toHaveBeenCalledTimes(2);
+      expect(endHandler).toHaveBeenCalledWith(7);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("should reject non-finite values via Number.isFinite guard and warn", async () => {
