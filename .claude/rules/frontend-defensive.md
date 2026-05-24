@@ -141,3 +141,15 @@ The extracted function:
 3. Must be imported by all call sites that need the same logic — duplication of the function body across components is a bug, subject to the same reasoning as the Rust rule "inline copies diverge silently."
 
 This rule is the TypeScript counterpart to the Rust convention "Define all validation artifacts in `validate.rs`." Inline anonymous functions in JSX are not independently testable, not discoverable by other developers, and get copy-pasted when the same logic is needed elsewhere.
+
+### Kobalte Imports Must Live in `components/` Wrappers
+
+All `@kobalte/core/*` imports MUST live inside `frontend/src/components/<wrapper>/` directories. Consumer code (panels, canvas, tools, stores, shells) imports from the project wrapper (e.g., `import { Slider } from "../components/slider/Slider"`), never directly from `@kobalte/core/*`.
+
+**Why:** Direct Kobalte imports scattered across the app create silent drift — when interaction fixes, a11y improvements, or styling updates land on a wrapped primitive, call sites that bypassed the wrapper never get those updates. Wrapping ensures every improvement applies everywhere.
+
+**How to apply:**
+- When adding a new Kobalte primitive, create a wrapper at `frontend/src/components/<name>/<Name>.tsx` that re-exports the project API.
+- When consuming a Kobalte primitive from any non-`components/` file, import from the project wrapper.
+- The wrapper is responsible for: applying the project's Number.isFinite guards on numeric callbacks, exposing gesture-start/end events for history coalescing (when applicable), enforcing the project's CSS naming convention (`sigil-*` prefix), and respecting `prefers-reduced-motion` on any transitions.
+- A direct import from `@kobalte/core/*` anywhere outside `frontend/src/components/` is a bug. Enforced by a CI grep (see `.github/workflows/ci.yml` "kobalte-import-discipline" step).
