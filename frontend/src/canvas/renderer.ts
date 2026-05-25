@@ -816,7 +816,7 @@ function drawGuideLines(
 export function render(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
-  nodes: readonly DocumentNode[],
+  nodes: readonly RenderOrderNode[],
   selectedUuids: ReadonlySet<string>,
   dpr = 1,
   previewRect: PreviewRect | null = null,
@@ -856,13 +856,10 @@ export function render(
   //
   // The ancestry walk is bounded by MAX_RENDER_DEPTH (CLAUDE.md §11 "Recursive
   // Functions Require Depth Guards") to defend against cycles or orphans.
-  // The renderer's nodes are typed as `DocumentNode[]`, but at runtime they
-  // come from `buildRenderOrder` and carry the optional `parentUuid` /
-  // `childrenUuids` fields declared by `RenderOrderNode`. A node arriving
-  // without a `parentUuid` is treated as a root for clipping purposes.
+  // A node arriving without a `parentUuid` is treated as a root for clipping.
   const nodesByUuid = new Map<string, RenderOrderNode>();
   for (const n of nodes) {
-    nodesByUuid.set(n.uuid, n as RenderOrderNode);
+    nodesByUuid.set(n.uuid, n);
   }
 
   function isDescendant(nodeUuid: string, ancestorUuid: string): boolean {

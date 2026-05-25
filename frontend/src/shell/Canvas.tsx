@@ -31,7 +31,7 @@ import { createTextTool } from "../tools/text-tool";
 import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overlay";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
-import { buildRenderOrder } from "../canvas/render-order";
+import { buildRenderOrder, type RenderOrderNode } from "../canvas/render-order";
 import { defaultCorners } from "../store/default-corners";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
@@ -154,7 +154,7 @@ export const Canvas: Component = () => {
 
   // RF-004: Memoize render order so DFS traversal only runs when the node
   // graph changes, not on every pointer event (preview, marquee, guides).
-  const renderOrder = createMemo((): DocumentNode[] => {
+  const renderOrder = createMemo((): RenderOrderNode[] => {
     const nodesObj = store.state.nodes;
     // Object.keys() creates a reactive dependency on key additions/deletions.
     const keys = Object.keys(nodesObj);

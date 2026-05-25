@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { render, clampOpacity } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
+import type { RenderOrderNode } from "../render-order";
 import type { SnapGuide } from "../snap-engine";
 import { createMockContext, getCalls, type MockGradient } from "./canvas-mock";
 
@@ -1037,16 +1038,12 @@ describe("renderer", () => {
 // ── Plan 14c Task 15: frame child clipping (clip stack) ──────────────────
 
 /**
- * Test fixtures for the clip-stack scenarios. The renderer's typed input is
- * `readonly DocumentNode[]`, but at runtime the array is produced by
- * `buildRenderOrder` and carries the optional `parentUuid` / `childrenUuids`
- * fields declared by `RenderOrderNode`. Casting via `as unknown as DocumentNode`
- * mirrors that runtime shape.
+ * Test fixtures for the clip-stack scenarios. The renderer accepts
+ * `readonly RenderOrderNode[]` — `DocumentNode` plus the optional
+ * `parentUuid` / `childrenUuids` tree fields that `buildRenderOrder`
+ * populates.
  */
-type ClipTestNode = DocumentNode & {
-  readonly parentUuid?: string | null;
-  readonly childrenUuids?: readonly string[];
-};
+type ClipTestNode = RenderOrderNode;
 
 const ZERO_CORNERS = [
   { type: "round" as const, radii: { x: 0, y: 0 } },
@@ -1150,7 +1147,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const frame = createClipFrame("frame-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "frame-1");
 
-    render(ctx, viewport, [frame as DocumentNode, child as DocumentNode], new Set(), 1);
+    render(ctx, viewport, [frame, child], new Set(), 1);
 
     const calls = getCalls(ctx);
     const methodSequence = calls.map((c) => c.method);
@@ -1176,7 +1173,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const group = createClipGroup("group-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "group-1");
 
-    render(ctx, viewport, [group as DocumentNode, child as DocumentNode], new Set(), 1);
+    render(ctx, viewport, [group, child], new Set(), 1);
 
     const calls = getCalls(ctx);
     // No clip(Path2D) calls — groups do not clip their children.
@@ -1200,7 +1197,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     render(
       ctx,
       viewport,
-      [frameA as DocumentNode, frameB as DocumentNode, rect as DocumentNode],
+      [frameA, frameB, rect],
       new Set(),
       1,
     );
@@ -1228,7 +1225,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const frame = createClipFrame("frame-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "frame-1");
 
-    render(ctx, viewport, [frame as DocumentNode, child as DocumentNode], new Set(), 1);
+    render(ctx, viewport, [frame, child], new Set(), 1);
 
     const calls = getCalls(ctx);
     const fillCallIndices = calls

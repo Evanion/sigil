@@ -35,7 +35,7 @@ export interface RenderOrderNode extends DocumentNode {
 export function buildRenderOrder(
   nodes: Record<string, RenderOrderNode>,
   keys: readonly string[],
-): DocumentNode[] {
+): RenderOrderNode[] {
   // Find root nodes: nodes without a parentUuid or whose parent is not in the store.
   const rootUuids: string[] = [];
   for (const uuid of keys) {
@@ -47,7 +47,7 @@ export function buildRenderOrder(
     }
   }
 
-  const result: DocumentNode[] = [];
+  const result: RenderOrderNode[] = [];
 
   // Walk tree using explicit stack (DFS). Push children in reverse so
   // first child (childrenUuids[0]) is popped first → drawn first → behind.
