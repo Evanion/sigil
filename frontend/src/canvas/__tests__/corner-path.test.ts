@@ -82,6 +82,10 @@ const TL_GEOM: CornerGeometry = {
   entryDirY: -1,
   exitDirX: 1,
   exitDirY: 0,
+  // TL entry edge is vertical (left side) → entryEdgeRadius = ry.
+  // TL exit edge is horizontal (top) → exitEdgeRadius = rx.
+  entryEdgeRadius: 16,
+  exitEdgeRadius: 16,
 };
 
 describe("appendRoundCorner", () => {
@@ -434,5 +438,201 @@ describe("buildCornerPath public API", () => {
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+// ── RF-001 / RF-003: asymmetric radii (rx ≠ ry) regression tests ─────────────
+//
+// Bug class: per-corner helpers were conflating rx and ry, using whichever
+// happened to be defined on the "entry" vs "exit" role rather than selecting
+// by edge axis. The bug was hidden by every existing test using circular
+// radii (rx === ry). These tests exercise rectangles with elliptical radii
+// (rx ≠ ry) where each corner uses a different shape; the assertion is that
+// every per-corner helper hands the pen off to the orchestrator's next edge
+// `lineTo` at the right coordinate.
+//
+// For a rect at (0,0,W,H) with corners=[CTL, CTR, CBR, CBL], the orchestrator
+// emits, in order:
+//   moveTo(CTL.rx, 0)
+//   lineTo(W - CTR.rx, 0)      ← top edge to TR entry endpoint
+//   <CTR helper>               ← must end the pen at (W, CTR.ry)
+//   lineTo(W, H - CBR.ry)      ← right edge to BR entry endpoint
+//   <CBR helper>               ← must end at (W - CBR.rx, H)
+//   lineTo(CBL.rx, H)          ← bottom edge to BL entry endpoint
+//   <CBL helper>               ← must end at (0, H - CBL.ry)
+//   lineTo(0, CTL.ry)          ← left edge to TL entry endpoint
+//   <CTL helper>               ← must end at (CTL.rx, 0)
+//   closePath()
+//
+// Bevel emits one final `lineTo` per corner; we assert the last `lineTo`
+// before each subsequent edge-lineTo matches the expected exit endpoint.
+//
+// Notch emits TWO `lineTo`s per corner (inner step + exit endpoint); the
+// second is the exit endpoint we assert on.
+//
+// Superellipse emits one `bezierCurveTo`; the last two args are the exit
+// endpoint (x, y).
+//
+// Scoop emits an `ellipse` call with the rectangle's corner-point as center
+// and (rx, ry) as the axes — it's the only helper that natively handles
+// rx ≠ ry via Canvas's ellipse API, so it's a control case.
+
+// Asymmetric-radii helpers: each takes explicit rx and ry (the existing
+// `bevel`/`notch`/`scoop` helpers above use a single circular radius).
+function bevelXY(x: number, y: number): Corner {
+  return { type: "bevel", radii: { x, y } };
+}
+function notchXY(x: number, y: number): Corner {
+  return { type: "notch", radii: { x, y } };
+}
+function squircleXY(x: number, y: number, smoothing: number): Corner {
+  return { type: "superellipse", radii: { x, y }, smoothing };
+}
+function scoopXY(x: number, y: number): Corner {
+  return { type: "scoop", radii: { x, y } };
+}
+
+describe("asymmetric radii (rx ≠ ry) — RF-001 regression", () => {
+  const W = 400;
+  const H = 300;
+
+  it("bevel: every corner's exit endpoint lands on its exit edge", () => {
+    // Each corner uses bevel with DIFFERENT rx and ry. If the helper picked
+    // the wrong axis, the exit endpoint would land off the expected edge.
+    const corners: Corners = [bevelXY(30, 20), bevelXY(25, 18), bevelXY(40, 12), bevelXY(35, 22)];
+    const r = new PathRecorder();
+    appendCornerPath(r, 0, 0, W, H, corners);
+
+    // Pull out every lineTo and bezierCurveTo (the pen-position emitters).
+    const lineTos = r.ops.filter((op) => op.method === "lineTo");
+    // Five lineTos from the orchestrator (top, right, bottom, left, closing
+    // happens implicitly via closePath) plus one per bevel corner = 9 total.
+    expect(lineTos.length).toBe(8);
+
+    // TR exit endpoint: (W, ry=18). After top-edge lineTo (W-25, 0) the
+    // bevel must land on (W, 18) — NOT (W, 25) which is the wrong-axis bug.
+    const trExit = lineTos[1];
+    expect(trExit.args).toEqual([W, 18]);
+
+    // BR exit endpoint: (W - 40, H). Comes after the right-edge lineTo
+    // (W, H-12).
+    const brExit = lineTos[3];
+    expect(brExit.args).toEqual([W - 40, H]);
+
+    // BL exit endpoint: (0, H - 22). Comes after the bottom-edge lineTo
+    // (35, H).
+    const blExit = lineTos[5];
+    expect(blExit.args).toEqual([0, H - 22]);
+
+    // TL exit endpoint: (30, 0). Comes after the left-edge lineTo (0, 20).
+    const tlExit = lineTos[7];
+    expect(tlExit.args).toEqual([30, 0]);
+  });
+
+  it("notch: every corner's exit endpoint lands on its exit edge", () => {
+    const corners: Corners = [notchXY(30, 20), notchXY(25, 18), notchXY(40, 12), notchXY(35, 22)];
+    const r = new PathRecorder();
+    appendCornerPath(r, 0, 0, W, H, corners);
+    const lineTos = r.ops.filter((op) => op.method === "lineTo");
+    // Each notch emits 2 lineTos (inner + exit); orchestrator emits 4 edges.
+    // 4 edges + 4 corners * 2 lineTos = 12.
+    expect(lineTos.length).toBe(12);
+
+    // TR exit endpoint (second lineTo of TR notch): (W, 18). Index map:
+    // [0] top-edge, [1] TR inner, [2] TR exit, [3] right-edge, [4] BR inner,
+    // [5] BR exit, [6] bottom-edge, [7] BL inner, [8] BL exit, [9] left-edge,
+    // [10] TL inner, [11] TL exit.
+    expect(lineTos[2].args).toEqual([W, 18]);
+    // BR exit: (W - 40, H)
+    expect(lineTos[5].args).toEqual([W - 40, H]);
+    // BL exit: (0, H - 22)
+    expect(lineTos[8].args).toEqual([0, H - 22]);
+    // TL exit: (30, 0)
+    expect(lineTos[11].args).toEqual([30, 0]);
+  });
+
+  it("superellipse (s=0): every corner's exit endpoint matches the round-corner endpoint", () => {
+    // At smoothing=0, the bezier endpoints must land at the same coordinates
+    // a round corner would have. This is the asymmetric-radii canary.
+    const corners: Corners = [
+      squircleXY(30, 20, 0),
+      squircleXY(25, 18, 0),
+      squircleXY(40, 12, 0),
+      squircleXY(35, 22, 0),
+    ];
+    const r = new PathRecorder();
+    appendCornerPath(r, 0, 0, W, H, corners);
+    const beziers = r.ops.filter((op) => op.method === "bezierCurveTo");
+    expect(beziers.length).toBe(4);
+
+    // The last two args of each bezierCurveTo are (endpointX, endpointY).
+    // bezierCurveTo signature: (cp1x, cp1y, cp2x, cp2y, x, y).
+    const [tr, br, bl, tl] = beziers;
+    // TR exit endpoint: (W, ry=18)
+    expect([tr.args[4], tr.args[5]]).toEqual([W, 18]);
+    // BR exit endpoint: (W - 40, H)
+    expect([br.args[4], br.args[5]]).toEqual([W - 40, H]);
+    // BL exit endpoint: (0, H - 22)
+    expect([bl.args[4], bl.args[5]]).toEqual([0, H - 22]);
+    // TL exit endpoint: (30, 0)
+    expect([tl.args[4], tl.args[5]]).toEqual([30, 0]);
+  });
+
+  it("superellipse: control points sit on the edges (tangent C1 with straight edges)", () => {
+    // With smoothing=0 and bleed=1.0, the cp offset is rx*(1-K) on horizontal
+    // edges and ry*(1-K) on vertical edges. Asymmetric radii must produce
+    // axis-correct offsets — the bug used rx where ry was needed and v.v.
+    const K = 1 - 0.5522847498;
+    const corners: Corners = [
+      squircleXY(30, 20, 0),
+      squircleXY(25, 18, 0),
+      squircleXY(40, 12, 0),
+      squircleXY(35, 22, 0),
+    ];
+    const r = new PathRecorder();
+    appendCornerPath(r, 0, 0, W, H, corners);
+    const beziers = r.ops.filter((op) => op.method === "bezierCurveTo");
+
+    // TR cp1 is on the top edge (entry edge = horizontal, entryEdgeRadius = rx = 25):
+    //   cp1 = (cornerX - entryDirX * 25 * K, cornerY) = (W - 25*K, 0)
+    // TR cp2 is on the right edge (exit edge = vertical, exitEdgeRadius = ry = 18):
+    //   cp2 = (cornerX, cornerY + exitDirY * 18 * K) = (W, 18*K)
+    const tr = beziers[0];
+    expect(tr.args[0]).toBeCloseTo(W - 25 * K, 6);
+    expect(tr.args[1]).toBe(0);
+    expect(tr.args[2]).toBe(W);
+    expect(tr.args[3]).toBeCloseTo(18 * K, 6);
+
+    // BR cp1: entry edge vertical (right side), entryEdgeRadius = ry = 12.
+    //   cp1 = (W, H - 12*K)
+    // BR cp2: exit edge horizontal (bottom), exitEdgeRadius = rx = 40.
+    //   cp2 = (W - 40*K, H)
+    const br = beziers[1];
+    expect(br.args[0]).toBe(W);
+    expect(br.args[1]).toBeCloseTo(H - 12 * K, 6);
+    expect(br.args[2]).toBeCloseTo(W - 40 * K, 6);
+    expect(br.args[3]).toBe(H);
+  });
+
+  it("scoop: every corner's ellipse uses corner-specific rx and ry (control)", () => {
+    // Scoop uses ctx.ellipse(cornerX, cornerY, rx, ry, ...) — Canvas natively
+    // handles asymmetric axes via two separate parameters. This is the
+    // control case: scoop is expected to be correct regardless of the bug.
+    const corners: Corners = [scoopXY(30, 20), scoopXY(25, 18), scoopXY(40, 12), scoopXY(35, 22)];
+    const r = new PathRecorder();
+    appendCornerPath(r, 0, 0, W, H, corners);
+    const ellipses = r.ops.filter((op) => op.method === "ellipse");
+    expect(ellipses.length).toBe(4);
+
+    // ellipse signature: (cx, cy, rx, ry, rotation, startAngle, endAngle, counterclockwise?).
+    const [tr, br, bl, tl] = ellipses;
+    // TR: corner = (W, 0), rx=25, ry=18
+    expect([tr.args[0], tr.args[1], tr.args[2], tr.args[3]]).toEqual([W, 0, 25, 18]);
+    // BR: corner = (W, H), rx=40, ry=12
+    expect([br.args[0], br.args[1], br.args[2], br.args[3]]).toEqual([W, H, 40, 12]);
+    // BL: corner = (0, H), rx=35, ry=22
+    expect([bl.args[0], bl.args[1], bl.args[2], bl.args[3]]).toEqual([0, H, 35, 22]);
+    // TL: corner = (0, 0), rx=30, ry=20
+    expect([tl.args[0], tl.args[1], tl.args[2], tl.args[3]]).toEqual([0, 0, 30, 20]);
   });
 });

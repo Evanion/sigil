@@ -60,6 +60,17 @@ export interface CornerGeometry {
   /** The geometric corner-point of the rectangle (where the two edges meet). */
   readonly cornerX: number;
   readonly cornerY: number;
+  /**
+   * Scalar distance from the corner-point along the ENTRY edge to the entry
+   * endpoint (where the previous straight edge meets the corner curve). Equals
+   * `rx` when the entry edge runs horizontally (top/bottom), `ry` when it runs
+   * vertically (left/right). Pre-computed so per-shape helpers don't have to
+   * re-derive the axis-of-edge convention and avoid rx/ry conflation under
+   * asymmetric radii (see RF-001 in PR #64 review).
+   */
+  readonly entryEdgeRadius: number;
+  /** Scalar distance from the corner-point along the EXIT edge to the exit endpoint. */
+  readonly exitEdgeRadius: number;
 }
 
 /** Emit a single round-corner ellipse using the corner's geometry. */
@@ -70,32 +81,24 @@ export function appendRoundCorner(builder: PathBuilder, geom: CornerGeometry): v
 /**
  * Emit a single diagonal `lineTo` for a Bevel corner.
  *
- * The bevel cuts from the point that's `ry` along the entry edge (away from
- * the geometric corner-point) to the point that's `rx` along the exit edge.
- * Both endpoints are at the same distance-from-edge as a Round corner would
- * have, so neighbouring edges remain aligned regardless of corner shape.
- *
- * The previous lineTo (in `appendCornerPath`) already placed the pen at the
- * entry endpoint; this helper only needs to draw the cut to the exit endpoint.
+ * The bevel cuts from the entry endpoint (where the previous `lineTo` placed
+ * the pen — at distance `entryEdgeRadius` from the corner-point along the
+ * entry edge) to the exit endpoint (distance `exitEdgeRadius` from the
+ * corner-point along the exit edge). Both endpoints are at the same
+ * distance-from-edge as a Round corner would have, so neighbouring straight
+ * edges remain aligned regardless of corner shape — including under
+ * asymmetric radii (rx ≠ ry).
  */
 export function appendBevelCorner(builder: PathBuilder, geom: CornerGeometry): void {
-  // Exit edge endpoint: corner + exitDir * rx (toward next corner along the exit edge).
-  const exitStartX = geom.cornerX + geom.exitDirX * geom.rx;
-  const exitStartY = geom.cornerY + geom.exitDirY * geom.rx;
+  // Exit edge endpoint: corner + exitDir * exitEdgeRadius. Using the
+  // axis-correct scalar (rx for horizontal edges, ry for vertical) is what
+  // keeps the cut aligned with the orchestrator's next edge lineTo when
+  // rx ≠ ry (RF-001).
+  const exitStartX = geom.cornerX + geom.exitDirX * geom.exitEdgeRadius;
+  const exitStartY = geom.cornerY + geom.exitDirY * geom.exitEdgeRadius;
   builder.lineTo(exitStartX, exitStartY);
 }
 
-/**
- * Emit two `lineTo` segments for a Notch corner — a square step inward.
- *
- * Starting from the entry endpoint (where the previous lineTo placed the pen),
- * step perpendicular to the entry edge (toward the rectangle interior) by `rx`,
- * then step along the entry-edge direction outward to the exit endpoint.
- *
- * For a rectangle, the exit direction is perpendicular to the entry direction,
- * so the inward step is along `exitDir` and the final step lands on the exit
- * edge endpoint `(cornerX + exitDir * rx, cornerY + exitDir * rx)`.
- */
 /**
  * Emit an inward-curving ellipse for a Scoop corner.
  *
@@ -153,41 +156,48 @@ export function appendSuperellipseCorner(
   smoothing: number,
 ): void {
   const bleed = superellipseBleed(smoothing);
-  // The entry endpoint (current pen position) is at distance `ry` from the corner
-  // along the entry edge. The control point for the entry side is offset
-  // KAPPA_CIRCULAR closer to the corner-point along the entry edge — scaled by
-  // the bleed factor.
-  // Control point near entry: along entry edge toward corner-point by
-  // KAPPA_CIRCULAR * ry, but the BLEED scales how far along the edge the
-  // control point sits from the corner.
-  // At bleed=1.0, control point sits at distance ry*(1 - KAPPA_CIRCULAR) from the corner.
-  // At bleed=1.5, control point sits at distance ry*1.5*(1 - KAPPA_CIRCULAR) from the corner.
-  const cp1X = geom.cornerX - geom.entryDirX * geom.ry * (1 - KAPPA_CIRCULAR) * bleed;
-  const cp1Y = geom.cornerY - geom.entryDirY * geom.ry * (1 - KAPPA_CIRCULAR) * bleed;
-  // Control point near exit: along exit edge from corner-point.
-  const cp2X = geom.cornerX + geom.exitDirX * geom.rx * (1 - KAPPA_CIRCULAR) * bleed;
-  const cp2Y = geom.cornerY + geom.exitDirY * geom.rx * (1 - KAPPA_CIRCULAR) * bleed;
-  // Exit endpoint.
-  const exitX = geom.cornerX + geom.exitDirX * geom.rx;
-  const exitY = geom.cornerY + geom.exitDirY * geom.ry;
+  // Control point near entry: along the entry edge, offset from the
+  // corner-point by entryEdgeRadius * (1 - KAPPA_CIRCULAR) * bleed.
+  // At bleed=1.0 this matches the standard cubic-circle anchor; at bleed=1.5
+  // it produces a flatter G2-style "shoulder." Using entryEdgeRadius (rx on
+  // horizontal edges, ry on vertical) is what keeps the tangent on the edge
+  // when rx ≠ ry (RF-001).
+  const entryOffset = geom.entryEdgeRadius * (1 - KAPPA_CIRCULAR) * bleed;
+  const cp1X = geom.cornerX - geom.entryDirX * entryOffset;
+  const cp1Y = geom.cornerY - geom.entryDirY * entryOffset;
+  // Control point near exit: same logic along the exit edge.
+  const exitOffset = geom.exitEdgeRadius * (1 - KAPPA_CIRCULAR) * bleed;
+  const cp2X = geom.cornerX + geom.exitDirX * exitOffset;
+  const cp2Y = geom.cornerY + geom.exitDirY * exitOffset;
+  // Exit endpoint: corner + exitDir * exitEdgeRadius.
+  const exitX = geom.cornerX + geom.exitDirX * geom.exitEdgeRadius;
+  const exitY = geom.cornerY + geom.exitDirY * geom.exitEdgeRadius;
   builder.bezierCurveTo(cp1X, cp1Y, cp2X, cp2Y, exitX, exitY);
 }
 
+/**
+ * Emit two `lineTo` segments for a Notch corner — a square step inward.
+ *
+ * Starting from the entry endpoint (where the previous `lineTo` placed the
+ * pen), step perpendicular to the entry edge into the rectangle interior by
+ * `exitEdgeRadius`, then step along the entry-edge direction to the exit
+ * endpoint at distance `exitEdgeRadius` from the corner-point. Both
+ * endpoints align with what Bevel / Round / Superellipse would have produced,
+ * so neighbouring straight edges remain seam-free under asymmetric radii.
+ */
 export function appendNotchCorner(builder: PathBuilder, geom: CornerGeometry): void {
-  // Entry endpoint (current pen position): corner - entryDir * ry.
-  const entryEndX = geom.cornerX - geom.entryDirX * geom.ry;
-  const entryEndY = geom.cornerY - geom.entryDirY * geom.ry;
-  // First inward step: from entry endpoint, perpendicular to entry edge by `rx`/`ry`.
-  // Perpendicular to entryDir (pointing into the rectangle) = exitDir for a rectangle.
-  // At any rectangle corner, exactly one of exitDir's components is zero, so the
-  // mismatched axis multiplier (rx vs ry) has no effect — the inner point lands
-  // at `(cornerX + exitDirX * rx, cornerY + exitDirY * ry)`.
-  const innerX = entryEndX + geom.exitDirX * geom.rx;
-  const innerY = entryEndY + geom.exitDirY * geom.ry;
+  // Entry endpoint: corner - entryDir * entryEdgeRadius (axis-correct scalar).
+  const entryEndX = geom.cornerX - geom.entryDirX * geom.entryEdgeRadius;
+  const entryEndY = geom.cornerY - geom.entryDirY * geom.entryEdgeRadius;
+  // First inward step: from entry endpoint, step in the exit-edge direction
+  // by exitEdgeRadius. This lands at the inner corner of the square notch —
+  // (cornerX - entryDir*entryEdgeRadius + exitDir*exitEdgeRadius).
+  const innerX = entryEndX + geom.exitDirX * geom.exitEdgeRadius;
+  const innerY = entryEndY + geom.exitDirY * geom.exitEdgeRadius;
   builder.lineTo(innerX, innerY);
-  // Second step: along the entry edge (back outward) to the exit endpoint.
-  const exitStartX = geom.cornerX + geom.exitDirX * geom.rx;
-  const exitStartY = geom.cornerY + geom.exitDirY * geom.rx;
+  // Second step: out to the exit endpoint on the exit edge.
+  const exitStartX = geom.cornerX + geom.exitDirX * geom.exitEdgeRadius;
+  const exitStartY = geom.cornerY + geom.exitDirY * geom.exitEdgeRadius;
   builder.lineTo(exitStartX, exitStartY);
 }
 
@@ -202,7 +212,8 @@ function cornerGeometries(
   const [tl, tr, br, bl] = corners;
   return [
     // Top-left: corner point at (x, y), ellipse center at (x+rx, y+ry).
-    // Arc sweeps from +π (left) to +3π/2 (up).
+    // Entry edge runs vertically (left side) → entryEdgeRadius = ry.
+    // Exit edge runs horizontally (top) → exitEdgeRadius = rx.
     {
       cornerX: x,
       cornerY: y,
@@ -216,10 +227,12 @@ function cornerGeometries(
       entryDirY: -1,
       exitDirX: 1,
       exitDirY: 0,
+      entryEdgeRadius: tl.radii.y,
+      exitEdgeRadius: tl.radii.x,
     },
     // Top-right: corner at (x+w, y), ellipse center at (x+w-rx, y+ry).
-    // Arc sweeps from +3π/2 (up) to 0 (right). Note Canvas ellipse uses
-    // clockwise sweep by default when end > start.
+    // Entry edge runs horizontally (top) → entryEdgeRadius = rx.
+    // Exit edge runs vertically (right) → exitEdgeRadius = ry.
     {
       cornerX: x + width,
       cornerY: y,
@@ -233,8 +246,12 @@ function cornerGeometries(
       entryDirY: 0,
       exitDirX: 0,
       exitDirY: 1,
+      entryEdgeRadius: tr.radii.x,
+      exitEdgeRadius: tr.radii.y,
     },
-    // Bottom-right: corner at (x+w, y+h). Arc sweeps from 0 (right) to π/2 (down).
+    // Bottom-right: corner at (x+w, y+h).
+    // Entry edge runs vertically (right) → entryEdgeRadius = ry.
+    // Exit edge runs horizontally (bottom) → exitEdgeRadius = rx.
     {
       cornerX: x + width,
       cornerY: y + height,
@@ -248,8 +265,12 @@ function cornerGeometries(
       entryDirY: 1,
       exitDirX: -1,
       exitDirY: 0,
+      entryEdgeRadius: br.radii.y,
+      exitEdgeRadius: br.radii.x,
     },
-    // Bottom-left: corner at (x, y+h). Arc sweeps from π/2 (down) to π (left).
+    // Bottom-left: corner at (x, y+h).
+    // Entry edge runs horizontally (bottom) → entryEdgeRadius = rx.
+    // Exit edge runs vertically (left) → exitEdgeRadius = ry.
     {
       cornerX: x,
       cornerY: y + height,
@@ -263,6 +284,8 @@ function cornerGeometries(
       entryDirY: 0,
       exitDirX: 0,
       exitDirY: -1,
+      entryEdgeRadius: bl.radii.x,
+      exitEdgeRadius: bl.radii.y,
     },
   ];
 }
