@@ -196,6 +196,23 @@ Custom `<CornerSection />` component in the Design panel's Appearance tab. The e
 - Shape picker stays in the sidebar.
 - Data model is stable across this extension — no core changes required.
 
+### 1.6 Plan 14d execution commitments (decided at brainstorm)
+
+These supplement §1.5 with architectural decisions made during 14d planning. They do not change the user-facing design; they pin down implementation specifics that affect file layout, code sharing, and testing.
+
+- **SVG preview path generation reuses Plan 14c geometry.** Plan 14d adds an `SvgPathBuilder` class that implements the same structural `PathBuilder` interface as `Path2D` in `frontend/src/canvas/corner-path.ts`. The same `appendCornerPath` orchestrator drives both Canvas and SVG output. Parity is enforced by a vitest that runs both builders against shared fixtures. No separate corner-geometry implementation for SVG — single source of truth.
+- **Tab placement.** CornerSection lives in the Appearance tab of `DesignPanel.tsx`, alongside the existing `TypographySection` and `AppearancePanel`. The current "Corner Radius" entry in `frontend/src/panels/schemas/design-schema.ts` is removed; CornerSection is a dedicated component (matching the AppearancePanel / TypographySection / EffectsPanel pattern), not a new schema escape hatch.
+- **Hotspot affordance is reveal-on-hover/focus.** The 9 hotspot buttons are invisible by default; visible when the section receives `:hover` or `:focus-within`. This is the v1 default — easily swapped to "always visible" later based on user feedback, since the swap is purely a CSS rule.
+- **Hotspot substrate is HTML buttons absolutely positioned over the SVG.** Not SVG `<rect>` children. Native `<button>` semantics, keyboard activation, and focus management come for free.
+- **Component decomposition** (under `frontend/src/panels/corner-section/`):
+  - `CornerSection.tsx` — section frame, state orchestration, self-gating by node kind
+  - `CornerPreviewSvg.tsx` — preview SVG + hotspot overlay
+  - `CornerPopover.tsx` — popover contents (shape picker, radius ValueInput, axis-unlock toggle, conditional smoothing control)
+  - `corner-svg-builder.ts` — `SvgPathBuilder` implementing PathBuilder
+  - `__tests__/` — component, a11y, parity, and pipeline tests
+- **Smoothing calibration is lightweight self-review for v1.** Storybook story renders the smoothing scale (s ∈ {0, 0.25, 0.5, 0.75, 1.0}) for visual inspection during 14d implementation. The implementer eyeballs and tunes `BLEED_AT_S1` if needed. No external designer review blocks 14d. The constants are subject to recalibration in a future PR based on user feedback per §3.7.
+- **Mixed-state popover.** When an edge or center hotspot opens against corners with mixed shapes (e.g., TL=Round, TR=Bevel under the top-edge hotspot), the shape picker shows a "Mixed" indicator and the radius shows blank. Committing a new value writes uniformly to every targeted corner.
+
 ---
 
 ## 2. Kobalte wrapper governance (Plan 14b)
