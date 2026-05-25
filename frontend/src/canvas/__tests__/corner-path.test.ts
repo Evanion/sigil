@@ -12,6 +12,7 @@ import {
   appendCornerPath,
   appendRoundCorner,
   appendBevelCorner,
+  appendNotchCorner,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -154,5 +155,34 @@ describe("appendCornerPath — all-bevel corners", () => {
     expect(methods.filter((m) => m === "ellipse").length).toBe(0);
     // 4 edge lineTos (between corners) + 4 bevel-cut lineTos = 8 lineTos.
     expect(methods.filter((m) => m === "lineTo").length).toBe(8);
+  });
+});
+
+function notch(r: number): Corner {
+  return { type: "notch", radii: { x: r, y: r } };
+}
+
+describe("appendNotchCorner", () => {
+  it("emits exactly two lineTo segments (step in + step out)", () => {
+    const r = new PathRecorder();
+    appendNotchCorner(r, TL_GEOM);
+    expect(r.ops.length).toBe(2);
+    expect(r.ops.every((op) => op.method === "lineTo")).toBe(true);
+    // Entry endpoint = corner (0,0) - entryDir (0,-1) * ry (16) = (0, 16).
+    // Inner step: + exitDir (1,0) * rx (16) = (16, 16).
+    expect(r.ops[0].args).toEqual([16, 16]);
+    // Outward step: exit endpoint = corner (0,0) + exitDir (1,0) * rx (16) = (16, 0).
+    expect(r.ops[1].args).toEqual([16, 0]);
+  });
+});
+
+describe("appendCornerPath — all-notch corners", () => {
+  it("emits moveTo + 12 lineTo + closePath (4 edges + 4 corners × 2 segments)", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [notch(16), notch(16), notch(16), notch(16)];
+    appendCornerPath(r, 0, 0, 100, 100, corners);
+    const methods = r.ops.map((op) => op.method);
+    expect(methods.filter((m) => m === "ellipse").length).toBe(0);
+    expect(methods.filter((m) => m === "lineTo").length).toBe(12);
   });
 });

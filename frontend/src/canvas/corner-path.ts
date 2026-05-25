@@ -93,6 +93,35 @@ export function appendBevelCorner(builder: PathBuilder, geom: CornerGeometry): v
   builder.lineTo(exitStartX, exitStartY);
 }
 
+/**
+ * Emit two `lineTo` segments for a Notch corner — a square step inward.
+ *
+ * Starting from the entry endpoint (where the previous lineTo placed the pen),
+ * step perpendicular to the entry edge (toward the rectangle interior) by `rx`,
+ * then step along the entry-edge direction outward to the exit endpoint.
+ *
+ * For a rectangle, the exit direction is perpendicular to the entry direction,
+ * so the inward step is along `exitDir` and the final step lands on the exit
+ * edge endpoint `(cornerX + exitDir * rx, cornerY + exitDir * rx)`.
+ */
+export function appendNotchCorner(builder: PathBuilder, geom: CornerGeometry): void {
+  // Entry endpoint (current pen position): corner - entryDir * ry.
+  const entryEndX = geom.cornerX - geom.entryDirX * geom.ry;
+  const entryEndY = geom.cornerY - geom.entryDirY * geom.ry;
+  // First inward step: from entry endpoint, perpendicular to entry edge by `rx`/`ry`.
+  // Perpendicular to entryDir (pointing into the rectangle) = exitDir for a rectangle.
+  // At any rectangle corner, exactly one of exitDir's components is zero, so the
+  // mismatched axis multiplier (rx vs ry) has no effect — the inner point lands
+  // at `(cornerX + exitDirX * rx, cornerY + exitDirY * ry)`.
+  const innerX = entryEndX + geom.exitDirX * geom.rx;
+  const innerY = entryEndY + geom.exitDirY * geom.ry;
+  builder.lineTo(innerX, innerY);
+  // Second step: along the entry edge (back outward) to the exit endpoint.
+  const exitStartX = geom.cornerX + geom.exitDirX * geom.rx;
+  const exitStartY = geom.cornerY + geom.exitDirY * geom.rx;
+  builder.lineTo(exitStartX, exitStartY);
+}
+
 /** Compute geometry for the 4 corners of a rectangle. */
 function cornerGeometries(
   x: number,
@@ -180,6 +209,9 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
       return;
     case "bevel":
       appendBevelCorner(builder, geom);
+      return;
+    case "notch":
+      appendNotchCorner(builder, geom);
       return;
     default:
       // Other variants implemented in later tasks.
