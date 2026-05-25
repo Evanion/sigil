@@ -30,32 +30,153 @@ export const BLEED_AT_S0 = 1.0;
 export const BLEED_AT_S1 = 1.5;
 
 /**
- * Append a single round corner to the path. (Stub — implemented in Task 3.)
+ * Per-corner geometric context computed by `appendCornerPath` and passed to
+ * each per-shape helper. Insulates the shape helpers from corner-position
+ * arithmetic.
  */
-export function appendRoundCorner(_builder: PathBuilder, _corner: Corner): void {
-  throw new Error("not implemented");
+export interface CornerGeometry {
+  /** Center of the ellipse / origin for the corner shape. */
+  readonly cx: number;
+  readonly cy: number;
+  /** Effective radii after clamping. */
+  readonly rx: number;
+  readonly ry: number;
+  /**
+   * Angle in radians at which the corner curve starts (entering the curve from
+   * the previous edge). Canvas convention: 0 = +x, π/2 = +y (down).
+   */
+  readonly startAngle: number;
+  /** Angle in radians at which the corner curve ends (exiting onto the next edge). */
+  readonly endAngle: number;
+  /**
+   * Unit vector pointing along the FIRST adjacent edge (the edge the curve
+   * enters FROM). Used by Bevel / Notch / Superellipse for tangent math.
+   */
+  readonly entryDirX: number;
+  readonly entryDirY: number;
+  /** Unit vector along the SECOND adjacent edge (the edge the curve exits ONTO). */
+  readonly exitDirX: number;
+  readonly exitDirY: number;
+}
+
+/** Emit a single round-corner ellipse using the corner's geometry. */
+export function appendRoundCorner(builder: PathBuilder, geom: CornerGeometry): void {
+  builder.ellipse(
+    geom.cx,
+    geom.cy,
+    geom.rx,
+    geom.ry,
+    0,
+    geom.startAngle,
+    geom.endAngle,
+  );
+}
+
+/** Compute geometry for the 4 corners of a rectangle. */
+function cornerGeometries(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  corners: Corners,
+): readonly [CornerGeometry, CornerGeometry, CornerGeometry, CornerGeometry] {
+  const [tl, tr, br, bl] = corners;
+  return [
+    // Top-left: arc from +π (left) to +3π/2 (up), center at (x+rx, y+ry).
+    {
+      cx: x + tl.radii.x,
+      cy: y + tl.radii.y,
+      rx: tl.radii.x,
+      ry: tl.radii.y,
+      startAngle: Math.PI,
+      endAngle: 1.5 * Math.PI,
+      entryDirX: 0,
+      entryDirY: -1,
+      exitDirX: 1,
+      exitDirY: 0,
+    },
+    // Top-right: arc from +3π/2 (up) to 0 (right). Note Canvas ellipse uses
+    // clockwise sweep by default when end > start.
+    {
+      cx: x + width - tr.radii.x,
+      cy: y + tr.radii.y,
+      rx: tr.radii.x,
+      ry: tr.radii.y,
+      startAngle: 1.5 * Math.PI,
+      endAngle: 2 * Math.PI,
+      entryDirX: 1,
+      entryDirY: 0,
+      exitDirX: 0,
+      exitDirY: 1,
+    },
+    // Bottom-right: arc from 0 (right) to π/2 (down).
+    {
+      cx: x + width - br.radii.x,
+      cy: y + height - br.radii.y,
+      rx: br.radii.x,
+      ry: br.radii.y,
+      startAngle: 0,
+      endAngle: 0.5 * Math.PI,
+      entryDirX: 0,
+      entryDirY: 1,
+      exitDirX: -1,
+      exitDirY: 0,
+    },
+    // Bottom-left: arc from π/2 (down) to π (left).
+    {
+      cx: x + bl.radii.x,
+      cy: y + height - bl.radii.y,
+      rx: bl.radii.x,
+      ry: bl.radii.y,
+      startAngle: 0.5 * Math.PI,
+      endAngle: Math.PI,
+      entryDirX: -1,
+      entryDirY: 0,
+      exitDirX: 0,
+      exitDirY: -1,
+    },
+  ];
 }
 
 /**
- * Append the full 4-corner path (closed rectangle outline with per-corner shapes)
- * to `builder`. The path traces edges + corners in order: top-left → top-right →
- * bottom-right → bottom-left → close.
- *
- * Public `buildCornerPath` (Task 11) allocates a `Path2D` and delegates here.
- *
- * @param x — top-left X in canvas coordinates
- * @param y — top-left Y in canvas coordinates
- * @param width — node width (must be finite and > 0)
- * @param height — node height (must be finite and > 0)
- * @param corners — [topLeft, topRight, bottomRight, bottomLeft]
+ * Dispatch to the appropriate per-shape helper for a single corner.
+ * Round only for now; other variants added in Tasks 4-7.
  */
+function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry): void {
+  switch (corner.type) {
+    case "round":
+      appendRoundCorner(builder, geom);
+      return;
+    default:
+      // Other variants implemented in later tasks.
+      throw new Error(`appendCorner not yet implemented for ${corner.type}`);
+  }
+}
+
 export function appendCornerPath(
-  _builder: PathBuilder,
-  _x: number,
-  _y: number,
-  _width: number,
-  _height: number,
-  _corners: Corners,
+  builder: PathBuilder,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  corners: Corners,
 ): void {
-  throw new Error("not implemented");
+  const [tl, tr, br, bl] = corners;
+  const [glTL, glTR, glBR, glBL] = cornerGeometries(x, y, width, height, corners);
+
+  // Top-left corner — start the path on the top edge just to the right of the TL corner curve.
+  builder.moveTo(x + tl.radii.x, y);
+  // Top edge → top-right corner
+  builder.lineTo(x + width - tr.radii.x, y);
+  appendCorner(builder, tr, glTR);
+  // Right edge → bottom-right corner
+  builder.lineTo(x + width, y + height - br.radii.y);
+  appendCorner(builder, br, glBR);
+  // Bottom edge → bottom-left corner
+  builder.lineTo(x + bl.radii.x, y + height);
+  appendCorner(builder, bl, glBL);
+  // Left edge → top-left corner
+  builder.lineTo(x, y + tl.radii.y);
+  appendCorner(builder, tl, glTL);
+  builder.closePath();
 }

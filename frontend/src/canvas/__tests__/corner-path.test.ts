@@ -1,18 +1,18 @@
 /**
  * @vitest-environment jsdom
  *
- * Pure-geometry tests for `corner-path.ts`. We use a `PathRecorder` that
- * implements the `PathBuilder` structural interface and records every
- * emitted operation; tests assert on the operation sequence.
+ * Pure-geometry tests for `corner-path.ts`. Uses a `PathRecorder` that
+ * implements the `PathBuilder` structural interface; assertions are on the
+ * recorded operation sequence.
  *
- * Per spec § 4.3 + § 3.7: no pixel snapshots, no `canvas` npm package.
- * For pure deterministic geometry, instruction sequence == output.
+ * Per spec § 4.3: no pixel snapshots, no `canvas` npm package.
  */
 import { describe, it, expect } from "vitest";
 import {
   appendCornerPath,
   appendRoundCorner,
   type PathBuilder,
+  type CornerGeometry,
 } from "../corner-path";
 import type { Corner, Corners } from "../../types/document";
 
@@ -63,16 +63,66 @@ function round(r: number): Corner {
   return { type: "round", radii: { x: r, y: r } };
 }
 
+const TL_GEOM: CornerGeometry = {
+  cx: 16,
+  cy: 16,
+  rx: 16,
+  ry: 16,
+  startAngle: Math.PI,
+  endAngle: 1.5 * Math.PI,
+  entryDirX: 0,
+  entryDirY: -1,
+  exitDirX: 1,
+  exitDirY: 0,
+};
+
 describe("appendRoundCorner", () => {
-  it("emits a single ellipse instruction for a round corner", () => {
+  it("emits a single ellipse instruction", () => {
     const r = new PathRecorder();
-    appendRoundCorner(r, round(16));
+    appendRoundCorner(r, TL_GEOM);
     const ellipses = r.ops.filter((op) => op.method === "ellipse");
     expect(ellipses.length).toBe(1);
   });
+
+  it("ellipse arguments match the corner geometry", () => {
+    const r = new PathRecorder();
+    appendRoundCorner(r, TL_GEOM);
+    const ellipse = r.ops.find((op) => op.method === "ellipse");
+    expect(ellipse?.args[0]).toBe(16); // cx
+    expect(ellipse?.args[1]).toBe(16); // cy
+    expect(ellipse?.args[2]).toBe(16); // rx
+    expect(ellipse?.args[3]).toBe(16); // ry
+    expect(ellipse?.args[5]).toBe(Math.PI); // startAngle
+    expect(ellipse?.args[6]).toBe(1.5 * Math.PI); // endAngle
+  });
 });
 
-// Suppress unused-import warnings until later tasks use these symbols.
-void appendCornerPath;
-const _typeKeep: Corners | null = null;
-void _typeKeep;
+describe("appendCornerPath — all-round corners", () => {
+  it("emits moveTo + 4 lineTo + 4 ellipse + closePath in the right order", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [round(16), round(16), round(16), round(16)];
+    appendCornerPath(r, 0, 0, 100, 100, corners);
+    const methods = r.ops.map((op) => op.method);
+    expect(methods).toEqual([
+      "moveTo",
+      "lineTo",
+      "ellipse",
+      "lineTo",
+      "ellipse",
+      "lineTo",
+      "ellipse",
+      "lineTo",
+      "ellipse",
+      "closePath",
+    ]);
+  });
+
+  it("starts the path at the top edge just past the TL corner radius", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [round(16), round(16), round(16), round(16)];
+    appendCornerPath(r, 10, 20, 100, 100, corners);
+    const moveTo = r.ops[0];
+    expect(moveTo.method).toBe("moveTo");
+    expect(moveTo.args).toEqual([10 + 16, 20]); // x + tl.radii.x, y
+  });
+});
