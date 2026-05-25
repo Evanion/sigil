@@ -976,9 +976,7 @@ describe("renderer", () => {
 
       const calls = getCalls(ctx);
       // The stroke is drawn via ctx.stroke(Path2D), not ctx.strokeRect.
-      const strokeCalls = calls.filter(
-        (c) => c.method === "stroke" && c.args[0] instanceof Path2D,
-      );
+      const strokeCalls = calls.filter((c) => c.method === "stroke" && c.args[0] instanceof Path2D);
       expect(strokeCalls.length).toBeGreaterThan(0);
       // No strokeRect at the node's own coordinates.
       const nodeOriginStrokeRects = calls.filter(
@@ -1030,10 +1028,223 @@ describe("renderer", () => {
       );
       expect(nodeStrokeRects.length).toBeGreaterThan(0);
       // And NO ctx.stroke(Path2D) call — verify no path-based strokes occur.
-      const pathStrokes = calls.filter(
-        (c) => c.method === "stroke" && c.args[0] instanceof Path2D,
-      );
+      const pathStrokes = calls.filter((c) => c.method === "stroke" && c.args[0] instanceof Path2D);
       expect(pathStrokes.length).toBe(0);
     });
+  });
+});
+
+// ── Plan 14c Task 15: frame child clipping (clip stack) ──────────────────
+
+/**
+ * Test fixtures for the clip-stack scenarios. The renderer's typed input is
+ * `readonly DocumentNode[]`, but at runtime the array is produced by
+ * `buildRenderOrder` and carries the optional `parentUuid` / `childrenUuids`
+ * fields declared by `RenderOrderNode`. Casting via `as unknown as DocumentNode`
+ * mirrors that runtime shape.
+ */
+type ClipTestNode = DocumentNode & {
+  readonly parentUuid?: string | null;
+  readonly childrenUuids?: readonly string[];
+};
+
+const ZERO_CORNERS = [
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+  { type: "round" as const, radii: { x: 0, y: 0 } },
+] as const;
+
+function createClipFrame(
+  uuid: string,
+  parentUuid: string | null,
+  childrenUuids: readonly string[],
+  transformOverrides?: Partial<DocumentNode["transform"]>,
+): ClipTestNode {
+  const base = createTestNode({
+    uuid,
+    kind: { type: "frame", layout: null, corners: ZERO_CORNERS },
+    transform: {
+      x: 0,
+      y: 0,
+      width: 400,
+      height: 300,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+      ...transformOverrides,
+    },
+  });
+  return {
+    ...base,
+    parentUuid,
+    childrenUuids,
+  };
+}
+
+function createClipGroup(
+  uuid: string,
+  parentUuid: string | null,
+  childrenUuids: readonly string[],
+): ClipTestNode {
+  const base = createTestNode({
+    uuid,
+    kind: { type: "group" },
+  });
+  return {
+    ...base,
+    parentUuid,
+    childrenUuids,
+  };
+}
+
+function createClipRect(
+  uuid: string,
+  parentUuid: string | null,
+  childrenUuids: readonly string[] = [],
+  transformOverrides?: Partial<DocumentNode["transform"]>,
+): ClipTestNode {
+  const base = createTestNode({
+    uuid,
+    kind: { type: "rectangle", corners: ZERO_CORNERS },
+    style: {
+      fills: [
+        {
+          type: "solid",
+          color: { type: "literal", value: { space: "srgb", r: 0.5, g: 0.5, b: 0.5, a: 1 } },
+        },
+      ],
+      strokes: [],
+      opacity: { type: "literal", value: 1 },
+      blend_mode: "normal",
+      effects: [],
+    },
+    transform: {
+      x: 10,
+      y: 10,
+      width: 100,
+      height: 80,
+      rotation: 0,
+      scale_x: 1,
+      scale_y: 1,
+      ...transformOverrides,
+    },
+  });
+  return {
+    ...base,
+    parentUuid,
+    childrenUuids,
+  };
+}
+
+describe("render() — frame child clipping (Plan 14c)", () => {
+  let ctx: CanvasRenderingContext2D;
+  let viewport: Viewport;
+
+  beforeEach(() => {
+    ctx = createMockContext();
+    viewport = { x: 0, y: 0, zoom: 1 };
+  });
+
+  it("frame draws then save + clip(Path2D) + child draws + restore", () => {
+    const frame = createClipFrame("frame-1", null, ["rect-1"]);
+    const child = createClipRect("rect-1", "frame-1");
+
+    render(ctx, viewport, [frame as DocumentNode, child as DocumentNode], new Set(), 1);
+
+    const calls = getCalls(ctx);
+    const methodSequence = calls.map((c) => c.method);
+
+    // Locate a clip(Path2D) call; everything else hangs off it.
+    const clipCallIdx = calls.findIndex((c) => c.method === "clip" && c.args[0] instanceof Path2D);
+    expect(clipCallIdx).toBeGreaterThan(-1);
+
+    // The immediately-preceding save() (the clip save) must exist before it.
+    const saveIdxBeforeClip = methodSequence.lastIndexOf("save", clipCallIdx - 1);
+    expect(saveIdxBeforeClip).toBeGreaterThan(-1);
+
+    // After the clip there must be at least one restore, draining the stack.
+    const restoreAfterClip = methodSequence.indexOf("restore", clipCallIdx);
+    expect(restoreAfterClip).toBeGreaterThan(clipCallIdx);
+
+    // And the clip(Path2D) call must carry an actual Path2D instance.
+    const clipCall = calls[clipCallIdx];
+    expect(clipCall.args[0]).toBeInstanceOf(Path2D);
+  });
+
+  it("group does NOT push a clip", () => {
+    const group = createClipGroup("group-1", null, ["rect-1"]);
+    const child = createClipRect("rect-1", "group-1");
+
+    render(ctx, viewport, [group as DocumentNode, child as DocumentNode], new Set(), 1);
+
+    const calls = getCalls(ctx);
+    // No clip(Path2D) calls — groups do not clip their children.
+    const clipCalls = calls.filter((c) => c.method === "clip");
+    expect(clipCalls.length).toBe(0);
+  });
+
+  it("nested frames stack clips correctly", () => {
+    // Frame A → Frame B → Rectangle. Expect at least 2 clip-related
+    // save/restore pairs (in addition to the per-node opacity save/restore
+    // emitted inside drawNode).
+    const frameA = createClipFrame("frame-A", null, ["frame-B"]);
+    const frameB = createClipFrame("frame-B", "frame-A", ["rect-1"], {
+      x: 20,
+      y: 20,
+      width: 200,
+      height: 150,
+    });
+    const rect = createClipRect("rect-1", "frame-B");
+
+    render(
+      ctx,
+      viewport,
+      [frameA as DocumentNode, frameB as DocumentNode, rect as DocumentNode],
+      new Set(),
+      1,
+    );
+
+    const calls = getCalls(ctx);
+    // Each frame pushes one save+clip; both must drain by end of loop.
+    const clipCalls = calls.filter((c) => c.method === "clip" && c.args[0] instanceof Path2D);
+    expect(clipCalls.length).toBe(2);
+
+    const saves = calls.filter((c) => c.method === "save").length;
+    const restores = calls.filter((c) => c.method === "restore").length;
+    // Per-node save/restore inside drawNode runs for each node (3 here), plus
+    // 2 clip pairs from the two frames → at least 5 of each. The bare lower
+    // bound the spec asks for is the clip pairs themselves (≥ 2).
+    expect(saves).toBeGreaterThanOrEqual(2);
+    expect(restores).toBeGreaterThanOrEqual(2);
+    // Lifecycle invariant: every save must be paired with a restore.
+    expect(saves).toBe(restores);
+  });
+
+  it("clip stack drains at end of loop when last node is inside a frame", () => {
+    // Frame containing a child as the LAST node — no later siblings exist
+    // to trigger the pop via the ancestry check, so the end-of-loop drain
+    // is the only path that emits the final restore.
+    const frame = createClipFrame("frame-1", null, ["rect-1"]);
+    const child = createClipRect("rect-1", "frame-1");
+
+    render(ctx, viewport, [frame as DocumentNode, child as DocumentNode], new Set(), 1);
+
+    const calls = getCalls(ctx);
+    const fillCallIndices = calls
+      .map((c, i) => ({ method: c.method, i }))
+      .filter((x) => x.method === "fill")
+      .map((x) => x.i);
+    const restoreCallIndices = calls
+      .map((c, i) => ({ method: c.method, i }))
+      .filter((x) => x.method === "restore")
+      .map((x) => x.i);
+
+    expect(fillCallIndices.length).toBeGreaterThan(0);
+    expect(restoreCallIndices.length).toBeGreaterThan(0);
+    // The drain restore for the frame clip must come AFTER the child's fill.
+    const lastRestore = restoreCallIndices[restoreCallIndices.length - 1];
+    const lastFill = fillCallIndices[fillCallIndices.length - 1];
+    expect(lastRestore).toBeGreaterThan(lastFill);
   });
 });

@@ -29,6 +29,7 @@ import { computeCompoundBounds } from "./multi-select";
 import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
 import { buildCornerPath } from "./corner-path";
+import { MAX_RENDER_DEPTH, type RenderOrderNode } from "./render-order";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -845,13 +846,77 @@ export function render(
     previewTransforms.map((pt) => [pt.uuid, pt.transform]),
   );
 
+  // Plan 14c: clip-stack for frame children. `nodes` arrives in depth-first
+  // parent-then-children order (via buildRenderOrder), so we push a clip when
+  // entering a frame's subtree and pop when leaving it.
+  //
+  // Each clipStack entry holds the frame's UUID. Before drawing a node, we
+  // pop frames whose subtree we have left by checking whether the new node's
+  // ancestry chain (via parentUuid walks) still contains the top-of-stack UUID.
+  //
+  // The ancestry walk is bounded by MAX_RENDER_DEPTH (CLAUDE.md §11 "Recursive
+  // Functions Require Depth Guards") to defend against cycles or orphans.
+  // The renderer's nodes are typed as `DocumentNode[]`, but at runtime they
+  // come from `buildRenderOrder` and carry the optional `parentUuid` /
+  // `childrenUuids` fields declared by `RenderOrderNode`. A node arriving
+  // without a `parentUuid` is treated as a root for clipping purposes.
+  const nodesByUuid = new Map<string, RenderOrderNode>();
+  for (const n of nodes) {
+    nodesByUuid.set(n.uuid, n as RenderOrderNode);
+  }
+
+  function isDescendant(nodeUuid: string, ancestorUuid: string): boolean {
+    let current: string | null | undefined = nodeUuid;
+    let depth = 0;
+    while (current && depth < MAX_RENDER_DEPTH) {
+      if (current === ancestorUuid) return true;
+      const node = nodesByUuid.get(current);
+      current = node?.parentUuid;
+      depth++;
+    }
+    if (depth >= MAX_RENDER_DEPTH) {
+      // Diagnostic when the depth guard fires — likely a cycle or extreme nesting.
+      // Mirrors the pattern in render-order.ts (CLAUDE.md §11 "Internal Mutation
+      // Entry Points Must Diagnose Their Own No-Ops").
+      console.warn(
+        `[Canvas] MAX_RENDER_DEPTH (${MAX_RENDER_DEPTH}) exceeded while walking ancestry for clip stack`,
+        { nodeUuid, ancestorUuid },
+      );
+    }
+    return false;
+  }
+
+  const clipStack: string[] = [];
+
   // Draw each visible node.
   for (const node of nodes) {
     if (!node.visible) {
       continue;
     }
+
+    // Pop frames whose subtree we have left.
+    while (clipStack.length > 0 && !isDescendant(node.uuid, clipStack[clipStack.length - 1])) {
+      ctx.restore();
+      clipStack.pop();
+    }
+
     const effectiveTransform = getEffectiveTransform(node, previewMap);
     drawNode(ctx, node, effectiveTransform, tokens);
+
+    // If this is a frame, push a clip for its subtree.
+    if (node.kind.type === "frame") {
+      const { x, y, width, height } = effectiveTransform;
+      const clipPath = buildCornerPath(x, y, width, height, node.kind.corners);
+      ctx.save();
+      ctx.clip(clipPath);
+      clipStack.push(node.uuid);
+    }
+  }
+
+  // Drain any remaining clip-stack entries at end of loop.
+  while (clipStack.length > 0) {
+    ctx.restore();
+    clipStack.pop();
   }
 
   // RF-006: selectedUuids is already a Set — no per-frame allocation needed.
