@@ -908,34 +908,42 @@ export function render(
 
   const clipStack: string[] = [];
 
-  // Draw each visible node.
-  for (const node of nodes) {
-    if (!node.visible) {
-      continue;
-    }
+  // RF-002: the clip-stack drain MUST run even if drawNode / buildCornerPath /
+  // ctx.clip throws. Without the try/finally, an exception would skip the
+  // drain and leak ctx.save() slots across frames; the Canvas.tsx caller
+  // swallows the throw, the next render() call would inherit the corrupted
+  // state, and outer ctx.restore() calls in the selection-highlight pass
+  // would pop back to a stale clip region.
+  try {
+    // Draw each visible node.
+    for (const node of nodes) {
+      if (!node.visible) {
+        continue;
+      }
 
-    // Pop frames whose subtree we have left.
-    while (clipStack.length > 0 && !isDescendant(node.uuid, clipStack[clipStack.length - 1])) {
+      // Pop frames whose subtree we have left.
+      while (clipStack.length > 0 && !isDescendant(node.uuid, clipStack[clipStack.length - 1])) {
+        ctx.restore();
+        clipStack.pop();
+      }
+
+      const effectiveTransform = getEffectiveTransform(node, previewMap);
+      const cornerPath = drawNode(ctx, node, effectiveTransform, tokens);
+
+      // If this is a frame, push a clip for its subtree. Reuse the Path2D
+      // that drawNode already built (RF-004) — no third allocation.
+      if (node.kind.type === "frame" && cornerPath !== null) {
+        ctx.save();
+        ctx.clip(cornerPath);
+        clipStack.push(node.uuid);
+      }
+    }
+  } finally {
+    // Drain any remaining clip-stack entries at end of loop (or on throw).
+    while (clipStack.length > 0) {
       ctx.restore();
       clipStack.pop();
     }
-
-    const effectiveTransform = getEffectiveTransform(node, previewMap);
-    const cornerPath = drawNode(ctx, node, effectiveTransform, tokens);
-
-    // If this is a frame, push a clip for its subtree. Reuse the Path2D
-    // that drawNode already built (RF-004) — no third allocation.
-    if (node.kind.type === "frame" && cornerPath !== null) {
-      ctx.save();
-      ctx.clip(cornerPath);
-      clipStack.push(node.uuid);
-    }
-  }
-
-  // Drain any remaining clip-stack entries at end of loop.
-  while (clipStack.length > 0) {
-    ctx.restore();
-    clipStack.pop();
   }
 
   // RF-006: selectedUuids is already a Set — no per-frame allocation needed.
