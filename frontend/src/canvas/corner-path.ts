@@ -446,3 +446,23 @@ export function appendCornerPath(
   appendCorner(builder, tl, glTL);
   builder.closePath();
 }
+
+/**
+ * Public API for the canvas renderer. Allocates a fresh `Path2D` and writes
+ * the corner-shape geometry into it. Returns the populated path ready for
+ * `ctx.fill(path)` / `ctx.stroke(path)` / `ctx.clip(path)`.
+ *
+ * If `appendCornerPath` rejects the input (see guards), the returned Path2D
+ * is empty — the caller will draw nothing, matching the safe fallback.
+ */
+export function buildCornerPath(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  corners: Corners,
+): Path2D {
+  const path = new Path2D();
+  appendCornerPath(path, x, y, width, height, corners);
+  return path;
+}

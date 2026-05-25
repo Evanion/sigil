@@ -15,6 +15,7 @@ import {
   appendNotchCorner,
   appendScoopCorner,
   appendSuperellipseCorner,
+  buildCornerPath,
   clampScale,
   type PathBuilder,
   type CornerGeometry,
@@ -383,6 +384,53 @@ describe("appendCornerPath — input guards", () => {
       appendCornerPath(r, 0, 0, 100, 100, corners);
       expect(r.ops.length).toBe(0);
       expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+});
+
+describe("appendCornerPath — mixed shapes", () => {
+  it("emits the right per-corner ops when corners differ", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [round(16), bevel(16), notch(16), scoop(16)];
+    appendCornerPath(r, 0, 0, 100, 100, corners);
+    // The orchestrator emits corners in order: TR, BR, BL, TL.
+    // TR is index 1 = bevel (1 lineTo).
+    // BR is index 2 = notch (2 lineTo).
+    // BL is index 3 = scoop (1 ellipse).
+    // TL is index 0 = round (1 ellipse).
+    const methods = r.ops.map((op) => op.method);
+    expect(methods).toEqual([
+      "moveTo",
+      "lineTo", // top edge
+      "lineTo", // TR bevel
+      "lineTo", // right edge
+      "lineTo", // BR notch step 1
+      "lineTo", // BR notch step 2
+      "lineTo", // bottom edge
+      "ellipse", // BL scoop
+      "lineTo", // left edge
+      "ellipse", // TL round
+      "closePath",
+    ]);
+  });
+});
+
+describe("buildCornerPath public API", () => {
+  it("returns a Path2D instance", () => {
+    const corners: Corners = [round(16), round(16), round(16), round(16)];
+    const path = buildCornerPath(0, 0, 100, 100, corners);
+    expect(path).toBeInstanceOf(Path2D);
+  });
+
+  it("returns an empty Path2D when inputs are invalid (no throw)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [round(16), round(16), round(16), round(16)];
+      const path = buildCornerPath(NaN, 0, 100, 100, corners);
+      // Construction succeeds; path is empty (no observable side effect).
+      expect(path).toBeInstanceOf(Path2D);
     } finally {
       warnSpy.mockRestore();
     }

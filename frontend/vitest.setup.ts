@@ -15,6 +15,13 @@
  * - jsdom 29 does not implement Element.setPointerCapture / releasePointerCapture
  *   / hasPointerCapture. Kobalte's slider thumb calls these unconditionally
  *   inside its pointerdown/pointermove/pointerup handlers.
+ * - jsdom 29 does not expose `Path2D` as a global. The canvas renderer
+ *   (Plan 14c) uses `new Path2D()` to build corner-shape outlines and pass
+ *   them to `ctx.fill(path)` / `ctx.stroke(path)` / `ctx.clip(path)`. Tests
+ *   use a Proxy-recording mock context that records the calls without
+ *   inspecting the Path2D contents, so a minimal Path2D shim suffices — the
+ *   shape's methods are no-ops in tests (the geometry helpers are tested
+ *   independently via the `PathRecorder` in `corner-path.test.ts`).
  */
 
 const cssProto = (
@@ -67,4 +74,25 @@ if (elProto) {
         return getSet(this).has(pointerId);
       };
   }
+}
+
+if (typeof (globalThis as Record<string, unknown>).Path2D === "undefined") {
+  // Minimal Path2D shim — no-op methods. Production canvas calls accept the
+  // path object opaquely; the recorder mock context records the call args
+  // without inspecting the path's contents. Geometry correctness is verified
+  // via the structural `PathBuilder` interface in `corner-path.test.ts`.
+  class Path2DShim {
+    addPath(): void {}
+    arc(): void {}
+    arcTo(): void {}
+    bezierCurveTo(): void {}
+    closePath(): void {}
+    ellipse(): void {}
+    lineTo(): void {}
+    moveTo(): void {}
+    quadraticCurveTo(): void {}
+    rect(): void {}
+    roundRect(): void {}
+  }
+  (globalThis as Record<string, unknown>).Path2D = Path2DShim;
 }
