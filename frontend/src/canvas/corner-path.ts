@@ -104,6 +104,34 @@ export function appendBevelCorner(builder: PathBuilder, geom: CornerGeometry): v
  * so the inward step is along `exitDir` and the final step lands on the exit
  * edge endpoint `(cornerX + exitDir * rx, cornerY + exitDir * rx)`.
  */
+/**
+ * Emit an inward-curving ellipse for a Scoop corner.
+ *
+ * Whereas Round centers the ellipse INSIDE the rectangle and sweeps a quarter
+ * circle from edge to edge, Scoop centers the ellipse at the geometric corner-
+ * point of the rectangle (outside) and sweeps the OPPOSITE quarter circle in
+ * the reverse direction (counterclockwise), producing a concave bite.
+ *
+ * Mathematically: the start/end points on the edges are unchanged from Round
+ * (so the path remains C0 continuous with the straight edges), only the center
+ * and sweep direction change.
+ */
+export function appendScoopCorner(builder: PathBuilder, geom: CornerGeometry): void {
+  // The complementary angle range covers the OUTSIDE arc; we sweep counterclockwise
+  // to keep the path direction consistent with the outer polygon traversal.
+  // For TL: instead of (PI to 1.5PI), use (2PI to 0.5PI) going CCW.
+  builder.ellipse(
+    geom.cornerX,
+    geom.cornerY,
+    geom.rx,
+    geom.ry,
+    0,
+    geom.endAngle - Math.PI, // opposite-side start
+    geom.startAngle - Math.PI, // opposite-side end
+    true, // counterclockwise
+  );
+}
+
 export function appendNotchCorner(builder: PathBuilder, geom: CornerGeometry): void {
   // Entry endpoint (current pen position): corner - entryDir * ry.
   const entryEndX = geom.cornerX - geom.entryDirX * geom.ry;
@@ -212,6 +240,9 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
       return;
     case "notch":
       appendNotchCorner(builder, geom);
+      return;
+    case "scoop":
+      appendScoopCorner(builder, geom);
       return;
     default:
       // Other variants implemented in later tasks.

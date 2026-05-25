@@ -13,6 +13,7 @@ import {
   appendRoundCorner,
   appendBevelCorner,
   appendNotchCorner,
+  appendScoopCorner,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -184,5 +185,23 @@ describe("appendCornerPath — all-notch corners", () => {
     const methods = r.ops.map((op) => op.method);
     expect(methods.filter((m) => m === "ellipse").length).toBe(0);
     expect(methods.filter((m) => m === "lineTo").length).toBe(12);
+  });
+});
+
+function scoop(r: number): Corner {
+  return { type: "scoop", radii: { x: r, y: r } };
+}
+
+describe("appendScoopCorner", () => {
+  it("emits an ellipse with counterclockwise sweep centered at the corner-point", () => {
+    const r = new PathRecorder();
+    appendScoopCorner(r, TL_GEOM);
+    expect(r.ops.length).toBe(1);
+    expect(r.ops[0].method).toBe("ellipse");
+    // Center at corner-point (0, 0), not at ellipse center.
+    expect(r.ops[0].args[0]).toBe(0);
+    expect(r.ops[0].args[1]).toBe(0);
+    // counterclockwise flag at index 7 = 1.
+    expect(r.ops[0].args[7]).toBe(1);
   });
 });
