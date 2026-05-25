@@ -28,6 +28,7 @@ import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
 import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
+import { buildCornerPath } from "./corner-path";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -366,15 +367,36 @@ function drawNode(
   switch (node.kind.type) {
     case "frame":
     case "rectangle":
-    case "group":
-    case "image":
-    case "component_instance": {
+    case "image": {
+      // Corner-bearing kinds — fill via a Path2D produced by buildCornerPath
+      // so per-corner shapes (round, bevel, notch, scoop, superellipse) are
+      // rendered correctly. With all-zero round corners this is equivalent to
+      // a rectangular fill but goes through the path API.
+      const path = buildCornerPath(x, y, width, height, node.kind.corners);
       if (node.style.fills.length === 0) {
         // No fills — draw with default fill color for visibility
         ctx.fillStyle = DEFAULT_FILL;
-        ctx.fillRect(x, y, width, height);
+        ctx.fill(path);
       } else {
         // Draw the shape once per fill (bottom-to-top = array order)
+        for (const fill of node.style.fills) {
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
+          if (fillStyle !== null) {
+            ctx.fillStyle = fillStyle;
+            ctx.fill(path);
+          }
+        }
+      }
+      break;
+    }
+    case "group":
+    case "component_instance": {
+      // Non-corner-bearing container kinds — placeholder rectangular fill
+      // (no per-corner shape geometry exists on these NodeKind variants).
+      if (node.style.fills.length === 0) {
+        ctx.fillStyle = DEFAULT_FILL;
+        ctx.fillRect(x, y, width, height);
+      } else {
         for (const fill of node.style.fills) {
           const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
@@ -535,6 +557,16 @@ function drawNode(
         ctx.beginPath();
         ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
         ctx.stroke();
+        break;
+      }
+      case "frame":
+      case "rectangle":
+      case "image": {
+        // Corner-bearing kinds — stroke via the same Path2D used by the fill
+        // so the stroke follows the actual corner geometry (round, bevel,
+        // notch, scoop, superellipse).
+        const path = buildCornerPath(x, y, width, height, node.kind.corners);
+        ctx.stroke(path);
         break;
       }
       default: {

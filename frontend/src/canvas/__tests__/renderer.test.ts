@@ -149,9 +149,14 @@ describe("renderer", () => {
       render(ctx, viewport, [node], new Set(["drag-node"]), 1, null, previewTransforms);
 
       const calls = getCalls(ctx);
-      // The node should be drawn at the preview position (200, 200), not (100, 100)
-      const fillRectCalls = calls.filter((c) => c.method === "fillRect");
-      const hasPreviewPosition = fillRectCalls.some((c) => c.args[0] === 200 && c.args[1] === 200);
+      // The node should be drawn at the preview position (200, 200), not (100, 100).
+      // Plan 14c routes rectangle FILL through ctx.fill(Path2D) which we cannot
+      // introspect for coordinates, so assert via the selection-highlight
+      // strokeRect (still axis-aligned, still at preview position).
+      const strokeRectCalls = calls.filter((c) => c.method === "strokeRect");
+      const hasPreviewPosition = strokeRectCalls.some(
+        (c) => c.args[0] === 200 && c.args[1] === 200,
+      );
       expect(hasPreviewPosition).toBe(true);
     });
   });
@@ -641,17 +646,11 @@ describe("renderer", () => {
       render(ctx, viewport, [node], new Set<string>(), 1);
 
       const calls = getCalls(ctx);
-      // The node is a rectangle, so each fill should produce one fillRect.
-      // 2 fills = 2 fillRect calls for the node itself.
-      const fillRectCalls = calls.filter(
-        (c) =>
-          c.method === "fillRect" &&
-          c.args[0] === 100 &&
-          c.args[1] === 100 &&
-          c.args[2] === 200 &&
-          c.args[3] === 150,
-      );
-      expect(fillRectCalls.length).toBe(2);
+      // The node is a rectangle, so each fill should produce one ctx.fill(Path2D)
+      // call (Plan 14c routes rectangle fill through buildCornerPath). 2 fills =
+      // 2 fill calls for the node itself.
+      const fillCalls = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
+      expect(fillCalls.length).toBe(2);
     });
 
     it("should use default fill color when node has no fills", () => {
@@ -893,6 +892,148 @@ describe("renderer", () => {
       expect(conicCalls.length).toBe(1);
       // NaN angle should default to 0
       expect(conicCalls[0].args[0]).toBe(0);
+    });
+  });
+
+  // ── Plan 14c Task 13: corner-bearing nodes use buildCornerPath for FILL ──
+
+  describe("drawNode — corner-bearing nodes use buildCornerPath (fill)", () => {
+    it("rectangle node calls ctx.fill(Path2D) instead of ctx.fillRect", () => {
+      const node = createTestNode();
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The rectangle is drawn via ctx.fill(Path2D), not ctx.fillRect.
+      const fillCalls = calls.filter((c) => c.method === "fill");
+      expect(fillCalls.length).toBeGreaterThan(0);
+      expect(fillCalls[0].args[0]).toBeInstanceOf(Path2D);
+      // No fillRect at the node's own coordinates (selection-handle fillRects
+      // are at handle-corner positions, not at the node origin (100, 100)).
+      const nodeOriginFillRects = calls.filter(
+        (c) =>
+          c.method === "fillRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeOriginFillRects.length).toBe(0);
+    });
+
+    it("group node still uses ctx.fillRect (no corners on NodeKindGroup)", () => {
+      const node = createTestNode({
+        kind: { type: "group" },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The group falls into the non-corner-bearing branch — it draws via
+      // ctx.fillRect at the node's own coordinates.
+      const nodeFillRects = calls.filter(
+        (c) =>
+          c.method === "fillRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeFillRects.length).toBeGreaterThan(0);
+      // And NO ctx.fill(Path2D) call originates from a group draw — verify
+      // there are no path-based fills at all in this render.
+      const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
+      expect(pathFills.length).toBe(0);
+    });
+  });
+
+  // ── Plan 14c Task 14: corner-bearing nodes use buildCornerPath for STROKE ──
+
+  describe("drawNode — corner-bearing nodes use buildCornerPath (stroke)", () => {
+    it("rectangle node with stroke calls ctx.stroke(Path2D) instead of ctx.strokeRect", () => {
+      const node = createTestNode({
+        style: {
+          fills: [],
+          strokes: [
+            {
+              color: {
+                type: "literal",
+                value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 },
+              },
+              width: { type: "literal", value: 2 },
+              alignment: "center",
+              cap: "butt",
+              join: "miter",
+            },
+          ],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The stroke is drawn via ctx.stroke(Path2D), not ctx.strokeRect.
+      const strokeCalls = calls.filter(
+        (c) => c.method === "stroke" && c.args[0] instanceof Path2D,
+      );
+      expect(strokeCalls.length).toBeGreaterThan(0);
+      // No strokeRect at the node's own coordinates.
+      const nodeOriginStrokeRects = calls.filter(
+        (c) =>
+          c.method === "strokeRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeOriginStrokeRects.length).toBe(0);
+    });
+
+    it("group node with stroke still uses ctx.strokeRect (no corners on NodeKindGroup)", () => {
+      const node = createTestNode({
+        kind: { type: "group" },
+        style: {
+          fills: [],
+          strokes: [
+            {
+              color: {
+                type: "literal",
+                value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 },
+              },
+              width: { type: "literal", value: 2 },
+              alignment: "center",
+              cap: "butt",
+              join: "miter",
+            },
+          ],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The group falls into the non-corner-bearing branch — it strokes via
+      // ctx.strokeRect at the node's own coordinates.
+      const nodeStrokeRects = calls.filter(
+        (c) =>
+          c.method === "strokeRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeStrokeRects.length).toBeGreaterThan(0);
+      // And NO ctx.stroke(Path2D) call — verify no path-based strokes occur.
+      const pathStrokes = calls.filter(
+        (c) => c.method === "stroke" && c.args[0] instanceof Path2D,
+      );
+      expect(pathStrokes.length).toBe(0);
     });
   });
 });
