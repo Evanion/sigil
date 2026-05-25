@@ -92,3 +92,14 @@ When implementing a mutation that requires lock acquisition and entity existence
 ### Delete Operations Must Enforce Collection-Level Invariants
 
 Any `FieldOperation` that removes an entity from a bounded collection MUST validate both (1) that the entity exists, AND (2) that removing it will not violate a minimum-cardinality invariant. If a document must always contain at least one page, `DeletePage::validate` must check `page_count > MIN_PAGES_PER_DOCUMENT`. The minimum MUST be defined as a `MIN_*` constant in `validate.rs`. Do not rely on the frontend to enforce this — frontend guards are bypassable via GraphQL and MCP.
+
+### Tests for Multi-Axis Inputs Must Cover Non-Degenerate Cases
+
+When a function accepts an input value with N independent axes that can take different values (`Vec2 { x, y }`, `Size { width, height }`, `Point`, `RadiusPair`, per-channel color, any `[f64; N]` where entries are independent), at least one test fixture MUST exercise the case where the axes differ from each other. A test suite where every fixture sets `x == y` (or `width == height`, etc.) is biased toward the degenerate subset of the input domain, and bugs in axis selection — picking the wrong axis based on role rather than identity — are invisible to it.
+
+Required coverage when a type permits axis-independent values:
+1. At least one fixture where each pair/tuple of independent axes has **distinct** values (e.g., `RadiusPair { x: 30.0, y: 10.0 }`).
+2. At least one fixture where the axis assignment is **swapped** relative to (1).
+3. The test must assert axis-specific output, not just "the function returned `Ok(_)`."
+
+Mirrors the corresponding TypeScript rule in `frontend-defensive.md`. Precedent: PR #64 (Plan 14c, frontend) — three corner helpers (Bevel, Notch, Superellipse) shipped wrong geometry for asymmetric radii because every fixture used `{x: r, y: r}`. Equivalent Rust types (e.g., `[f64; 2]` for corner radii in `crates/core`) carry the same risk.

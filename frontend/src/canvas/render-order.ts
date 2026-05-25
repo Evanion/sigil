@@ -24,18 +24,30 @@ export interface RenderOrderNode extends DocumentNode {
 }
 
 /**
+ * Output of `buildRenderOrder`. The two arrays are index-aligned:
+ * `nodes[i]` is at tree depth `depths[i]` (0 = root). The renderer uses
+ * `depths` to manage its clip stack in O(1) per node instead of walking
+ * the ancestry chain for each pop check (RF-005).
+ */
+export interface RenderOrderResult {
+  readonly nodes: readonly RenderOrderNode[];
+  readonly depths: readonly number[];
+}
+
+/**
  * Build a flat array of nodes in depth-first tree order for correct
  * z-order rendering via the painter's algorithm.
  *
  * @param nodes - The node store (Record<uuid, node>).
  * @param keys - Object.keys(nodes) — passed separately so the caller
  *   can ensure Solid.js reactive tracking on key additions/deletions.
- * @returns Nodes in painter's algorithm order (first = behind, last = front).
+ * @returns The flat node array plus an index-aligned depth array.
+ *   Nodes appear in painter's algorithm order (first = behind, last = front).
  */
 export function buildRenderOrder(
   nodes: Record<string, RenderOrderNode>,
   keys: readonly string[],
-): DocumentNode[] {
+): RenderOrderResult {
   // Find root nodes: nodes without a parentUuid or whose parent is not in the store.
   const rootUuids: string[] = [];
   for (const uuid of keys) {
@@ -47,7 +59,8 @@ export function buildRenderOrder(
     }
   }
 
-  const result: DocumentNode[] = [];
+  const result: RenderOrderNode[] = [];
+  const depths: number[] = [];
 
   // Walk tree using explicit stack (DFS). Push children in reverse so
   // first child (childrenUuids[0]) is popped first → drawn first → behind.
@@ -73,6 +86,7 @@ export function buildRenderOrder(
     if (!node) continue;
 
     result.push(node);
+    depths.push(depth);
 
     const childUuids = node.childrenUuids;
     if (childUuids && childUuids.length > 0) {
@@ -85,5 +99,5 @@ export function buildRenderOrder(
     }
   }
 
-  return result;
+  return { nodes: result, depths };
 }

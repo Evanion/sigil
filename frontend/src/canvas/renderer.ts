@@ -28,6 +28,8 @@ import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
 import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
+import { buildCornerPath } from "./corner-path";
+import { type RenderOrderNode } from "./render-order";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -344,8 +346,18 @@ function drawNode(
   node: DocumentNode,
   transform: Transform,
   tokens: Record<string, Token>,
-): void {
+): Path2D | null {
   const { x, y, width, height } = transform;
+
+  // RF-004: Build the corner Path2D ONCE per drawNode for corner-bearing
+  // kinds. Reuse it across the fill loop, the stroke, and (for frames)
+  // the clip-push in render(). At the 1000-node ceiling this halves
+  // Path2D allocations from 2 → 1 per node and eliminates the third
+  // allocation for the frame clip path.
+  const cornerPath =
+    node.kind.type === "frame" || node.kind.type === "rectangle" || node.kind.type === "image"
+      ? buildCornerPath(x, y, width, height, node.kind.corners)
+      : null;
 
   // Save context state so opacity/blend mode don't leak to other nodes.
   // RF-024: clampOpacity + the save/restore pair are the rendering-boundary
@@ -366,15 +378,36 @@ function drawNode(
   switch (node.kind.type) {
     case "frame":
     case "rectangle":
-    case "group":
-    case "image":
-    case "component_instance": {
+    case "image": {
+      // Corner-bearing kinds — fill via the hoisted cornerPath (built once
+      // above) so per-corner shapes (round, bevel, notch, scoop,
+      // superellipse) are rendered correctly and the same Path2D is reused
+      // by the stroke + clip passes.
+      if (cornerPath === null) break; // unreachable — narrowed by kind switch
       if (node.style.fills.length === 0) {
         // No fills — draw with default fill color for visibility
         ctx.fillStyle = DEFAULT_FILL;
-        ctx.fillRect(x, y, width, height);
+        ctx.fill(cornerPath);
       } else {
         // Draw the shape once per fill (bottom-to-top = array order)
+        for (const fill of node.style.fills) {
+          const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
+          if (fillStyle !== null) {
+            ctx.fillStyle = fillStyle;
+            ctx.fill(cornerPath);
+          }
+        }
+      }
+      break;
+    }
+    case "group":
+    case "component_instance": {
+      // Non-corner-bearing container kinds — placeholder rectangular fill
+      // (no per-corner shape geometry exists on these NodeKind variants).
+      if (node.style.fills.length === 0) {
+        ctx.fillStyle = DEFAULT_FILL;
+        ctx.fillRect(x, y, width, height);
+      } else {
         for (const fill of node.style.fills) {
           const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
@@ -517,6 +550,10 @@ function drawNode(
       }
       break;
     }
+    default: {
+      const _exhaustive: never = node.kind;
+      throw new Error(`drawNode: unhandled node kind ${String(_exhaustive)}`);
+    }
   }
 
   // Draw stroke (after fill, so stroke renders on top). resolveStroke already
@@ -537,15 +574,34 @@ function drawNode(
         ctx.stroke();
         break;
       }
-      default: {
+      case "frame":
+      case "rectangle":
+      case "image": {
+        // Corner-bearing kinds — stroke via the hoisted cornerPath so the
+        // stroke follows the same geometry as the fill.
+        if (cornerPath === null) break; // unreachable — narrowed by kind switch
+        ctx.stroke(cornerPath);
+        break;
+      }
+      case "group":
+      case "component_instance":
+      case "text":
+      case "path": {
+        // Non-corner-bearing / placeholder kinds — fall back to the bounding rect.
         ctx.strokeRect(x, y, width, height);
         break;
+      }
+      default: {
+        const _exhaustive: never = node.kind;
+        throw new Error(`drawNode stroke: unhandled node kind ${String(_exhaustive)}`);
       }
     }
   }
 
   // Restore context state (resets globalAlpha, globalCompositeOperation)
   ctx.restore();
+
+  return cornerPath;
 }
 
 /**
@@ -783,7 +839,8 @@ function drawGuideLines(
 export function render(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
-  nodes: readonly DocumentNode[],
+  nodes: readonly RenderOrderNode[],
+  depths: readonly number[],
   selectedUuids: ReadonlySet<string>,
   dpr = 1,
   previewRect: PreviewRect | null = null,
@@ -813,13 +870,57 @@ export function render(
     previewTransforms.map((pt) => [pt.uuid, pt.transform]),
   );
 
-  // Draw each visible node.
-  for (const node of nodes) {
-    if (!node.visible) {
-      continue;
+  // Plan 14c: clip-stack for frame children. `nodes` arrives in depth-first
+  // parent-then-children order (via buildRenderOrder), with index-aligned
+  // `depths`. Because the order is DFS-monotone (every parent precedes its
+  // children, and children share parent.depth + 1), the clip stack's size
+  // is bounded by the current node's depth. RF-005: pop while
+  // `clipStack.length > depths[i]` — O(1) amortized, no ancestry walks,
+  // no parent-uuid Map allocation per render.
+  const clipStack: number[] = []; // stored depths only — UUIDs are not needed for popping
+
+  // RF-002: the clip-stack drain MUST run even if drawNode / buildCornerPath /
+  // ctx.clip throws. Without the try/finally, an exception would skip the
+  // drain and leak ctx.save() slots across frames; the Canvas.tsx caller
+  // swallows the throw, the next render() call would inherit the corrupted
+  // state, and outer ctx.restore() calls in the selection-highlight pass
+  // would pop back to a stale clip region.
+  try {
+    // Draw each visible node.
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (!node.visible) {
+        continue;
+      }
+      const depth = depths[i] ?? 0;
+
+      // Pop frames whose subtree we have left — any clip stack entry at or
+      // deeper than this node is out of scope.
+      while (clipStack.length > 0 && clipStack[clipStack.length - 1] >= depth) {
+        ctx.restore();
+        clipStack.pop();
+      }
+
+      const effectiveTransform = getEffectiveTransform(node, previewMap);
+      const cornerPath = drawNode(ctx, node, effectiveTransform, tokens);
+
+      // If this is a frame, push a clip for its subtree. Reuse the Path2D
+      // that drawNode already built (RF-004) — no third allocation.
+      if (node.kind.type === "frame" && cornerPath !== null) {
+        ctx.save();
+        ctx.clip(cornerPath);
+        // A frame's children are at depth+1, so they keep the clip; siblings
+        // and ancestors of the frame are at depth or less, so they trigger
+        // the pop above on the next iteration.
+        clipStack.push(depth);
+      }
     }
-    const effectiveTransform = getEffectiveTransform(node, previewMap);
-    drawNode(ctx, node, effectiveTransform, tokens);
+  } finally {
+    // Drain any remaining clip-stack entries at end of loop (or on throw).
+    while (clipStack.length > 0) {
+      ctx.restore();
+      clipStack.pop();
+    }
   }
 
   // RF-006: selectedUuids is already a Set — no per-frame allocation needed.
