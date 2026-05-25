@@ -540,6 +540,10 @@ function drawNode(
       }
       break;
     }
+    default: {
+      const _exhaustive: never = node.kind;
+      throw new Error(`drawNode: unhandled node kind ${String(_exhaustive)}`);
+    }
   }
 
   // Draw stroke (after fill, so stroke renders on top). resolveStroke already
@@ -570,9 +574,17 @@ function drawNode(
         ctx.stroke(path);
         break;
       }
-      default: {
+      case "group":
+      case "component_instance":
+      case "text":
+      case "path": {
+        // Non-corner-bearing / placeholder kinds — fall back to the bounding rect.
         ctx.strokeRect(x, y, width, height);
         break;
+      }
+      default: {
+        const _exhaustive: never = node.kind;
+        throw new Error(`drawNode stroke: unhandled node kind ${String(_exhaustive)}`);
       }
     }
   }
