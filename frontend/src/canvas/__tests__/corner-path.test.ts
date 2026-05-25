@@ -16,7 +16,7 @@ import {
   appendScoopCorner,
   appendSuperellipseCorner,
   buildCornerPath,
-  clampScale,
+  computeRadiusFitScale,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -45,6 +45,10 @@ class PathRecorder implements PathBuilder {
     endAngle: number,
     counterclockwise = false,
   ): void {
+    // RF-019: counterclockwise is coerced to 0|1 so the `args` array can be
+    // declared as `readonly number[]`. The convention `args[7] === 1` means
+    // CCW, `args[7] === 0` (or absent) means clockwise; tests that assert
+    // sweep direction should read this index against 0 or 1, not true/false.
     this.ops.push({
       method: "ellipse",
       args: [x, y, rx, ry, rotation, startAngle, endAngle, counterclockwise ? 1 : 0],
@@ -260,16 +264,16 @@ describe("appendSuperellipseCorner interpolation", () => {
   });
 });
 
-describe("clampScale", () => {
+describe("computeRadiusFitScale", () => {
   it("returns 1.0 when radii fit within edges", () => {
     const corners: Corners = [round(16), round(16), round(16), round(16)];
-    expect(clampScale(100, 100, corners)).toBe(1);
+    expect(computeRadiusFitScale(100, 100, corners)).toBe(1);
   });
 
   it("returns 0.75 when top-edge sum exceeds width by 4/3x", () => {
     const corners: Corners = [round(40), round(40), round(40), round(40)];
     // Top edge: 40 + 40 = 80 > 60 → scale = 60/80 = 0.75.
-    expect(clampScale(60, 100, corners)).toBe(0.75);
+    expect(computeRadiusFitScale(60, 100, corners)).toBe(0.75);
   });
 
   it("uses the minimum scale across all 4 edges", () => {
@@ -280,7 +284,7 @@ describe("clampScale", () => {
     // Right edge: 10 + 10 = 20, scale_right = 5.
     // Bottom edge: 10 + 60 = 70, scale_bottom ≈ 1.43.
     // Min: scale_left.
-    expect(clampScale(100, 100, corners)).toBeCloseTo(100 / 120, 6);
+    expect(computeRadiusFitScale(100, 100, corners)).toBeCloseTo(100 / 120, 6);
   });
 });
 

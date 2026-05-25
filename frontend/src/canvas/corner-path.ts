@@ -6,6 +6,20 @@
  * `PathRecorder` test helper). Each Corner variant has a dedicated append
  * helper so its instruction sequence is unit-testable in isolation.
  *
+ * Public API (intended for production callers): `buildCornerPath`.
+ *
+ * Internal-but-exported (exported only to enable unit testing — do NOT
+ * import these from production code; use `buildCornerPath` instead):
+ *  - `PathBuilder` type, `CornerGeometry` type
+ *  - `KAPPA_CIRCULAR`, `BLEED_AT_S0`, `BLEED_AT_S1` constants
+ *  - `appendRoundCorner`, `appendBevelCorner`, `appendNotchCorner`,
+ *    `appendScoopCorner`, `appendSuperellipseCorner`
+ *  - `appendCornerPath`, `computeRadiusFitScale`
+ *
+ * Per-corner helpers assume their `CornerGeometry` argument has already been
+ * validated by the orchestrator's input guards. Direct callers (tests,
+ * future debug tools) MUST validate inputs first.
+ *
  * Spec: `docs/superpowers/specs/2026-04-23-14-corner-shapes.md` § 3.
  */
 
@@ -22,6 +36,18 @@ export type PathBuilder = Pick<
 
 /** Bezier kappa for a circular arc (v1 superellipse anchor at smoothing = 0). */
 export const KAPPA_CIRCULAR = 0.5522847498;
+
+// CALIBRATION (v1 — see spec § 3.7):
+//
+// BLEED_AT_S0 and BLEED_AT_S1 are hand-tuned anchors interpolated linearly by
+// `superellipseBleed(s)`. At s=0 the bezier matches a standard kappa-circle.
+// At s=1 the control points sit ~67% along each edge from the corner, giving
+// a visible squircle shoulder while preserving C0/C1 continuity with the
+// adjacent straight edges and staying well clear of degenerate values.
+//
+// These constants are subject to designer recalibration in Plan 14d's
+// Storybook tuning loop against iOS / Figma references. If you update them,
+// also update the smoothing-related parity tests in `corner-path.test.ts`.
 
 /** v1 anchor for superellipse smoothing = 0 — control points sit at distance `r` from corner. */
 export const BLEED_AT_S0 = 1.0;
@@ -331,8 +357,27 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
  * length, that edge needs scaling. The minimum scale across all edges is
  * applied uniformly to every corner's rx and ry so the shape stays
  * proportional. Per spec § 3.3.
+ *
+ * Returns a scale FACTOR in (0, 1], not a clamped value — the orchestrator
+ * multiplies every corner's radii by this scalar.
+ *
+ * RF-008: guards non-finite / non-positive dimensions at the function entry
+ * per CLAUDE.md §11 "Math Helpers Must Guard Their Domain". A bad input
+ * returns 1 (no clamping) with a structured `console.warn`; downstream
+ * helpers' validation catches the bad geometry separately. Exported, so
+ * future direct callers (panels, debug tools) get defense-in-depth.
  */
-export function clampScale(width: number, height: number, corners: Corners): number {
+export function computeRadiusFitScale(width: number, height: number, corners: Corners): number {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    console.warn(
+      "corner-path: computeRadiusFitScale rejected non-finite or non-positive dimensions",
+      {
+        width,
+        height,
+      },
+    );
+    return 1;
+  }
   const [tl, tr, br, bl] = corners;
   // Top edge: tl.rx + tr.rx ≤ width
   const topSum = tl.radii.x + tr.radii.x;
@@ -436,7 +481,7 @@ export function appendCornerPath(
 ): void {
   if (!validateDimensions(x, y, width, height)) return;
   if (!validateCornerRadii(corners)) return;
-  const scale = clampScale(width, height, corners);
+  const scale = computeRadiusFitScale(width, height, corners);
   const effective = scale < 1 ? scaleCorners(corners, scale) : corners;
   const [tl, tr, br, bl] = effective;
   const [glTL, glTR, glBR, glBL] = cornerGeometries(x, y, width, height, effective);

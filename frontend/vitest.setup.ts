@@ -76,7 +76,8 @@ if (elProto) {
   }
 }
 
-if (typeof (globalThis as Record<string, unknown>).Path2D === "undefined") {
+const _globalThisForPath2D = globalThis as typeof globalThis & { Path2D?: typeof Path2D };
+if (typeof _globalThisForPath2D.Path2D === "undefined") {
   // Minimal Path2D shim — no-op methods. Production canvas calls accept the
   // path object opaquely; the recorder mock context records the call args
   // without inspecting the path's contents. Geometry correctness is verified
@@ -94,5 +95,5 @@ if (typeof (globalThis as Record<string, unknown>).Path2D === "undefined") {
     rect(): void {}
     roundRect(): void {}
   }
-  (globalThis as Record<string, unknown>).Path2D = Path2DShim;
+  _globalThisForPath2D.Path2D = Path2DShim as unknown as typeof Path2D;
 }
