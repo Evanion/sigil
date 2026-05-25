@@ -307,6 +307,59 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
   }
 }
 
+/**
+ * Compute the maximum scale factor that fits the per-corner radii within the
+ * rectangle edges. Returns 1.0 if no clamping is required.
+ *
+ * For each of the 4 edges, the two adjacent corners contribute their on-edge
+ * radius (x for top/bottom, y for left/right). If the sum exceeds the edge
+ * length, that edge needs scaling. The minimum scale across all edges is
+ * applied uniformly to every corner's rx and ry so the shape stays
+ * proportional. Per spec § 3.3.
+ */
+export function clampScale(width: number, height: number, corners: Corners): number {
+  const [tl, tr, br, bl] = corners;
+  // Top edge: tl.rx + tr.rx ≤ width
+  const topSum = tl.radii.x + tr.radii.x;
+  const topScale = topSum > 0 ? width / topSum : Infinity;
+  // Bottom edge: bl.rx + br.rx ≤ width
+  const bottomSum = bl.radii.x + br.radii.x;
+  const bottomScale = bottomSum > 0 ? width / bottomSum : Infinity;
+  // Left edge: tl.ry + bl.ry ≤ height
+  const leftSum = tl.radii.y + bl.radii.y;
+  const leftScale = leftSum > 0 ? height / leftSum : Infinity;
+  // Right edge: tr.ry + br.ry ≤ height
+  const rightSum = tr.radii.y + br.radii.y;
+  const rightScale = rightSum > 0 ? height / rightSum : Infinity;
+  return Math.min(1, topScale, bottomScale, leftScale, rightScale);
+}
+
+/** Apply a uniform scale to every corner's radii. */
+function scaleCorners(corners: Corners, scale: number): Corners {
+  const scaled = corners.map((c): Corner => {
+    const radii = { x: c.radii.x * scale, y: c.radii.y * scale };
+    switch (c.type) {
+      case "round":
+        return { type: "round", radii };
+      case "bevel":
+        return { type: "bevel", radii };
+      case "notch":
+        return { type: "notch", radii };
+      case "scoop":
+        return { type: "scoop", radii };
+      case "superellipse":
+        return { type: "superellipse", radii, smoothing: c.smoothing };
+      default: {
+        // Exhaustiveness sentinel — adding a Corner variant without a case
+        // here will fail `tsc --noEmit`.
+        const _exhaustive: never = c;
+        throw new Error(`unexpected corner type: ${String(_exhaustive)}`);
+      }
+    }
+  });
+  return [scaled[0], scaled[1], scaled[2], scaled[3]] as Corners;
+}
+
 export function appendCornerPath(
   builder: PathBuilder,
   x: number,
@@ -315,8 +368,10 @@ export function appendCornerPath(
   height: number,
   corners: Corners,
 ): void {
-  const [tl, tr, br, bl] = corners;
-  const [glTL, glTR, glBR, glBL] = cornerGeometries(x, y, width, height, corners);
+  const scale = clampScale(width, height, corners);
+  const effective = scale < 1 ? scaleCorners(corners, scale) : corners;
+  const [tl, tr, br, bl] = effective;
+  const [glTL, glTR, glBR, glBL] = cornerGeometries(x, y, width, height, effective);
 
   // Top-left corner — start the path on the top edge just to the right of the TL corner curve.
   builder.moveTo(x + tl.radii.x, y);

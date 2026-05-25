@@ -15,6 +15,7 @@ import {
   appendNotchCorner,
   appendScoopCorner,
   appendSuperellipseCorner,
+  clampScale,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -253,5 +254,44 @@ describe("appendSuperellipseCorner interpolation", () => {
     const expectedOffset = 16 * (1 - 0.5522847498) * 1.25;
     expect(r.ops[0].args[1]).toBeCloseTo(expectedOffset, 6);
     expect(r.ops[0].args[2]).toBeCloseTo(expectedOffset, 6);
+  });
+});
+
+describe("clampScale", () => {
+  it("returns 1.0 when radii fit within edges", () => {
+    const corners: Corners = [round(16), round(16), round(16), round(16)];
+    expect(clampScale(100, 100, corners)).toBe(1);
+  });
+
+  it("returns 0.75 when top-edge sum exceeds width by 4/3x", () => {
+    const corners: Corners = [round(40), round(40), round(40), round(40)];
+    // Top edge: 40 + 40 = 80 > 60 → scale = 60/80 = 0.75.
+    expect(clampScale(60, 100, corners)).toBe(0.75);
+  });
+
+  it("uses the minimum scale across all 4 edges", () => {
+    // Asymmetric: left edge is the constraint.
+    const corners: Corners = [round(60), round(10), round(10), round(60)];
+    // Left edge: 60 + 60 = 120 > 100 → scale_left = 100/120 ≈ 0.833.
+    // Top edge: 60 + 10 = 70 < 100 → scale_top ≈ 1.43, no clamp.
+    // Right edge: 10 + 10 = 20, scale_right = 5.
+    // Bottom edge: 10 + 60 = 70, scale_bottom ≈ 1.43.
+    // Min: scale_left.
+    expect(clampScale(100, 100, corners)).toBeCloseTo(100 / 120, 6);
+  });
+});
+
+describe("appendCornerPath — radius clamping", () => {
+  it("scales ellipse radii when corner radii exceed edge length", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [round(40), round(40), round(40), round(40)];
+    appendCornerPath(r, 0, 0, 60, 60, corners);
+    // After clamping, scale = 60/80 = 0.75 → effective radii = 30.
+    const ellipses = r.ops.filter((op) => op.method === "ellipse");
+    expect(ellipses.length).toBe(4);
+    for (const e of ellipses) {
+      expect(e.args[2]).toBeCloseTo(30, 6); // rx
+      expect(e.args[3]).toBeCloseTo(30, 6); // ry
+    }
   });
 });
