@@ -64,15 +64,7 @@ export interface CornerGeometry {
 
 /** Emit a single round-corner ellipse using the corner's geometry. */
 export function appendRoundCorner(builder: PathBuilder, geom: CornerGeometry): void {
-  builder.ellipse(
-    geom.cx,
-    geom.cy,
-    geom.rx,
-    geom.ry,
-    0,
-    geom.startAngle,
-    geom.endAngle,
-  );
+  builder.ellipse(geom.cx, geom.cy, geom.rx, geom.ry, 0, geom.startAngle, geom.endAngle);
 }
 
 /**
@@ -402,11 +394,7 @@ function validateCornerRadii(corners: Corners): boolean {
       return false;
     }
     if (corner.type === "superellipse") {
-      if (
-        !Number.isFinite(corner.smoothing) ||
-        corner.smoothing < 0 ||
-        corner.smoothing > 1
-      ) {
+      if (!Number.isFinite(corner.smoothing) || corner.smoothing < 0 || corner.smoothing > 1) {
         console.warn("corner-path: rejected out-of-range superellipse smoothing", { corner });
         return false;
       }
