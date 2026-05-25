@@ -97,6 +97,48 @@ function _cornerExhaustive(c: Corner): string {
 
 The exhaustiveness sentinel must include every set/map/array that branches on the discriminant — `VALID_CORNER_TYPES`, `CORNER_BEARING_KINDS`, renderer dispatch tables — by referencing them in the test body so a new variant fails the test if any one of them is out of date.
 
+**CI enforcement:** A grep step in CI MUST verify that every `export type X = ...` discriminated union in `frontend/src/types/` has a colocated test-d file at `frontend/src/types/__tests__/<name>.test-d.ts`. A discriminated union without a sentinel file fails CI. Precedent: PR #64 (Plan 14c) — `NodeKind` had no sentinel file even though `Corner` did; the renderer's `drawNode` switches over NodeKind would have silently rendered nothing for a new variant. The gap went undetected for the lifetime of the union.
+
+**Runtime coverage obligation:** The sentinel proves every arm exists at compile time; it does NOT prove every arm produces the intended runtime behavior. When a function adds or expands a switch over a discriminated union, every variant arm MUST have at least one direct test assertion against the new call site. A test that exercises only one arm and trusts the sentinel for the others does not satisfy this — sentinels enforce presence, not correctness. Precedent: PR #64 — `drawNode` added fill switches over all 8 NodeKind variants but only the rectangle arm had a direct `ctx.fill(Path2D)` assertion; frame and image arms were uncovered until remediation added explicit tests.
+
+### Tests for Multi-Axis Inputs Must Cover Non-Degenerate Cases
+
+When a function accepts an input value with N independent axes that can take different values (e.g., `{x, y}` radius pair, `{width, height}` dimensions, 2D coordinates, matrix entries, per-channel color), at least one test fixture MUST exercise the case where the axes differ from each other. A test suite where every fixture sets `x === y` (or `width === height`, etc.) is biased toward the degenerate subset of the input domain, and bugs in axis selection — picking the wrong axis based on role rather than identity — are invisible to it.
+
+Required coverage when a type permits axis-independent values:
+1. At least one fixture where each pair/tuple of independent axes has **distinct** values (e.g., `{x: 30, y: 10}` not `{x: 16, y: 16}`).
+2. At least one fixture where the axis assignment is **swapped** relative to (1) (e.g., `{x: 10, y: 30}`).
+3. The test must assert axis-specific output, not just "the function returned something."
+
+This applies whether the type is in Rust (`Vec2`, `Size`, `RadiusPair`) or TypeScript (any `{x, y}` or `{width, height}` shape). When adding a new type with axis-independent fields, add the asymmetric-fixture obligation to its test file alongside the basic cases.
+
+Precedent: PR #64 (Plan 14c) — every corner-radius test fixture used `{x: r, y: r}`; per-corner helpers picked `rx` vs `ry` by entry/exit role instead of edge axis. Three independent helpers (Bevel, Notch, Superellipse) shipped wrong geometry, and the bug was invisible to the entire test suite until asymmetric fixtures were added during remediation.
+
+### Imperative Push/Pop Stacks Must Drain via try-finally
+
+The "Temporary State Flags Must Use try-finally" rule (CLAUDE.md §11) extends to any imperative API exposing a `push`/`pop` (or `save`/`restore`, `begin`/`end`, `acquire`/`release`) pair where the pop is owed by the caller. Canvas 2D `ctx.save()`/`ctx.restore()`, WebGL state, audio context state, and any custom imperative stack maintained alongside it MUST drain in a `finally` block that wraps the entire push-into-stack scope.
+
+If a loop body pushes onto a stack and a subsequent loop iteration is expected to pop, an exception inside the loop skips every pending pop and leaks state across renders. A drain placed at the bottom of the function does NOT cover this — the parent caller's `try/catch` swallows the throw, calls the function again on the next frame, and operates on a corrupted stack.
+
+Pattern:
+
+```typescript
+try {
+  for (const item of items) {
+    ctx.save();
+    stack.push(item);
+    drawItem(item); // may throw
+  }
+} finally {
+  while (stack.length > 0) {
+    ctx.restore();
+    stack.pop();
+  }
+}
+```
+
+Precedent: PR #64 (Plan 14c) — the clip-stack drain was positioned AFTER the node-draw loop. A throw inside `drawNode` skipped the drain; the parent caller's `try/catch` in `Canvas.tsx` resumed rendering on the next animation frame with `ctx.save()` slots permanently leaked, corrupting all subsequent renders.
+
 ### Defensive Message Parsing
 
 Every `JSON.parse` call on data from an external source (WebSocket, fetch, postMessage, file read) must be wrapped in try-catch. Parse failures must be handled gracefully — log and discard, never crash the application. After parsing, validate the shape of the parsed object before type-casting. This applies to both frontend TypeScript and any future Node.js code.
