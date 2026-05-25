@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, clampOpacity } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
@@ -946,6 +946,113 @@ describe("renderer", () => {
       const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
       expect(pathFills.length).toBe(0);
     });
+
+    // RF-009: frame and image arms of the corner-bearing fill switch need
+    // explicit coverage (the rectangle case alone leaves them as silently-
+    // covered by the clip-stack tests, which assert on clip(Path2D) not on
+    // the fill path itself).
+
+    it("frame node calls ctx.fill(Path2D) instead of ctx.fillRect", () => {
+      const node = createTestNode({
+        kind: {
+          type: "frame",
+          layout: null,
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
+      expect(pathFills.length).toBeGreaterThan(0);
+      const nodeOriginFillRects = calls.filter(
+        (c) =>
+          c.method === "fillRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeOriginFillRects.length).toBe(0);
+    });
+
+    it("image node calls ctx.fill(Path2D) instead of ctx.fillRect", () => {
+      const node = createTestNode({
+        kind: {
+          type: "image",
+          src: "https://example.com/img.png",
+          corners: [
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+            { type: "round", radii: { x: 0, y: 0 } },
+          ],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
+      expect(pathFills.length).toBeGreaterThan(0);
+      const nodeOriginFillRects = calls.filter(
+        (c) =>
+          c.method === "fillRect" &&
+          c.args[0] === 100 &&
+          c.args[1] === 100 &&
+          c.args[2] === 200 &&
+          c.args[3] === 150,
+      );
+      expect(nodeOriginFillRects.length).toBe(0);
+    });
+
+    // RF-004: corner-bearing nodes build the Path2D ONCE per drawNode and
+    // reuse it for fill, stroke, and the clip-push. The same Path2D instance
+    // should appear in the fill, stroke, and (for frames) clip arguments.
+
+    it("rectangle reuses one Path2D for fill and stroke (RF-004)", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "solid",
+              color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 1, a: 1 } },
+            },
+          ],
+          strokes: [
+            {
+              color: {
+                type: "literal",
+                value: { space: "srgb", r: 1, g: 0, b: 0, a: 1 },
+              },
+              width: { type: "literal", value: 2 },
+              alignment: "center",
+              cap: "butt",
+              join: "miter",
+            },
+          ],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const fillCalls = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
+      const strokeCalls = calls.filter((c) => c.method === "stroke" && c.args[0] instanceof Path2D);
+      expect(fillCalls.length).toBe(1);
+      expect(strokeCalls.length).toBe(1);
+      // Same Path2D instance — proves the path was hoisted, not rebuilt.
+      expect(fillCalls[0].args[0]).toBe(strokeCalls[0].args[0]);
+    });
   });
 
   // ── Plan 14c Task 14: corner-bearing nodes use buildCornerPath for STROKE ──
@@ -1194,13 +1301,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     });
     const rect = createClipRect("rect-1", "frame-B");
 
-    render(
-      ctx,
-      viewport,
-      [frameA, frameB, rect],
-      new Set(),
-      1,
-    );
+    render(ctx, viewport, [frameA, frameB, rect], new Set(), 1);
 
     const calls = getCalls(ctx);
     // Each frame pushes one save+clip; both must drain by end of loop.
@@ -1243,5 +1344,56 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const lastRestore = restoreCallIndices[restoreCallIndices.length - 1];
     const lastFill = fillCallIndices[fillCallIndices.length - 1];
     expect(lastRestore).toBeGreaterThan(lastFill);
+  });
+
+  // RF-003: MAX_RENDER_DEPTH guard on the renderer's isDescendant ancestry
+  // walk. A cycle in parentUuid links would otherwise hang the canvas thread.
+  // The depth guard fires structured console.warn and the render completes
+  // (the offending node is treated as not-a-descendant → clip stack drains).
+
+  it("isDescendant ancestry walk terminates at MAX_RENDER_DEPTH on cycle", () => {
+    // Build a frame containing one rect (so the clip stack is non-empty when
+    // we visit the cyclic pair), then a parent-chain cycle A→B→A where
+    // neither A nor B is actually a descendant of the frame. The ancestry
+    // walk from A looking for "frame-1" would loop indefinitely between
+    // A and B without the depth guard.
+    const frame = createClipFrame("frame-1", null, []);
+    const cycleA = createClipRect("cycle-A", "cycle-B");
+    const cycleB = createClipRect("cycle-B", "cycle-A");
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      // render() must return without hanging.
+      render(ctx, viewport, [frame, cycleA, cycleB], new Set(), 1);
+      // Diagnostic fires when the depth bound is reached.
+      const depthWarnings = warnSpy.mock.calls.filter((args) => {
+        const first = args[0];
+        return typeof first === "string" && first.includes("MAX_RENDER_DEPTH");
+      });
+      expect(depthWarnings.length).toBeGreaterThan(0);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("renders without hanging when frame nesting exceeds MAX_RENDER_DEPTH", () => {
+    // Construct a chain of 70 frames each parented to the previous. After
+    // MAX_RENDER_DEPTH (64) levels, the ancestry walk gives up and isDescendant
+    // returns false — the clip stack pops. The render still completes.
+    const nodes: ClipTestNode[] = [];
+    for (let i = 0; i < 70; i++) {
+      const uuid = `frame-${i}`;
+      const parentUuid = i === 0 ? null : `frame-${i - 1}`;
+      const childrenUuids = i === 69 ? [] : [`frame-${i + 1}`];
+      nodes.push(createClipFrame(uuid, parentUuid, childrenUuids));
+    }
+
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      // No throw / hang.
+      render(ctx, viewport, nodes, new Set(), 1);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

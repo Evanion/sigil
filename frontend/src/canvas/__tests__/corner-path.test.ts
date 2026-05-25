@@ -297,6 +297,54 @@ describe("appendCornerPath — radius clamping", () => {
       expect(e.args[3]).toBeCloseTo(30, 6); // ry
     }
   });
+
+  // RF-003 / RF-011: clamping must preserve each corner's variant tag — a
+  // bevel under clamp must remain a bevel (one lineTo), not collapse to a
+  // round (one ellipse). The scaleCorners function reconstructs each Corner
+  // through a switch; this test locks the variant-preserving behavior.
+  it("preserves the corner-variant tags under clamping", () => {
+    const r = new PathRecorder();
+    // 60x60 rect with every corner having r=40 — scale = 60/80 = 0.75.
+    const corners: Corners = [
+      { type: "superellipse", radii: { x: 40, y: 40 }, smoothing: 0.5 },
+      { type: "bevel", radii: { x: 40, y: 40 } },
+      { type: "notch", radii: { x: 40, y: 40 } },
+      { type: "scoop", radii: { x: 40, y: 40 } },
+    ];
+    appendCornerPath(r, 0, 0, 60, 60, corners);
+
+    // Each variant emits a distinctive op signature; verify all four survive.
+    const beziers = r.ops.filter((op) => op.method === "bezierCurveTo");
+    const ellipses = r.ops.filter((op) => op.method === "ellipse");
+    const lineTos = r.ops.filter((op) => op.method === "lineTo");
+    // 1 superellipse → 1 bezier; 1 scoop → 1 ellipse (scoop's ctx.ellipse);
+    // 1 bevel → +1 lineTo, 1 notch → +2 lineTos; plus 4 edge lineTos = 7.
+    expect(beziers.length).toBe(1);
+    expect(ellipses.length).toBe(1);
+    expect(lineTos.length).toBe(7);
+  });
+
+  it("scaled superellipse retains its smoothing value", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [
+      { type: "superellipse", radii: { x: 40, y: 40 }, smoothing: 0.5 },
+      { type: "superellipse", radii: { x: 40, y: 40 }, smoothing: 0.5 },
+      { type: "superellipse", radii: { x: 40, y: 40 }, smoothing: 0.5 },
+      { type: "superellipse", radii: { x: 40, y: 40 }, smoothing: 0.5 },
+    ];
+    // 60x60 → scale = 0.75 → effective radii = 30. Smoothing unchanged.
+    appendCornerPath(r, 0, 0, 60, 60, corners);
+    const beziers = r.ops.filter((op) => op.method === "bezierCurveTo");
+    expect(beziers.length).toBe(4);
+    // bleed(0.5) = (1-0.5)*1.0 + 0.5*1.5 = 1.25. cp offset = 30*(1-K)*1.25.
+    const K = 1 - 0.5522847498;
+    const expectedOffset = 30 * K * 1.25;
+    // TR cp1 along top edge (entry horizontal, entryEdgeRadius=30):
+    //   cp1X = cornerX - 1 * expectedOffset = 60 - expectedOffset.
+    // (TR is index 0 because orchestrator emits in TR, BR, BL, TL order.)
+    const tr = beziers[0];
+    expect(tr.args[0]).toBeCloseTo(60 - expectedOffset, 6);
+  });
 });
 
 describe("appendCornerPath — input guards", () => {
