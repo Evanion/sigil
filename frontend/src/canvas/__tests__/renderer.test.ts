@@ -10,6 +10,7 @@ import { render, clampOpacity } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
 import type { SnapGuide } from "../snap-engine";
+import { createMockContext, getCalls, type MockGradient } from "./canvas-mock";
 
 // ── RF-024: clampOpacity ─────────────────────────────────────────────────
 
@@ -74,98 +75,6 @@ function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
     locked: false,
     ...overrides,
   };
-}
-
-/**
- * Mock CanvasGradient that records addColorStop calls.
- * Stores gradient type and construction args for test assertions.
- */
-interface MockGradient {
-  readonly __type: "linear" | "radial" | "conic";
-  readonly __args: readonly number[];
-  readonly __stops: Array<{ offset: number; color: string }>;
-  addColorStop: (offset: number, color: string) => void;
-}
-
-/** Create a mock 2D canvas context that records calls. */
-function createMockContext(): CanvasRenderingContext2D {
-  const calls: Array<{ method: string; args: unknown[] }> = [];
-
-  const handler: ProxyHandler<Record<string, unknown>> = {
-    get(target: Record<string, unknown>, prop: string): unknown {
-      if (prop === "__calls") {
-        return calls;
-      }
-      if (prop === "canvas") {
-        return { width: 800, height: 600 };
-      }
-      // createLinearGradient / createRadialGradient return mock gradients
-      if (prop === "createLinearGradient") {
-        return (...args: number[]): MockGradient => {
-          const stops: Array<{ offset: number; color: string }> = [];
-          const gradient: MockGradient = {
-            __type: "linear",
-            __args: args,
-            __stops: stops,
-            addColorStop(offset: number, color: string) {
-              stops.push({ offset, color });
-            },
-          };
-          calls.push({ method: "createLinearGradient", args });
-          return gradient;
-        };
-      }
-      if (prop === "createRadialGradient") {
-        return (...args: number[]): MockGradient => {
-          const stops: Array<{ offset: number; color: string }> = [];
-          const gradient: MockGradient = {
-            __type: "radial",
-            __args: args,
-            __stops: stops,
-            addColorStop(offset: number, color: string) {
-              stops.push({ offset, color });
-            },
-          };
-          calls.push({ method: "createRadialGradient", args });
-          return gradient;
-        };
-      }
-      if (prop === "createConicGradient") {
-        return (...args: number[]): MockGradient => {
-          const stops: Array<{ offset: number; color: string }> = [];
-          const gradient: MockGradient = {
-            __type: "conic",
-            __args: args,
-            __stops: stops,
-            addColorStop(offset: number, color: string) {
-              stops.push({ offset, color });
-            },
-          };
-          calls.push({ method: "createConicGradient", args });
-          return gradient;
-        };
-      }
-      // Return a function that records the call
-      if (typeof target[prop] === "undefined") {
-        target[prop] = (...args: unknown[]) => {
-          calls.push({ method: prop, args });
-        };
-      }
-      return target[prop];
-    },
-    set(target: Record<string, unknown>, prop: string, value: unknown): boolean {
-      calls.push({ method: `set:${prop}`, args: [value] });
-      target[prop] = value;
-      return true;
-    },
-  };
-
-  return new Proxy({}, handler) as unknown as CanvasRenderingContext2D;
-}
-
-/** Extract recorded calls from the mock context. */
-function getCalls(ctx: CanvasRenderingContext2D): Array<{ method: string; args: unknown[] }> {
-  return (ctx as unknown as { __calls: Array<{ method: string; args: unknown[] }> }).__calls;
 }
 
 describe("renderer", () => {
