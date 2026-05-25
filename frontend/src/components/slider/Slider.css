@@ -1,0 +1,77 @@
+/*
+ * Slider wrapper styles. All visual values come from CSS custom properties
+ * defined in styles/theme.css per CLAUDE.md §5 ("All colors, spacing,
+ * typography, and radii use CSS custom properties from styles/theme.css").
+ * Every transition is paired with a prefers-reduced-motion override per
+ * a11y-rules.md "CSS Animations Must Respect Reduced Motion".
+ */
+
+.sigil-slider {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--input-height);
+  user-select: none;
+  touch-action: none;
+}
+
+.sigil-slider[data-disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.sigil-slider__track {
+  position: relative;
+  flex: 1;
+  height: var(--size-1);
+  background-color: var(--surface-4);
+  border-radius: var(--radius-round);
+}
+
+.sigil-slider__fill {
+  position: absolute;
+  height: 100%;
+  background-color: var(--accent);
+  border-radius: var(--radius-round);
+}
+
+.sigil-slider__thumb {
+  display: block;
+  width: var(--size-3);
+  height: var(--size-3);
+  background-color: var(--text-on-accent);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-round);
+  outline: none;
+  cursor: grab;
+  top: calc(50% - var(--size-3) / 2);
+  transition:
+    transform 80ms ease-out,
+    box-shadow 80ms ease-out;
+}
+
+.sigil-slider__thumb:hover {
+  transform: scale(1.1);
+}
+
+.sigil-slider__thumb:active {
+  cursor: grabbing;
+  transform: scale(1.15);
+}
+
+.sigil-slider__thumb:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-slider__thumb {
+    transition: none;
+  }
+  .sigil-slider__thumb:hover,
+  .sigil-slider__thumb:active {
+    transform: none;
+  }
+}

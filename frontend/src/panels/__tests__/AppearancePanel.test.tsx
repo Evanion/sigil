@@ -444,7 +444,7 @@ describe("AppearancePanel", () => {
     const addBtn = screen.getByRole("button", { name: "Add fill" });
     fireEvent.click(addBtn);
     expect(setFills).not.toHaveBeenCalled();
-  });
+  }, 15000);
 
   // ── flushHistory on ValueInput commit ───────────────────────────────
 

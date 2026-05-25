@@ -190,23 +190,47 @@ jobs:
           fi
           echo "All version references are pinned."
 
+  kobalte-import-discipline:
+    name: Kobalte Import Discipline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Check for direct @kobalte/core imports outside components/
+        run: |
+          # Search for any direct @kobalte/core import outside the components/ tree.
+          # The rule (frontend-defensive.md "Kobalte Imports Must Live in components/ Wrappers"):
+          # all Kobalte imports must live in frontend/src/components/<wrapper>/.
+          OFFENDERS=$(grep -rln "from [\"']@kobalte/core" frontend/src 2>/dev/null \
+            | grep -v "^frontend/src/components/" \
+            || true)
+          if [ -n "$OFFENDERS" ]; then
+            echo "::error::Direct @kobalte/core imports found outside frontend/src/components/. Use a project wrapper from frontend/src/components/<name>/ instead."
+            echo "Offending files:"
+            echo "$OFFENDERS"
+            exit 1
+          fi
+          echo "No direct @kobalte/core imports outside frontend/src/components/."
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust, frontend, pin-check]
+    needs: [rust, frontend, pin-check, kobalte-import-discipline]
     steps:
       - name: Check results
         env:
           RUST_RESULT: ${{ needs.rust.result }}
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           PIN_CHECK_RESULT: ${{ needs.pin-check.result }}
+          KOBALTE_CHECK_RESULT: ${{ needs.kobalte-import-discipline.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
           echo "Pin Check: $PIN_CHECK_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" ]]; then
+          echo "Kobalte Check: $KOBALTE_CHECK_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
