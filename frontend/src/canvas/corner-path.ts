@@ -360,6 +360,61 @@ function scaleCorners(corners: Corners, scale: number): Corners {
   return [scaled[0], scaled[1], scaled[2], scaled[3]] as Corners;
 }
 
+/**
+ * Per CLAUDE.md §11 "Floating-Point Validation": every f64 numeric input to a
+ * path-construction call must be guarded. NaN/Infinity in canvas calls
+ * produces malformed paths silently — the browser ignores the offending
+ * operation without error.
+ *
+ * On failure: emit a structured `console.warn` per `.claude/rules/frontend-defensive.md`
+ * "Internal Mutation Entry Points Must Diagnose Their Own No-Ops", and return
+ * `false` so the caller emits NO ops to the builder.
+ */
+function validateDimensions(x: number, y: number, width: number, height: number): boolean {
+  if (
+    !Number.isFinite(x) ||
+    !Number.isFinite(y) ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    console.warn("corner-path: rejected non-finite or non-positive dimensions", {
+      x,
+      y,
+      width,
+      height,
+    });
+    return false;
+  }
+  return true;
+}
+
+function validateCornerRadii(corners: Corners): boolean {
+  for (const corner of corners) {
+    if (
+      !Number.isFinite(corner.radii.x) ||
+      !Number.isFinite(corner.radii.y) ||
+      corner.radii.x < 0 ||
+      corner.radii.y < 0
+    ) {
+      console.warn("corner-path: rejected non-finite or negative radii", { corner });
+      return false;
+    }
+    if (corner.type === "superellipse") {
+      if (
+        !Number.isFinite(corner.smoothing) ||
+        corner.smoothing < 0 ||
+        corner.smoothing > 1
+      ) {
+        console.warn("corner-path: rejected out-of-range superellipse smoothing", { corner });
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 export function appendCornerPath(
   builder: PathBuilder,
   x: number,
@@ -368,6 +423,8 @@ export function appendCornerPath(
   height: number,
   corners: Corners,
 ): void {
+  if (!validateDimensions(x, y, width, height)) return;
+  if (!validateCornerRadii(corners)) return;
   const scale = clampScale(width, height, corners);
   const effective = scale < 1 ? scaleCorners(corners, scale) : corners;
   const [tl, tr, br, bl] = effective;

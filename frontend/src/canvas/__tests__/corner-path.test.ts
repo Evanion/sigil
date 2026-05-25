@@ -7,7 +7,7 @@
  *
  * Per spec § 4.3: no pixel snapshots, no `canvas` npm package.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   appendCornerPath,
   appendRoundCorner,
@@ -211,8 +211,6 @@ describe("appendScoopCorner", () => {
 function superellipse(r: number, smoothing: number): Corner {
   return { type: "superellipse", radii: { x: r, y: r }, smoothing };
 }
-// Suppress unused-symbol warnings until later tasks consume this helper.
-void superellipse;
 
 describe("appendSuperellipseCorner at smoothing = 0", () => {
   it("emits a single bezierCurveTo", () => {
@@ -292,6 +290,101 @@ describe("appendCornerPath — radius clamping", () => {
     for (const e of ellipses) {
       expect(e.args[2]).toBeCloseTo(30, 6); // rx
       expect(e.args[3]).toBeCloseTo(30, 6); // ry
+    }
+  });
+});
+
+describe("appendCornerPath — input guards", () => {
+  it("emits no ops and warns on NaN x", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [round(16), round(16), round(16), round(16)];
+      appendCornerPath(r, NaN, 0, 100, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits no ops and warns on Infinity width", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [round(16), round(16), round(16), round(16)];
+      appendCornerPath(r, 0, 0, Infinity, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits no ops on zero width (degenerate rectangle)", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [round(16), round(16), round(16), round(16)];
+      appendCornerPath(r, 0, 0, 0, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits no ops on NaN radius", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [
+        { type: "round", radii: { x: NaN, y: 16 } },
+        round(16),
+        round(16),
+        round(16),
+      ];
+      appendCornerPath(r, 0, 0, 100, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits no ops on superellipse smoothing > 1", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [
+        superellipse(16, 1.5),
+        superellipse(16, 0.5),
+        superellipse(16, 0.5),
+        superellipse(16, 0.5),
+      ];
+      appendCornerPath(r, 0, 0, 100, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("emits no ops on superellipse smoothing < 0", () => {
+    const r = new PathRecorder();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      const corners: Corners = [
+        superellipse(16, -0.1),
+        superellipse(16, 0.5),
+        superellipse(16, 0.5),
+        superellipse(16, 0.5),
+      ];
+      appendCornerPath(r, 0, 0, 100, 100, corners);
+      expect(r.ops.length).toBe(0);
+      expect(warnSpy).toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 });
