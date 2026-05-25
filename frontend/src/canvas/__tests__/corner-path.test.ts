@@ -236,3 +236,22 @@ describe("appendSuperellipseCorner at smoothing = 0", () => {
     expect(r.ops[0].args[5]).toBeCloseTo(0, 6);
   });
 });
+
+describe("appendSuperellipseCorner interpolation", () => {
+  it("at smoothing = 1, control point offset extends to bleed=1.5", () => {
+    const r = new PathRecorder();
+    appendSuperellipseCorner(r, TL_GEOM, 1);
+    const expectedOffset = 16 * (1 - 0.5522847498) * 1.5;
+    expect(r.ops[0].args[1]).toBeCloseTo(expectedOffset, 6); // cp1.y
+    expect(r.ops[0].args[2]).toBeCloseTo(expectedOffset, 6); // cp2.x
+  });
+
+  it("at smoothing = 0.5, control point offset is the midpoint between bleed values", () => {
+    const r = new PathRecorder();
+    appendSuperellipseCorner(r, TL_GEOM, 0.5);
+    // Midpoint of bleed between 1.0 and 1.5 is 1.25.
+    const expectedOffset = 16 * (1 - 0.5522847498) * 1.25;
+    expect(r.ops[0].args[1]).toBeCloseTo(expectedOffset, 6);
+    expect(r.ops[0].args[2]).toBeCloseTo(expectedOffset, 6);
+  });
+});
