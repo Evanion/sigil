@@ -5,7 +5,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { render, clampOpacity } from "../renderer";
 import type { Viewport } from "../viewport";
 import type { DocumentNode } from "../../types/document";
@@ -44,6 +44,25 @@ describe("clampOpacity (RF-024)", () => {
     expect(clampOpacity(Number.NEGATIVE_INFINITY)).toBe(1);
   });
 });
+
+/**
+ * Compute index-aligned depths for an array of RenderOrderNodes by walking
+ * parentUuid chains. Mirrors what buildRenderOrder produces in production —
+ * used by tests that construct fixtures by hand. RF-005.
+ */
+function depthsFor(nodes: readonly RenderOrderNode[]): readonly number[] {
+  const byUuid = new Map<string, RenderOrderNode>();
+  for (const n of nodes) byUuid.set(n.uuid, n);
+  return nodes.map((n) => {
+    let depth = 0;
+    let parent: string | null | undefined = n.parentUuid;
+    while (parent && byUuid.has(parent) && depth < 200) {
+      depth++;
+      parent = byUuid.get(parent)?.parentUuid;
+    }
+    return depth;
+  });
+}
 
 /** Create a minimal DocumentNode for testing. */
 function createTestNode(overrides?: Partial<DocumentNode>): DocumentNode {
@@ -91,7 +110,7 @@ describe("renderer", () => {
     it("should draw selection handles when a node is selected by UUID", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], new Set(["test-uuid-1"]), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set(["test-uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       // Selection handles are drawn as fillRect calls with SELECTION_COLOR
@@ -108,7 +127,7 @@ describe("renderer", () => {
     it("should not draw selection handles when no node is selected", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // No selection color should be set (besides the node fill itself)
@@ -121,7 +140,7 @@ describe("renderer", () => {
     it("should not draw selection handles for invisible nodes", () => {
       const node = createTestNode({ visible: false });
 
-      render(ctx, viewport, [node], new Set(["test-uuid-1"]), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set(["test-uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       const selectionStyleSets = calls.filter(
@@ -147,7 +166,16 @@ describe("renderer", () => {
         },
       ];
 
-      render(ctx, viewport, [node], new Set(["drag-node"]), 1, null, previewTransforms);
+      render(
+        ctx,
+        viewport,
+        [node],
+        depthsFor([node]),
+        new Set(["drag-node"]),
+        1,
+        null,
+        previewTransforms,
+      );
 
       const calls = getCalls(ctx);
       // The node should be drawn at the preview position (200, 200), not (100, 100).
@@ -179,7 +207,14 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
+      render(
+        ctx,
+        viewport,
+        [node1, node2],
+        depthsFor([node1, node2]),
+        new Set(["uuid-1", "uuid-2"]),
+        1,
+      );
 
       const calls = getCalls(ctx);
       // Should see strokeRect calls for individual highlights
@@ -205,7 +240,14 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
+      render(
+        ctx,
+        viewport,
+        [node1, node2],
+        depthsFor([node1, node2]),
+        new Set(["uuid-1", "uuid-2"]),
+        1,
+      );
 
       const calls = getCalls(ctx);
       // Compound bounds handles: 8 fillRect calls with SELECTION_COLOR
@@ -220,7 +262,14 @@ describe("renderer", () => {
       const node1 = createTestNode({ uuid: "uuid-1", name: "Node 1" });
       const node2 = createTestNode({ uuid: "uuid-2", name: "Node 2" });
 
-      render(ctx, viewport, [node1, node2], new Set(["uuid-1", "uuid-2"]), 1);
+      render(
+        ctx,
+        viewport,
+        [node1, node2],
+        depthsFor([node1, node2]),
+        new Set(["uuid-1", "uuid-2"]),
+        1,
+      );
 
       const calls = getCalls(ctx);
       // fillText is used for name labels and text nodes
@@ -233,7 +282,7 @@ describe("renderer", () => {
     it("should draw name label when exactly one node is selected", () => {
       const node = createTestNode({ uuid: "uuid-1", name: "My Node" });
 
-      render(ctx, viewport, [node], new Set(["uuid-1"]), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set(["uuid-1"]), 1);
 
       const calls = getCalls(ctx);
       const fillTextCalls = calls.filter((c) => c.method === "fillText");
@@ -247,7 +296,7 @@ describe("renderer", () => {
     it("should draw marquee rect when provided", () => {
       const marquee = { x: 50, y: 50, width: 200, height: 150 };
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       // Marquee should produce a fillRect and strokeRect with the marquee color
@@ -265,7 +314,7 @@ describe("renderer", () => {
     it("should set dashed line pattern for marquee rect", () => {
       const marquee = { x: 0, y: 0, width: 100, height: 100 };
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       // Should have a setLineDash call with non-empty array
@@ -277,7 +326,7 @@ describe("renderer", () => {
     });
 
     it("should not draw marquee rect when null", () => {
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], null);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], [], null);
 
       const calls = getCalls(ctx);
       // With no nodes, no selection, no preview, no guides, no marquee,
@@ -289,7 +338,7 @@ describe("renderer", () => {
     it("should use marquee fill color with semi-transparency", () => {
       const marquee = { x: 10, y: 10, width: 50, height: 50 };
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       const fillStyleSets = calls.filter(
@@ -305,7 +354,7 @@ describe("renderer", () => {
       // RF-016: Test that right-to-left / bottom-to-top marquee is normalized
       const marquee = { x: 250, y: 200, width: -200, height: -150 };
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], [], marquee);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], [], marquee);
 
       const calls = getCalls(ctx);
       // After normalization: x=50, y=50, w=200, h=150
@@ -330,7 +379,7 @@ describe("renderer", () => {
     it("should not call stroke when no snap guides are provided", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], new Set<string>(), 1, null, [], []);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1, null, [], []);
 
       const calls = getCalls(ctx);
       // With empty guides the guide color should never be set
@@ -343,7 +392,7 @@ describe("renderer", () => {
     it("should set stroke style to guide color when x-axis snap guide is present", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 150 }];
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], guides);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorSets = calls.filter(
@@ -358,7 +407,7 @@ describe("renderer", () => {
         { axis: "y", position: 200 },
       ];
 
-      render(ctx, viewport, [], new Set<string>(), 1, null, [], guides);
+      render(ctx, viewport, [], depthsFor([]), new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       // Count stroke calls that occur after guide color is set
@@ -379,7 +428,7 @@ describe("renderer", () => {
       // Viewport at origin, zoom 1 — canvas is 800x600 logical px
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
+      render(ctx, vp, [], depthsFor([]), new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -397,7 +446,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "y", position: 250 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 1 };
 
-      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
+      render(ctx, vp, [], depthsFor([]), new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -415,7 +464,7 @@ describe("renderer", () => {
       const guides: SnapGuide[] = [{ axis: "x", position: 100 }];
       const vp: Viewport = { x: 0, y: 0, zoom: 2 };
 
-      render(ctx, vp, [], new Set<string>(), 1, null, [], guides);
+      render(ctx, vp, [], depthsFor([]), new Set<string>(), 1, null, [], guides);
 
       const calls = getCalls(ctx);
       const guideColorIdx = calls.findIndex(
@@ -462,7 +511,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
@@ -502,7 +551,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const radialCalls = calls.filter((c) => c.method === "createRadialGradient");
@@ -552,7 +601,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // Retrieve the gradient object set as fillStyle
@@ -597,7 +646,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const fillStyleSet = calls.find(
@@ -644,7 +693,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // The node is a rectangle, so each fill should produce one ctx.fill(Path2D)
@@ -665,7 +714,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // Should still draw the node with default fill
@@ -705,7 +754,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
@@ -748,7 +797,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const linearCalls = calls.filter((c) => c.method === "createLinearGradient");
@@ -793,7 +842,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const conicCalls = calls.filter((c) => c.method === "createConicGradient");
@@ -841,7 +890,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const fillStyleSet = calls.find(
@@ -886,7 +935,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const conicCalls = calls.filter((c) => c.method === "createConicGradient");
@@ -902,7 +951,7 @@ describe("renderer", () => {
     it("rectangle node calls ctx.fill(Path2D) instead of ctx.fillRect", () => {
       const node = createTestNode();
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // The rectangle is drawn via ctx.fill(Path2D), not ctx.fillRect.
@@ -927,7 +976,7 @@ describe("renderer", () => {
         kind: { type: "group" },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // The group falls into the non-corner-bearing branch — it draws via
@@ -966,7 +1015,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
@@ -986,7 +1035,7 @@ describe("renderer", () => {
       const node = createTestNode({
         kind: {
           type: "image",
-          src: "https://example.com/img.png",
+          asset_ref: "img-1",
           corners: [
             { type: "round", radii: { x: 0, y: 0 } },
             { type: "round", radii: { x: 0, y: 0 } },
@@ -996,7 +1045,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const pathFills = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
@@ -1043,7 +1092,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       const fillCalls = calls.filter((c) => c.method === "fill" && c.args[0] instanceof Path2D);
@@ -1080,7 +1129,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // The stroke is drawn via ctx.stroke(Path2D), not ctx.strokeRect.
@@ -1121,7 +1170,7 @@ describe("renderer", () => {
         },
       });
 
-      render(ctx, viewport, [node], new Set<string>(), 1);
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
 
       const calls = getCalls(ctx);
       // The group falls into the non-corner-bearing branch — it strokes via
@@ -1254,7 +1303,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const frame = createClipFrame("frame-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "frame-1");
 
-    render(ctx, viewport, [frame, child], new Set(), 1);
+    render(ctx, viewport, [frame, child], depthsFor([frame, child]), new Set(), 1);
 
     const calls = getCalls(ctx);
     const methodSequence = calls.map((c) => c.method);
@@ -1280,7 +1329,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const group = createClipGroup("group-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "group-1");
 
-    render(ctx, viewport, [group, child], new Set(), 1);
+    render(ctx, viewport, [group, child], depthsFor([group, child]), new Set(), 1);
 
     const calls = getCalls(ctx);
     // No clip(Path2D) calls — groups do not clip their children.
@@ -1301,7 +1350,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     });
     const rect = createClipRect("rect-1", "frame-B");
 
-    render(ctx, viewport, [frameA, frameB, rect], new Set(), 1);
+    render(ctx, viewport, [frameA, frameB, rect], depthsFor([frameA, frameB, rect]), new Set(), 1);
 
     const calls = getCalls(ctx);
     // Each frame pushes one save+clip; both must drain by end of loop.
@@ -1326,7 +1375,7 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     const frame = createClipFrame("frame-1", null, ["rect-1"]);
     const child = createClipRect("rect-1", "frame-1");
 
-    render(ctx, viewport, [frame, child], new Set(), 1);
+    render(ctx, viewport, [frame, child], depthsFor([frame, child]), new Set(), 1);
 
     const calls = getCalls(ctx);
     const fillCallIndices = calls
@@ -1346,54 +1395,33 @@ describe("render() — frame child clipping (Plan 14c)", () => {
     expect(lastRestore).toBeGreaterThan(lastFill);
   });
 
-  // RF-003: MAX_RENDER_DEPTH guard on the renderer's isDescendant ancestry
-  // walk. A cycle in parentUuid links would otherwise hang the canvas thread.
-  // The depth guard fires structured console.warn and the render completes
-  // (the offending node is treated as not-a-descendant → clip stack drains).
+  // RF-005: depth-tracking clip stack — the renderer pops while the
+  // top-of-stack depth >= the current node's depth. Verify the new contract.
 
-  it("isDescendant ancestry walk terminates at MAX_RENDER_DEPTH on cycle", () => {
-    // Build a frame containing one rect (so the clip stack is non-empty when
-    // we visit the cyclic pair), then a parent-chain cycle A→B→A where
-    // neither A nor B is actually a descendant of the frame. The ancestry
-    // walk from A looking for "frame-1" would loop indefinitely between
-    // A and B without the depth guard.
-    const frame = createClipFrame("frame-1", null, []);
-    const cycleA = createClipRect("cycle-A", "cycle-B");
-    const cycleB = createClipRect("cycle-B", "cycle-A");
+  it("pops clip when traversal returns to a depth <= the frame's depth", () => {
+    // Two sibling frames at depth 0, each with one child at depth 1.
+    // After frameA's child draws, the next node (frameB) is at depth 0,
+    // so frameA's clip MUST be popped before frameB is drawn.
+    const frameA = createClipFrame("frame-A", null, ["rect-A"]);
+    const childA = createClipRect("rect-A", "frame-A");
+    const frameB = createClipFrame("frame-B", null, ["rect-B"]);
+    const childB = createClipRect("rect-B", "frame-B");
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      // render() must return without hanging.
-      render(ctx, viewport, [frame, cycleA, cycleB], new Set(), 1);
-      // Diagnostic fires when the depth bound is reached.
-      const depthWarnings = warnSpy.mock.calls.filter((args) => {
-        const first = args[0];
-        return typeof first === "string" && first.includes("MAX_RENDER_DEPTH");
-      });
-      expect(depthWarnings.length).toBeGreaterThan(0);
-    } finally {
-      warnSpy.mockRestore();
-    }
-  });
+    const nodes = [frameA, childA, frameB, childB];
+    render(ctx, viewport, nodes, depthsFor(nodes), new Set(), 1);
 
-  it("renders without hanging when frame nesting exceeds MAX_RENDER_DEPTH", () => {
-    // Construct a chain of 70 frames each parented to the previous. After
-    // MAX_RENDER_DEPTH (64) levels, the ancestry walk gives up and isDescendant
-    // returns false — the clip stack pops. The render still completes.
-    const nodes: ClipTestNode[] = [];
-    for (let i = 0; i < 70; i++) {
-      const uuid = `frame-${i}`;
-      const parentUuid = i === 0 ? null : `frame-${i - 1}`;
-      const childrenUuids = i === 69 ? [] : [`frame-${i + 1}`];
-      nodes.push(createClipFrame(uuid, parentUuid, childrenUuids));
-    }
+    const calls = getCalls(ctx);
+    const methodSeq = calls.map((c) => c.method);
 
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    try {
-      // No throw / hang.
-      render(ctx, viewport, nodes, new Set(), 1);
-    } finally {
-      warnSpy.mockRestore();
-    }
+    // Expect: save (frameA clip), clip, ... fill (childA), restore (pop A),
+    // save (frameB clip), clip, ... fill (childB), restore (end-of-loop drain).
+    const saveCount = methodSeq.filter((m) => m === "save").length;
+    const restoreCount = methodSeq.filter((m) => m === "restore").length;
+    const clipCount = methodSeq.filter((m) => m === "clip").length;
+    expect(clipCount).toBe(2);
+    // Each frame pushes a save before clip and a restore on pop; per-node
+    // save/restore from drawNode opacity guard also contribute. The
+    // invariant we test is save/restore balance.
+    expect(saveCount).toBe(restoreCount);
   });
 });

@@ -29,7 +29,7 @@ import { computeCompoundBounds } from "./multi-select";
 import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
 import { buildCornerPath } from "./corner-path";
-import { MAX_RENDER_DEPTH, type RenderOrderNode } from "./render-order";
+import { type RenderOrderNode } from "./render-order";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -840,6 +840,7 @@ export function render(
   ctx: CanvasRenderingContext2D,
   viewport: Viewport,
   nodes: readonly RenderOrderNode[],
+  depths: readonly number[],
   selectedUuids: ReadonlySet<string>,
   dpr = 1,
   previewRect: PreviewRect | null = null,
@@ -870,43 +871,13 @@ export function render(
   );
 
   // Plan 14c: clip-stack for frame children. `nodes` arrives in depth-first
-  // parent-then-children order (via buildRenderOrder), so we push a clip when
-  // entering a frame's subtree and pop when leaving it.
-  //
-  // Each clipStack entry holds the frame's UUID. Before drawing a node, we
-  // pop frames whose subtree we have left by checking whether the new node's
-  // ancestry chain (via parentUuid walks) still contains the top-of-stack UUID.
-  //
-  // The ancestry walk is bounded by MAX_RENDER_DEPTH (CLAUDE.md §11 "Recursive
-  // Functions Require Depth Guards") to defend against cycles or orphans.
-  // A node arriving without a `parentUuid` is treated as a root for clipping.
-  const nodesByUuid = new Map<string, RenderOrderNode>();
-  for (const n of nodes) {
-    nodesByUuid.set(n.uuid, n);
-  }
-
-  function isDescendant(nodeUuid: string, ancestorUuid: string): boolean {
-    let current: string | null | undefined = nodeUuid;
-    let depth = 0;
-    while (current && depth < MAX_RENDER_DEPTH) {
-      if (current === ancestorUuid) return true;
-      const node = nodesByUuid.get(current);
-      current = node?.parentUuid;
-      depth++;
-    }
-    if (depth >= MAX_RENDER_DEPTH) {
-      // Diagnostic when the depth guard fires — likely a cycle or extreme nesting.
-      // Mirrors the pattern in render-order.ts (CLAUDE.md §11 "Internal Mutation
-      // Entry Points Must Diagnose Their Own No-Ops").
-      console.warn(
-        `[Canvas] MAX_RENDER_DEPTH (${MAX_RENDER_DEPTH}) exceeded while walking ancestry for clip stack`,
-        { nodeUuid, ancestorUuid },
-      );
-    }
-    return false;
-  }
-
-  const clipStack: string[] = [];
+  // parent-then-children order (via buildRenderOrder), with index-aligned
+  // `depths`. Because the order is DFS-monotone (every parent precedes its
+  // children, and children share parent.depth + 1), the clip stack's size
+  // is bounded by the current node's depth. RF-005: pop while
+  // `clipStack.length > depths[i]` — O(1) amortized, no ancestry walks,
+  // no parent-uuid Map allocation per render.
+  const clipStack: number[] = []; // stored depths only — UUIDs are not needed for popping
 
   // RF-002: the clip-stack drain MUST run even if drawNode / buildCornerPath /
   // ctx.clip throws. Without the try/finally, an exception would skip the
@@ -916,13 +887,16 @@ export function render(
   // would pop back to a stale clip region.
   try {
     // Draw each visible node.
-    for (const node of nodes) {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
       if (!node.visible) {
         continue;
       }
+      const depth = depths[i] ?? 0;
 
-      // Pop frames whose subtree we have left.
-      while (clipStack.length > 0 && !isDescendant(node.uuid, clipStack[clipStack.length - 1])) {
+      // Pop frames whose subtree we have left — any clip stack entry at or
+      // deeper than this node is out of scope.
+      while (clipStack.length > 0 && clipStack[clipStack.length - 1] >= depth) {
         ctx.restore();
         clipStack.pop();
       }
@@ -935,7 +909,10 @@ export function render(
       if (node.kind.type === "frame" && cornerPath !== null) {
         ctx.save();
         ctx.clip(cornerPath);
-        clipStack.push(node.uuid);
+        // A frame's children are at depth+1, so they keep the clip; siblings
+        // and ancestors of the frame are at depth or less, so they trigger
+        // the pop above on the next iteration.
+        clipStack.push(depth);
       }
     }
   } finally {

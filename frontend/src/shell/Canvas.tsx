@@ -31,7 +31,7 @@ import { createTextTool } from "../tools/text-tool";
 import { createTextOverlay, type TextOverlayHandle } from "../canvas/text-overlay";
 import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
-import { buildRenderOrder, type RenderOrderNode } from "../canvas/render-order";
+import { buildRenderOrder, type RenderOrderResult } from "../canvas/render-order";
 import { defaultCorners } from "../store/default-corners";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
@@ -154,7 +154,7 @@ export const Canvas: Component = () => {
 
   // RF-004: Memoize render order so DFS traversal only runs when the node
   // graph changes, not on every pointer event (preview, marquee, guides).
-  const renderOrder = createMemo((): RenderOrderNode[] => {
+  const renderOrder = createMemo((): RenderOrderResult => {
     const nodesObj = store.state.nodes;
     // Object.keys() creates a reactive dependency on key additions/deletions.
     const keys = Object.keys(nodesObj);
@@ -448,7 +448,7 @@ export const Canvas: Component = () => {
 
       // RF-005: Find the topmost text node at this world position.
       // Use render order in reverse — last in render order = topmost on canvas.
-      const ordered = renderOrder();
+      const ordered = renderOrder().nodes;
       let topmostUuid: string | null = null;
       for (let i = ordered.length - 1; i >= 0; i--) {
         const node = ordered[i];
@@ -690,7 +690,7 @@ export const Canvas: Component = () => {
       const selSet = selectedIdsSet();
 
       // RF-004: Use memoized render order — only recomputed when node graph changes.
-      const nodesArray = renderOrder();
+      const { nodes: nodesArray, depths } = renderOrder();
 
       // Read tokens for token-ref resolution in the renderer
       const tokens = store.state.tokens;
@@ -698,7 +698,19 @@ export const Canvas: Component = () => {
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
       try {
-        renderCanvas(ctx, vp, nodesArray, selSet, dpr, prevRect, previews, guides, marquee, tokens);
+        renderCanvas(
+          ctx,
+          vp,
+          nodesArray,
+          depths,
+          selSet,
+          dpr,
+          prevRect,
+          previews,
+          guides,
+          marquee,
+          tokens,
+        );
       } catch (err: unknown) {
         console.error("Canvas render error:", err);
       }
