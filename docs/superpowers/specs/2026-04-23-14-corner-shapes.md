@@ -217,7 +217,9 @@ Plan 14b lands this rule in CLAUDE.md §5 and/or `.claude/rules/frontend-defensi
 
 ### 3.1 The rendering gap
 
-Today `drawNode` in `frontend/src/canvas/renderer.ts:236-254` renders Rectangle, Frame, and Image using `ctx.fillRect(x, y, width, height)`. Corner radii are stored in the data model but **never drawn**. Spec 14 closes this gap as a prerequisite for supporting any shape beyond `round, radius: 0`.
+Today `drawNode` in `frontend/src/canvas/renderer.ts` renders Rectangle, Frame, and Image using `ctx.fillRect(x, y, width, height)`. Corner radii are stored in the data model but **never drawn**. Additionally — and not previously captured in this spec — **frames do not clip their children**. The renderer iterates a flattened render-order array of nodes and paints each in turn without any save/clip/restore around frame subtrees. A frame with a beveled corner therefore shows the bevel only on its own paint; the moment any child overflows the frame's bounds, the bevel becomes visually invisible because the child renders past it. Corner shapes are essentially decorative-on-the-frame's-own-paint without clipping.
+
+Plan 14c closes both gaps: path-based shape rendering for rect/frame/image, and frame child clipping using the corner-shape path.
 
 ### 3.2 Path construction
 
@@ -236,7 +238,7 @@ Each corner contributes one arc or polyline segment; edges between corners are a
 - **Bevel** — single `lineTo(cornerPoint)` diagonal cut. Uses `rx` and `ry` as offsets along the two adjacent edges.
 - **Notch** — two straight segments forming a square step inward: `in by rx along one edge`, `over by ry perpendicular`, `back out`. Axis-asymmetry supported natively.
 - **Scoop** — same ellipse math as round but with the sweep direction reversed (concave arc).
-- **Superellipse** — cubic beziers per corner approximating a squircle. `smoothing = 0` collapses to the same geometry as the round case (circular/elliptical arc approximation). `smoothing = 1` produces Apple-style G2-continuous curvature bleeding along the adjacent edges. Intermediate values interpolate the control-point offsets between these two anchors. Exact constants (circular-arc kappa ≈ 0.5522, squircle bleed length) and the interpolation curve are a Plan 14c deliverable — derive against reference renders from iOS / Figma's corner smoothing, not from a formula stated up-front. Radii asymmetry scales control points independently on x and y.
+- **Superellipse** — cubic beziers per corner approximating a squircle. `smoothing = 0` collapses to the same geometry as the round case (circular/elliptical arc approximation, kappa ≈ 0.5522). `smoothing = 1` produces curvature that bleeds further along the adjacent edges (Apple/Figma-style smoothing). Intermediate values linearly interpolate the bezier control-point offsets between these two anchors. Radii asymmetry scales control points independently on x and y. **v1 ships a credible approximation, not a pixel-perfect Figma/iOS match** — see §3.7 design decisions.
 
 Each algorithm lives in its own pure helper function (`appendRoundCorner`, `appendBevelCorner`, etc.) so it's unit-testable against Path2D instruction sequences.
 
@@ -255,15 +257,28 @@ Clamping is a **render-time** operation — stored radii remain what the user ty
 
 Every helper that uses `Math.sqrt`, `Math.asin`, `Math.acos`, `Math.pow` with a fractional exponent guards its domain at function entry (CLAUDE.md §11 "Math Helpers Must Guard Their Domain"). Every numeric result flowing into a Canvas 2D path call passes `Number.isFinite` (§11 "Floating-Point Validation").
 
-### 3.5 Fill, stroke, clip
+### 3.5 Fill, stroke, clip — and frame child clipping (new)
 
 - **Fill**: existing per-fill loop in `drawNode` constructs the path once, then each fill does `ctx.fill(path)`. Replaces the `fillRect` call.
 - **Stroke**: the stroke rendering pipeline (separate from fills) uses the same `Path2D`. Centered-stroke offset logic continues to work — the new path is a drop-in replacement.
-- **Clip**: frames clipping their children today use `ctx.rect(...); ctx.clip();`. Replace with `ctx.clip(path)` so children clip to the rounded/beveled frame outline, not a plain AABB.
+- **Frame child clipping (new in 14c).** The render loop in `render()` (`frontend/src/canvas/renderer.ts`) receives nodes in depth-first parent-then-children order via `buildRenderOrder()`. Plan 14c threads a "clip stack" through the loop:
+  - On entering a `frame` node: call `ctx.save()`, then `ctx.clip(buildCornerPath(...))` using the frame's transform + corner data. Push the frame's UUID onto the clip stack.
+  - Before drawing each node: while the next node's ancestry chain does NOT include the top-of-stack frame UUID, `ctx.restore()` and pop. This emits restores when the iterator leaves a frame's subtree.
+  - At end of frame loop: drain remaining stack with `ctx.restore()` calls.
+  - Groups do NOT push a clip — `group` nodes are containers without their own bounds (Figma semantics).
+- **Recursion safety:** the clip stack depth is bounded by `MAX_RENDER_DEPTH = 64` (already enforced in `buildRenderOrder`). No additional limit needed; the same constant gates both.
 
 ### 3.6 Hit-testing
 
 Stays AABB-based for v1. Picking a rectangular region containing the shape matches Figma behavior — clicking the empty area in a bevel or scoop corner still selects the node. Path-level hit-test can be a future enhancement if user demand surfaces.
+
+### 3.7 Design decisions (CLAUDE.md §1 Design Decision Criteria)
+
+This spec section was expanded during Plan 14c brainstorming after discovering that the originally-stated "replace `ctx.rect; ctx.clip` with `ctx.clip(path)`" understated the work — no clipping existed at all. Three decisions worth recording:
+
+- **Frame child clipping is in-scope for Plan 14c, not deferred.** Corner shapes without frame clipping are decorative-on-paint only — the moment a child overflows, the shape becomes visually invisible. A Frame that does not clip is functionally a Group. Including clipping in 14c is the difference between corner shapes being a real UX feature and being half-baked data. Correctness > Simplicity (CLAUDE.md §1).
+- **Superellipse smoothing in v1 ships a credible approximation, not pixel-perfect Figma matching.** Calibrating to Figma's exact bezier constants requires either reverse-engineering Figma's renderer or extensive designer-in-the-loop tuning. The data layer (Plan 14a) already validates smoothing ∈ [0, 1]; the visual fidelity can sharpen post-merge through designer feedback without a schema change. v1 uses linear interpolation between kappa = 0.5522 (s=0) and a chosen bleed length (s=1) tuned to be visually plausible. Calibration against iOS/Figma references is a tracked follow-up after designer review.
+- **Test strategy: Path2D instruction snapshots, not pixel snapshots.** "Golden pixel tests" would require installing the heavy `canvas` npm package (libcairo bindings) plus an image-snapshot library, with cross-platform brittleness. Instead: pure geometry helpers are tested by snapshotting the sequence of canvas operations (`moveTo` / `lineTo` / `bezierCurveTo` / `ellipse`) they emit — for pure deterministic geometry, instruction sequence == output. The renderer integration test uses a recorder-mock of `CanvasRenderingContext2D` to verify call ordering (path → fill → stroke; save → clip → child draws → restore). Visual fidelity QA happens via Storybook stories in Plan 14d. Simplicity + Robustness over pixel-level coverage that we don't have infrastructure for.
 
 ---
 
@@ -291,11 +306,39 @@ Stays AABB-based for v1. Picking a rectangular region containing the shape match
 
 ### 4.3 Canvas (Plan 14c)
 
-- Golden pixel tests per shape × (axes locked / unlocked) × 2 radii sizes in `frontend/src/canvas/__tests__/renderer.test.ts`.
-- `test_radius_clamping_when_sum_exceeds_edge` — renders a node with oversized radii and verifies the output matches a clamped version.
-- `test_mixed_shapes_per_corner_render` — one rectangle with round/bevel/notch/scoop on the 4 corners.
-- `test_superellipse_smoothing_varies_curvature` — render at smoothing = 0, 0.5, 1.0 and verify visible divergence.
-- Frame clipping: `test_frame_clip_uses_corner_path` — children of a rounded frame are clipped to the rounded outline.
+Per §3.7, tests use **Path2D instruction snapshots** for pure geometry helpers and a **CanvasRenderingContext2D recorder-mock** for renderer integration. No pixel snapshots, no `canvas` npm package, no cross-platform image-diff brittleness.
+
+**Pure helpers in `corner-path.test.ts`:**
+
+- `test_build_round_corners_uniform_radii` — snapshot the recorded operation sequence for a 100×100 rect with all-round 16/16 corners. Asserts the sequence: `moveTo` → `ellipse` × 4 → `closePath`.
+- `test_build_bevel_corners_uniform_radii` — same, asserts `lineTo` × 8 (4 edges × 2 segments each: corner-cut + edge).
+- `test_build_notch_corners` — asserts the two-segment step inward per corner.
+- `test_build_scoop_corners` — asserts ellipse with reversed sweep direction (concave).
+- `test_build_superellipse_corners_smoothing_0` — at smoothing = 0, the bezier control points should produce a path visually indistinguishable from round (kappa = 0.5522 anchor).
+- `test_build_superellipse_corners_smoothing_1` — at smoothing = 1, control points are at the "bleed length" extreme.
+- `test_build_superellipse_corners_smoothing_0_5` — interpolation midpoint; assert control points are halfway between the s=0 and s=1 values.
+- `test_build_corners_clamps_when_radii_exceed_edge` — input 60×40 rect with all-round 40/40 corners. Expect clamping: top edge has 40+40 = 80 > 60, so scale = 60/80 = 0.75. Asserts ellipse calls use rx=30, not 40.
+- `test_build_corners_clamps_minimum_axis` — asymmetric radii: top edge {x: 40, y: 10} corners with edge length 50 must clamp x to 25 each, leaving y unchanged.
+- `test_build_corners_mixed_shapes` — one rect with round/bevel/notch/scoop in the 4 corners; assert the per-corner branch in the operation sequence.
+- `test_corner_path_rejects_non_finite_dimensions` — `buildCornerPath(NaN, 0, 100, 100, ...)` should produce a defined fallback (empty path) and emit a structured `console.warn` per the frontend-defensive rule. Equivalent test for Infinity.
+- `test_corner_path_rejects_non_finite_radii` — same for a corner whose `radii.x` is NaN.
+
+**Per-shape `Math.*` domain guard tests** (one per helper that calls `Math.sqrt`/`Math.pow`/`Math.asin`/`Math.acos`):
+
+- `test_superellipse_helper_guards_math_pow_domain` — exercise inputs that would produce a negative base under fractional exponent and assert the helper returns a degenerate-but-defined value (no NaN escapes).
+
+**Renderer integration in `renderer.test.ts` (using recorder mock):**
+
+- `test_drawNode_rectangle_uses_corner_path` — render a Rectangle node, assert the recorder captured `ctx.fill(<Path2D>)`, NOT `ctx.fillRect`. The recorder must capture the Path2D identity so the test can correlate it with a separately-built reference path.
+- `test_drawNode_frame_with_round_corners_clips_children` — render a parent Frame with round 16/16 corners and a child Rectangle. Assert the operation sequence: `save` → `clip(framePath)` → child `fill(rectPath)` → `restore`.
+- `test_drawNode_group_does_not_clip_children` — group is NOT a clip boundary; assert NO `save`/`clip`/`restore` pair around the group's subtree.
+- `test_drawNode_nested_frames_stack_clip` — Frame A contains Frame B contains Rect. Assert nested `save`/`clip`/`save`/`clip`/draw/`restore`/`restore` ordering.
+- `test_drawNode_clip_stack_drains_on_loop_exit` — last node in render order is a child of a frame; assert the loop's final `restore` is called before `render()` returns.
+- `test_drawNode_clip_uses_max_render_depth_guard` — render a 65-deep frame chain (exceeds MAX_RENDER_DEPTH=64); assert traversal stops with a structured `console.warn`, no stack overflow.
+
+**Visual QA (Plan 14d Storybook):**
+
+- 14d adds Storybook stories rendering each shape on a Frame containing a child that would overflow without clipping. Manual designer review compares against iOS / Figma reference for superellipse-smoothing acceptance (per §3.7 — calibration is a 14d-time tuning loop, not blocked by 14c shipping a v1 approximation).
 
 ### 4.4 UI (Plan 14d)
 
