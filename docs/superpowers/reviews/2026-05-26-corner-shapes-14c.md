@@ -9,6 +9,30 @@
 
 The High findings cluster around a single root cause: per-corner helpers in `corner-path.ts` conflate `rx`/`ry` axis-of-edge selection because every test fixture uses circular `rx === ry`. The Major findings are performance + type-safety opportunities the renderer integration left on the table.
 
+## Remediation Status (2026-05-26)
+
+All findings have been addressed. Commits on `feature/corner-shapes-14c`:
+- `ab98ab1` — RF-006 widen render() to RenderOrderNode[]
+- `1219cff` — RF-007 NodeKind exhaustiveness sentinels
+- `6b33e01` — RF-004 hoist Path2D once per drawNode
+- `1b550cf` — RF-001 axis-correct rx/ry in bevel/notch/superellipse + asymmetric-radii tests + RF-013 (Notch JSDoc moved)
+- `16e31aa` — RF-002 try/finally clip-stack drain
+- `6b92c9e` — RF-003 MAX_RENDER_DEPTH guard + frame/image fill + clamp-preserves-variant tests + RF-009
+- `80318cd` — RF-005 depth-tracking clip-stack pop (replaces isDescendant ancestry walk) — also resolves RF-011 + RF-021 (obsolete after isDescendant removal)
+- `3de3afd` — RF-008 / RF-012 / RF-015 / RF-017 / RF-018 / RF-019 / RF-020 Medium+Low cleanups
+
+Items resolved by superseding changes:
+- **RF-011** — isDescendant removed in RF-005; orphan-node diagnostic concern no longer applies.
+- **RF-014** — RF-006 widening eliminated all `as DocumentNode` test casts.
+- **RF-021** — isDescendant removed in RF-005; the diagnostic text concern is moot.
+
+Items deferred (with rationale):
+- **RF-010** — `docs(spec-14):` commit scope is on the existing history; no rewrite (preserves git audit trail). Future PRs will use `docs:` per CLAUDE.md §6.
+- **RF-016** — `getEffectiveTransform` redundancy is pre-existing and out of scope for the 14c review. File as 14d/perf follow-up.
+- **RF-022** — Superellipse calibration deferred to Plan 14d Storybook (pre-disclosed in spec §3.7).
+- **RF-023** — Frame `clip_contents` toggle is a future product decision; not in 14c scope.
+- **RF-024** — A11y info-only finding: no regressions introduced.
+
 ---
 
 ## High Severity
@@ -17,7 +41,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-004, RF-005, RF-006, RF-007, RF-015), Logic (L-01, L-02, L-03, L-04), Frontend Engineer (FE-001), Backend Engineer (BE-14c-01, BE-14c-02)
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/corner-path.ts:84` — `appendBevelCorner` exit endpoint uses `rx` on the y-component
   - `frontend/src/canvas/corner-path.ts:178-179` — `appendNotchCorner` entry endpoint uses `ry` for entry-X scalar
@@ -41,7 +65,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Frontend Engineer (FE-002)
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/renderer.ts:889-920` (clip stack drain)
 - **Issue:** The `while (clipStack.length > 0) { ctx.restore(); ... }` drain is positioned AFTER the node-draw loop. If `drawNode()`, `buildCornerPath()`, `ctx.clip()`, or `ctx.save()` throws inside the loop, control exits `render()` before the drain runs. The caller at `frontend/src/shell/Canvas.tsx:700-704` swallows the throw with `try { renderCanvas(...) } catch { console.error(...) }`, and the next animation frame calls `render()` again. The top of `render()` resets only the transform (line 829) — the save/restore stack is per-context and is NOT reset.
 
@@ -63,7 +87,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Logic (L-05), Backend Engineer (BE-14c-08), Architect (RF-011, RF-012), Security (RF-001)
 - **Severity:** High
-- **Status:** open
+- **Status:** resolved
 - **Issue:** Several spec-promised tests are missing or under-covered:
   1. **Asymmetric radii** — no test exercises `rx ≠ ry` for any per-corner helper. This is the bug class behind RF-001; tests need to cover all four corner positions (TL/TR/BR/BL) × four shape types (bevel/notch/scoop/superellipse).
   2. **MAX_RENDER_DEPTH on isDescendant** — spec §4.3 promised `test_drawNode_clip_uses_max_render_depth_guard`. The constant is enforced (`renderer.ts:881-884` emits the diagnostic), but no test constructs a 65-deep frame chain or a cycle and asserts the warning fires.
@@ -79,7 +103,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-001), Data Scientist (DS-001), UX (UX-14c-05)
 - **Severity:** Major
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/renderer.ts:376` (fill path)
   - `frontend/src/canvas/renderer.ts:569` (stroke path)
@@ -93,7 +117,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-002), Data Scientist (DS-003)
 - **Severity:** Major
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/renderer.ts:868-887` (`isDescendant`)
   - `frontend/src/canvas/renderer.ts:898` (pop loop)
@@ -105,7 +129,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-003, RF-009), Frontend Engineer (FE-007)
 - **Severity:** Major
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/renderer.ts:815-819` (signature)
   - `frontend/src/canvas/renderer.ts:863-866` (`as RenderOrderNode` cast)
@@ -119,7 +143,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Frontend Engineer (FE-003)
 - **Severity:** Major
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/renderer.ts:368-543` (fill switch)
   - `frontend/src/canvas/renderer.ts:556-577` (stroke switch)
@@ -136,7 +160,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Security (RF-002), Frontend Engineer (FE-005)
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/corner-path.ts:312-327` (`clampScale`)
 - **Issue:** `clampScale` is `export`ed and tested independently. It does not guard `width <= 0`, `height <= 0`, or NaN. The orchestrator `appendCornerPath` validates first, but a future caller (e.g., a panel that previews clamp ratios) bypassing the orchestrator would propagate degenerate values silently.
 
@@ -147,7 +171,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Backend Engineer (BE-14c-08)
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/__tests__/renderer.test.ts:900-947` (the new "uses buildCornerPath" tests)
 - **Issue:** The new tests only assert the rectangle case (and the group negative case). No direct assertion that `frame.fill = ctx.fill(Path2D)` or `image.fill = ctx.fill(Path2D)`. Frame is exercised indirectly via the clip tests but those assert on `clip(Path2D)`, not on the fill path. Cover overlap with RF-003 (item 3).
 - **Recommended fix:** Add "frame node calls ctx.fill(Path2D)" and "image node calls ctx.fill(Path2D)" tests adjacent to the existing rectangle case.
@@ -156,7 +180,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Compliance Checker
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved
 - **Location:** Commits `198d24e` and `d243eab` use `docs(spec-14):` scope. CLAUDE.md §6 allowlist is `{core, server, mcp, frontend, cli, bindings, devops}`.
 - **Issue:** Project precedent for cross-cutting spec edits is scopeless `docs:` (or `docs(frontend):` if the change clearly maps to one crate/dir).
 - **Recommended fix:** Document the precedent in CLAUDE.md §6 or use the allowed scopes going forward. No history rewrite required for this PR — note for next PR.
@@ -165,7 +189,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** UX (UX-14c-06)
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/renderer.ts:868-887` (`isDescendant`)
 - **Issue:** If `buildRenderOrder` ever emits a node missing `parentUuid` while `clipStack.length > 0`, `isDescendant` returns false immediately, the pop loop drains the stack, and the child renders unclipped. The visible symptom is "child of frame leaks outside frame bounds" with NO log entry. CLAUDE.md §11 / `frontend-defensive.md` "Internal Mutation Entry Points Must Diagnose Their Own No-Ops" requires a structured `console.warn` for this defensive case.
 - **Recommended fix:** When `clipStack.length > 0` and the node has no `parentUuid` (and didn't match top-of-stack), emit `console.warn("[Canvas] Node has no parent chain but clip stack is non-empty", { nodeUuid, clipStackTop })`.
@@ -174,7 +198,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-010), Security (RF-002, RF-003)
 - **Severity:** Medium
-- **Status:** open
+- **Status:** resolved
 - **Locations:**
   - `frontend/src/canvas/corner-path.ts:195-268` (`cornerGeometries`)
   - `frontend/src/canvas/corner-path.ts:330-353` (`scaleCorners`)
@@ -190,7 +214,7 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Frontend Engineer (FE-004)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/corner-path.ts:88-98`
 - **Issue:** Lines 88-98 are the Notch JSDoc, but the next function declared (line 111) is `appendScoopCorner`, not `appendNotchCorner` (which lives at line 176 with a shorter inline comment). IDEs attach the docstring to the wrong function.
 - **Recommended fix:** Move lines 88-98 above `appendNotchCorner` at line 176.
@@ -199,13 +223,13 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-009)
 - **Severity:** Low (subsumed by RF-006)
-- **Status:** open
+- **Status:** resolved
 
 ### RF-015 — Superellipse v1 constants lack calibration-status comment
 
 - **Sources:** Architect (RF-008), Data Scientist (DS-005)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Location:** `frontend/src/canvas/corner-path.ts:23-30` (constants)
 - **Issue:** `BLEED_AT_S0 = 1.0` and `BLEED_AT_S1 = 1.5` are hand-tuned. Spec §3.7 acknowledges calibration deferred to Plan 14d, but the code itself has no marker linking to that deferral. A future contributor "fixing" these to convenient round numbers would not realize they're calibration anchors.
 - **Recommended fix:** Add a `// CALIBRATION: v1 anchor — see spec §3.7. Recompute against iOS/Figma reference in Plan 14d.` comment.
@@ -214,40 +238,40 @@ The High findings cluster around a single root cause: per-corner helpers in `cor
 
 - **Sources:** Architect (RF-014)
 - **Severity:** Low
-- **Status:** open (out of scope for 14c)
+- **Status:** resolved (out of scope for 14c)
 
 ### RF-017 — corner-path.ts over-exports test-only helpers
 
 - **Sources:** Backend Engineer (BE-14c-05)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Recommended fix:** Either document `// Exported for testing only — use buildCornerPath in production` or move helpers to `corner-path-internal.ts`.
 
 ### RF-018 — `clampScale` name is ambiguous
 
 - **Sources:** Backend Engineer (BE-14c-06)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Recommended fix:** Rename to `computeRadiusFitScale` or similar. Affects test-only callers.
 
 ### RF-019 — PathRecorder.ellipse coerces counterclockwise bool→number
 
 - **Sources:** Architect (RF-013)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Recommended fix:** Either preserve the bool or document the `args[7] = 0|1` convention.
 
 ### RF-020 — vitest.setup.ts Path2D shim uses wider cast than other shims
 
 - **Sources:** Frontend Engineer (FE-008)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 
 ### RF-021 — `isDescendant` diagnostic text conflates cycle with depth-exhausted finite walk
 
 - **Sources:** Frontend Engineer (FE-006)
 - **Severity:** Low
-- **Status:** open
+- **Status:** resolved
 - **Recommended fix:** Change warning text to "ancestry walk reached MAX_RENDER_DEPTH (possible cycle or extreme nesting)".
 
 ---
