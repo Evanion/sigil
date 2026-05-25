@@ -346,8 +346,18 @@ function drawNode(
   node: DocumentNode,
   transform: Transform,
   tokens: Record<string, Token>,
-): void {
+): Path2D | null {
   const { x, y, width, height } = transform;
+
+  // RF-004: Build the corner Path2D ONCE per drawNode for corner-bearing
+  // kinds. Reuse it across the fill loop, the stroke, and (for frames)
+  // the clip-push in render(). At the 1000-node ceiling this halves
+  // Path2D allocations from 2 → 1 per node and eliminates the third
+  // allocation for the frame clip path.
+  const cornerPath =
+    node.kind.type === "frame" || node.kind.type === "rectangle" || node.kind.type === "image"
+      ? buildCornerPath(x, y, width, height, node.kind.corners)
+      : null;
 
   // Save context state so opacity/blend mode don't leak to other nodes.
   // RF-024: clampOpacity + the save/restore pair are the rendering-boundary
@@ -369,22 +379,22 @@ function drawNode(
     case "frame":
     case "rectangle":
     case "image": {
-      // Corner-bearing kinds — fill via a Path2D produced by buildCornerPath
-      // so per-corner shapes (round, bevel, notch, scoop, superellipse) are
-      // rendered correctly. With all-zero round corners this is equivalent to
-      // a rectangular fill but goes through the path API.
-      const path = buildCornerPath(x, y, width, height, node.kind.corners);
+      // Corner-bearing kinds — fill via the hoisted cornerPath (built once
+      // above) so per-corner shapes (round, bevel, notch, scoop,
+      // superellipse) are rendered correctly and the same Path2D is reused
+      // by the stroke + clip passes.
+      if (cornerPath === null) break; // unreachable — narrowed by kind switch
       if (node.style.fills.length === 0) {
         // No fills — draw with default fill color for visibility
         ctx.fillStyle = DEFAULT_FILL;
-        ctx.fill(path);
+        ctx.fill(cornerPath);
       } else {
         // Draw the shape once per fill (bottom-to-top = array order)
         for (const fill of node.style.fills) {
           const fillStyle = resolveFillStyle(ctx, fill, x, y, width, height, tokens);
           if (fillStyle !== null) {
             ctx.fillStyle = fillStyle;
-            ctx.fill(path);
+            ctx.fill(cornerPath);
           }
         }
       }
@@ -567,11 +577,10 @@ function drawNode(
       case "frame":
       case "rectangle":
       case "image": {
-        // Corner-bearing kinds — stroke via the same Path2D used by the fill
-        // so the stroke follows the actual corner geometry (round, bevel,
-        // notch, scoop, superellipse).
-        const path = buildCornerPath(x, y, width, height, node.kind.corners);
-        ctx.stroke(path);
+        // Corner-bearing kinds — stroke via the hoisted cornerPath so the
+        // stroke follows the same geometry as the fill.
+        if (cornerPath === null) break; // unreachable — narrowed by kind switch
+        ctx.stroke(cornerPath);
         break;
       }
       case "group":
@@ -591,6 +600,8 @@ function drawNode(
 
   // Restore context state (resets globalAlpha, globalCompositeOperation)
   ctx.restore();
+
+  return cornerPath;
 }
 
 /**
@@ -910,14 +921,13 @@ export function render(
     }
 
     const effectiveTransform = getEffectiveTransform(node, previewMap);
-    drawNode(ctx, node, effectiveTransform, tokens);
+    const cornerPath = drawNode(ctx, node, effectiveTransform, tokens);
 
-    // If this is a frame, push a clip for its subtree.
-    if (node.kind.type === "frame") {
-      const { x, y, width, height } = effectiveTransform;
-      const clipPath = buildCornerPath(x, y, width, height, node.kind.corners);
+    // If this is a frame, push a clip for its subtree. Reuse the Path2D
+    // that drawNode already built (RF-004) — no third allocation.
+    if (node.kind.type === "frame" && cornerPath !== null) {
       ctx.save();
-      ctx.clip(clipPath);
+      ctx.clip(cornerPath);
       clipStack.push(node.uuid);
     }
   }
