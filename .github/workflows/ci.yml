@@ -212,12 +212,65 @@ jobs:
           fi
           echo "No direct @kobalte/core imports outside frontend/src/components/."
 
+  discriminated-union-sentinels:
+    name: Discriminated Union Sentinels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Verify every object-discriminator union has an exhaustive sentinel
+        run: |
+          # The rule (frontend-defensive.md "Discriminated Unions Must Have a
+          # Type-Level Exhaustiveness Sentinel"): every object-discriminator
+          # union in frontend/src/types/ must have a colocated .test-d.ts file
+          # in frontend/src/types/__tests__/ that imports the union AND
+          # contains a `const _<name>: never = ...` sentinel.
+          #
+          # Heuristic: an "object-discriminator union" is `export type X = A | B`
+          # where the RHS contains pipes between PascalCase identifiers (no
+          # string literals — those are enum-style unions that don't dispatch).
+          UNIONS=$(perl -ne 'BEGIN{$/=undef} while (/^export type ([A-Z][A-Za-z0-9_]+)\s*=\s*([^;]+);/gms) { my $name = $1; my $body = $2; print "$name\n" if $body =~ /\|/ and $body !~ /"/; }' frontend/src/types/*.ts)
+
+          if [ -z "$UNIONS" ]; then
+            echo "::error::No discriminated unions detected in frontend/src/types/ — grep heuristic may be broken."
+            exit 1
+          fi
+
+          # Collect content of every .test-d.ts file that contains an exhaustive sentinel.
+          # The rule's canonical pattern is `const _<name>: never = x;` — any
+          # identifier starting with `_` and typed as `never`.
+          SENTINEL_FILES=$(grep -lE 'const _[A-Za-z0-9_]*\s*:\s*never\b' frontend/src/types/__tests__/*.test-d.ts 2>/dev/null || true)
+
+          if [ -z "$SENTINEL_FILES" ]; then
+            echo "::error::No .test-d.ts files with exhaustive sentinels found in frontend/src/types/__tests__/"
+            exit 1
+          fi
+
+          SENTINEL_CONTENT=$(echo "$SENTINEL_FILES" | xargs cat)
+
+          MISSING=""
+          for TYPE in $UNIONS; do
+            if ! echo "$SENTINEL_CONTENT" | grep -qE "\\b$TYPE\\b"; then
+              MISSING="$MISSING $TYPE"
+            fi
+          done
+
+          if [ -n "$MISSING" ]; then
+            echo "::error::Discriminated unions missing exhaustive-switch sentinel:$MISSING"
+            echo "::error::Each union must be referenced in a .test-d.ts file under frontend/src/types/__tests__/ that contains a 'const _: never = ...' sentinel. See document-corners.test-d.ts for the canonical example."
+            exit 1
+          fi
+
+          echo "Every discriminated union has an exhaustive-switch sentinel:"
+          echo "$UNIONS" | sed 's/^/  /'
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
-    needs: [rust, frontend, pin-check, kobalte-import-discipline]
+    needs:
+      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels]
     steps:
       - name: Check results
         env:
@@ -225,12 +278,14 @@ jobs:
           FRONTEND_RESULT: ${{ needs.frontend.result }}
           PIN_CHECK_RESULT: ${{ needs.pin-check.result }}
           KOBALTE_CHECK_RESULT: ${{ needs.kobalte-import-discipline.result }}
+          SENTINELS_RESULT: ${{ needs.discriminated-union-sentinels.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
           echo "Pin Check: $PIN_CHECK_RESULT"
           echo "Kobalte Check: $KOBALTE_CHECK_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" ]]; then
+          echo "Sentinels Check: $SENTINELS_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
