@@ -132,6 +132,55 @@ export function appendScoopCorner(builder: PathBuilder, geom: CornerGeometry): v
   );
 }
 
+/**
+ * Compute the v1 bleed factor for a given smoothing value.
+ * At s=0: standard circular-arc anchor (BLEED_AT_S0).
+ * At s=1: anchor extends to BLEED_AT_S1, producing G2-like curvature.
+ *
+ * v1 uses linear interpolation. Calibration against iOS/Figma references is a
+ * 14d follow-up per spec § 3.7.
+ */
+function superellipseBleed(smoothing: number): number {
+  return (1 - smoothing) * BLEED_AT_S0 + smoothing * BLEED_AT_S1;
+}
+
+/**
+ * Emit a single cubic bezier `bezierCurveTo` for a Superellipse corner.
+ *
+ * Control points are positioned along the edges, offset from the corner-point
+ * by `bleed * radius`, and the cubic tangent at each endpoint is along the
+ * adjacent edge (C1 continuity with the straight edges).
+ *
+ * At smoothing = 0, bleed = 1.0 and the bezier is the standard cubic
+ * approximation of a quarter-circle (kappa = 0.5522 captured via the bleed
+ * factor's interaction with the control-point offset).
+ */
+export function appendSuperellipseCorner(
+  builder: PathBuilder,
+  geom: CornerGeometry,
+  smoothing: number,
+): void {
+  const bleed = superellipseBleed(smoothing);
+  // The entry endpoint (current pen position) is at distance `ry` from the corner
+  // along the entry edge. The control point for the entry side is offset
+  // KAPPA_CIRCULAR closer to the corner-point along the entry edge — scaled by
+  // the bleed factor.
+  // Control point near entry: along entry edge toward corner-point by
+  // KAPPA_CIRCULAR * ry, but the BLEED scales how far along the edge the
+  // control point sits from the corner.
+  // At bleed=1.0, control point sits at distance ry*(1 - KAPPA_CIRCULAR) from the corner.
+  // At bleed=1.5, control point sits at distance ry*1.5*(1 - KAPPA_CIRCULAR) from the corner.
+  const cp1X = geom.cornerX - geom.entryDirX * geom.ry * (1 - KAPPA_CIRCULAR) * bleed;
+  const cp1Y = geom.cornerY - geom.entryDirY * geom.ry * (1 - KAPPA_CIRCULAR) * bleed;
+  // Control point near exit: along exit edge from corner-point.
+  const cp2X = geom.cornerX + geom.exitDirX * geom.rx * (1 - KAPPA_CIRCULAR) * bleed;
+  const cp2Y = geom.cornerY + geom.exitDirY * geom.rx * (1 - KAPPA_CIRCULAR) * bleed;
+  // Exit endpoint.
+  const exitX = geom.cornerX + geom.exitDirX * geom.rx;
+  const exitY = geom.cornerY + geom.exitDirY * geom.ry;
+  builder.bezierCurveTo(cp1X, cp1Y, cp2X, cp2Y, exitX, exitY);
+}
+
 export function appendNotchCorner(builder: PathBuilder, geom: CornerGeometry): void {
   // Entry endpoint (current pen position): corner - entryDir * ry.
   const entryEndX = geom.cornerX - geom.entryDirX * geom.ry;
@@ -244,9 +293,17 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
     case "scoop":
       appendScoopCorner(builder, geom);
       return;
-    default:
-      // Other variants implemented in later tasks.
-      throw new Error(`appendCorner not yet implemented for ${corner.type}`);
+    case "superellipse":
+      appendSuperellipseCorner(builder, geom, corner.smoothing);
+      return;
+    default: {
+      // Exhaustiveness sentinel per
+      // `.claude/rules/frontend-defensive.md` "Discriminated Unions Must Have
+      // a Type-Level Exhaustiveness Sentinel". Adding a new Corner variant
+      // without a case here will fail `tsc --noEmit`.
+      const _exhaustive: never = corner;
+      throw new Error(`unexpected corner type: ${String(_exhaustive)}`);
+    }
   }
 }
 

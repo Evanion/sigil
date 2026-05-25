@@ -14,6 +14,7 @@ import {
   appendBevelCorner,
   appendNotchCorner,
   appendScoopCorner,
+  appendSuperellipseCorner,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -203,5 +204,35 @@ describe("appendScoopCorner", () => {
     expect(r.ops[0].args[1]).toBe(0);
     // counterclockwise flag at index 7 = 1.
     expect(r.ops[0].args[7]).toBe(1);
+  });
+});
+
+function superellipse(r: number, smoothing: number): Corner {
+  return { type: "superellipse", radii: { x: r, y: r }, smoothing };
+}
+// Suppress unused-symbol warnings until later tasks consume this helper.
+void superellipse;
+
+describe("appendSuperellipseCorner at smoothing = 0", () => {
+  it("emits a single bezierCurveTo", () => {
+    const r = new PathRecorder();
+    appendSuperellipseCorner(r, TL_GEOM, 0);
+    expect(r.ops.length).toBe(1);
+    expect(r.ops[0].method).toBe("bezierCurveTo");
+  });
+
+  it("control points are placed using kappa anchor at bleed=1.0", () => {
+    const r = new PathRecorder();
+    appendSuperellipseCorner(r, TL_GEOM, 0);
+    const expectedOffset = 16 * (1 - 0.5522847498) * 1.0;
+    // cp1: corner (0,0) - entryDir (0,-1) * offset = (0, +offset).
+    expect(r.ops[0].args[0]).toBeCloseTo(0, 6);
+    expect(r.ops[0].args[1]).toBeCloseTo(expectedOffset, 6);
+    // cp2: corner (0,0) + exitDir (1,0) * offset = (offset, 0).
+    expect(r.ops[0].args[2]).toBeCloseTo(expectedOffset, 6);
+    expect(r.ops[0].args[3]).toBeCloseTo(0, 6);
+    // Exit endpoint: (16, 0).
+    expect(r.ops[0].args[4]).toBeCloseTo(16, 6);
+    expect(r.ops[0].args[5]).toBeCloseTo(0, 6);
   });
 });
