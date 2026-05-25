@@ -57,6 +57,9 @@ export interface CornerGeometry {
   /** Unit vector along the SECOND adjacent edge (the edge the curve exits ONTO). */
   readonly exitDirX: number;
   readonly exitDirY: number;
+  /** The geometric corner-point of the rectangle (where the two edges meet). */
+  readonly cornerX: number;
+  readonly cornerY: number;
 }
 
 /** Emit a single round-corner ellipse using the corner's geometry. */
@@ -72,6 +75,24 @@ export function appendRoundCorner(builder: PathBuilder, geom: CornerGeometry): v
   );
 }
 
+/**
+ * Emit a single diagonal `lineTo` for a Bevel corner.
+ *
+ * The bevel cuts from the point that's `ry` along the entry edge (away from
+ * the geometric corner-point) to the point that's `rx` along the exit edge.
+ * Both endpoints are at the same distance-from-edge as a Round corner would
+ * have, so neighbouring edges remain aligned regardless of corner shape.
+ *
+ * The previous lineTo (in `appendCornerPath`) already placed the pen at the
+ * entry endpoint; this helper only needs to draw the cut to the exit endpoint.
+ */
+export function appendBevelCorner(builder: PathBuilder, geom: CornerGeometry): void {
+  // Exit edge endpoint: corner + exitDir * rx (toward next corner along the exit edge).
+  const exitStartX = geom.cornerX + geom.exitDirX * geom.rx;
+  const exitStartY = geom.cornerY + geom.exitDirY * geom.rx;
+  builder.lineTo(exitStartX, exitStartY);
+}
+
 /** Compute geometry for the 4 corners of a rectangle. */
 function cornerGeometries(
   x: number,
@@ -82,8 +103,11 @@ function cornerGeometries(
 ): readonly [CornerGeometry, CornerGeometry, CornerGeometry, CornerGeometry] {
   const [tl, tr, br, bl] = corners;
   return [
-    // Top-left: arc from +π (left) to +3π/2 (up), center at (x+rx, y+ry).
+    // Top-left: corner point at (x, y), ellipse center at (x+rx, y+ry).
+    // Arc sweeps from +π (left) to +3π/2 (up).
     {
+      cornerX: x,
+      cornerY: y,
       cx: x + tl.radii.x,
       cy: y + tl.radii.y,
       rx: tl.radii.x,
@@ -95,9 +119,12 @@ function cornerGeometries(
       exitDirX: 1,
       exitDirY: 0,
     },
-    // Top-right: arc from +3π/2 (up) to 0 (right). Note Canvas ellipse uses
+    // Top-right: corner at (x+w, y), ellipse center at (x+w-rx, y+ry).
+    // Arc sweeps from +3π/2 (up) to 0 (right). Note Canvas ellipse uses
     // clockwise sweep by default when end > start.
     {
+      cornerX: x + width,
+      cornerY: y,
       cx: x + width - tr.radii.x,
       cy: y + tr.radii.y,
       rx: tr.radii.x,
@@ -109,8 +136,10 @@ function cornerGeometries(
       exitDirX: 0,
       exitDirY: 1,
     },
-    // Bottom-right: arc from 0 (right) to π/2 (down).
+    // Bottom-right: corner at (x+w, y+h). Arc sweeps from 0 (right) to π/2 (down).
     {
+      cornerX: x + width,
+      cornerY: y + height,
       cx: x + width - br.radii.x,
       cy: y + height - br.radii.y,
       rx: br.radii.x,
@@ -122,8 +151,10 @@ function cornerGeometries(
       exitDirX: -1,
       exitDirY: 0,
     },
-    // Bottom-left: arc from π/2 (down) to π (left).
+    // Bottom-left: corner at (x, y+h). Arc sweeps from π/2 (down) to π (left).
     {
+      cornerX: x,
+      cornerY: y + height,
       cx: x + bl.radii.x,
       cy: y + height - bl.radii.y,
       rx: bl.radii.x,
@@ -146,6 +177,9 @@ function appendCorner(builder: PathBuilder, corner: Corner, geom: CornerGeometry
   switch (corner.type) {
     case "round":
       appendRoundCorner(builder, geom);
+      return;
+    case "bevel":
+      appendBevelCorner(builder, geom);
       return;
     default:
       // Other variants implemented in later tasks.

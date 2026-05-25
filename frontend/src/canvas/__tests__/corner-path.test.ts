@@ -11,6 +11,7 @@ import { describe, it, expect } from "vitest";
 import {
   appendCornerPath,
   appendRoundCorner,
+  appendBevelCorner,
   type PathBuilder,
   type CornerGeometry,
 } from "../corner-path";
@@ -64,6 +65,8 @@ function round(r: number): Corner {
 }
 
 const TL_GEOM: CornerGeometry = {
+  cornerX: 0,
+  cornerY: 0,
   cx: 16,
   cy: 16,
   rx: 16,
@@ -124,5 +127,32 @@ describe("appendCornerPath — all-round corners", () => {
     const moveTo = r.ops[0];
     expect(moveTo.method).toBe("moveTo");
     expect(moveTo.args).toEqual([10 + 16, 20]); // x + tl.radii.x, y
+  });
+});
+
+function bevel(r: number): Corner {
+  return { type: "bevel", radii: { x: r, y: r } };
+}
+
+describe("appendBevelCorner", () => {
+  it("emits a single lineTo diagonal cut for a TL bevel", () => {
+    const r = new PathRecorder();
+    appendBevelCorner(r, TL_GEOM);
+    expect(r.ops.length).toBe(1);
+    expect(r.ops[0].method).toBe("lineTo");
+    // Exit endpoint = (cornerX + exitDirX * rx, cornerY + exitDirY * rx) = (16, 0).
+    expect(r.ops[0].args).toEqual([16, 0]);
+  });
+});
+
+describe("appendCornerPath — all-bevel corners", () => {
+  it("emits moveTo + 8 lineTo + closePath (no ellipses)", () => {
+    const r = new PathRecorder();
+    const corners: Corners = [bevel(16), bevel(16), bevel(16), bevel(16)];
+    appendCornerPath(r, 0, 0, 100, 100, corners);
+    const methods = r.ops.map((op) => op.method);
+    expect(methods.filter((m) => m === "ellipse").length).toBe(0);
+    // 4 edge lineTos (between corners) + 4 bevel-cut lineTos = 8 lineTos.
+    expect(methods.filter((m) => m === "lineTo").length).toBe(8);
   });
 });
