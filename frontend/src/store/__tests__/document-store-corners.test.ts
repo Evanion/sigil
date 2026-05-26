@@ -14,6 +14,8 @@ import {
   MAX_CORNER_RADIUS,
   MIN_CORNER_SMOOTHING,
   MAX_CORNER_SMOOTHING,
+  MIN_SUPERELLIPSE_SMOOTHING,
+  MAX_SUPERELLIPSE_SMOOTHING,
   DEFAULT_SMOOTHING,
 } from "../corners-input";
 import type { Corner, Corners } from "../../types/document";
@@ -331,6 +333,63 @@ describe("parseCornersInput — constant enforcement boundaries", () => {
 
   it("MAX_CORNER_SMOOTHING should match Rust validate.rs MAX_CORNER_SMOOTHING (1.0)", () => {
     expect(MAX_CORNER_SMOOTHING).toBe(1.0);
+  });
+});
+
+// ── MIN/MAX_SUPERELLIPSE_SMOOTHING enforcement (Plan 14d Task 9) ─────────
+// The Slider/NumberInput-facing aliases for the smoothing domain bounds.
+// These constants are consumed by the upcoming CornerPopover smoothing
+// Slider (Task 12). Per CLAUDE.md §11 "Constants Must Be Enforced", every
+// MIN_*/MAX_* constant must have a test that verifies enforcement at the
+// parser boundary. parseCornersInput is the canonical enforcement site.
+
+describe("MIN_SUPERELLIPSE_SMOOTHING / MAX_SUPERELLIPSE_SMOOTHING enforcement", () => {
+  it("test_max_superellipse_smoothing_enforced — rejects smoothing > MAX_SUPERELLIPSE_SMOOTHING", () => {
+    const result = parseCornersInput({
+      type: "superellipse",
+      radius: 8,
+      smoothing: MAX_SUPERELLIPSE_SMOOTHING + 0.0001,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("test_min_superellipse_smoothing_enforced — rejects smoothing < MIN_SUPERELLIPSE_SMOOTHING", () => {
+    const result = parseCornersInput({
+      type: "superellipse",
+      radius: 8,
+      smoothing: MIN_SUPERELLIPSE_SMOOTHING - 0.0001,
+    });
+    expect(result).toBeNull();
+  });
+
+  it("accepts smoothing at the MIN_SUPERELLIPSE_SMOOTHING boundary", () => {
+    expect(
+      parseCornersInput({
+        type: "superellipse",
+        radius: 8,
+        smoothing: MIN_SUPERELLIPSE_SMOOTHING,
+      }),
+    ).not.toBeNull();
+  });
+
+  it("accepts smoothing at the MAX_SUPERELLIPSE_SMOOTHING boundary", () => {
+    expect(
+      parseCornersInput({
+        type: "superellipse",
+        radius: 8,
+        smoothing: MAX_SUPERELLIPSE_SMOOTHING,
+      }),
+    ).not.toBeNull();
+  });
+
+  it("MIN_SUPERELLIPSE_SMOOTHING matches MIN_CORNER_SMOOTHING (Rust validate.rs 0.0)", () => {
+    expect(MIN_SUPERELLIPSE_SMOOTHING).toBe(MIN_CORNER_SMOOTHING);
+    expect(MIN_SUPERELLIPSE_SMOOTHING).toBe(0.0);
+  });
+
+  it("MAX_SUPERELLIPSE_SMOOTHING matches MAX_CORNER_SMOOTHING (Rust validate.rs 1.0)", () => {
+    expect(MAX_SUPERELLIPSE_SMOOTHING).toBe(MAX_CORNER_SMOOTHING);
+    expect(MAX_SUPERELLIPSE_SMOOTHING).toBe(1.0);
   });
 });
 

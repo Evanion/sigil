@@ -28,6 +28,18 @@ export const MIN_CORNER_SMOOTHING = 0.0;
  *  Matches Rust validate.rs `MAX_CORNER_SMOOTHING = 1.0`. */
 export const MAX_CORNER_SMOOTHING = 1.0;
 
+/** Minimum superellipse smoothing value (Spec 14 §3.7 v1 range).
+ *  Slider/NumberInput-facing alias for `MIN_CORNER_SMOOTHING` — same value,
+ *  named after the shape that bears it so the CornerPopover smoothing
+ *  Slider (Plan 14d Task 12) can reference a domain-specific constant per
+ *  CLAUDE.md §11 "Constants Must Be Enforced". */
+export const MIN_SUPERELLIPSE_SMOOTHING = MIN_CORNER_SMOOTHING;
+
+/** Maximum superellipse smoothing value (Spec 14 §3.7 v1 range).
+ *  Slider/NumberInput-facing alias for `MAX_CORNER_SMOOTHING` — see
+ *  `MIN_SUPERELLIPSE_SMOOTHING` for rationale. */
+export const MAX_SUPERELLIPSE_SMOOTHING = MAX_CORNER_SMOOTHING;
+
 /** Default smoothing applied when the caller provides a shape-level
  *  superellipse input without an explicit smoothing value. Matches the
  *  Figma/iOS squircle default. */
