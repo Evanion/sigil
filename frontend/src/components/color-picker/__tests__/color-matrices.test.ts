@@ -89,4 +89,48 @@ describe("color-matrices", () => {
     ];
     expect(multiplyMatrixVec3(P, [1, 2, 3])).toEqual([3, 1, 2]);
   });
+
+  describe("NaN/Infinity guards (RF-007)", () => {
+    it("srgbEotf returns 0 for NaN", () => {
+      expect(srgbEotf(NaN)).toBe(0);
+    });
+
+    it("srgbEotf returns 0 for Infinity", () => {
+      expect(srgbEotf(Infinity)).toBe(0);
+      expect(srgbEotf(-Infinity)).toBe(0);
+    });
+
+    it("srgbOetf returns 0 for NaN", () => {
+      expect(srgbOetf(NaN)).toBe(0);
+    });
+
+    it("srgbOetf returns 0 for Infinity", () => {
+      expect(srgbOetf(Infinity)).toBe(0);
+      expect(srgbOetf(-Infinity)).toBe(0);
+    });
+
+    it("multiplyMatrixVec3 zeros NaN components", () => {
+      const I: ReadonlyArray<ReadonlyArray<number>> = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ];
+      const out = multiplyMatrixVec3(I, [NaN, 0.5, 0.5]);
+      expect(out[0]).toBe(0);
+      expect(out[1]).toBe(0.5);
+      expect(out[2]).toBe(0.5);
+    });
+
+    it("multiplyMatrixVec3 zeros Infinity components", () => {
+      const I: ReadonlyArray<ReadonlyArray<number>> = [
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+      ];
+      const out = multiplyMatrixVec3(I, [Infinity, 0.5, -Infinity]);
+      expect(out[0]).toBe(0);
+      expect(out[1]).toBe(0.5);
+      expect(out[2]).toBe(0);
+    });
+  });
 });

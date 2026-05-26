@@ -47,6 +47,10 @@ export const XYZ_TO_DISPLAY_P3_D65: ReadonlyArray<ReadonlyArray<number>> = [
  * Piecewise: linear toe up to ~0.04045, power curve above.
  */
 export function srgbEotf(c: number): number {
+  // Domain guard (RF-007): non-finite inputs collapse to 0 so NaN/Infinity
+  // doesn't propagate through Math.pow into the entire color pipeline.
+  // Math helpers must guard their own domain — see CLAUDE.md §11.
+  if (!Number.isFinite(c)) return 0;
   // Negative values are kept signed so out-of-gamut math round-trips.
   const sign = c < 0 ? -1 : 1;
   const abs = Math.abs(c);
@@ -59,6 +63,9 @@ export function srgbEotf(c: number): number {
  * Inverse of srgbEotf.
  */
 export function srgbOetf(c: number): number {
+  // Domain guard (RF-007): non-finite inputs collapse to 0 so NaN/Infinity
+  // doesn't propagate through Math.pow into the entire color pipeline.
+  if (!Number.isFinite(c)) return 0;
   const sign = c < 0 ? -1 : 1;
   const abs = Math.abs(c);
   const encoded = abs <= 0.0031308 ? abs * 12.92 : 1.055 * Math.pow(abs, 1 / 2.4) - 0.055;
@@ -74,9 +81,14 @@ export function multiplyMatrixVec3(
   const r1 = m[1];
   const r2 = m[2];
   if (!r0 || !r1 || !r2) throw new Error("matrix is not 3x3");
+  // Domain guard (RF-007): zero non-finite components so NaN doesn't
+  // propagate through the matrix multiply into the color pipeline.
+  const v0 = Number.isFinite(v[0]) ? v[0] : 0;
+  const v1 = Number.isFinite(v[1]) ? v[1] : 0;
+  const v2 = Number.isFinite(v[2]) ? v[2] : 0;
   return [
-    (r0[0] ?? 0) * v[0] + (r0[1] ?? 0) * v[1] + (r0[2] ?? 0) * v[2],
-    (r1[0] ?? 0) * v[0] + (r1[1] ?? 0) * v[1] + (r1[2] ?? 0) * v[2],
-    (r2[0] ?? 0) * v[0] + (r2[1] ?? 0) * v[1] + (r2[2] ?? 0) * v[2],
+    (r0[0] ?? 0) * v0 + (r0[1] ?? 0) * v1 + (r0[2] ?? 0) * v2,
+    (r1[0] ?? 0) * v0 + (r1[1] ?? 0) * v1 + (r1[2] ?? 0) * v2,
+    (r2[0] ?? 0) * v0 + (r2[1] ?? 0) * v1 + (r2[2] ?? 0) * v2,
   ];
 }
