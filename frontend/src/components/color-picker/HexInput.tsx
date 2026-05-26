@@ -23,6 +23,8 @@ export interface HexInputProps {
   b: number;
   /** When true, shows a gamut warning badge. */
   isOutOfGamut: boolean;
+  /** Spec 18: when true, shows a "P3" badge to signal hex is interpreted as P3. */
+  isP3Mode: boolean;
   /** Called with the new sRGB values when a valid hex is committed. */
   onChange: (r: number, g: number, b: number) => void;
 }
@@ -119,6 +121,16 @@ export function HexInput(props: HexInputProps) {
         >
           {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative warning glyph; accessible name comes from aria-label/title */}
           {"⚠"}
+        </span>
+      </Show>
+      <Show when={props.isP3Mode}>
+        <span
+          class="sigil-hex-input__p3-badge"
+          aria-hidden="true"
+          title={t("panels:colorPicker.p3HexHint")}
+        >
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: abbreviated mode label, full name in title attribute */}
+          {"P3"}
         </span>
       </Show>
     </div>

@@ -427,6 +427,7 @@ export function ColorPicker(props: ColorPickerProps) {
         g={state.g}
         b={state.b}
         isOutOfGamut={outOfGamut()}
+        isP3Mode={state.space === "display_p3"}
         onChange={handleHexChange}
       />
       <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />
