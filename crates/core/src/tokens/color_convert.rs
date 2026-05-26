@@ -10,6 +10,10 @@
 //! these are internal conversion functions producing computed results, not
 //! user-input validation boundaries.
 
+use crate::color_matrix::{
+    DISPLAY_P3_TO_XYZ_D65, SRGB_TO_XYZ_D65, XYZ_TO_DISPLAY_P3_D65, XYZ_TO_SRGB_D65,
+    multiply_matrix_vec3, srgb_eotf, srgb_oetf,
+};
 use crate::node::Color;
 use crate::tokens::errors::ExprError;
 
@@ -124,26 +128,89 @@ fn hue_to_rgb(p: f64, q: f64, mut t: f64) -> f64 {
     p
 }
 
-/// Extract sRGB channels from a `Color` enum.
+/// Display-P3 → sRGB through CIE XYZ (D65). Both legs use the sRGB transfer
+/// function pair. Output channels are unclamped — values outside `[0, 1]`
+/// signal that the source P3 color is out of sRGB gamut.
+#[must_use]
+pub fn display_p3_to_srgb(r: f64, g: f64, b: f64) -> [f64; 3] {
+    let linear_p3 = [srgb_eotf(r), srgb_eotf(g), srgb_eotf(b)];
+    let xyz = multiply_matrix_vec3(&DISPLAY_P3_TO_XYZ_D65, linear_p3);
+    let linear_srgb = multiply_matrix_vec3(&XYZ_TO_SRGB_D65, xyz);
+    [
+        srgb_oetf(linear_srgb[0]),
+        srgb_oetf(linear_srgb[1]),
+        srgb_oetf(linear_srgb[2]),
+    ]
+}
+
+/// sRGB → Display-P3 through CIE XYZ (D65). Inverse of `display_p3_to_srgb`.
 ///
-/// Supports `Srgb` and `DisplayP3` (same channel structure, reasonable
-/// approximation). Returns an error for `Oklch` and `Oklab` because
-/// proper conversion is not yet implemented and treating their channels
-/// as sRGB produces incorrect results.
+/// Introduced in Plan 18 Task 5 alongside `display_p3_to_srgb` so the pair
+/// is in place for later Plan 18 tasks (`HexInput` P3 badge — Task 10,
+/// `colorToCss` — Task 11, wide-gamut canvas helpers — Task 12). Exercised
+/// by `test_srgb_to_display_p3_red_matches_w3c_reference` below.
+#[must_use]
+#[allow(dead_code)] // consumed by Plan 18 Tasks 10, 11, 12
+pub fn srgb_to_display_p3(r: f64, g: f64, b: f64) -> [f64; 3] {
+    let linear_srgb = [srgb_eotf(r), srgb_eotf(g), srgb_eotf(b)];
+    let xyz = multiply_matrix_vec3(&SRGB_TO_XYZ_D65, linear_srgb);
+    let linear_p3 = multiply_matrix_vec3(&XYZ_TO_DISPLAY_P3_D65, xyz);
+    [
+        srgb_oetf(linear_p3[0]),
+        srgb_oetf(linear_p3[1]),
+        srgb_oetf(linear_p3[2]),
+    ]
+}
+
+/// Return `true` if any sRGB channel would fall outside `[0, 1]` (with a
+/// small floating-point epsilon) when the color is converted to sRGB.
 ///
-/// Returns `Ok((r, g, b, a))` with all values guarded against NaN/Infinity.
+/// Introduced in Plan 18 Task 5 for use by the `HexInput` P3 badge (Task 10)
+/// and the wide-gamut canvas plumbing (Task 12). Exercised by
+/// `test_is_out_of_srgb_gamut_p3_red` / `test_is_out_of_srgb_gamut_p3_gray`.
+#[must_use]
+#[allow(dead_code)] // consumed by Plan 18 Tasks 10, 12
+pub fn is_out_of_srgb_gamut(color: &Color) -> bool {
+    const EPS: f64 = 1e-7;
+    let in_range = -EPS..=1.0 + EPS;
+    match color {
+        Color::Srgb { r, g, b, .. } => {
+            !in_range.contains(r) || !in_range.contains(g) || !in_range.contains(b)
+        }
+        Color::DisplayP3 { r, g, b, .. } => {
+            let [rs, gs, bs] =
+                display_p3_to_srgb(finite_or_zero(*r), finite_or_zero(*g), finite_or_zero(*b));
+            !in_range.contains(&rs) || !in_range.contains(&gs) || !in_range.contains(&bs)
+        }
+        Color::Oklch { .. } | Color::Oklab { .. } => false,
+    }
+}
+
+/// Extract sRGB channels from a `Color` enum, applying proper Display-P3 →
+/// sRGB matrix conversion when needed.
+///
+/// Output channels for `DisplayP3` colors are unclamped — values outside
+/// `[0, 1]` signal that the source P3 color is out of sRGB gamut.
+///
+/// Returns `Ok((r, g, b, a))` with NaN/Infinity values normalized to 0.0.
 ///
 /// # Errors
 ///
-/// Returns `ExprError::DomainError` for `Oklch` and `Oklab` color spaces.
+/// Returns `ExprError::DomainError` for `Oklch` and `Oklab` color spaces;
+/// those conversions are still deferred.
 pub fn color_to_srgb(color: &Color) -> Result<(f64, f64, f64, f64), ExprError> {
     match color {
-        Color::Srgb { r, g, b, a } | Color::DisplayP3 { r, g, b, a } => Ok((
+        Color::Srgb { r, g, b, a } => Ok((
             finite_or_zero(*r),
             finite_or_zero(*g),
             finite_or_zero(*b),
             finite_or_zero(*a),
         )),
+        Color::DisplayP3 { r, g, b, a } => {
+            let [rs, gs, bs] =
+                display_p3_to_srgb(finite_or_zero(*r), finite_or_zero(*g), finite_or_zero(*b));
+            Ok((rs, gs, bs, finite_or_zero(*a)))
+        }
         Color::Oklch { .. } => Err(ExprError::DomainError(
             "color function requires sRGB color; Oklch conversion not yet implemented".to_string(),
         )),
@@ -355,18 +422,85 @@ mod tests {
     }
 
     #[test]
-    fn test_color_to_srgb_extracts_display_p3_channels() {
+    fn test_color_to_srgb_display_p3_red_matrix_converts() {
+        // Replaces the passthrough test — P3 conversion now uses matrices.
         let color = Color::DisplayP3 {
-            r: 0.1,
-            g: 0.3,
-            b: 0.5,
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
             a: 1.0,
         };
         let (r, g, b, a) = color_to_srgb(&color).expect("DisplayP3 should succeed");
-        assert_approx(r, 0.1, "r");
-        assert_approx(g, 0.3, "g");
-        assert_approx(b, 0.5, "b");
-        assert_approx(a, 1.0, "a");
+        assert!(
+            r > 1.0,
+            "P3 red should map to sRGB R > 1.0 (out of gamut), got {r}"
+        );
+        assert!(g < 0.0, "P3 red should map to sRGB G < 0.0, got {g}");
+        assert!(b < 0.0, "P3 red should map to sRGB B < 0.0, got {b}");
+        assert!((a - 1.0).abs() < 1e-12);
+    }
+
+    // ── Display-P3 conversion (spec-18) ─────────────────────────────────
+
+    #[test]
+    fn test_color_to_srgb_display_p3_red_matches_w3c_reference() {
+        let p3_red = Color::DisplayP3 {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        let (r, g, b, _a) = color_to_srgb(&p3_red).expect("P3 conversion succeeds");
+        assert!(
+            r > 1.0,
+            "P3 red R should be > 1.0 (out of sRGB gamut), got {r}"
+        );
+        assert!(g < 0.0, "P3 red G should be < 0.0, got {g}");
+        assert!(b < 0.0, "P3 red B should be < 0.0, got {b}");
+    }
+
+    #[test]
+    fn test_color_to_srgb_display_p3_gray_in_gamut() {
+        let p3_gray = Color::DisplayP3 {
+            r: 0.5,
+            g: 0.5,
+            b: 0.5,
+            a: 1.0,
+        };
+        let (r, g, b, _a) = color_to_srgb(&p3_gray).expect("P3 gray conversion succeeds");
+        assert!((r - 0.5).abs() < 1e-6, "expected r≈0.5, got {r}");
+        assert!((g - 0.5).abs() < 1e-6, "expected g≈0.5, got {g}");
+        assert!((b - 0.5).abs() < 1e-6, "expected b≈0.5, got {b}");
+    }
+
+    #[test]
+    fn test_srgb_to_display_p3_red_matches_w3c_reference() {
+        let [r, g, b] = srgb_to_display_p3(1.0, 0.0, 0.0);
+        assert!(r > 0.9 && r < 1.0, "expected P3 R in (0.9, 1.0), got {r}");
+        assert!(g > 0.1, "expected P3 G > 0.1, got {g}");
+        assert!(b > 0.1, "expected P3 B > 0.1, got {b}");
+    }
+
+    #[test]
+    fn test_is_out_of_srgb_gamut_p3_red() {
+        let p3_red = Color::DisplayP3 {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        assert!(is_out_of_srgb_gamut(&p3_red));
+    }
+
+    #[test]
+    fn test_is_out_of_srgb_gamut_p3_gray() {
+        let p3_gray = Color::DisplayP3 {
+            r: 0.5,
+            g: 0.5,
+            b: 0.5,
+            a: 1.0,
+        };
+        assert!(!is_out_of_srgb_gamut(&p3_gray));
     }
 
     #[test]
