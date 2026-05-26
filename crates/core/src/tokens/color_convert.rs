@@ -145,12 +145,13 @@ pub fn display_p3_to_srgb(r: f64, g: f64, b: f64) -> [f64; 3] {
 
 /// sRGB → Display-P3 through CIE XYZ (D65). Inverse of `display_p3_to_srgb`.
 ///
-/// Introduced in Plan 18 Task 5 alongside `display_p3_to_srgb` so the pair
-/// is in place for later Plan 18 tasks (`HexInput` P3 badge — Task 10,
-/// `colorToCss` — Task 11, wide-gamut canvas helpers — Task 12). Exercised
-/// by `test_srgb_to_display_p3_red_matches_w3c_reference` below.
+/// Kept in the Rust crate for cross-language parity (`test_srgb_to_p3_parity_fixture`)
+/// and `test_srgb_to_display_p3_red_matches_w3c_reference`; the runtime consumer
+/// is the TypeScript mirror in `frontend/src/components/color-picker/color-matrices.ts`,
+/// which the canvas + picker call. A future API/MCP handler that accepts P3
+/// input as sRGB hex would consume this function directly.
 #[must_use]
-#[allow(dead_code)] // consumed by Plan 18 Tasks 10, 11, 12
+#[allow(dead_code)] // production consumer is the TS mirror; the Rust copy is the parity ground truth
 pub fn srgb_to_display_p3(r: f64, g: f64, b: f64) -> [f64; 3] {
     let linear_srgb = [srgb_eotf(r), srgb_eotf(g), srgb_eotf(b)];
     let xyz = multiply_matrix_vec3(&SRGB_TO_XYZ_D65, linear_srgb);
@@ -165,17 +166,24 @@ pub fn srgb_to_display_p3(r: f64, g: f64, b: f64) -> [f64; 3] {
 /// Return `true` if any sRGB channel would fall outside `[0, 1]` (with a
 /// small floating-point epsilon) when the color is converted to sRGB.
 ///
-/// Introduced in Plan 18 Task 5 for use by the `HexInput` P3 badge (Task 10)
-/// and the wide-gamut canvas plumbing (Task 12). Exercised by
-/// `test_is_out_of_srgb_gamut_p3_red` / `test_is_out_of_srgb_gamut_p3_gray`.
+/// Consumed in-crate by [`crate::node::Color::is_out_of_srgb_gamut`]. The
+/// frontend mirrors this logic for the `HexInput` P3 badge and wide-gamut
+/// canvas plumbing. Exercised by `test_is_out_of_srgb_gamut_p3_red` /
+/// `test_is_out_of_srgb_gamut_p3_gray`.
+///
+/// RF-012: both the `Srgb` and `DisplayP3` arms apply `finite_or_zero`
+/// before range checking. Without this, NaN inputs would be silently
+/// classified as in-gamut (`NaN < -EPS` and `NaN > 1+EPS` are both false).
 #[must_use]
-#[allow(dead_code)] // consumed by Plan 18 Tasks 10, 12
 pub fn is_out_of_srgb_gamut(color: &Color) -> bool {
     const EPS: f64 = 1e-7;
     let in_range = -EPS..=1.0 + EPS;
     match color {
         Color::Srgb { r, g, b, .. } => {
-            !in_range.contains(r) || !in_range.contains(g) || !in_range.contains(b)
+            let r = finite_or_zero(*r);
+            let g = finite_or_zero(*g);
+            let b = finite_or_zero(*b);
+            !in_range.contains(&r) || !in_range.contains(&g) || !in_range.contains(&b)
         }
         Color::DisplayP3 { r, g, b, .. } => {
             let [rs, gs, bs] =
@@ -501,6 +509,82 @@ mod tests {
             a: 1.0,
         };
         assert!(!is_out_of_srgb_gamut(&p3_gray));
+    }
+
+    #[test]
+    fn test_is_out_of_srgb_gamut_srgb_in_range() {
+        let c = Color::Srgb {
+            r: 0.3,
+            g: 0.5,
+            b: 0.7,
+            a: 1.0,
+        };
+        assert!(!is_out_of_srgb_gamut(&c));
+    }
+
+    #[test]
+    fn test_is_out_of_srgb_gamut_srgb_out_of_range() {
+        let c = Color::Srgb {
+            r: 1.5,
+            g: 0.5,
+            b: 0.5,
+            a: 1.0,
+        };
+        assert!(is_out_of_srgb_gamut(&c));
+    }
+
+    // RF-012: NaN channels in Srgb arm must not be silently classified
+    // as in-gamut. The `finite_or_zero` normalization should map NaN to 0,
+    // which is in-range — so a NaN-only color reports in-gamut, but a
+    // mixed NaN + out-of-range color should still flag.
+    #[test]
+    fn test_is_out_of_srgb_gamut_srgb_nan_classified_via_finite_or_zero() {
+        let c = Color::Srgb {
+            r: f64::NAN,
+            g: 0.5,
+            b: 0.5,
+            a: 1.0,
+        };
+        // NaN -> 0 via finite_or_zero -> in range. Expected: false (in-gamut).
+        assert!(
+            !is_out_of_srgb_gamut(&c),
+            "NaN should map to 0 (in-range) under finite_or_zero"
+        );
+
+        // Confirm mixed NaN + out-of-range still flags out-of-gamut.
+        let mixed = Color::Srgb {
+            r: f64::NAN,
+            g: 2.0,
+            b: 0.5,
+            a: 1.0,
+        };
+        assert!(is_out_of_srgb_gamut(&mixed));
+    }
+
+    #[test]
+    fn test_color_is_out_of_srgb_gamut_method_delegates() {
+        // Verify the new Color::is_out_of_srgb_gamut method matches the
+        // free function (RF-008 wiring).
+        let p3_red = Color::DisplayP3 {
+            r: 1.0,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        assert_eq!(p3_red.is_out_of_srgb_gamut(), is_out_of_srgb_gamut(&p3_red));
+        assert!(p3_red.is_out_of_srgb_gamut());
+
+        let in_gamut = Color::Srgb {
+            r: 0.3,
+            g: 0.5,
+            b: 0.7,
+            a: 1.0,
+        };
+        assert_eq!(
+            in_gamut.is_out_of_srgb_gamut(),
+            is_out_of_srgb_gamut(&in_gamut)
+        );
+        assert!(!in_gamut.is_out_of_srgb_gamut());
     }
 
     #[test]

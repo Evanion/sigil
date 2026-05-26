@@ -179,6 +179,51 @@ pub fn validate_finite(name: &str, value: f64) -> Result<(), CoreError> {
     Ok(())
 }
 
+/// Validates a single sRGB / Display-P3 color channel.
+///
+/// Rejects NaN, infinity, and values outside `[MIN_COLOR_CHANNEL, MAX_COLOR_CHANNEL]`.
+/// This is the strict API-level check used by `Color::new_srgb` / `Color::new_display_p3`
+/// constructors.
+///
+/// Deserialization uses a more permissive check ([`validate_color_channel_finite`])
+/// that allows any finite value, since OkLCH→sRGB conversion can produce wide-gamut
+/// values that round-trip through workfiles.
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the value is not finite or out of range.
+pub fn validate_color_channel(name: &str, value: f64) -> Result<(), CoreError> {
+    if !value.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "color channel {name} must be finite, got {value}"
+        )));
+    }
+    if !(MIN_COLOR_CHANNEL..=MAX_COLOR_CHANNEL).contains(&value) {
+        return Err(CoreError::ValidationError(format!(
+            "color channel {name} = {value} is out of range [{MIN_COLOR_CHANNEL}, {MAX_COLOR_CHANNEL}]"
+        )));
+    }
+    Ok(())
+}
+
+/// Validates that a color channel value is finite (NaN/Infinity rejected) without
+/// enforcing the `[MIN_COLOR_CHANNEL, MAX_COLOR_CHANNEL]` range.
+///
+/// Used by the manual `Deserialize` impl for [`crate::node::Color`] to allow
+/// round-tripping wide-gamut values that fall slightly outside `[0, 1]` after
+/// OkLCH→sRGB conversion, while still rejecting NaN/Infinity (which is always
+/// a corruption signal regardless of range).
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if the value is not finite.
+pub fn validate_color_channel_finite(name: &str, value: f64) -> Result<(), CoreError> {
+    if !value.is_finite() {
+        return Err(CoreError::ValidationError(format!(
+            "color channel {name} must be finite, got {value}"
+        )));
+    }
+    Ok(())
+}
+
 /// Recursively walks a JSON value and rejects any Number that converts to NaN or infinity.
 ///
 /// Uses an iterative approach with an explicit stack to prevent stack overflow.
@@ -1628,20 +1673,74 @@ mod tests {
     // ── Color channel bounds ───────────────────────────────────────────
     //
     // Per CLAUDE.md §11 "Constant Enforcement Tests", every `MIN_*` /
-    // `MAX_*` constant requires a `test_<constant>_enforced` test. These
-    // bounds are scaffolding for forthcoming API/MCP handlers that accept
-    // color input directly; today they are not yet referenced by an
-    // enforcement site, so the tests below assert only the constants'
-    // intended semantic shape (lower bound ≤ 0, upper bound ≥ 1). Richer
-    // boundary tests follow when an enforcement site lands.
+    // `MAX_*` constant requires a `test_<constant>_enforced` test. The
+    // bounds are enforced by `validate_color_channel`, which is in turn
+    // called by the `Color::new_srgb` / `Color::new_display_p3` validating
+    // constructors. See also constructor-level tests in `node::tests`.
 
     #[test]
     fn test_min_color_channel_enforced() {
-        assert!(MIN_COLOR_CHANNEL <= 0.0);
+        // A channel strictly below MIN_COLOR_CHANNEL must be rejected.
+        let below = MIN_COLOR_CHANNEL - 0.1;
+        let err = validate_color_channel("r", below).expect_err("below min must error");
+        match err {
+            CoreError::ValidationError(msg) => {
+                assert!(msg.contains("out of range"), "unexpected message: {msg}");
+            }
+            other => panic!("expected ValidationError, got {other:?}"),
+        }
     }
 
     #[test]
     fn test_max_color_channel_enforced() {
-        assert!(MAX_COLOR_CHANNEL >= 1.0);
+        // A channel strictly above MAX_COLOR_CHANNEL must be rejected.
+        let above = MAX_COLOR_CHANNEL + 0.1;
+        let err = validate_color_channel("r", above).expect_err("above max must error");
+        match err {
+            CoreError::ValidationError(msg) => {
+                assert!(msg.contains("out of range"), "unexpected message: {msg}");
+            }
+            other => panic!("expected ValidationError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_validate_color_channel_rejects_nan() {
+        let err = validate_color_channel("r", f64::NAN).expect_err("NaN must error");
+        match err {
+            CoreError::ValidationError(msg) => {
+                assert!(msg.contains("finite"), "unexpected message: {msg}");
+            }
+            other => panic!("expected ValidationError, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_validate_color_channel_rejects_infinity() {
+        assert!(validate_color_channel("g", f64::INFINITY).is_err());
+        assert!(validate_color_channel("b", f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_color_channel_accepts_boundary_values() {
+        assert!(validate_color_channel("r", MIN_COLOR_CHANNEL).is_ok());
+        assert!(validate_color_channel("r", MAX_COLOR_CHANNEL).is_ok());
+        assert!(validate_color_channel("g", 0.5).is_ok());
+    }
+
+    #[test]
+    fn test_validate_color_channel_finite_rejects_non_finite() {
+        assert!(validate_color_channel_finite("r", f64::NAN).is_err());
+        assert!(validate_color_channel_finite("g", f64::INFINITY).is_err());
+        assert!(validate_color_channel_finite("b", f64::NEG_INFINITY).is_err());
+    }
+
+    #[test]
+    fn test_validate_color_channel_finite_accepts_wide_gamut() {
+        // Wide-gamut OkLCH→sRGB conversion can produce slightly out-of-range
+        // values that the deserialization path tolerates.
+        assert!(validate_color_channel_finite("r", -0.1).is_ok());
+        assert!(validate_color_channel_finite("r", 1.5).is_ok());
+        assert!(validate_color_channel_finite("g", 0.5).is_ok());
     }
 }

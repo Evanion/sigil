@@ -504,7 +504,13 @@ impl<T: Default> Default for StyleValue<T> {
 }
 
 /// Multi-color-space color representation.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+///
+/// `Color` does NOT derive `Deserialize` — it has a manual `Deserialize` impl
+/// (below) that routes through validation. Public fields remain so existing
+/// in-crate `Color::Srgb { r, g, b, a }` struct-literal call sites continue to
+/// work; external untrusted inputs must construct via `new_srgb` /
+/// `new_display_p3` (or deserialize from JSON), both of which validate.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(tag = "space", rename_all = "snake_case")]
 pub enum Color {
     Srgb {
@@ -543,6 +549,221 @@ impl Default for Color {
             a: 1.0,
         }
     }
+}
+
+impl Color {
+    /// Construct a `Color::Srgb` after validating each channel against the
+    /// strict API-level bounds (`[MIN_COLOR_CHANNEL, MAX_COLOR_CHANNEL]`)
+    /// and rejecting NaN/Infinity.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if any channel is non-finite or
+    /// outside `[0.0, 1.0]`.
+    pub fn new_srgb(r: f64, g: f64, b: f64, a: f64) -> Result<Self, CoreError> {
+        crate::validate::validate_color_channel("r", r)?;
+        crate::validate::validate_color_channel("g", g)?;
+        crate::validate::validate_color_channel("b", b)?;
+        crate::validate::validate_color_channel("a", a)?;
+        Ok(Self::Srgb { r, g, b, a })
+    }
+
+    /// Construct a `Color::DisplayP3` after validating each channel.
+    ///
+    /// # Errors
+    /// Returns `CoreError::ValidationError` if any channel is non-finite or
+    /// outside `[0.0, 1.0]`.
+    pub fn new_display_p3(r: f64, g: f64, b: f64, a: f64) -> Result<Self, CoreError> {
+        crate::validate::validate_color_channel("r", r)?;
+        crate::validate::validate_color_channel("g", g)?;
+        crate::validate::validate_color_channel("b", b)?;
+        crate::validate::validate_color_channel("a", a)?;
+        Ok(Self::DisplayP3 { r, g, b, a })
+    }
+
+    /// Returns `true` if this color is outside the sRGB gamut.
+    ///
+    /// Delegates to [`crate::tokens::color_convert::is_out_of_srgb_gamut`].
+    #[must_use]
+    pub fn is_out_of_srgb_gamut(&self) -> bool {
+        crate::tokens::color_convert::is_out_of_srgb_gamut(self)
+    }
+}
+
+// ── Manual Deserialize for Color ──────────────────────────────────────────
+//
+// Routes through a validation pass that rejects NaN/Infinity in every channel.
+// Numeric range is NOT enforced at deserialize-time (wide-gamut OkLCH→sRGB
+// conversions can produce values slightly outside [0, 1] that we round-trip
+// through workfiles). The strict API-level range check lives in
+// `Color::new_srgb` / `Color::new_display_p3`.
+
+/// Field discriminant for the [`Color`] deserialization map walker.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum ColorField {
+    Space,
+    R,
+    G,
+    B,
+    A,
+    L,
+    C,
+    H,
+    Alpha,
+}
+
+/// Channels gathered during deserialization, prior to variant dispatch.
+#[derive(Default)]
+struct ColorChannels {
+    space: Option<String>,
+    red: Option<f64>,
+    green: Option<f64>,
+    blue: Option<f64>,
+    alpha_short: Option<f64>,
+    lightness: Option<f64>,
+    chroma: Option<f64>,
+    hue: Option<f64>,
+    alpha_long: Option<f64>,
+}
+
+/// Take a channel by name, error on missing, validate finite (rejects NaN/Inf).
+fn take_color_channel<E: serde::de::Error>(val: Option<f64>, name: &'static str) -> Result<f64, E> {
+    let v = val.ok_or_else(|| serde::de::Error::missing_field(name))?;
+    crate::validate::validate_color_channel_finite(name, v).map_err(E::custom)?;
+    Ok(v)
+}
+
+impl<'de> Deserialize<'de> for Color {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct ColorVisitor;
+
+        impl<'de> Visitor<'de> for ColorVisitor {
+            type Value = Color;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a Color object with a `space` discriminant")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut ch = ColorChannels::default();
+
+                while let Some(key) = map.next_key::<ColorField>()? {
+                    collect_color_field::<A>(&mut ch, key, &mut map)?;
+                }
+
+                let space = ch
+                    .space
+                    .as_deref()
+                    .ok_or_else(|| de::Error::missing_field("space"))?;
+
+                match space {
+                    "srgb" => Ok(Color::Srgb {
+                        r: take_color_channel::<A::Error>(ch.red, "r")?,
+                        g: take_color_channel::<A::Error>(ch.green, "g")?,
+                        b: take_color_channel::<A::Error>(ch.blue, "b")?,
+                        a: take_color_channel::<A::Error>(ch.alpha_short, "a")?,
+                    }),
+                    "display_p3" => Ok(Color::DisplayP3 {
+                        r: take_color_channel::<A::Error>(ch.red, "r")?,
+                        g: take_color_channel::<A::Error>(ch.green, "g")?,
+                        b: take_color_channel::<A::Error>(ch.blue, "b")?,
+                        a: take_color_channel::<A::Error>(ch.alpha_short, "a")?,
+                    }),
+                    "oklch" => Ok(Color::Oklch {
+                        // OkLCH chroma is unbounded above, hue wraps — no range check,
+                        // just NaN/Infinity rejection.
+                        l: take_color_channel::<A::Error>(ch.lightness, "l")?,
+                        c: take_color_channel::<A::Error>(ch.chroma, "c")?,
+                        h: take_color_channel::<A::Error>(ch.hue, "h")?,
+                        a: take_color_channel::<A::Error>(ch.alpha_short, "a")?,
+                    }),
+                    "oklab" => Ok(Color::Oklab {
+                        l: take_color_channel::<A::Error>(ch.lightness, "l")?,
+                        a: take_color_channel::<A::Error>(ch.alpha_short, "a")?,
+                        b: take_color_channel::<A::Error>(ch.blue, "b")?,
+                        alpha: take_color_channel::<A::Error>(ch.alpha_long, "alpha")?,
+                    }),
+                    other => Err(de::Error::unknown_variant(
+                        other,
+                        &["srgb", "display_p3", "oklch", "oklab"],
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_map(ColorVisitor)
+    }
+}
+
+/// Collect one map entry into the `ColorChannels` accumulator, rejecting
+/// duplicates with a typed serde error (per rust-defensive.md "Custom
+/// `Deserialize` implementations MUST reject duplicate keys").
+fn collect_color_field<'de, A: serde::de::MapAccess<'de>>(
+    ch: &mut ColorChannels,
+    key: ColorField,
+    map: &mut A,
+) -> Result<(), A::Error> {
+    use serde::de::Error as _;
+    match key {
+        ColorField::Space => {
+            if ch.space.is_some() {
+                return Err(A::Error::duplicate_field("space"));
+            }
+            ch.space = Some(map.next_value()?);
+        }
+        ColorField::R => {
+            if ch.red.is_some() {
+                return Err(A::Error::duplicate_field("r"));
+            }
+            ch.red = Some(map.next_value()?);
+        }
+        ColorField::G => {
+            if ch.green.is_some() {
+                return Err(A::Error::duplicate_field("g"));
+            }
+            ch.green = Some(map.next_value()?);
+        }
+        ColorField::B => {
+            if ch.blue.is_some() {
+                return Err(A::Error::duplicate_field("b"));
+            }
+            ch.blue = Some(map.next_value()?);
+        }
+        ColorField::A => {
+            if ch.alpha_short.is_some() {
+                return Err(A::Error::duplicate_field("a"));
+            }
+            ch.alpha_short = Some(map.next_value()?);
+        }
+        ColorField::L => {
+            if ch.lightness.is_some() {
+                return Err(A::Error::duplicate_field("l"));
+            }
+            ch.lightness = Some(map.next_value()?);
+        }
+        ColorField::C => {
+            if ch.chroma.is_some() {
+                return Err(A::Error::duplicate_field("c"));
+            }
+            ch.chroma = Some(map.next_value()?);
+        }
+        ColorField::H => {
+            if ch.hue.is_some() {
+                return Err(A::Error::duplicate_field("h"));
+            }
+            ch.hue = Some(map.next_value()?);
+        }
+        ColorField::Alpha => {
+            if ch.alpha_long.is_some() {
+                return Err(A::Error::duplicate_field("alpha"));
+            }
+            ch.alpha_long = Some(map.next_value()?);
+        }
+    }
+    Ok(())
 }
 
 /// Gradient stop point.
@@ -2103,6 +2324,222 @@ mod tests {
             r: 1.0,
             g: 0.0,
             b: 0.5,
+            a: 1.0,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        let deserialized: Color = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(c, deserialized);
+    }
+
+    // ── Color validating constructors (RF-004, RF-005) ─────────────────
+
+    #[test]
+    fn test_color_new_srgb_accepts_in_range() {
+        let c = Color::new_srgb(0.5, 0.5, 0.5, 1.0).expect("in-range channels accepted");
+        assert_eq!(
+            c,
+            Color::Srgb {
+                r: 0.5,
+                g: 0.5,
+                b: 0.5,
+                a: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_color_new_srgb_rejects_out_of_range() {
+        assert!(Color::new_srgb(1.5, 0.0, 0.0, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, -0.1, 0.0, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, 0.0, 0.0, 1.5).is_err());
+    }
+
+    #[test]
+    fn test_color_new_srgb_rejects_nan() {
+        assert!(Color::new_srgb(f64::NAN, 0.0, 0.0, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, f64::NAN, 0.0, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, 0.0, f64::NAN, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, 0.0, 0.0, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn test_color_new_srgb_rejects_infinity() {
+        assert!(Color::new_srgb(f64::INFINITY, 0.0, 0.0, 1.0).is_err());
+        assert!(Color::new_srgb(0.0, f64::NEG_INFINITY, 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn test_color_new_display_p3_accepts_in_range() {
+        let c = Color::new_display_p3(1.0, 0.0, 0.5, 1.0).expect("in-range channels accepted");
+        assert_eq!(
+            c,
+            Color::DisplayP3 {
+                r: 1.0,
+                g: 0.0,
+                b: 0.5,
+                a: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_color_new_display_p3_rejects_out_of_range() {
+        assert!(Color::new_display_p3(1.5, 0.0, 0.0, 1.0).is_err());
+        assert!(Color::new_display_p3(0.0, -0.1, 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn test_color_new_display_p3_rejects_nan_and_infinity() {
+        assert!(Color::new_display_p3(f64::NAN, 0.0, 0.0, 1.0).is_err());
+        assert!(Color::new_display_p3(0.0, f64::INFINITY, 0.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn test_color_new_constructors_accept_boundary_zero_and_one() {
+        // The MIN_/MAX_COLOR_CHANNEL bounds are inclusive.
+        assert!(Color::new_srgb(0.0, 0.0, 0.0, 0.0).is_ok());
+        assert!(Color::new_srgb(1.0, 1.0, 1.0, 1.0).is_ok());
+        assert!(Color::new_display_p3(0.0, 0.0, 0.0, 0.0).is_ok());
+        assert!(Color::new_display_p3(1.0, 1.0, 1.0, 1.0).is_ok());
+    }
+
+    // ── Color manual Deserialize (RF-004) ──────────────────────────────
+
+    #[test]
+    fn test_color_deserialize_srgb_rejects_non_numeric_channel() {
+        // JSON cannot represent NaN/Infinity natively (serde_json::Number
+        // refuses to construct them). The deserializer's NaN/Infinity
+        // rejection path is exercised by `validate_color_channel_finite`
+        // tests in `validate::tests`; this test confirms the visitor
+        // errors on a non-numeric channel value rather than silently
+        // coercing.
+        let json = r#"{"space":"srgb","r":null,"g":0.0,"b":0.0,"a":1.0}"#;
+        let result: Result<Color, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "null channel must fail to deserialize");
+    }
+
+    #[test]
+    fn test_color_deserialize_srgb_round_trips_after_nan_serialize() {
+        // Defense against regression: a NaN-bearing Color round-trips
+        // through serde_json by being emitted as `null` (serde_json
+        // does not represent NaN). The deserializer then sees a `null`
+        // channel and errors. Together this guarantees: no path in our
+        // codebase can serialize a NaN-bearing Color and silently get
+        // back a NaN-bearing one. If serde_json ever starts emitting
+        // raw `NaN` tokens, the visitor still rejects via the
+        // `validate_color_channel_finite` call inside `take_color_channel`.
+        let nan = Color::Srgb {
+            r: f64::NAN,
+            g: 0.0,
+            b: 0.0,
+            a: 1.0,
+        };
+        match serde_json::to_string(&nan) {
+            Err(_) => {
+                // serde_json refused NaN at serialize time — good.
+            }
+            Ok(json) => {
+                // serde_json mapped NaN to a non-numeric token (typically
+                // `null`). Deserialization must then reject it.
+                let result: Result<Color, _> = serde_json::from_str(&json);
+                assert!(
+                    result.is_err(),
+                    "NaN must not survive a serialize → deserialize round-trip; got {json}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_color_deserialize_srgb_rejects_missing_field() {
+        let json = r#"{"space":"srgb","r":0.5,"g":0.5,"b":0.5}"#;
+        let result: Result<Color, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "missing 'a' field must error");
+    }
+
+    #[test]
+    fn test_color_deserialize_srgb_rejects_duplicate_field() {
+        let json = r#"{"space":"srgb","r":0.5,"r":0.6,"g":0.5,"b":0.5,"a":1.0}"#;
+        let result: Result<Color, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "duplicate 'r' field must error");
+    }
+
+    #[test]
+    fn test_color_deserialize_rejects_unknown_space() {
+        let json = r#"{"space":"rec2020","r":0.5,"g":0.5,"b":0.5,"a":1.0}"#;
+        let result: Result<Color, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "unknown space tag must error");
+    }
+
+    #[test]
+    fn test_color_deserialize_oklch_accepts_unbounded_chroma() {
+        // OkLCH chroma is intentionally unbounded above; deserialize must
+        // accept c > 1.0.
+        let json = r#"{"space":"oklch","l":0.5,"c":2.5,"h":120.0,"a":1.0}"#;
+        let deserialized: Color = serde_json::from_str(json).expect("oklch deserialize");
+        assert_eq!(
+            deserialized,
+            Color::Oklch {
+                l: 0.5,
+                c: 2.5,
+                h: 120.0,
+                a: 1.0,
+            }
+        );
+    }
+
+    #[test]
+    fn test_color_deserialize_oklab_round_trip() {
+        let c = Color::Oklab {
+            l: 0.6,
+            a: 0.1,
+            b: -0.2,
+            alpha: 0.75,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        let deserialized: Color = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(c, deserialized);
+    }
+
+    #[test]
+    fn test_color_deserialize_oklch_round_trip() {
+        let c = Color::Oklch {
+            l: 0.7,
+            c: 0.15,
+            h: 240.0,
+            a: 0.5,
+        };
+        let json = serde_json::to_string(&c).expect("serialize");
+        let deserialized: Color = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(c, deserialized);
+    }
+
+    #[test]
+    fn test_color_deserialize_srgb_tolerates_wide_gamut() {
+        // OkLCH→sRGB conversion can produce values slightly outside [0, 1].
+        // The deserialization path tolerates wide-gamut values (the API-level
+        // constructors do not — that's the strict bound).
+        let json = r#"{"space":"srgb","r":1.05,"g":-0.02,"b":0.5,"a":1.0}"#;
+        let deserialized: Color = serde_json::from_str(json).expect("wide-gamut tolerated");
+        match deserialized {
+            Color::Srgb { r, g, b, a } => {
+                assert!((r - 1.05).abs() < 1e-12);
+                assert!((g - (-0.02)).abs() < 1e-12);
+                assert!((b - 0.5).abs() < 1e-12);
+                assert!((a - 1.0).abs() < 1e-12);
+            }
+            other => panic!("expected Srgb, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_color_deserialize_display_p3_round_trip() {
+        // Defense against regression: with the manual Deserialize, P3 must
+        // still round-trip cleanly through serde_json.
+        let c = Color::DisplayP3 {
+            r: 0.92,
+            g: 0.21,
+            b: 0.37,
             a: 1.0,
         };
         let json = serde_json::to_string(&c).expect("serialize");
