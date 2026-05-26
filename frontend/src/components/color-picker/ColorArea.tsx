@@ -13,6 +13,7 @@
  * is only in aria-valuetext. Defer to a dedicated a11y follow-up PR.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { acquireWideGamut2D } from "../../canvas/canvas-context";
 import "./ColorArea.css";
 
 /** Default width when container hasn't been measured yet. */
@@ -96,7 +97,7 @@ export function ColorArea(props: ColorAreaProps) {
       canvas.height = pixelHeight;
     }
 
-    const ctx = canvas.getContext("2d");
+    const ctx = acquireWideGamut2D(canvas);
     if (!ctx) return;
 
     // Apply DPR scaling so canvas gradients render at logical CSS dimensions

@@ -21,6 +21,7 @@ import {
 } from "solid-js";
 import { useDocument } from "../store/document-context";
 import { render as renderCanvas } from "../canvas/renderer";
+import { acquireWideGamut2D } from "../canvas/canvas-context";
 import { screenToWorld, zoomAt, type Viewport } from "../canvas/viewport";
 import { createToolManager, type ToolEvent, type Tool } from "../tools/tool-manager";
 import type { ToolType } from "../store/document-store-solid";
@@ -164,7 +165,7 @@ export const Canvas: Component = () => {
   onMount(() => {
     if (!canvasRef) return;
     const canvas = canvasRef;
-    const ctx = canvas.getContext("2d");
+    const ctx = acquireWideGamut2D(canvas);
     if (!ctx) return;
 
     // -- Tool setup -----------------------------------------------------------
