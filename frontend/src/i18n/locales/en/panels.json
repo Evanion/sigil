@@ -178,7 +178,13 @@
     "opacity": "Opacity",
     "hexColor": "Hex color",
     "colorSpace": "Color space",
-    "colorChannelValues": "Color channel values"
+    "colorChannelValues": "Color channel values",
+    "p3Label": "P3",
+    "p3Title": "Wide-gamut Display-P3 colors",
+    "p3HexHint": "Hex channels interpreted as Display-P3",
+    "srgbTitle": "Standard web colors (sRGB)",
+    "oklchTitle": "Perceptual lightness/chroma/hue (OkLCH)",
+    "hslTitle": "Hue/Saturation/Lightness (HSL — CSS-style, not Figma's HSB)"
   },
   "valueInput": {
     "tokenExpression": "Token expression",

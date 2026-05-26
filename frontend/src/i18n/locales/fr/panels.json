@@ -178,7 +178,13 @@
     "opacity": "Opacité",
     "hexColor": "Couleur hexadécimale",
     "colorSpace": "Espace de couleur",
-    "colorChannelValues": "Valeurs des canaux de couleur"
+    "colorChannelValues": "Valeurs des canaux de couleur",
+    "p3Label": "P3",
+    "p3Title": "Couleurs Display-P3 à large gamme",
+    "p3HexHint": "Canaux hexadécimaux interprétés comme Display-P3",
+    "srgbTitle": "Couleurs web standard (sRGB)",
+    "oklchTitle": "Luminosité/chroma/teinte perceptuels (OkLCH)",
+    "hslTitle": "Teinte/Saturation/Luminosité (HSL — style CSS, pas HSB Figma)"
   },
   "valueInput": {
     "tokenExpression": "Expression de jeton",
