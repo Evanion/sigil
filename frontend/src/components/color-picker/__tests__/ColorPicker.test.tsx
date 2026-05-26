@@ -368,12 +368,199 @@ describe("ColorPicker emit storage tag (Spec 18)", () => {
     if (!p3Button) throw new Error("P3 radio button missing");
     p3Button.click();
 
-    // Wait for the requestAnimationFrame inside flushEmit.
+    // RF-003: handleSpaceChange now flushes the emit synchronously, so the
+    // emission is observable immediately. The historical rAF wait stays
+    // here as a no-op tick — harmless and protects against any
+    // browser/JSDOM scheduling differences.
     await new Promise((r) => requestAnimationFrame(() => r(null)));
 
     expect(emissions.length).toBeGreaterThan(0);
     const lastEmit = emissions[emissions.length - 1];
     expect(lastEmit?.space).toBe("display_p3");
+  });
+
+  it("initializes mode to display_p3 when seed color is Color::DisplayP3 (RF-002)", async () => {
+    // RF-002 regression: ColorPicker used to hardcode state.space="srgb".
+    // Opening the picker on a DisplayP3 color must surface the P3 radio
+    // as the active selection, otherwise the first drag silently emits
+    // a Color::Srgb downgrade.
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "display_p3", r: 1, g: 0, b: 0, a: 1 }}
+        onColorChange={() => {}}
+      />
+    ));
+
+    const radioButtons = container.querySelectorAll<HTMLButtonElement>("[role='radio']");
+    const p3Radio = Array.from(radioButtons).find(
+      (b) =>
+        (b.getAttribute("title") ?? "").toLowerCase().includes("p3") ||
+        (b.textContent ?? "").trim() === "P3",
+    );
+    expect(p3Radio, "P3 radio button should exist").not.toBeUndefined();
+    expect(p3Radio?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("emits Color::DisplayP3 on a drag-like change when seed is Color::DisplayP3 (RF-002)", async () => {
+    // RF-002 regression: prior to the fix, ColorPicker hardcoded
+    // state.space="srgb", so the first emission after mounting on a P3
+    // seed silently downgraded the storage tag to sRGB. Now state.space
+    // initialises from props.color.space, so any user gesture (here
+    // simulated via the alpha keyboard arrow) emits with the correct
+    // P3 discriminant. The test asserts post-fix: every emission MUST be
+    // Color::DisplayP3 (the picker is in P3 mode and no mode switch is
+    // triggered in this test).
+    const emissions: Color[] = [];
+
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "display_p3", r: 0.5, g: 0.5, b: 0.5, a: 1 }}
+        onColorChange={(c) => {
+          emissions.push(c);
+        }}
+      />
+    ));
+
+    // Allow mount guard to elapse.
+    await Promise.resolve();
+
+    // Trigger a drag-like emit by sending an arrow key to the alpha
+    // slider. JSDOM may not have a slider focused, but the keydown
+    // handler runs on the slider element regardless.
+    const sliders = container.querySelectorAll<HTMLElement>("[role='slider']");
+    const alphaSlider = Array.from(sliders).find((s) =>
+      (s.getAttribute("aria-label") ?? "").toLowerCase().includes("opacity"),
+    );
+    if (alphaSlider) {
+      fireEvent.keyDown(alphaSlider, { key: "ArrowRight" });
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    }
+
+    // Every emission MUST carry the P3 tag — no silent sRGB downgrades.
+    for (const e of emissions) {
+      expect(e.space).toBe("display_p3");
+    }
+  });
+
+  it("does not commit when the user clicks the already-active radio (RF-003)", async () => {
+    // RF-003 regression: handleSpaceChange used to fire commitColor() on
+    // every click, including no-op transitions. Clicking the already-
+    // active radio must be a fully silent operation — no emit, no commit.
+    const emissions: Color[] = [];
+    const onColorCommit = vi.fn();
+
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "srgb", r: 1, g: 0, b: 0, a: 1 }}
+        onColorChange={(c) => {
+          emissions.push(c);
+        }}
+        onColorCommit={onColorCommit}
+      />
+    ));
+
+    await Promise.resolve();
+    // Clear any mount-time commits so we measure only the click effect.
+    onColorCommit.mockClear();
+    const emissionsBefore = emissions.length;
+
+    // Click the sRGB radio (already active).
+    const radioButtons = container.querySelectorAll<HTMLButtonElement>("[role='radio']");
+    const srgbRadio = Array.from(radioButtons).find((b) => (b.textContent ?? "").trim() === "sRGB");
+    expect(srgbRadio, "sRGB radio should be present").not.toBeUndefined();
+    if (!srgbRadio) throw new Error("sRGB radio missing");
+    srgbRadio.click();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    expect(onColorCommit).not.toHaveBeenCalled();
+    // No new emissions for a no-op mode switch.
+    expect(emissions.length).toBe(emissionsBefore);
+  });
+});
+
+describe("HexInput P3 affordances (Spec 18)", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+    (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
+      MockResizeObserver;
+    mockMatchMedia();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows P3 badge in HexInput when picker switches to P3 mode (RF-011)", async () => {
+    // RF-011 regression: the P3 badge visibility must be tied to
+    // state.space. The badge mounts via <Show when={props.isP3Mode}> in
+    // HexInput; the wiring through ColorPicker (state.space === "display_p3"
+    // → isP3Mode prop) is what this test exercises end-to-end.
+    const { container } = renderWithI18n(() => (
+      <ColorPicker color={{ space: "srgb", r: 1, g: 0, b: 0, a: 1 }} onColorChange={() => {}} />
+    ));
+
+    await Promise.resolve();
+
+    // Initially in sRGB mode — no P3 badge.
+    expect(container.querySelector(".sigil-hex-input__p3-badge")).toBeNull();
+
+    // Click P3 radio.
+    const radioButtons = container.querySelectorAll<HTMLButtonElement>("[role='radio']");
+    const p3Radio = Array.from(radioButtons).find(
+      (b) =>
+        (b.getAttribute("title") ?? "").toLowerCase().includes("p3") ||
+        (b.textContent ?? "").trim() === "P3",
+    );
+    expect(p3Radio, "P3 radio should be present").not.toBeUndefined();
+    p3Radio?.click();
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    // Badge now visible.
+    expect(container.querySelector(".sigil-hex-input__p3-badge")).not.toBeNull();
+  });
+
+  it("hex input aria-describedby points at the P3 hint while in P3 mode (RF-017)", async () => {
+    // RF-017: the badge is aria-hidden=true so it doesn't add tab clutter.
+    // To keep the hint discoverable for screen-reader users tabbing into
+    // the hex input, the input's aria-describedby must reference a
+    // sibling node carrying the full description text.
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "display_p3", r: 0.5, g: 0.5, b: 0.5, a: 1 }}
+        onColorChange={() => {}}
+      />
+    ));
+
+    await Promise.resolve();
+
+    const hexInput = container.querySelector<HTMLInputElement>(".sigil-hex-input__input");
+    expect(hexInput, "hex input should be present").not.toBeNull();
+    const describedBy = hexInput?.getAttribute("aria-describedby");
+    expect(describedBy, "aria-describedby should be set in P3 mode").toBeTruthy();
+    const descElement = describedBy ? container.querySelector(`#${describedBy}`) : null;
+    expect(descElement, "referenced description element should exist").not.toBeNull();
+    expect(descElement?.textContent ?? "").toContain("Display-P3");
+  });
+
+  it("suppresses out-of-gamut warning when picker is in P3 mode (RF-016)", async () => {
+    // RF-016: an OOG-of-sRGB color displayed in P3 mode is the *intended*
+    // state — the user chose wide gamut to access those colors. Showing
+    // the warning here reads as a defect. Pair that with RF-002's
+    // mode-from-prop init: opening the picker on a DisplayP3-tagged red
+    // (which is OOG of sRGB) must show the P3 badge and NOT the warning.
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "display_p3", r: 1, g: 0, b: 0, a: 1 }}
+        onColorChange={() => {}}
+      />
+    ));
+
+    await Promise.resolve();
+
+    // Sanity check that we *are* in P3 mode (RF-002 wiring).
+    expect(container.querySelector(".sigil-hex-input__p3-badge")).not.toBeNull();
+    // Warning is suppressed.
+    expect(container.querySelector(".sigil-hex-input__gamut-warning")).toBeNull();
   });
 });
 

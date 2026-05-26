@@ -95,6 +95,14 @@ export function ColorPicker(props: ColorPickerProps) {
   const initAlpha = Number.isFinite(rawInitAlpha) ? rawInitAlpha : 1;
   const [initHue] = srgbToHsv(initR, initG, initB);
   const [initHslH, initHslS] = srgbToHsl(initR, initG, initB);
+  // RF-002: initialise the display mode from the incoming color's storage
+  // tag. Hardcoding "srgb" silently downgrades a Color::DisplayP3 prop to
+  // sRGB on the next outbound emit — the picker re-emits with the storage
+  // tag derived from `state.space`, so a wrong initial tag corrupts the
+  // round-trip on the first drag. Mirror only the storage-tag flavours that
+  // map directly to a display mode; OkLCH/HSL colors are not yet stored
+  // first-class, so fall back to "srgb" for them.
+  const initSpace: ColorDisplayMode = props.color.space === "display_p3" ? "display_p3" : "srgb";
   const [state, setState] = createStore<InternalState>({
     r: initR,
     g: initG,
@@ -106,7 +114,7 @@ export function ColorPicker(props: ColorPickerProps) {
     hue: Number.isFinite(initHue) ? initHue : 0,
     hslH: Number.isFinite(initHslH) ? initHslH : 0,
     hslS: Number.isFinite(initHslS) ? initHslS : 0,
-    space: "srgb",
+    space: initSpace,
   });
 
   // ── Sync from props.color ──────────────────────────────────────────────
@@ -385,19 +393,45 @@ export function ColorPicker(props: ColorPickerProps) {
   // emits Color::DisplayP3). Switching mode must trigger a re-emit so the
   // parent sees the new tag for the same visual color.
   function handleSpaceChange(space: ColorDisplayMode) {
+    // RF-003: skip no-op transitions (clicking the already-active radio).
+    // Without this gate, ColorSpaceSwitcher's keyboard handler and click
+    // handler would each produce a ghost undo entry for the same selection.
+    if (space === state.space) return;
     setState({ space });
-    // Re-emit immediately with the new mode so the parent's storage tag
-    // tracks the switcher. Internal sRGB state is unchanged; only the
-    // outbound Color discriminant changes.
-    emit(state.r, state.g, state.b, state.alpha);
-    commitColor();
+    if (mounted) {
+      // RF-003: bypass the rAF deferral so the outbound emit completes
+      // BEFORE commitColor() fires. The default `emit` path schedules a
+      // flush via requestAnimationFrame, which means commitColor()
+      // (synchronous, fires `props.onColorCommit`) runs while the parent's
+      // store still holds the pre-switch tag — the history snapshot
+      // captures the wrong state. Setting pendingColor and flushing
+      // synchronously here keeps emit→commit ordered the way the parent
+      // expects. Gated on `mounted` so the initial sync-effect path can't
+      // emit during construction.
+      pendingColor = {
+        r: state.r,
+        g: state.g,
+        b: state.b,
+        alpha: state.alpha,
+        space,
+      };
+      flushEmit();
+      commitColor();
+    }
   }
 
   // ── Alpha CSS color string for AlphaStrip ─────────────────────────────
   const alphaCss = createMemo(() => srgbToHex(state.r, state.g, state.b));
 
   // ── Out-of-gamut detection ─────────────────────────────────────────────
-  const outOfGamut = createMemo(() => isOutOfSrgbGamut(props.color));
+  // RF-016: in P3 mode, OOG-of-sRGB is the intended UX (the user picked
+  // wide-gamut). Showing the warning would read as a defect rather than a
+  // feature. Suppress the warning while the picker is in P3 mode; the P3
+  // badge already signals "wide-gamut active."
+  const outOfGamut = createMemo(() => {
+    if (state.space === "display_p3") return false;
+    return isOutOfSrgbGamut(props.color);
+  });
 
   return (
     <div class="sigil-color-picker" aria-label={t("panels:colorPicker.title")}>
