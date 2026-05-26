@@ -171,7 +171,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
           onChange={(raw) => handleSimpleValueChange(raw, "dimension")}
           tokens={props.tokens}
           acceptedTypes={acceptedTypesForToken(props.token.token_type)}
-          placeholder="e.g. 16px, 1.5rem, 50%"
+          placeholder={t("panels:tokens.dimensionPlaceholder")}
           aria-label={t("panels:tokens.value")}
         />
       </div>
@@ -343,7 +343,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
               prefix="X"
               min={MIN_SHADOW_OFFSET}
               max={MAX_SHADOW_OFFSET}
-              aria-label="Offset X"
+              aria-label={t("panels:tokens.offsetX")}
             />
             <NumberInput
               value={Number.isFinite(shadow().offset.y) ? shadow().offset.y : 0}
@@ -361,7 +361,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
               prefix="Y"
               min={MIN_SHADOW_OFFSET}
               max={MAX_SHADOW_OFFSET}
-              aria-label="Offset Y"
+              aria-label={t("panels:tokens.offsetY")}
             />
             <NumberInput
               value={Number.isFinite(shadow().blur) ? shadow().blur : 0}
@@ -376,7 +376,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
               prefix="B"
               min={MIN_SHADOW_BLUR}
               max={MAX_SHADOW_BLUR}
-              aria-label="Blur"
+              aria-label={t("panels:tokens.blur")}
             />
             <NumberInput
               value={Number.isFinite(shadow().spread) ? shadow().spread : 0}
@@ -391,7 +391,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
               prefix="S"
               min={MIN_SHADOW_BLUR}
               max={MAX_SHADOW_BLUR}
-              aria-label="Spread"
+              aria-label={t("panels:tokens.spread")}
             />
           </div>
         )}
@@ -584,7 +584,7 @@ export const TokenDetailEditor: Component<TokenDetailEditorProps> = (rawProps) =
           onChange={handleExpressionChange}
           tokens={props.tokens}
           tokenType={props.token.token_type}
-          aria-label="Expression"
+          aria-label={t("panels:tokens.expression")}
         />
       </div>
     );

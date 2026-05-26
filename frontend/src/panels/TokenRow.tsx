@@ -6,6 +6,7 @@
  */
 
 import { createSignal, createEffect, Show, splitProps, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Token, TokenValue, Color } from "../types/document";
 import { MAX_TOKEN_NAME_LENGTH } from "../store/document-store-solid";
 import "./TokenRow.css";
@@ -203,6 +204,7 @@ const TypeIcon: Component<TypeIconProps> = (props) => {
 // ── TokenRow ───────────────────────────────────────────────────────────────
 
 export const TokenRow: Component<TokenRowProps> = (rawProps) => {
+  const [t] = useTransContext();
   const [props] = splitProps(rawProps, [
     "token",
     "isSelected",
@@ -311,7 +313,7 @@ export const TokenRow: Component<TokenRowProps> = (rawProps) => {
       <span
         class="sigil-token-row__value"
         classList={{ "sigil-token-row__value--alias": isAlias() }}
-        aria-label={`Value: ${valuePreview()}`}
+        aria-label={t("a11y:tokens.valuePreview", { value: valuePreview() })}
       >
         {valuePreview()}
       </span>

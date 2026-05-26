@@ -1,4 +1,5 @@
 import { createSignal, createUniqueId, For, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { SectionDef } from "./schema/types";
 import { FieldRenderer } from "./FieldRenderer";
 import type { DocumentNode } from "../types/document";
@@ -35,6 +36,7 @@ function resolveValue(node: DocumentNode, key: string): unknown {
 }
 
 export const SchemaSection: Component<SchemaSectionProps> = (props) => {
+  const [t] = useTransContext();
   const [collapsed, setCollapsed] = createSignal(props.section.collapsed ?? false);
   // RF-022: stable id linking the disclosure trigger to its content. Required
   // by WAI-ARIA Disclosure pattern so screen readers can announce the
@@ -48,11 +50,18 @@ export const SchemaSection: Component<SchemaSectionProps> = (props) => {
           class="sigil-schema-section__toggle"
           aria-expanded={!collapsed()}
           aria-controls={fieldsId}
-          aria-label={`${collapsed() ? "Expand" : "Collapse"} ${props.section.name}`}
+          aria-label={
+            collapsed()
+              ? t("a11y:disclosure.expandSection", { name: props.section.name })
+              : t("a11y:disclosure.collapseSection", { name: props.section.name })
+          }
           onClick={() => setCollapsed(!collapsed())}
         >
           <h3 class="sigil-schema-section__name">{props.section.name}</h3>
-          <span class="sigil-schema-section__chevron">{collapsed() ? "\u25B8" : "\u25BE"}</span>
+          <span class="sigil-schema-section__chevron" aria-hidden="true">
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative chevron glyph; accessible name on aria-label */}
+            {collapsed() ? "\u25B8" : "\u25BE"}
+          </span>
         </button>
       </div>
       <Show when={!collapsed()}>

@@ -82,8 +82,23 @@ export async function initI18n(): Promise<i18n> {
     // a locale like "pt-BR" falls back to "pt" resources instead of
     // missing entirely.
     load: "languageOnly",
+    // RF-004: surface missing translation keys at runtime. With i18next's
+    // default behavior, `t("missing:key")` returns the key string itself
+    // (truthy), which silently masks missing-key bugs — `t(k) || fallback`
+    // never reaches the fallback branch. Setting `returnNull: true` returns
+    // `null` for a missing key so callers' `|| fallback` works as written
+    // and tests/dev tooling can detect missing keys.
+    returnNull: true,
     interpolation: {
-      // Solid.js handles escaping — avoid double-escaping.
+      // Solid.js handles escaping in JSX text and JSX attribute slots —
+      // avoid double-escaping.
+      //
+      // RF-031 invariant: do NOT pipe `t()` results into HTML-sink
+      // consumers (innerHTML, raw HTML insertion APIs). `escapeValue: false`
+      // means translation values are inserted verbatim — safe in JSX text
+      // and attribute slots (Solid escapes those), but unsafe if rendered
+      // as raw HTML. Today no such usage exists in `frontend/src`; this
+      // comment exists so any future regression is flagged at review time.
       escapeValue: false,
     },
   });
@@ -91,9 +106,32 @@ export async function initI18n(): Promise<i18n> {
   persistLocale(i18nInstance.language);
 
   // Persist locale whenever it changes at runtime.
+  //
+  // RF-023: this subscription lives for the lifetime of the singleton
+  // `i18nInstance`. In production this is intentional — the instance is
+  // never disposed before the page unloads, and the singleton's lifetime
+  // matches the document's. The matching `.off()` is exposed via
+  // `teardownI18n()` below for tests + HMR that need to dispose the
+  // instance and recreate it (otherwise the subscription accumulates a
+  // closure over each prior persistLocale binding).
   i18nInstance.on("languageChanged", persistLocale);
 
   return i18nInstance;
+}
+
+/**
+ * Removes the `languageChanged` listener installed by `initI18n`. Safe to
+ * call even when `initI18n` has not run (i18next's `.off()` is a no-op for
+ * unregistered listeners).
+ *
+ * No production code calls this today — `i18nInstance` is treated as a
+ * singleton whose lifetime matches the document. The function exists to
+ * support tests and future hot-module-replacement (HMR) flows that
+ * re-import this module and would otherwise leak a stale closure over
+ * each prior `persistLocale` binding.
+ */
+export function teardownI18n(): void {
+  i18nInstance.off("languageChanged", persistLocale);
 }
 
 export { i18nInstance };

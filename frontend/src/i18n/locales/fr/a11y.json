@@ -68,5 +68,24 @@
     "disconnected": "Déconnecté du serveur",
     "nodes": "{{count}} noeuds",
     "pages": "{{count}} pages"
+  },
+  "fills": {
+    "itemLabel": "Remplissage {{index}}"
+  },
+  "disclosure": {
+    "expandSection": "Développer {{name}}",
+    "collapseSection": "Réduire {{name}}"
+  },
+  "strokes": {
+    "itemLabel": "Contour {{index}}"
+  },
+  "effects": {
+    "itemLabel": "Effet {{index}}"
+  },
+  "gradient": {
+    "stopAtPercent": "Arrêt de dégradé {{index}} à {{percent}}%"
+  },
+  "tokens": {
+    "valuePreview": "Valeur : {{value}}"
   }
 }

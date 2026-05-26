@@ -15,10 +15,16 @@
     "rightPanel": "Right panel",
     "leftPanelTabs": "Left panel tabs",
     "rightPanelTabs": "Right panel tabs",
-    "designPanelTabs": "Design panel tabs"
+    "designPanelTabs": "Design panel tabs",
+    "appearance": "Appearance"
   },
   "emptyState": {
     "selectLayer": "Select a layer to see its properties"
+  },
+  "placeholder": {
+    "componentMessage": "Component editor -- future spec",
+    "inspectMessage": "Inspect mode -- future spec",
+    "comingSoon": "{{title}} -- coming soon"
   },
   "typography": {
     "title": "Typography",
@@ -75,12 +81,20 @@
     "removeStop": "Remove color stop",
     "radius": "Radius",
     "editGradient": "Edit gradient",
-    "repeating": "Repeating"
+    "repeating": "Repeating",
+    "controls": "Gradient controls",
+    "selectedStop": "Selected stop",
+    "type": "Gradient type",
+    "stops": "Gradient stops",
+    "colorStop": "Color stop"
   },
   "fill": {
     "title": "Fill",
     "empty": "No fills",
     "add": "Add fill",
+    "color": "Fill color",
+    "type": "Fill type",
+    "remove": "Remove fill",
     "typeSolid": "Solid",
     "typeLinear": "Linear",
     "typeRadial": "Radial",
@@ -90,7 +104,89 @@
   "stroke": {
     "title": "Stroke",
     "empty": "No strokes",
-    "add": "Add stroke"
+    "add": "Add stroke",
+    "remove": "Remove stroke",
+    "color": "Stroke color",
+    "width": "Stroke width"
+  },
+  "align": {
+    "title": "Align",
+    "distribute": "Distribute",
+    "toolbar": "Alignment",
+    "alignLeft": "Align left",
+    "alignCenterHorizontal": "Align center horizontally",
+    "alignRight": "Align right",
+    "alignTop": "Align top",
+    "alignCenterVertical": "Align center vertically",
+    "alignBottom": "Align bottom",
+    "distributeHorizontal": "Distribute horizontally",
+    "distributeVertical": "Distribute vertically"
+  },
+  "effects": {
+    "title": "Effects",
+    "empty": "No effects",
+    "noSelection": "Select a layer to edit effects.",
+    "add": "Add effect",
+    "remove": "Remove effect",
+    "types": {
+      "dropShadow": "Drop Shadow",
+      "innerShadow": "Inner Shadow",
+      "layerBlur": "Layer Blur",
+      "backgroundBlur": "Background Blur"
+    },
+    "fields": {
+      "type": "Effect type",
+      "shadowColor": "Shadow color",
+      "offsetX": "X offset",
+      "offsetY": "Y offset",
+      "blur": "Blur",
+      "spread": "Spread",
+      "radius": "Radius"
+    }
+  },
+  "corners": {
+    "title": "Corners",
+    "shape": "Shape",
+    "mixed": "Mixed",
+    "smoothing": "Smoothing",
+    "disabledExplanation": "Corner radius applies to rectangles, frames, and images only.",
+    "headers": {
+      "topLeftCorner": "Top-left corner",
+      "topRightCorner": "Top-right corner",
+      "bottomRightCorner": "Bottom-right corner",
+      "bottomLeftCorner": "Bottom-left corner",
+      "topCorners": "Top corners",
+      "rightCorners": "Right corners",
+      "bottomCorners": "Bottom corners",
+      "leftCorners": "Left corners",
+      "allCorners": "All corners"
+    },
+    "shapeOptions": {
+      "round": "Round",
+      "bevel": "Bevel",
+      "notch": "Notch",
+      "scoop": "Scoop",
+      "superellipse": "Superellipse"
+    }
+  },
+  "colorPicker": {
+    "outOfGamutShort": "Out of sRGB gamut",
+    "outOfGamutLong": "Color is outside the sRGB gamut",
+    "title": "Color picker",
+    "areaLabel": "Color saturation and lightness",
+    "hue": "Hue",
+    "opacity": "Opacity",
+    "hexColor": "Hex color",
+    "colorSpace": "Color space",
+    "colorChannelValues": "Color channel values"
+  },
+  "valueInput": {
+    "tokenExpression": "Token expression",
+    "suggestions": "Suggestions",
+    "fontSourceGeneric": "Generic",
+    "fontSourceSystem": "System",
+    "fontSourceWorkspace": "Workspace",
+    "fontSourcePlugin": "Plugin"
   },
   "node": {
     "title": "Node",
@@ -174,6 +270,16 @@
     "expressionError": "Expression error",
     "expressionResolved": "Resolved: {{value}}",
     "autocompleteHint": "Type { for tokens, or start typing a function name",
-    "emptyExpression": "Expression cannot be empty"
+    "emptyExpression": "Expression cannot be empty",
+    "dimensionPlaceholder": "e.g. 16px, 1.5rem, 50%",
+    "offsetX": "Offset X",
+    "offsetY": "Offset Y",
+    "blur": "Blur",
+    "spread": "Spread",
+    "expression": "Expression",
+    "clickToRename": "Click to rename",
+    "invalidValue": "Invalid value",
+    "expand": "Expand",
+    "collapse": "Collapse"
   }
 }

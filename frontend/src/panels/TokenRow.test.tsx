@@ -6,6 +6,7 @@ import { render, fireEvent } from "@solidjs/testing-library";
 import { describe, it, expect, vi } from "vitest";
 import { TokenRow } from "./TokenRow";
 import type { Token } from "../types/document";
+import { withI18n } from "../test-utils/i18n";
 
 // ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -130,213 +131,239 @@ function makeFontWeightToken(): Token {
 
 describe("TokenRow rendering", () => {
   it("should render token name", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("color/primary")).toBeTruthy();
   });
 
   it("should have role=option and aria-selected=false when not selected", () => {
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     const option = getByRole("option");
     expect(option.getAttribute("aria-selected")).toBe("false");
   });
 
   it("should have aria-selected=true when selected", () => {
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={true}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={true}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     const option = getByRole("option");
     expect(option.getAttribute("aria-selected")).toBe("true");
   });
 
   it("should set data-token-name attribute", () => {
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByRole("option").getAttribute("data-token-name")).toBe("color/primary");
   });
 
   it("should render dimension value preview as 16px", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeDimensionToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeDimensionToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("16px")).toBeTruthy();
   });
 
   it("should render alias value preview in italic style with arrow", () => {
-    const { container } = render(() => (
-      <TokenRow
-        token={makeAliasToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { container } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeAliasToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     const valueEl = container.querySelector(".sigil-token-row__value");
     expect(valueEl?.textContent).toContain("color/primary");
   });
 
   it("should render typography value preview with family size/weight", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeTypographyToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeTypographyToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("Inter 24/700")).toBeTruthy();
   });
 
   it("should render shadow value preview as summary string", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeShadowToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeShadowToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("0 2 4 #000000")).toBeTruthy();
   });
 
   it("should render number value as raw value", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeNumberToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeNumberToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("2")).toBeTruthy();
   });
 
   it("should render duration token value preview", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeDurationToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeDurationToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("0.15s")).toBeTruthy();
   });
 
   it("should render font family as first family name", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeFontFamilyToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeFontFamilyToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("Inter")).toBeTruthy();
   });
 
   it("should render font weight as weight number", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeFontWeightToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeFontWeightToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("700")).toBeTruthy();
   });
 
   it("should render cubic bezier control points as preview", () => {
-    const { getByText } = render(() => (
-      <TokenRow
-        token={makeCubicBezierToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByText } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeCubicBezierToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     expect(getByText("0.4, 0, 1, 1")).toBeTruthy();
   });
 });
@@ -346,89 +373,99 @@ describe("TokenRow rendering", () => {
 describe("TokenRow interaction", () => {
   it("should call onSelect with token name when clicked", () => {
     const onSelect = vi.fn();
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={onSelect}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={onSelect}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     fireEvent.click(getByRole("option"));
     expect(onSelect).toHaveBeenCalledWith("color/primary");
   });
 
   it("should call onEdit with token name when double-clicked", () => {
     const onEdit = vi.fn();
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={onEdit}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={onEdit}
+        />
+      )),
+    );
     fireEvent.dblClick(getByRole("option"));
     expect(onEdit).toHaveBeenCalledWith("color/primary");
   });
 
   it("should call onDelete when Delete key is pressed", () => {
     const onDelete = vi.fn();
-    const { getByRole } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={onDelete}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={onDelete}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     fireEvent.keyDown(getByRole("option"), { key: "Delete" });
     expect(onDelete).toHaveBeenCalledWith("color/primary");
   });
 
   it("should enter rename mode when F2 is pressed", () => {
-    const { getByRole, container } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole, container } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     expect(container.querySelector(".sigil-token-row__name-input")).toBeTruthy();
   });
 
   it("should commit rename on Enter and call onRename", () => {
     const onRename = vi.fn();
-    const { getByRole, container } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={onRename}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole, container } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
     expect(input).toBeTruthy();
@@ -440,18 +477,20 @@ describe("TokenRow interaction", () => {
 
   it("should cancel rename on Escape without calling onRename", () => {
     const onRename = vi.fn();
-    const { getByRole, container } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={onRename}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-      />
-    ));
+    const { getByRole, container } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={onRename}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+        />
+      )),
+    );
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
     if (!input) throw new Error("rename input not found");
@@ -462,20 +501,22 @@ describe("TokenRow interaction", () => {
 
   it("should stop propagation of keydown events from rename input (overlay mode)", () => {
     const outerHandler = vi.fn();
-    const { getByRole, container } = render(() => (
-      <div onKeyDown={outerHandler}>
-        <TokenRow
-          token={makeColorToken()}
-          isSelected={false}
-          isFocused={false}
-          tabIndex={0}
-          onSelect={vi.fn()}
-          onRename={vi.fn()}
-          onDelete={vi.fn()}
-          onEdit={vi.fn()}
-        />
-      </div>
-    ));
+    const { getByRole, container } = render(() =>
+      withI18n(() => (
+        <div onKeyDown={outerHandler}>
+          <TokenRow
+            token={makeColorToken()}
+            isSelected={false}
+            isFocused={false}
+            tabIndex={0}
+            onSelect={vi.fn()}
+            onRename={vi.fn()}
+            onDelete={vi.fn()}
+            onEdit={vi.fn()}
+          />
+        </div>
+      )),
+    );
     fireEvent.keyDown(getByRole("option"), { key: "F2" });
     const input = container.querySelector<HTMLInputElement>(".sigil-token-row__name-input");
     outerHandler.mockClear();
@@ -487,20 +528,22 @@ describe("TokenRow interaction", () => {
 
   it("should enter rename mode when requestRename prop is true", () => {
     const onRenameStarted = vi.fn();
-    const { container } = render(() => (
-      <TokenRow
-        token={makeColorToken()}
-        isSelected={false}
-        isFocused={false}
-        tabIndex={0}
-        onSelect={vi.fn()}
-        onRename={vi.fn()}
-        onDelete={vi.fn()}
-        onEdit={vi.fn()}
-        requestRename={true}
-        onRenameStarted={onRenameStarted}
-      />
-    ));
+    const { container } = render(() =>
+      withI18n(() => (
+        <TokenRow
+          token={makeColorToken()}
+          isSelected={false}
+          isFocused={false}
+          tabIndex={0}
+          onSelect={vi.fn()}
+          onRename={vi.fn()}
+          onDelete={vi.fn()}
+          onEdit={vi.fn()}
+          requestRename={true}
+          onRenameStarted={onRenameStarted}
+        />
+      )),
+    );
     expect(container.querySelector(".sigil-token-row__name-input")).toBeTruthy();
     expect(onRenameStarted).toHaveBeenCalled();
   });

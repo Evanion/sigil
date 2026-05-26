@@ -121,7 +121,9 @@ export const TokenNavigationPane: Component<TokenNavigationPaneProps> = (rawProp
         type="button"
         onClick={() => props.onCreateToken()}
       >
-        + {t("panels:tokens.newToken")}
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative add glyph leading translated label */}
+        {"+ "}
+        {t("panels:tokens.newToken")}
       </button>
     </nav>
   );

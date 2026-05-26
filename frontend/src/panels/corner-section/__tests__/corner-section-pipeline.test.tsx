@@ -24,10 +24,17 @@
  *     `CornerPopover.test.tsx`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@solidjs/testing-library";
+import type { JSX } from "solid-js";
+import { fireEvent, cleanup } from "@solidjs/testing-library";
+import type { i18n } from "i18next";
 import { createStore } from "solid-js/store";
 import { CornerSection } from "../CornerSection";
 import type { Corners, DocumentNode } from "../../../types/document";
+import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+const renderWithI18n = (ui: () => JSX.Element) => renderWithI18nShared(ui, i18nInstance);
 
 function rectNode(corners: Corners): DocumentNode {
   return {
@@ -68,7 +75,8 @@ function simulatePopoverToggle(open: boolean): void {
 }
 
 describe("CornerSection pipeline — UI → store → re-render", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -100,7 +108,7 @@ describe("CornerSection pipeline — UI → store → re-render", () => {
       setDoc("node", { ...doc.node, kind: { type: "rectangle", corners } });
     }
 
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={doc.node} onCorners={(c) => setCorners(doc.node.uuid, c)} />
     ));
 

@@ -38,10 +38,12 @@ export const TokenColorGrid: Component<TokenColorGridProps> = (rawProps) => {
 
           const swatchColor = createMemo(() => {
             const t = token();
+            // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS variable reference, not user-facing text
             if (!t) return "var(--surface-3)";
             if (t.value.type === "color") {
               return colorToCss(t.value.value);
             }
+            // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS variable reference, not user-facing text
             return "var(--surface-3)";
           });
 

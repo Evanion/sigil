@@ -8,12 +8,11 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { JSX } from "solid-js";
-import { render, screen, fireEvent } from "@solidjs/testing-library";
-import { TransProvider } from "@mbarzda/solid-i18next";
+import { screen, fireEvent } from "@solidjs/testing-library";
 import type { i18n } from "i18next";
 import { GradientControls } from "../GradientControls";
 import type { FillLinearGradient, FillRadialGradient } from "../../types/document";
-import { createTestI18n } from "../../test-utils/i18n";
+import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../test-utils/i18n";
 import {
   MAX_GRADIENT_STOPS,
   MIN_GRADIENT_STOPS,
@@ -21,9 +20,7 @@ import {
 
 let i18nInstance: i18n;
 
-function renderWithI18n(ui: () => JSX.Element) {
-  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
-}
+const renderWithI18n = (ui: () => JSX.Element) => renderWithI18nShared(ui, i18nInstance);
 
 const linearFill: FillLinearGradient = {
   type: "linear_gradient",

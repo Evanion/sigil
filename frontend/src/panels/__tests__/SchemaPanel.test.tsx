@@ -5,6 +5,7 @@ import { SchemaPanel } from "../SchemaPanel";
 import { DocumentProvider } from "../../store/document-context";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { PropertySchema } from "../schema/types";
+import { withI18n } from "../../test-utils/i18n";
 
 const testSchema: PropertySchema = {
   sections: [
@@ -102,11 +103,13 @@ describe("SchemaPanel", () => {
 
   it("should show empty state when no node selected", () => {
     const store = createMockStore(null);
-    render(() => (
-      <DocumentProvider store={store}>
-        <SchemaPanel schema={testSchema} />
-      </DocumentProvider>
-    ));
+    render(() =>
+      withI18n(() => (
+        <DocumentProvider store={store}>
+          <SchemaPanel schema={testSchema} />
+        </DocumentProvider>
+      )),
+    );
     expect(screen.getByText(/Select a layer/)).toBeTruthy();
   });
 
@@ -148,11 +151,13 @@ describe("SchemaPanel", () => {
       locked: false,
     };
     const store = createMockStore("test-uuid", { "test-uuid": node });
-    render(() => (
-      <DocumentProvider store={store}>
-        <SchemaPanel schema={testSchema} />
-      </DocumentProvider>
-    ));
+    render(() =>
+      withI18n(() => (
+        <DocumentProvider store={store}>
+          <SchemaPanel schema={testSchema} />
+        </DocumentProvider>
+      )),
+    );
     expect(screen.getByText("Transform")).toBeTruthy();
     expect(screen.getByText("Rectangle Only")).toBeTruthy();
   });
@@ -187,11 +192,13 @@ describe("SchemaPanel", () => {
       locked: false,
     };
     const store = createMockStore("test-uuid", { "test-uuid": node });
-    render(() => (
-      <DocumentProvider store={store}>
-        <SchemaPanel schema={testSchema} />
-      </DocumentProvider>
-    ));
+    render(() =>
+      withI18n(() => (
+        <DocumentProvider store={store}>
+          <SchemaPanel schema={testSchema} />
+        </DocumentProvider>
+      )),
+    );
     expect(screen.getByText("Transform")).toBeTruthy();
     expect(screen.queryByText("Rectangle Only")).toBeNull();
   });

@@ -29,6 +29,7 @@ import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import ValueInput from "../ValueInput";
 import type { Token } from "../../../types/document";
+import { withI18n } from "../../../test-utils/i18n";
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -83,9 +84,11 @@ describe("ValueInput — basic rendering", () => {
   });
 
   it("renders a contenteditable combobox with the supplied value", () => {
-    render(() => (
-      <ValueInput value="#ff0000" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput value="#ff0000" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox).toBeTruthy();
     // The outer combobox wraps the inner textbox — textContent propagates up.
@@ -96,15 +99,17 @@ describe("ValueInput — basic rendering", () => {
   });
 
   it("surfaces the placeholder via data-placeholder when value is empty", () => {
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        placeholder="Custom placeholder"
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          placeholder="Custom placeholder"
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     // data-placeholder is on the inner textbox div.
     const textbox = getTextbox(combobox);
@@ -112,15 +117,17 @@ describe("ValueInput — basic rendering", () => {
   });
 
   it("defaults aria-label to 'Token expression' when no label prop is provided", () => {
-    render(() => <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} />);
+    render(() => withI18n(() => <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} />));
     const combobox = screen.getByRole("combobox", { name: "Token expression" });
     expect(combobox).toBeTruthy();
   });
 
   it("renders with aria-haspopup='listbox' and a static aria-autocomplete capability", () => {
-    render(() => (
-      <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox.getAttribute("aria-haspopup")).toBe("listbox");
     expect(combobox.getAttribute("aria-autocomplete")).toBe("list");
@@ -129,9 +136,17 @@ describe("ValueInput — basic rendering", () => {
   });
 
   it("marks tabIndex=-1 and aria-disabled when disabled", () => {
-    render(() => (
-      <ValueInput value="42" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" disabled />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="42"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          aria-label="Test input"
+          disabled
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     // tabindex and aria-disabled are on the outer combobox div.
     expect(combobox.getAttribute("tabindex")).toBe("-1");
@@ -149,9 +164,11 @@ describe("ValueInput — input propagation", () => {
 
   it("fires onChange when the contentEditable receives input (RF-027)", () => {
     const onChange = vi.fn();
-    render(() => (
-      <ValueInput value="" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput value="" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     // Interact through the inner textbox — event handlers live there.
     const textbox = getTextbox(combobox);
@@ -168,15 +185,17 @@ describe("ValueInput — commit events", () => {
 
   it("fires onCommit once when Enter is pressed outside autocomplete", () => {
     const onCommit = vi.fn();
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        onCommit={onCommit}
-        tokens={TOKENS}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          onCommit={onCommit}
+          tokens={TOKENS}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     textbox.textContent = "42";
@@ -187,15 +206,17 @@ describe("ValueInput — commit events", () => {
 
   it("fires onCommit on blur when the value has changed", () => {
     const onCommit = vi.fn();
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        onCommit={onCommit}
-        tokens={TOKENS}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          onCommit={onCommit}
+          tokens={TOKENS}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     // Simulate user typing, which also updates the component's confirmedValue tracking.
@@ -207,15 +228,17 @@ describe("ValueInput — commit events", () => {
 
   it("does not fire onCommit on blur when value is unchanged", () => {
     const onCommit = vi.fn();
-    render(() => (
-      <ValueInput
-        value="42"
-        onChange={vi.fn()}
-        onCommit={onCommit}
-        tokens={TOKENS}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="42"
+          onChange={vi.fn()}
+          onCommit={onCommit}
+          tokens={TOKENS}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     // blur without mutation — onBlur sees text matches confirmedValue and skips commit
@@ -231,9 +254,11 @@ describe("ValueInput — Escape revert", () => {
 
   it("reverts DOM and fires onChange with the confirmed value on Escape", () => {
     const onChange = vi.fn();
-    render(() => (
-      <ValueInput value="42" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput value="42" onChange={onChange} tokens={TOKENS} aria-label="Test input" />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     // Simulate typing — intermediate onChange fires
@@ -264,29 +289,33 @@ describe("ValueInput — color swatch visibility", () => {
   });
 
   it("renders the color swatch button when acceptedTypes includes 'color'", () => {
-    render(() => (
-      <ValueInput
-        value="#ff0000"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["color"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="#ff0000"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["color"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const swatch = screen.getByRole("button", { name: "Color preview, click to edit" });
     expect(swatch).toBeTruthy();
   });
 
   it("does not render the swatch when acceptedTypes omits 'color'", () => {
-    render(() => (
-      <ValueInput
-        value="42"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["number"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="42"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["number"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     expect(screen.queryByRole("button", { name: "Color preview, click to edit" })).toBeNull();
   });
 
@@ -296,15 +325,17 @@ describe("ValueInput — color swatch visibility", () => {
     // automatically. The old aria-haspopup="dialog" + role="dialog" contract is
     // replaced by the native popover pattern: aria-expanded conveys open state,
     // aria-controls points at the popover element (which is top-layer via popover="auto").
-    render(() => (
-      <ValueInput
-        value="#ff0000"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["color"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="#ff0000"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["color"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const swatch = screen.getByRole("button", { name: "Color preview, click to edit" });
     // aria-expanded must be present (initially false = closed)
     expect(swatch.getAttribute("aria-expanded")).not.toBeNull();
@@ -329,15 +360,17 @@ describe("ValueInput — autocomplete", () => {
   // rely on the Selection API. jsdom supports this minimally — we can assert
   // the autocomplete opens by observing the listbox display style changing.
   it("opens the autocomplete listbox when '{' is pressed with tokens available", () => {
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["color"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["color"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     // Focus the combobox so selection APIs have a target node
@@ -355,15 +388,17 @@ describe("ValueInput — autocomplete", () => {
   });
 
   it("closes the autocomplete when Escape is pressed with it open", () => {
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["color"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["color"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     combobox.focus();
@@ -382,31 +417,35 @@ describe("ValueInput — RF-020 numeric ARIA exposure", () => {
   });
 
   it("exposes aria-valuenow when in literal-number mode and numeric type is accepted", () => {
-    render(() => (
-      <ValueInput
-        value="42"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["number"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="42"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["number"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox.getAttribute("aria-valuenow")).toBe("42");
   });
 
   it("exposes aria-valuemin and aria-valuemax when min/max props are provided", () => {
-    render(() => (
-      <ValueInput
-        value="0.5"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["number"]}
-        min={0}
-        max={1}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="0.5"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["number"]}
+          min={0}
+          max={1}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox.getAttribute("aria-valuenow")).toBe("0.5");
     expect(combobox.getAttribute("aria-valuemin")).toBe("0");
@@ -414,30 +453,34 @@ describe("ValueInput — RF-020 numeric ARIA exposure", () => {
   });
 
   it("omits aria-valuenow when the value is not a literal number (token ref)", () => {
-    render(() => (
-      <ValueInput
-        value="{opacity.subtle}"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["number"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="{opacity.subtle}"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["number"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     // The combobox is in reference mode, not literal-number mode — no numeric state.
     expect(combobox.getAttribute("aria-valuenow")).toBeNull();
   });
 
   it("omits aria-valuenow when the field does not accept numeric values", () => {
-    render(() => (
-      <ValueInput
-        value="42"
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["string"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value="42"
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["string"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     expect(combobox.getAttribute("aria-valuenow")).toBeNull();
   });
@@ -449,9 +492,11 @@ describe("ValueInput — RF-008 aria-live discrete-event scoping", () => {
   });
 
   it("renders the SR status region empty until a discrete event fires", () => {
-    render(() => (
-      <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput value="" onChange={vi.fn()} tokens={TOKENS} aria-label="Test input" />
+      )),
+    );
     const status = document.querySelector<HTMLElement>("[role='status']");
     expect(status).toBeTruthy();
     // Initially empty — committedStatus starts at "".
@@ -459,15 +504,17 @@ describe("ValueInput — RF-008 aria-live discrete-event scoping", () => {
   });
 
   it("does NOT announce suggestion count on typing (aria-live flooding guard)", () => {
-    render(() => (
-      <ValueInput
-        value=""
-        onChange={vi.fn()}
-        tokens={TOKENS}
-        acceptedTypes={["color"]}
-        aria-label="Test input"
-      />
-    ));
+    render(() =>
+      withI18n(() => (
+        <ValueInput
+          value=""
+          onChange={vi.fn()}
+          tokens={TOKENS}
+          acceptedTypes={["color"]}
+          aria-label="Test input"
+        />
+      )),
+    );
     const combobox = screen.getByRole("combobox", { name: "Test input" });
     const textbox = getTextbox(combobox);
     combobox.focus();

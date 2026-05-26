@@ -10,6 +10,7 @@
  * Number.isFinite() before use (CLAUDE.md S11 Floating-Point Validation).
  */
 import { createMemo, Index } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../number-input/NumberInput";
 import { srgbToOklch, oklchToSrgb, srgbToHsl, hslToSrgb } from "./color-math";
 import type { ColorDisplayMode } from "./types";
@@ -77,6 +78,7 @@ const FIELD_ARIA_LABELS: Record<FieldId, string> = {
 };
 
 export function ColorValueFields(props: ColorValueFieldsProps) {
+  const [t] = useTransContext();
   // Guard to prevent re-entrant handleChange calls when props update
   // triggers onRawValueChange on the NumberInput.
   let isUpdating = false;
@@ -237,7 +239,11 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
   }
 
   return (
-    <div class="sigil-color-value-fields" role="group" aria-label="Color channel values">
+    <div
+      class="sigil-color-value-fields"
+      role="group"
+      aria-label={t("panels:colorPicker.colorChannelValues")}
+    >
       <Index each={fields()}>
         {(field) => (
           <div class="sigil-color-value-fields__field">

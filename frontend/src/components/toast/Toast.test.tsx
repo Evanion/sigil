@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, cleanup } from "@solidjs/testing-library";
 import { ToastRegion, showToast } from "./Toast";
+import { withI18n } from "../../test-utils/i18n";
 
 describe("Toast", () => {
   afterEach(() => {
@@ -13,19 +14,19 @@ describe("Toast", () => {
 
   describe("ToastRegion", () => {
     it("should render the toast list container in the document", () => {
-      render(() => <ToastRegion />);
+      render(() => withI18n(() => <ToastRegion />));
       const list = document.querySelector(".sigil-toast-region");
       expect(list).toBeTruthy();
     });
 
     it("should render as an ordered list element for accessibility", () => {
-      render(() => <ToastRegion />);
+      render(() => withI18n(() => <ToastRegion />));
       const list = document.querySelector(".sigil-toast-region");
       expect(list?.tagName.toLowerCase()).toBe("ol");
     });
 
     it("should include the toast region landmark role", () => {
-      render(() => <ToastRegion />);
+      render(() => withI18n(() => <ToastRegion />));
       const region = document.querySelector("[role='region']");
       expect(region).toBeTruthy();
     });

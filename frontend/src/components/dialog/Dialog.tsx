@@ -21,6 +21,7 @@
  */
 import { Show, splitProps, createUniqueId, createEffect, onCleanup } from "solid-js";
 import type { JSX } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { X } from "lucide-solid";
 import "./Dialog.css";
 
@@ -34,6 +35,7 @@ export interface DialogProps {
 }
 
 export function Dialog(props: DialogProps) {
+  const [t] = useTransContext();
   const [local] = splitProps(props, [
     "open",
     "onOpenChange",
@@ -103,7 +105,7 @@ export function Dialog(props: DialogProps) {
           </h2>
           <button
             class="sigil-dialog__close"
-            aria-label="Close"
+            aria-label={t("common:close")}
             onClick={() => local.onOpenChange(false)}
           >
             <X size={16} />

@@ -15,10 +15,16 @@
     "rightPanel": "Panneau droit",
     "leftPanelTabs": "Onglets du panneau gauche",
     "rightPanelTabs": "Onglets du panneau droit",
-    "designPanelTabs": "Onglets du panneau de design"
+    "designPanelTabs": "Onglets du panneau de design",
+    "appearance": "Apparence"
   },
   "emptyState": {
     "selectLayer": "Sélectionnez un calque pour voir ses propriétés"
+  },
+  "placeholder": {
+    "componentMessage": "Éditeur de composants -- spécification à venir",
+    "inspectMessage": "Mode d'inspection -- spécification à venir",
+    "comingSoon": "{{title}} -- bientôt disponible"
   },
   "typography": {
     "title": "Typographie",
@@ -75,12 +81,20 @@
     "removeStop": "Supprimer l'arrêt de couleur",
     "radius": "Rayon",
     "editGradient": "Modifier le dégradé",
-    "repeating": "Répéter"
+    "repeating": "Répéter",
+    "controls": "Contrôles du dégradé",
+    "selectedStop": "Arrêt sélectionné",
+    "type": "Type de dégradé",
+    "stops": "Arrêts du dégradé",
+    "colorStop": "Arrêt de couleur"
   },
   "fill": {
     "title": "Remplissage",
     "empty": "Aucun remplissage",
     "add": "Ajouter un remplissage",
+    "color": "Couleur de remplissage",
+    "type": "Type de remplissage",
+    "remove": "Supprimer le remplissage",
     "typeSolid": "Uni",
     "typeLinear": "Linéaire",
     "typeRadial": "Radial",
@@ -90,7 +104,89 @@
   "stroke": {
     "title": "Contour",
     "empty": "Aucun contour",
-    "add": "Ajouter un contour"
+    "add": "Ajouter un contour",
+    "remove": "Supprimer le contour",
+    "color": "Couleur du contour",
+    "width": "Épaisseur du contour"
+  },
+  "align": {
+    "title": "Aligner",
+    "distribute": "Distribuer",
+    "toolbar": "Alignement",
+    "alignLeft": "Aligner à gauche",
+    "alignCenterHorizontal": "Centrer horizontalement",
+    "alignRight": "Aligner à droite",
+    "alignTop": "Aligner en haut",
+    "alignCenterVertical": "Centrer verticalement",
+    "alignBottom": "Aligner en bas",
+    "distributeHorizontal": "Distribuer horizontalement",
+    "distributeVertical": "Distribuer verticalement"
+  },
+  "effects": {
+    "title": "Effets",
+    "empty": "Aucun effet",
+    "noSelection": "Sélectionnez un calque pour modifier les effets.",
+    "add": "Ajouter un effet",
+    "remove": "Supprimer l'effet",
+    "types": {
+      "dropShadow": "Ombre portée",
+      "innerShadow": "Ombre intérieure",
+      "layerBlur": "Flou de calque",
+      "backgroundBlur": "Flou d'arrière-plan"
+    },
+    "fields": {
+      "type": "Type d'effet",
+      "shadowColor": "Couleur de l'ombre",
+      "offsetX": "Décalage X",
+      "offsetY": "Décalage Y",
+      "blur": "Flou",
+      "spread": "Étalement",
+      "radius": "Rayon"
+    }
+  },
+  "corners": {
+    "title": "Coins",
+    "shape": "Forme",
+    "mixed": "Mixte",
+    "smoothing": "Lissage",
+    "disabledExplanation": "Le rayon des coins s'applique uniquement aux rectangles, cadres et images.",
+    "headers": {
+      "topLeftCorner": "Coin supérieur gauche",
+      "topRightCorner": "Coin supérieur droit",
+      "bottomRightCorner": "Coin inférieur droit",
+      "bottomLeftCorner": "Coin inférieur gauche",
+      "topCorners": "Coins supérieurs",
+      "rightCorners": "Coins droits",
+      "bottomCorners": "Coins inférieurs",
+      "leftCorners": "Coins gauches",
+      "allCorners": "Tous les coins"
+    },
+    "shapeOptions": {
+      "round": "Arrondi",
+      "bevel": "Biseau",
+      "notch": "Encoche",
+      "scoop": "Creux",
+      "superellipse": "Superellipse"
+    }
+  },
+  "colorPicker": {
+    "outOfGamutShort": "Hors gamme sRGB",
+    "outOfGamutLong": "La couleur est hors de la gamme sRGB",
+    "title": "Sélecteur de couleur",
+    "areaLabel": "Saturation et luminosité de la couleur",
+    "hue": "Teinte",
+    "opacity": "Opacité",
+    "hexColor": "Couleur hexadécimale",
+    "colorSpace": "Espace de couleur",
+    "colorChannelValues": "Valeurs des canaux de couleur"
+  },
+  "valueInput": {
+    "tokenExpression": "Expression de jeton",
+    "suggestions": "Suggestions",
+    "fontSourceGeneric": "Générique",
+    "fontSourceSystem": "Système",
+    "fontSourceWorkspace": "Espace de travail",
+    "fontSourcePlugin": "Extension"
   },
   "node": {
     "title": "Noeud",
@@ -174,6 +270,16 @@
     "expressionError": "Erreur d'expression",
     "expressionResolved": "Resolu : {{value}}",
     "autocompleteHint": "Tapez { pour les jetons, ou commencez a taper un nom de fonction",
-    "emptyExpression": "L'expression ne peut pas etre vide"
+    "emptyExpression": "L'expression ne peut pas etre vide",
+    "dimensionPlaceholder": "ex. 16px, 1.5rem, 50%",
+    "offsetX": "Décalage X",
+    "offsetY": "Décalage Y",
+    "blur": "Flou",
+    "spread": "Étalement",
+    "expression": "Expression",
+    "clickToRename": "Cliquer pour renommer",
+    "invalidValue": "Valeur non valide",
+    "expand": "Développer",
+    "collapse": "Réduire"
   }
 }

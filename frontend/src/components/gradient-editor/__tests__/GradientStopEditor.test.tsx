@@ -12,6 +12,7 @@ import { render, screen, fireEvent, cleanup } from "@solidjs/testing-library";
 import { GradientStopEditor } from "../GradientStopEditor";
 import type { GradientStop } from "../../../types/document";
 import { MIN_GRADIENT_STOPS, MAX_GRADIENT_STOPS } from "../gradient-utils";
+import { withI18n } from "../../../test-utils/i18n";
 
 function makeStop(id: string, position: number, r = 1, g = 0, b = 0): GradientStop {
   return {
@@ -35,17 +36,19 @@ function renderEditor(overrides: Partial<Parameters<typeof GradientStopEditor>[0
   const onAddStop = vi.fn();
   const onRemoveStop = vi.fn();
 
-  const result = render(() => (
-    <GradientStopEditor
-      stops={overrides.stops ?? defaultStops}
-      selectedStopId={overrides.selectedStopId ?? null}
-      onSelectStop={overrides.onSelectStop ?? onSelectStop}
-      onUpdateStop={overrides.onUpdateStop ?? onUpdateStop}
-      onAddStop={overrides.onAddStop ?? onAddStop}
-      onRemoveStop={overrides.onRemoveStop ?? onRemoveStop}
-      gradientCSS={overrides.gradientCSS ?? defaultGradientCSS}
-    />
-  ));
+  const result = render(() =>
+    withI18n(() => (
+      <GradientStopEditor
+        stops={overrides.stops ?? defaultStops}
+        selectedStopId={overrides.selectedStopId ?? null}
+        onSelectStop={overrides.onSelectStop ?? onSelectStop}
+        onUpdateStop={overrides.onUpdateStop ?? onUpdateStop}
+        onAddStop={overrides.onAddStop ?? onAddStop}
+        onRemoveStop={overrides.onRemoveStop ?? onRemoveStop}
+        gradientCSS={overrides.gradientCSS ?? defaultGradientCSS}
+      />
+    )),
+  );
 
   return { ...result, onSelectStop, onUpdateStop, onAddStop, onRemoveStop };
 }

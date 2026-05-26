@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { SchemaPanel } from "./SchemaPanel";
 import { designSchema } from "./schemas/design-schema";
 import { AppearancePanel } from "./AppearancePanel";
@@ -22,6 +23,7 @@ const TABS: readonly DesignTab[] = ["layout", "appearance", "effects"] as const;
  * ArrowLeft/ArrowRight navigate between tabs with wrapping.
  */
 export const DesignPanel: Component = () => {
+  const [t] = useTransContext();
   const store = useDocument();
   const [activeTab, setActiveTab] = createSignal<DesignTab>("layout");
 
@@ -66,7 +68,7 @@ export const DesignPanel: Component = () => {
       <div
         class="sigil-design-panel__tabs"
         role="tablist"
-        aria-label="Design panel tabs"
+        aria-label={t("panels:regions.designPanelTabs")}
         onKeyDown={handleKeyDown}
       >
         <For each={TABS}>

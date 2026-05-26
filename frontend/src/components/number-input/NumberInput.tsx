@@ -1,5 +1,6 @@
 import { NumberField } from "@kobalte/core/number-field";
 import { Show, splitProps } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { ChevronUp, ChevronDown } from "lucide-solid";
 import "./NumberInput.css";
 
@@ -19,6 +20,7 @@ export interface NumberInputProps {
 }
 
 export function NumberInput(props: NumberInputProps) {
+  const [t] = useTransContext();
   const [local, others] = splitProps(props, [
     "value",
     "onValueChange",
@@ -75,10 +77,16 @@ export function NumberInput(props: NumberInputProps) {
           <span class="sigil-number-input__suffix">{local.suffix}</span>
         </Show>
         <div class="sigil-number-input__buttons">
-          <NumberField.IncrementTrigger aria-label="Increment" class="sigil-number-input__btn">
+          <NumberField.IncrementTrigger
+            aria-label={t("common:increment")}
+            class="sigil-number-input__btn"
+          >
             <ChevronUp size={12} />
           </NumberField.IncrementTrigger>
-          <NumberField.DecrementTrigger aria-label="Decrement" class="sigil-number-input__btn">
+          <NumberField.DecrementTrigger
+            aria-label={t("common:decrement")}
+            class="sigil-number-input__btn"
+          >
             <ChevronDown size={12} />
           </NumberField.DecrementTrigger>
         </div>

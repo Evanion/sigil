@@ -1,9 +1,16 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import type { JSX } from "solid-js";
+import { screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import type { i18n } from "i18next";
 import { createSignal } from "solid-js";
 import { DesignPanel } from "../DesignPanel";
 import { DocumentProvider } from "../../store/document-context";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
+import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+const renderWithI18n = (ui: () => JSX.Element) => renderWithI18nShared(ui, i18nInstance);
 
 function createMockStore(
   selectedId: string | null = null,
@@ -75,13 +82,17 @@ function createMockStore(
 }
 
 describe("DesignPanel", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+  });
+
   afterEach(() => {
     cleanup();
   });
 
   it("should render three sub-tabs: Layout, Appearance, Effects", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -93,7 +104,7 @@ describe("DesignPanel", () => {
 
   it("should show Layout tab content by default", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -106,7 +117,7 @@ describe("DesignPanel", () => {
 
   it("should switch to Appearance tab when clicked", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -120,7 +131,7 @@ describe("DesignPanel", () => {
 
   it("should switch to Effects tab when clicked", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -134,7 +145,7 @@ describe("DesignPanel", () => {
 
   it("should navigate tabs with ArrowRight key", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -150,7 +161,7 @@ describe("DesignPanel", () => {
 
   it("should navigate tabs with ArrowLeft key", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -164,7 +175,7 @@ describe("DesignPanel", () => {
 
   it("should wrap ArrowRight navigation from last tab to first", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -178,7 +189,7 @@ describe("DesignPanel", () => {
 
   it("should wrap ArrowLeft navigation from first tab to last", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -190,7 +201,7 @@ describe("DesignPanel", () => {
 
   it("should use roving tabindex pattern (active tab has 0, others have -1)", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>
@@ -205,7 +216,7 @@ describe("DesignPanel", () => {
 
   it("should have a tabpanel with correct role", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <DesignPanel />
       </DocumentProvider>

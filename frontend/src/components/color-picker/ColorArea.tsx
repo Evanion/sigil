@@ -205,8 +205,8 @@ export function ColorArea(props: ColorAreaProps) {
         aria-hidden="true"
         style={{ width: "100%", height: `${areaHeight()}px` }}
       >
-        {/* Fallback text for non-canvas environments */}
-        Color selection area
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
+        {"Color selection area"}
       </canvas>
       <div
         class="sigil-color-area__cursor"

@@ -386,6 +386,7 @@ export const TokensPanel: Component = () => {
                     aria-controls={groupContentId()}
                   >
                     <span class="sigil-tokens-panel__group-chevron" aria-hidden="true">
+                      {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative chevron glyph; aria-hidden parent */}
                       {isCollapsed() ? "\u25B6" : "\u25BC"}
                     </span>
                     <span id={groupLabelId()} class="sigil-tokens-panel__group-label">

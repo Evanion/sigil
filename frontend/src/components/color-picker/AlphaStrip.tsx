@@ -169,6 +169,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(props.alpha * 100)}
+      aria-valuetext={`${Math.round(props.alpha * 100)}%`}
       style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -181,7 +182,8 @@ export function AlphaStrip(props: AlphaStripProps) {
         aria-hidden="true"
         style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       >
-        Opacity selection strip
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
+        {"Opacity selection strip"}
       </canvas>
       <div
         class="sigil-strip__thumb"

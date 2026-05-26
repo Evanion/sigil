@@ -8,6 +8,7 @@
  * before use per CLAUDE.md §11 Floating-Point Validation.
  */
 import { createMemo } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Stroke, Token } from "../types/document";
 import { GripVertical } from "lucide-solid";
 import ValueInput from "../components/value-input/ValueInput";
@@ -44,6 +45,7 @@ export interface StrokeRowProps {
 // ── StrokeRow component ────────────────────────────────────────────────
 
 export function StrokeRow(props: StrokeRowProps) {
+  const [t] = useTransContext();
   const colorDisplay = createMemo(() => formatColorStyleValue(props.stroke.color));
   const widthDisplay = createMemo(() => formatNumberStyleValue(props.stroke.width));
 
@@ -100,7 +102,7 @@ export function StrokeRow(props: StrokeRowProps) {
         onCommit={handleColorCommit}
         tokens={props.tokens ?? {}}
         acceptedTypes={["color"]}
-        aria-label="Stroke color"
+        aria-label={t("panels:stroke.color")}
       />
 
       <div class="sigil-stroke-row__width">
@@ -110,7 +112,7 @@ export function StrokeRow(props: StrokeRowProps) {
           onCommit={handleWidthCommit}
           tokens={props.tokens ?? {}}
           acceptedTypes={["number", "dimension"]}
-          aria-label="Stroke width"
+          aria-label={t("panels:stroke.width")}
         />
       </div>
 
@@ -121,10 +123,11 @@ export function StrokeRow(props: StrokeRowProps) {
         class="sigil-stroke-row__remove"
         type="button"
         tabIndex={-1}
-        aria-label="Remove stroke"
+        aria-label={t("panels:stroke.remove")}
         onClick={handleRemove}
       >
-        ×
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
+        {"×"}
       </button>
     </div>
   );

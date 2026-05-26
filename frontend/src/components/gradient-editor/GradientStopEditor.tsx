@@ -15,6 +15,7 @@
  * Uses pointer events (not mouse events) for drag per CLAUDE.md.
  */
 import { createSignal, Index, onCleanup } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { GradientStop } from "../../types/document";
 import { MIN_GRADIENT_STOPS, MAX_GRADIENT_STOPS } from "./gradient-utils";
 import "./GradientStopEditor.css";
@@ -50,6 +51,7 @@ export interface GradientStopEditorProps {
 }
 
 export function GradientStopEditor(props: GradientStopEditorProps) {
+  const [t] = useTransContext();
   // eslint-disable-next-line no-unassigned-vars
   let barRef: HTMLDivElement | undefined;
   const [draggingId, setDraggingId] = createSignal<string | null>(null);
@@ -203,7 +205,7 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
         onKeyDown={handleBarKeyDown}
         tabindex={0}
         role="group"
-        aria-label="Gradient stops"
+        aria-label={t("panels:gradient.stops")}
       >
         <Index each={props.stops}>
           {(stop) => {
@@ -216,8 +218,11 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
             const stopId = () => stop().id ?? "";
 
             const stopClass = () => {
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               let cls = "sigil-gradient-stop-editor__stop";
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               if (isSelected()) cls += " sigil-gradient-stop-editor__stop--selected";
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               if (isRemoving()) cls += " sigil-gradient-stop-editor__stop--removing";
               return cls;
             };
@@ -231,7 +236,7 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
                 }}
                 role="slider"
                 tabindex={0}
-                aria-label="Color stop"
+                aria-label={t("panels:gradient.colorStop")}
                 aria-valuenow={Math.round(positionPct())}
                 aria-valuemin={STOP_POSITION_MIN}
                 aria-valuemax={STOP_POSITION_MAX}

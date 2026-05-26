@@ -65,6 +65,7 @@ export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProp
             const fontFamily = validateCssIdentifier(v.font_family) ? v.font_family : "sans-serif";
 
             return {
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS font-family value, not user-facing text
               "font-family": `${fontFamily}, sans-serif`,
               "font-size": `${fontSize}px`,
               "font-weight": String(fontWeight),
@@ -76,6 +77,7 @@ export const TokenTypographyList: Component<TokenTypographyListProps> = (rawProp
             if (!v) return "";
             const size = Number.isFinite(v.font_size) ? v.font_size : 0;
             const weight = Number.isFinite(v.font_weight) ? v.font_weight : 0;
+            // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: numeric typography summary (font-family/size/weight) — purely structural data, not translatable copy
             return `${v.font_family} ${size}/${weight}`;
           });
 

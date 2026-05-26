@@ -372,6 +372,7 @@ These rules address recurring bug patterns. They apply to ALL implementation wor
 > - [Rust defensive rules](.claude/rules/rust-defensive.md) — core crate, validation, serialization, arena, locks
 > - [Frontend defensive rules](.claude/rules/frontend-defensive.md) — Solid.js, store, history, optimistic updates
 > - [Accessibility rules](.claude/rules/a11y-rules.md) — ARIA, keyboard, screen reader, reduced motion
+> - [CI shell-script discipline](.claude/rules/ci-shell-discipline.md) — defensive parsing of grep/lint output, arithmetic-expansion safety, exemption-token enforcement
 
 ### Constants Must Be Enforced
 
@@ -388,7 +389,11 @@ Every recursive function MUST accept a depth parameter or use an explicit stack 
 - JSON processing (e.g., `sort_json_keys`)
 - Any function that calls itself or walks a graph
 
+**Scope is workspace-wide, not language- or crate-scoped.** The rule applies equally to Rust code in any crate, TypeScript in the frontend, Node scripts in `frontend/scripts/`, build helpers, migration runners, custom CI tooling, and any locale/config parser. "Walks a graph" includes walking a JSON tree, a directory tree, a dependency tree, or any nested object structure read from disk or network.
+
 The depth limit must be a named constant, not a magic number. Use `>=` (not `>`) when comparing depth to the limit constant — depth is zero-indexed, so `depth >= MAX` allows exactly MAX levels (0 through MAX-1). An off-by-one here silently permits one extra recursion level.
+
+Precedent: RF-011 (PR #66) — `collectKeys` in a locale parity script recursed over a nested JSON object with no depth guard. The Compliance reviewer flagged it on the rule's literal text; the implementer had treated the rule as scoped to core-crate Rust. The scope-clarifying amendment removes the ambiguity.
 
 ### Floating-Point Validation
 
@@ -439,6 +444,42 @@ When a boolean or enum flag is set to temporarily change system behavior (suppre
 
 Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
 
+### CI Guards Must Ship With a Violation-Fires Test
+
+Any PR that adds or modifies a CI check whose purpose is to reject a class of source-code violation (lint rules, grep guards, custom AST checks, file-presence assertions, workflow `if` conditions, etc.) MUST include a programmatic test that runs the check against a representative violation and asserts the check fires (non-zero exit, lint error, failed assertion). A claim of enforcement without a sentinel test is a bug — the guard's configuration may silently bypass the violation it was designed to catch.
+
+The test:
+1. Constructs (inline or in a fixture file) a minimal source that the rule is supposed to reject.
+2. Invokes the check via the same entry point CI uses (the linter binary, the grep step, the script).
+3. Asserts the check produces a failure exit code or surfaces the expected error.
+
+It also asserts the converse where applicable: a clean fixture passes, so a future maintainer who tightens the rule can't accidentally invert it.
+
+Mirrors the "Constant Enforcement Tests" rule for CI gates: a guard you cannot prove fires is a guard you do not have.
+
+This applies equally to:
+- ESLint custom-rule configuration (verify the rule fires on each input type the option claims to cover — JSX text, JSX attribute, template literal, JSX expression).
+- Grep-based CI steps (verify the grep matches a known-bad input and rejects a known-good input).
+- Workflow `if:` gating conditions (verify the job actually runs on the trigger that's supposed to invoke it).
+- Schema/file-presence assertions (verify the assertion fails when the required file is absent).
+
+Precedent: PR #66 (i18n migration) — `mode: "jsx-text-only"` silently bypassed all 83+ JSX attribute literals in the codebase despite the PR claiming the migration was complete. Six reviewers converged on this single finding. Without a violation-fires test, the gate would have green-lit every future hardcoded `aria-label`.
+
+### Third-Party Plugin Options Must Be Verified, Not Inferred
+
+When configuring a third-party plugin, linter, build tool, or library via a structured option object (ESLint rule options, Vite plugin config, webpack loader config, Cargo `[features]`, GitHub Action `with:` inputs, etc.), the implementer MUST verify each option's behavior against the plugin's source code, type definitions, or current documentation BEFORE shipping. Options whose names read intuitively often do something narrower or different than they suggest. Three failure modes recur:
+
+1. **Mode-option mis-scoping** — an option whose name implies "X applies to all input shapes Y" actually applies only to a subset (e.g., `mode: "jsx-text-only"` excludes JSX attributes; `target: "node"` excludes worker contexts).
+2. **Dead config** — an option that does nothing in the version pinned (plugin reads `exclude` but not `include`, or the option was renamed in a major version bump).
+3. **Implicit default reliance** — an option whose default value is correct today but may flip in a future major (e.g., `framework: 'react'` defaulted in but Solid AST happens to match; if the default flips to `'vue'`, the rule silently stops working).
+
+When configuring such a plugin, the PR MUST:
+- Open the plugin's source or current changelog and confirm each option's semantics. Cite the line/section in a comment next to the option if the behavior is non-obvious.
+- Pair every non-trivial option with the sentinel test from "CI Guards Must Ship With a Violation-Fires Test" — the test proves the option actually does what the config claims.
+- Set defaults explicitly where the default's stability matters (e.g., `framework: 'react'` instead of relying on the implicit default).
+
+Precedent: PR #66 — `eslint-plugin-i18next` was configured with `mode: "jsx-text-only"` (silently excluded JSX attributes, made `jsx-attributes.include` dead config — RF-001), `callees.include: [...]` (plugin only reads `callees.exclude` — RF-007), and an implicit `framework: 'react'` default (RF-019). All three discoverable in a 5-minute read of the plugin's source; none caught before review.
+
 ### Behavioral Inventory Before Deleting or Rewriting Implementation Code
 
 When a PR either (a) deletes a module, trait, struct, or function carrying non-trivial logic, OR (b) rewrites a frontend component such that net line delta exceeds ±30% or the implementation is substantially different (new internal architecture, new state model, extracted/combined helpers), the PR MUST include a behavioral inventory before the diff.
@@ -470,6 +511,15 @@ When migrating from one protocol, library, or API to another (e.g., WebSocket to
 4. Dead test fixtures or mocks for the old protocol.
 5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
 A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.
+
+**Completion claims require machine-verifiable receipts.** A migration PR's description MUST NOT claim completeness unless one of the following is true:
+1. **Sentinel guard + violation test.** The PR introduces a CI guard that rejects the old pattern (lint rule, grep, type check, exhaustiveness sentinel), AND a programmatic test that proves the guard fires on a representative remnant (see "CI Guards Must Ship With a Violation-Fires Test"). Lint passing without a sentinel that fails-on-remnant is not a receipt — the guard may be misconfigured.
+2. **End-to-end search + zero-result assertion.** The PR description quotes the exact `rg` / `grep` command used to enumerate remnants, and the command output is empty. The command must be reproducible by a reviewer.
+3. **Explicit staged-delivery inventory.** If the migration is deliberately partial, the PR description includes a "Migration remnants — deferred" inventory naming every remaining call site, the owner of the follow-up, and the reason the staged delivery is safe (matches the §10 "Staged Feature Delivery Contract").
+
+A PR description that says "all X migrated" without one of the three is incomplete. Reviewers MUST treat such a claim as unverified.
+
+Precedent: PR #66 (i18n migration) — the description claimed "no new hardcoded user-facing strings"; lint and tests passed; but the central guard's `mode: "jsx-text-only"` silently bypassed every JSX attribute, leaving 83+ remnants in tree. Six reviewers independently caught this only by running the guard with a corrected mode.
 
 ### Do Not Use Positional Index as Item Identity in Dynamic Lists
 

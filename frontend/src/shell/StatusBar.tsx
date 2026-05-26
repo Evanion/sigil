@@ -29,6 +29,7 @@ export const StatusBar: Component = () => {
         </Show>
         <span>{t("a11y:status.nodes", { count: store.state.info.node_count })}</span>
         <span>{t("a11y:status.pages", { count: store.state.info.page_count })}</span>
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative unit suffix */}
         <span>{zoomPercent()}%</span>
       </div>
       {/* RF-002: Scoped aria-live region for connection status only.

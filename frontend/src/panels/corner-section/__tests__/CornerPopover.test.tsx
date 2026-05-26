@@ -10,8 +10,10 @@
  *   (`role="listbox"` / `role="option"`) instead of `.options`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { JSX } from "solid-js";
 import { createSignal } from "solid-js";
-import { render, fireEvent, screen, cleanup } from "@solidjs/testing-library";
+import { fireEvent, screen, cleanup } from "@solidjs/testing-library";
+import type { i18n } from "i18next";
 import { CornerPopover } from "../CornerPopover";
 import { hotspotHasAsymmetricRadii } from "../corner-section-state";
 import {
@@ -20,6 +22,11 @@ import {
   MIN_SUPERELLIPSE_SMOOTHING,
 } from "../../../store/corners-input";
 import type { Corner, Corners } from "../../../types/document";
+import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+const renderWithI18n = (ui: () => JSX.Element) => renderWithI18nShared(ui, i18nInstance);
 
 function round(r: number): Corner {
   return { type: "round", radii: { x: r, y: r } };
@@ -32,7 +39,8 @@ const ROUND_8: Corners = [round(8), round(8), round(8), round(8)];
 const MIXED: Corners = [round(8), bevel(8), round(8), round(8)];
 
 describe("CornerPopover — common skeleton", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     // Stub native popover methods (ValueInput's color picker uses them)
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
@@ -47,7 +55,7 @@ describe("CornerPopover — common skeleton", () => {
   });
 
   it("corner-popover renders header, shape picker, and radius input", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     // RF-010: popover header is h4 (one level below CornerSection's h3).
@@ -57,7 +65,7 @@ describe("CornerPopover — common skeleton", () => {
   });
 
   it("corner popover offers 4 shapes (Round / Bevel / Notch / Scoop) — NOT Superellipse", () => {
-    render(() => <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />);
+    renderWithI18n(() => <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />);
     // Open the Kobalte Select by pointer-pressing the trigger.
     // RF-011: Select is wired via aria-labelledby — accessible name is the
     // visible "Shape" label plus the current value (e.g., "Shape Round").
@@ -70,7 +78,7 @@ describe("CornerPopover — common skeleton", () => {
   });
 
   it("center popover offers 5 shapes (adds Superellipse)", () => {
-    render(() => <CornerPopover target="center" corners={ROUND_8} onCommit={() => {}} />);
+    renderWithI18n(() => <CornerPopover target="center" corners={ROUND_8} onCommit={() => {}} />);
     // RF-011: Select is wired via aria-labelledby — accessible name is the
     // visible "Shape" label plus the current value (e.g., "Shape Round").
     const trigger = screen.getByRole("button", { name: /^Shape/i });
@@ -82,7 +90,7 @@ describe("CornerPopover — common skeleton", () => {
 
   it("changing shape via the Select calls onCommit with the new shape applied to every targeted corner", () => {
     const handler = vi.fn();
-    render(() => <CornerPopover target="top" corners={ROUND_8} onCommit={handler} />);
+    renderWithI18n(() => <CornerPopover target="top" corners={ROUND_8} onCommit={handler} />);
 
     // Open the listbox.
     // RF-011: Select is wired via aria-labelledby — accessible name is the
@@ -110,7 +118,7 @@ describe("CornerPopover — common skeleton", () => {
   });
 
   it("shows the 'Mixed' indicator when targeted corners have different shapes", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="top" corners={MIXED} onCommit={() => {}} />
     ));
     expect(
@@ -120,7 +128,8 @@ describe("CornerPopover — common skeleton", () => {
 });
 
 describe("CornerPopover — axis-unlock toggle", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -134,7 +143,7 @@ describe("CornerPopover — axis-unlock toggle", () => {
   });
 
   it("renders a Toggle labeled 'Unlock axes'", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     const toggle = container.querySelector('[data-testid="corner-popover__unlock"]');
@@ -152,7 +161,7 @@ describe("CornerPopover — axis-unlock toggle", () => {
     const asym: Corner = { type: "round", radii: { x: 30, y: 10 } };
     const corners = [asym, round(8), round(8), round(8)] as Corners;
     expect(hotspotHasAsymmetricRadii(corners, "tl")).toBe(true);
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={() => {}} />
     ));
     const sw = container.querySelector(
@@ -170,7 +179,7 @@ describe("CornerPopover — axis-unlock toggle", () => {
       round(8),
       round(8),
     ];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={handler} />
     ));
 
@@ -230,7 +239,7 @@ describe("CornerPopover — axis-unlock toggle", () => {
       { type: "round", radii: { x: 8, y: 8 } },
       { type: "round", radii: { x: 8, y: 8 } },
     ];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="top" corners={startCorners} onCommit={handler} />
     ));
 
@@ -267,7 +276,7 @@ describe("CornerPopover — axis-unlock toggle", () => {
       { type: "round", radii: { x: 8, y: 8 } },
       { type: "round", radii: { x: 8, y: 8 } },
     ];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="top" corners={startCorners} onCommit={handler} />
     ));
 
@@ -303,7 +312,8 @@ function superellipseAll(s: number): Corners {
 }
 
 describe("CornerPopover — center smoothing control", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -317,21 +327,21 @@ describe("CornerPopover — center smoothing control", () => {
   });
 
   it("does NOT render the smoothing control on non-center popovers", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).toBeNull();
   });
 
   it("does NOT render the smoothing control on center when shape != superellipse", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={ROUND_8} onCommit={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).toBeNull();
   });
 
   it("renders the smoothing control on center popover when shape = superellipse", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).not.toBeNull();
@@ -347,7 +357,7 @@ describe("CornerPopover — center smoothing control", () => {
     // "0.7" (the corners' current smoothing). The cleanup resets the signal
     // so the next mount of the block reflects current state.
     const [corners, setCorners] = createSignal<Corners>(superellipseAll(0.5));
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={corners()} onCommit={() => {}} />
     ));
 
@@ -406,7 +416,7 @@ describe("CornerPopover — center smoothing control", () => {
     // Slider.test.tsx "should fire onChangeEnd at end of pointer interaction").
     // That single end event is what the smoothing control wires to onCommit.
     const handler = vi.fn();
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={handler} />
     ));
     const sliderWrapper = container.querySelector(
@@ -444,7 +454,8 @@ describe("CornerPopover — center smoothing control", () => {
  * the user after initial mount.
  */
 describe("CornerPopover — RF-006 axis-unlock toggle persistence", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -472,7 +483,7 @@ describe("CornerPopover — RF-006 axis-unlock toggle persistence", () => {
       setCorners(next);
     });
 
-    const { container, unmount } = render(() => (
+    const { container, unmount } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners()} onCommit={onCommit} />
     ));
 
@@ -530,7 +541,8 @@ describe("CornerPopover — RF-006 axis-unlock toggle persistence", () => {
  * "Internal Mutation Entry Points Must Diagnose Their Own No-Ops".
  */
 describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -566,7 +578,7 @@ describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const handler = vi.fn();
     const corners: Corners = [round(8), round(8), round(8), round(8)];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={handler} />
     ));
 
@@ -607,7 +619,7 @@ describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
       round(8),
       round(8),
     ];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={handler} />
     ));
 
@@ -634,7 +646,7 @@ describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
   it("commitSmoothingFromValueInput logs warn + sets status on out-of-range", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const handler = vi.fn();
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={handler} />
     ));
 
@@ -672,7 +684,7 @@ describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const handler = vi.fn();
     const corners: Corners = [round(8), round(8), round(8), round(8)];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={handler} />
     ));
 
@@ -703,7 +715,8 @@ describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
  * with a structured warn + visible status; props.onCommit must NOT fire.
  */
 describe("CornerPopover — RF-008 commitSmoothing guards target shape", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -724,7 +737,7 @@ describe("CornerPopover — RF-008 commitSmoothing guards target shape", () => {
     // Start with all-superellipse so the smoothing block mounts.
     const [corners, setCorners] = createSignal<Corners>(superellipseAll(0.5));
 
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={corners()} onCommit={handler} />
     ));
 
@@ -785,7 +798,8 @@ describe("CornerPopover — RF-008 commitSmoothing guards target shape", () => {
  * — pick ONE).
  */
 describe("CornerPopover — RF-011 label-input association", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -799,7 +813,7 @@ describe("CornerPopover — RF-011 label-input association", () => {
   });
 
   it("Shape label has an id and the Select trigger has matching aria-labelledby", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     const shapeField = container.querySelector(
@@ -825,7 +839,7 @@ describe("CornerPopover — RF-011 label-input association", () => {
   });
 
   it("Radius field's ValueInput uses aria-labelledby pointing at the visible label", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     const radiusField = container.querySelector(
@@ -845,7 +859,7 @@ describe("CornerPopover — RF-011 label-input association", () => {
       round(8),
       round(8),
     ];
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={corners} onCommit={() => {}} />
     ));
 
@@ -865,7 +879,7 @@ describe("CornerPopover — RF-011 label-input association", () => {
   });
 
   it("Smoothing field's ValueInput and Slider use aria-labelledby pointing at one shared label", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={() => {}} />
     ));
 
@@ -898,7 +912,8 @@ describe("CornerPopover — RF-011 label-input association", () => {
  * fires on every popover open.
  */
 describe("CornerPopover — RF-013 Mixed badge wiring", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -912,7 +927,7 @@ describe("CornerPopover — RF-013 Mixed badge wiring", () => {
   });
 
   it("Mixed span does not carry role='status' (it is wired via aria-describedby instead)", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="top" corners={MIXED} onCommit={() => {}} />
     ));
     const mixedSpan = container.querySelector(
@@ -924,7 +939,7 @@ describe("CornerPopover — RF-013 Mixed badge wiring", () => {
   });
 
   it("Shape Select trigger has aria-describedby pointing at the Mixed span when mixed", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="top" corners={MIXED} onCommit={() => {}} />
     ));
     const shapeField = container.querySelector(
@@ -942,7 +957,7 @@ describe("CornerPopover — RF-013 Mixed badge wiring", () => {
   });
 
   it("Shape Select trigger has NO aria-describedby when not mixed", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
     ));
     const shapeField = container.querySelector(
@@ -961,7 +976,8 @@ describe("CornerPopover — RF-013 Mixed badge wiring", () => {
  * bare numeric value.
  */
 describe("CornerPopover — RF-015 smoothing Slider ariaValueText", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -975,7 +991,7 @@ describe("CornerPopover — RF-015 smoothing Slider ariaValueText", () => {
   });
 
   it("slider thumb's aria-valuetext is 'Smoothing N percent' based on current value", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={() => {}} />
     ));
     const sliderRoot = container.querySelector(
@@ -987,7 +1003,7 @@ describe("CornerPopover — RF-015 smoothing Slider ariaValueText", () => {
   });
 
   it("slider aria-valuetext rounds the percent to integer", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerPopover target="center" corners={superellipseAll(0.337)} onCommit={() => {}} />
     ));
     const sliderRoot = container.querySelector(

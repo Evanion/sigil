@@ -14,6 +14,7 @@
  * All numeric inputs are guarded with Number.isFinite() per CLAUDE.md §11.
  */
 import { createEffect, createMemo } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type {
   Color,
   Effect,
@@ -151,6 +152,8 @@ function coerceEffectType(prev: Effect, newType: EffectType): Effect {
 // ── EffectCard component ─────────────────────────────────────────────────
 
 export function EffectCard(props: EffectCardProps) {
+  const [t] = useTransContext();
+
   // ── Type select ────────────────────────────────────────────────────────
   // Controlled via createEffect: when props.effect.type changes externally
   // (e.g. undo), the select element value is kept in sync.
@@ -332,22 +335,23 @@ export function EffectCard(props: EffectCardProps) {
           ref={selectRef}
           class="sigil-effect-card__type-select"
           onChange={handleTypeChange}
-          aria-label="Effect type"
+          aria-label={t("panels:effects.fields.type")}
         >
-          <option value="drop_shadow">Drop Shadow</option>
-          <option value="inner_shadow">Inner Shadow</option>
-          <option value="layer_blur">Layer Blur</option>
-          <option value="background_blur">Background Blur</option>
+          <option value="drop_shadow">{t("panels:effects.types.dropShadow")}</option>
+          <option value="inner_shadow">{t("panels:effects.types.innerShadow")}</option>
+          <option value="layer_blur">{t("panels:effects.types.layerBlur")}</option>
+          <option value="background_blur">{t("panels:effects.types.backgroundBlur")}</option>
         </select>
 
         <button
           class="sigil-effect-card__remove"
           type="button"
           tabIndex={-1}
-          aria-label="Remove effect"
+          aria-label={t("panels:effects.remove")}
           onClick={handleRemove}
         >
-          ×
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
+          {"×"}
         </button>
       </div>
 
@@ -362,7 +366,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleColorCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["color"]}
-              aria-label="Shadow color"
+              aria-label={t("panels:effects.fields.shadowColor")}
             />
           </div>
 
@@ -385,6 +389,7 @@ export function EffectCard(props: EffectCardProps) {
             combobox's own DOM structure.
           */}
           <div class="sigil-effect-card__field-with-prefix">
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative field-prefix label; aria-hidden, accessible name on input's aria-label */}
             <span class="sigil-effect-card__field-prefix" aria-hidden="true">
               X
             </span>
@@ -394,10 +399,11 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleOffsetXCommit}
               tokens={{}}
               acceptedTypes={["number"]}
-              aria-label="X offset"
+              aria-label={t("panels:effects.fields.offsetX")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative field-prefix label; aria-hidden, accessible name on input's aria-label */}
             <span class="sigil-effect-card__field-prefix" aria-hidden="true">
               Y
             </span>
@@ -407,10 +413,11 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleOffsetYCommit}
               tokens={{}}
               acceptedTypes={["number"]}
-              aria-label="Y offset"
+              aria-label={t("panels:effects.fields.offsetY")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative field-prefix label; aria-hidden, accessible name on input's aria-label */}
             <span class="sigil-effect-card__field-prefix" aria-hidden="true">
               B
             </span>
@@ -420,10 +427,11 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleBlurCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["number"]}
-              aria-label="Blur"
+              aria-label={t("panels:effects.fields.blur")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative field-prefix label; aria-hidden, accessible name on input's aria-label */}
             <span class="sigil-effect-card__field-prefix" aria-hidden="true">
               S
             </span>
@@ -433,7 +441,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleSpreadCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["number"]}
-              aria-label="Spread"
+              aria-label={t("panels:effects.fields.spread")}
             />
           </div>
         </div>
@@ -445,7 +453,7 @@ export function EffectCard(props: EffectCardProps) {
             onCommit={handleRadiusCommit}
             tokens={props.tokens ?? {}}
             acceptedTypes={["number"]}
-            aria-label="Radius"
+            aria-label={t("panels:effects.fields.radius")}
           />
         </div>
       )}
