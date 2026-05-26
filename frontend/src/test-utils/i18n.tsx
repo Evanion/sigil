@@ -36,6 +36,10 @@ function ensureInstance(): i18n {
         a11y: a11yEn,
       },
     },
+    // Mirrors production `initI18n` (RF-004): missing keys return null so
+    // `t("missing:key") || fallback` works as written and tests can detect
+    // missing-key bugs.
+    returnNull: true,
     interpolation: {
       escapeValue: false,
     },
@@ -74,6 +78,10 @@ export async function createTestI18n(): Promise<i18n> {
         a11y: a11yEn,
       },
     },
+    // Mirrors production `initI18n` (RF-004): missing keys return null so
+    // `t("missing:key") || fallback` works as written and tests can detect
+    // missing-key bugs.
+    returnNull: true,
     interpolation: {
       escapeValue: false,
     },

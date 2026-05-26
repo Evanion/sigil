@@ -82,8 +82,23 @@ export async function initI18n(): Promise<i18n> {
     // a locale like "pt-BR" falls back to "pt" resources instead of
     // missing entirely.
     load: "languageOnly",
+    // RF-004: surface missing translation keys at runtime. With i18next's
+    // default behavior, `t("missing:key")` returns the key string itself
+    // (truthy), which silently masks missing-key bugs — `t(k) || fallback`
+    // never reaches the fallback branch. Setting `returnNull: true` returns
+    // `null` for a missing key so callers' `|| fallback` works as written
+    // and tests/dev tooling can detect missing keys.
+    returnNull: true,
     interpolation: {
-      // Solid.js handles escaping — avoid double-escaping.
+      // Solid.js handles escaping in JSX text and JSX attribute slots —
+      // avoid double-escaping.
+      //
+      // RF-031 invariant: do NOT pipe `t()` results into HTML-sink
+      // consumers (innerHTML, raw HTML insertion APIs). `escapeValue: false`
+      // means translation values are inserted verbatim — safe in JSX text
+      // and attribute slots (Solid escapes those), but unsafe if rendered
+      // as raw HTML. Today no such usage exists in `frontend/src`; this
+      // comment exists so any future regression is flagged at review time.
       escapeValue: false,
     },
   });
