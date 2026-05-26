@@ -106,9 +106,32 @@ export async function initI18n(): Promise<i18n> {
   persistLocale(i18nInstance.language);
 
   // Persist locale whenever it changes at runtime.
+  //
+  // RF-023: this subscription lives for the lifetime of the singleton
+  // `i18nInstance`. In production this is intentional — the instance is
+  // never disposed before the page unloads, and the singleton's lifetime
+  // matches the document's. The matching `.off()` is exposed via
+  // `teardownI18n()` below for tests + HMR that need to dispose the
+  // instance and recreate it (otherwise the subscription accumulates a
+  // closure over each prior persistLocale binding).
   i18nInstance.on("languageChanged", persistLocale);
 
   return i18nInstance;
+}
+
+/**
+ * Removes the `languageChanged` listener installed by `initI18n`. Safe to
+ * call even when `initI18n` has not run (i18next's `.off()` is a no-op for
+ * unregistered listeners).
+ *
+ * No production code calls this today — `i18nInstance` is treated as a
+ * singleton whose lifetime matches the document. The function exists to
+ * support tests and future hot-module-replacement (HMR) flows that
+ * re-import this module and would otherwise leak a stale closure over
+ * each prior `persistLocale` binding.
+ */
+export function teardownI18n(): void {
+  i18nInstance.off("languageChanged", persistLocale);
 }
 
 export { i18nInstance };
