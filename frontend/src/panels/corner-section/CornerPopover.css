@@ -38,3 +38,10 @@
   color: var(--warning);
   align-self: flex-start;
 }
+
+/* Two-column grid for the rx/ry pair shown when "Unlock axes" is ON. */
+.sigil-corner-popover__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--size-2, 8px);
+}

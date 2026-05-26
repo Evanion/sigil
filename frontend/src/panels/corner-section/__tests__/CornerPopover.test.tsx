@@ -12,6 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, screen, cleanup } from "@solidjs/testing-library";
 import { CornerPopover } from "../CornerPopover";
+import { hotspotHasAsymmetricRadii } from "../corner-section-state";
 import type { Corner, Corners } from "../../../types/document";
 
 function round(r: number): Corner {
@@ -102,5 +103,85 @@ describe("CornerPopover — common skeleton", () => {
     expect(
       container.querySelector('[data-testid="corner-popover__mixed-indicator"]'),
     ).not.toBeNull();
+  });
+});
+
+describe("CornerPopover — axis-unlock toggle", () => {
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders a Toggle labeled 'Unlock axes'", () => {
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
+    ));
+    const toggle = container.querySelector('[data-testid="corner-popover__unlock"]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute("aria-label")).toBe("Unlock axes");
+  });
+
+  it("pre-toggles on when any targeted corner has rx ≠ ry", () => {
+    const asym: Corner = { type: "round", radii: { x: 30, y: 10 } };
+    const corners = [asym, round(8), round(8), round(8)] as Corners;
+    expect(hotspotHasAsymmetricRadii(corners, "tl")).toBe(true);
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={corners} onCommit={() => {}} />
+    ));
+    const sw = container.querySelector(
+      '[data-testid="corner-popover__unlock"] [role="switch"]',
+    ) as HTMLElement | null;
+    expect(sw).not.toBeNull();
+    expect(sw?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("when unlocked, renders rx and ry ValueInputs and commits them separately", () => {
+    const handler = vi.fn();
+    const corners: Corners = [
+      { type: "round", radii: { x: 8, y: 8 } },
+      round(8),
+      round(8),
+      round(8),
+    ];
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={corners} onCommit={handler} />
+    ));
+
+    // Click the toggle (the Switch element with role="switch") to unlock.
+    const sw = container.querySelector(
+      '[data-testid="corner-popover__unlock"] [role="switch"]',
+    ) as HTMLElement;
+    expect(sw).not.toBeNull();
+    fireEvent.click(sw);
+
+    const rxField = container.querySelector('[data-testid="corner-popover__rx"]');
+    const ryField = container.querySelector('[data-testid="corner-popover__ry"]');
+    expect(rxField).not.toBeNull();
+    expect(ryField).not.toBeNull();
+    if (rxField === null) return; // type guard
+
+    // ValueInput is a contentEditable combobox — the inner editable element
+    // is role="textbox" (NOT a native <input>). Drive a commit by setting
+    // textContent + firing input + blur (matches ValueInput.test.tsx
+    // "fires onCommit on blur when the value has changed" pattern).
+    const rxTextbox = rxField.querySelector('[role="textbox"]') as HTMLElement;
+    expect(rxTextbox).not.toBeNull();
+    rxTextbox.textContent = "30";
+    fireEvent.input(rxTextbox);
+    fireEvent.blur(rxTextbox);
+
+    expect(handler).toHaveBeenCalled();
+    const lastCall = handler.mock.calls[handler.mock.calls.length - 1] as [Corners];
+    const [newCorners] = lastCall;
+    expect(newCorners[0].radii.x).toBe(30);
+    expect(newCorners[0].radii.y).toBe(8); // unchanged
   });
 });

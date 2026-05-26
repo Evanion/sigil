@@ -16,14 +16,16 @@
  */
 
 import type { Component } from "solid-js";
-import { createMemo, Show } from "solid-js";
+import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
+import { Toggle } from "../../components/toggle/Toggle";
 import ValueInput from "../../components/value-input/ValueInput";
 import { MAX_CORNER_RADIUS } from "../../store/corners-input";
 import {
   CORNER_POSITION_LABEL,
   cornersAtHotspot,
+  hotspotHasAsymmetricRadii,
   hotspotShapeIsMixed,
   hotspotTargetIndices,
   type HotspotId,
@@ -219,6 +221,98 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     props.onCommit(next);
   }
 
+  // --- Axis unlock (Task 11) ----------------------------------------------
+  //
+  // Spec 14 §1.5 auto-link: the popover opens with "Unlock axes" pre-toggled
+  // ON whenever any targeted corner has rx ≠ ry. The user can toggle it
+  // OFF to re-link the axes (next radius commit writes rx = ry).
+  const [unlocked, setUnlocked] = createSignal(
+    hotspotHasAsymmetricRadii(props.corners, props.target),
+  );
+
+  // If `corners` or `target` change reactively after mount (e.g., another
+  // panel edits the field while this popover is open), reflect that in the
+  // local toggle state. Effects re-run when their reactive reads change;
+  // here we depend only on the targeted-corner asymmetry predicate.
+  createEffect(() => {
+    setUnlocked(hotspotHasAsymmetricRadii(props.corners, props.target));
+  });
+
+  /**
+   * Shared rx across all targeted corners (display value for the rx field
+   * when unlocked). Returns null when the targeted corners disagree on rx,
+   * which renders an empty input rather than a misleading single value.
+   */
+  const currentRx = createMemo<number | null>(() => {
+    const ts = targeted();
+    if (ts.length === 0) return null;
+    const first = ts[0];
+    if (ts.some((c) => c.radii.x !== first.radii.x)) return null;
+    return first.radii.x;
+  });
+
+  /**
+   * Shared ry across all targeted corners (display value for the ry field
+   * when unlocked). Returns null when the targeted corners disagree on ry.
+   */
+  const currentRy = createMemo<number | null>(() => {
+    const ts = targeted();
+    if (ts.length === 0) return null;
+    const first = ts[0];
+    if (ts.some((c) => c.radii.y !== first.radii.y)) return null;
+    return first.radii.y;
+  });
+
+  /**
+   * Commit a new rx value, preserving each targeted corner's existing ry.
+   *
+   * Per CLAUDE.md §11 "partial updates of multi-field values" — we MUST
+   * read each corner's current ry and write it back unchanged, otherwise
+   * a later mutation (e.g., MCP, another panel) that set ry to a non-
+   * matching value is silently overwritten.
+   */
+  function commitRx(raw: string): void {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return;
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) return;
+    const next = writeCorners(props.corners, targets(), (prev) => {
+      if (prev.type === "superellipse") {
+        return {
+          type: "superellipse",
+          radii: { x: parsed, y: prev.radii.y },
+          smoothing: prev.smoothing,
+        };
+      }
+      return { type: prev.type, radii: { x: parsed, y: prev.radii.y } };
+    });
+    props.onCommit(next);
+  }
+
+  /**
+   * Commit a new ry value, preserving each targeted corner's existing rx.
+   * Symmetric counterpart to `commitRx`; see that function's comment.
+   */
+  function commitRy(raw: string): void {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return;
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) return;
+    const next = writeCorners(props.corners, targets(), (prev) => {
+      if (prev.type === "superellipse") {
+        return {
+          type: "superellipse",
+          radii: { x: prev.radii.x, y: parsed },
+          smoothing: prev.smoothing,
+        };
+      }
+      return { type: prev.type, radii: { x: prev.radii.x, y: parsed } };
+    });
+    props.onCommit(next);
+  }
+
   return (
     <div class="sigil-corner-popover" role="group" aria-label={headerLabel(props.target)}>
       <h3 class="sigil-corner-popover__header">{headerLabel(props.target)}</h3>
@@ -242,21 +336,75 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
         />
       </div>
 
-      <div class="sigil-corner-popover__field" data-testid="corner-popover__radius">
-        <label class="sigil-corner-popover__label">Radius</label>
-        <ValueInput
-          value={currentRadiusDisplay()}
-          onChange={() => {
-            /* preview-only; commit happens on blur / Enter / token insert */
-          }}
-          onCommit={commitRadius}
-          tokens={props.tokens ?? EMPTY_TOKENS}
-          acceptedTypes={["number", "dimension"]}
-          aria-label="Corner radius"
-          min={0}
-          max={MAX_CORNER_RADIUS}
-        />
+      {/*
+       * The wrapper div carries the test id AND an `aria-label="Unlock axes"`
+       * so reviewers can locate the affordance reliably; the Toggle's visible
+       * `label="Unlock axes"` is what screen readers actually announce as the
+       * switch's accessible name (Kobalte's <Switch.Label> auto-associates).
+       * Omitting `aria-label` on the Toggle itself prevents duplicate
+       * announcements per .claude/rules/a11y-rules.md "Label association".
+       */}
+      <div
+        class="sigil-corner-popover__field"
+        data-testid="corner-popover__unlock"
+        aria-label="Unlock axes"
+      >
+        <Toggle checked={unlocked()} onCheckedChange={setUnlocked} label="Unlock axes" />
       </div>
+
+      <Show
+        when={unlocked()}
+        fallback={
+          <div class="sigil-corner-popover__field" data-testid="corner-popover__radius">
+            <label class="sigil-corner-popover__label">Radius</label>
+            <ValueInput
+              value={currentRadiusDisplay()}
+              onChange={() => {
+                /* preview-only; commit happens on blur / Enter / token insert */
+              }}
+              onCommit={commitRadius}
+              tokens={props.tokens ?? EMPTY_TOKENS}
+              acceptedTypes={["number", "dimension"]}
+              aria-label="Corner radius"
+              min={0}
+              max={MAX_CORNER_RADIUS}
+            />
+          </div>
+        }
+      >
+        <div class="sigil-corner-popover__row">
+          <div class="sigil-corner-popover__field" data-testid="corner-popover__rx">
+            <label class="sigil-corner-popover__label">rx</label>
+            <ValueInput
+              value={currentRx() === null ? "" : String(currentRx())}
+              onChange={() => {
+                /* preview-only; commit happens on blur / Enter / token insert */
+              }}
+              onCommit={commitRx}
+              tokens={props.tokens ?? EMPTY_TOKENS}
+              acceptedTypes={["number", "dimension"]}
+              aria-label="Radius X"
+              min={0}
+              max={MAX_CORNER_RADIUS}
+            />
+          </div>
+          <div class="sigil-corner-popover__field" data-testid="corner-popover__ry">
+            <label class="sigil-corner-popover__label">ry</label>
+            <ValueInput
+              value={currentRy() === null ? "" : String(currentRy())}
+              onChange={() => {
+                /* preview-only; commit happens on blur / Enter / token insert */
+              }}
+              onCommit={commitRy}
+              tokens={props.tokens ?? EMPTY_TOKENS}
+              acceptedTypes={["number", "dimension"]}
+              aria-label="Radius Y"
+              min={0}
+              max={MAX_CORNER_RADIUS}
+            />
+          </div>
+        </div>
+      </Show>
     </div>
   );
 };
