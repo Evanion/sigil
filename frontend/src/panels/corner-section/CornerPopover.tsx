@@ -16,7 +16,7 @@
  */
 
 import type { Component } from "solid-js";
-import { createMemo, createSignal, Show } from "solid-js";
+import { createMemo, createSignal, createUniqueId, Show } from "solid-js";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
 import { Slider } from "../../components/slider/Slider";
@@ -405,15 +405,42 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       );
       return;
     }
+    // RF-008: defend the "all targets currently superellipse" invariant
+    // at commit time. Without this guard, an external mutation that
+    // flipped one corner to a non-superellipse shape while the popover
+    // remained open would be silently undone — the previous factory
+    // unconditionally returned `{type: "superellipse", ...}` and would
+    // re-convert every target back to superellipse on the next commit,
+    // erasing the upstream change. The Show in the JSX is reactive, but
+    // the gesture/blur path can dispatch a commit between the corners-prop
+    // change and the reactive unmount; this guard closes that race.
+    const currentTargets = targeted();
+    if (!currentTargets.every((c) => c.type === "superellipse")) {
+      console.warn("CornerPopover: commitSmoothing rejected — not all targets are superellipse", {
+        smoothing: s,
+        target: props.target,
+        types: currentTargets.map((c) => c.type),
+      });
+      setStatus("Smoothing applies only when every targeted corner is Superellipse.");
+      return;
+    }
     // Per CLAUDE.md §11 "partial updates of multi-field values": preserve
-    // each corner's radii and only update smoothing. Non-superellipse
-    // corners are converted to superellipse (defensive — the control is
-    // gated by showSmoothing() so this branch is unreachable in practice).
-    const next = writeCorners(props.corners, targets(), (prev) => ({
-      type: "superellipse",
-      radii: { ...prev.radii },
-      smoothing: s,
-    }));
+    // each corner's radii and only update smoothing.
+    const next = writeCorners(props.corners, targets(), (prev) => {
+      // The guard above proved every target is superellipse, but the
+      // factory must still narrow `prev` — type-safe construction.
+      if (prev.type === "superellipse") {
+        return { type: "superellipse", radii: { ...prev.radii }, smoothing: s };
+      }
+      // Unreachable given the guard; structured warn keeps the diagnostic
+      // trail per frontend-defensive "Internal Mutation Entry Points Must
+      // Diagnose Their Own No-Ops" if the invariant ever drifts.
+      console.warn(
+        "CornerPopover: writeCorners factory reached non-superellipse branch after guard",
+        { prevType: prev.type, target: props.target },
+      );
+      return { type: "superellipse", radii: { ...prev.radii }, smoothing: s };
+    });
     props.onCommit(next);
     setStatus("");
   }
@@ -479,6 +506,38 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     setStatus("");
   }
 
+  // RF-011: each visible <label> gets a stable id so the input it labels
+  // can reference it via aria-labelledby. The visible "Shape" / "Radius" /
+  // "rx" / "ry" / "Smoothing" text then becomes the accessible name on the
+  // associated control — no orphan body text, no duplicate aria-label.
+  // Per a11y-rules.md "Label association", a labelled control must NOT
+  // ALSO carry an aria-label.
+  const shapeLabelId = createUniqueId();
+  const radiusLabelId = createUniqueId();
+  const rxLabelId = createUniqueId();
+  const ryLabelId = createUniqueId();
+  const smoothingLabelId = createUniqueId();
+
+  // RF-013: the "Mixed" badge is referenced from the Shape Select via
+  // aria-describedby so the badge text is announced as part of the Select's
+  // accessible description — NOT as a discrete role="status" announcement
+  // that fired every time the popover mounted (which flooded the SR queue
+  // whenever the user hopped between mixed-state nodes). The id is stable
+  // for the popover lifetime; describedby is conditional on isMixed().
+  const mixedId = createUniqueId();
+
+  // RF-015: SR-readable formatting for the smoothing slider's
+  // aria-valuetext. Kobalte's default value-label is the bare numeric
+  // value (e.g., "0.5") which is not meaningful out of context — a
+  // percent-formatted string is the standard pattern for normalized 0-1
+  // controls (matches the smoothing field's domain of [0, 1]).
+  const smoothingAriaValueText = createMemo<string>(() => {
+    const value = gestureSmoothing() ?? currentSmoothing();
+    if (!Number.isFinite(value)) return "Smoothing";
+    const pct = Math.round(value * 100);
+    return `Smoothing ${pct} percent`;
+  });
+
   return (
     <div class="sigil-corner-popover" role="group" aria-label={headerLabel(props.target)}>
       {/*
@@ -490,15 +549,21 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       <span class="sr-only" role="status" aria-live="polite">
         {status()}
       </span>
-      <h3 class="sigil-corner-popover__header">{headerLabel(props.target)}</h3>
+      {/*
+       * RF-010: popover header is h4 — one level below CornerSection's h3.
+       * Keeps the document outline coherent (h3 = section, h4 = sub-control).
+       */}
+      <h4 class="sigil-corner-popover__header">{headerLabel(props.target)}</h4>
 
       <div class="sigil-corner-popover__field" data-testid="corner-popover__shape">
-        <label class="sigil-corner-popover__label">Shape</label>
+        <label id={shapeLabelId} class="sigil-corner-popover__label">
+          Shape
+        </label>
         <Show when={isMixed()}>
           <span
+            id={mixedId}
             class="sigil-corner-popover__mixed"
             data-testid="corner-popover__mixed-indicator"
-            role="status"
           >
             Mixed
           </span>
@@ -507,23 +572,20 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
           options={isCenter() ? CENTER_SHAPE_OPTIONS : CORNER_SHAPE_OPTIONS}
           value={currentShape()}
           onValueChange={commitShape}
-          aria-label="Corner shape"
+          aria-labelledby={shapeLabelId}
+          aria-describedby={isMixed() ? mixedId : undefined}
         />
       </div>
 
       {/*
-       * The wrapper div carries the test id AND an `aria-label="Unlock axes"`
-       * so reviewers can locate the affordance reliably; the Toggle's visible
-       * `label="Unlock axes"` is what screen readers actually announce as the
-       * switch's accessible name (Kobalte's <Switch.Label> auto-associates).
-       * Omitting `aria-label` on the Toggle itself prevents duplicate
-       * announcements per .claude/rules/a11y-rules.md "Label association".
+       * RF-012: the wrapper div no longer carries aria-label. The inner
+       * Toggle's visible `label="Unlock axes"` (rendered by Kobalte's
+       * <Switch.Label> with auto-association to the underlying input) is
+       * the canonical accessible name. A wrapper-level aria-label would
+       * have been announced twice — banned by a11y-rules.md "Label
+       * association". The data-testid is retained for test selection.
        */}
-      <div
-        class="sigil-corner-popover__field"
-        data-testid="corner-popover__unlock"
-        aria-label="Unlock axes"
-      >
+      <div class="sigil-corner-popover__field" data-testid="corner-popover__unlock">
         <Toggle checked={unlocked()} onCheckedChange={setUnlocked} label="Unlock axes" />
       </div>
 
@@ -531,7 +593,9 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
         when={unlocked()}
         fallback={
           <div class="sigil-corner-popover__field" data-testid="corner-popover__radius">
-            <label class="sigil-corner-popover__label">Radius</label>
+            <label id={radiusLabelId} class="sigil-corner-popover__label">
+              Radius
+            </label>
             <ValueInput
               value={currentRadiusDisplay()}
               onChange={() => {
@@ -540,7 +604,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
               onCommit={commitRadius}
               tokens={props.tokens ?? EMPTY_TOKENS}
               acceptedTypes={["number", "dimension"]}
-              aria-label="Corner radius"
+              aria-labelledby={radiusLabelId}
               min={0}
               max={MAX_CORNER_RADIUS}
             />
@@ -549,7 +613,9 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       >
         <div class="sigil-corner-popover__row">
           <div class="sigil-corner-popover__field" data-testid="corner-popover__rx">
-            <label class="sigil-corner-popover__label">rx</label>
+            <label id={rxLabelId} class="sigil-corner-popover__label">
+              rx
+            </label>
             <ValueInput
               value={currentRx() === null ? "" : String(currentRx())}
               onChange={() => {
@@ -558,13 +624,15 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
               onCommit={commitRx}
               tokens={props.tokens ?? EMPTY_TOKENS}
               acceptedTypes={["number", "dimension"]}
-              aria-label="Radius X"
+              aria-labelledby={rxLabelId}
               min={0}
               max={MAX_CORNER_RADIUS}
             />
           </div>
           <div class="sigil-corner-popover__field" data-testid="corner-popover__ry">
-            <label class="sigil-corner-popover__label">ry</label>
+            <label id={ryLabelId} class="sigil-corner-popover__label">
+              ry
+            </label>
             <ValueInput
               value={currentRy() === null ? "" : String(currentRy())}
               onChange={() => {
@@ -573,7 +641,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
               onCommit={commitRy}
               tokens={props.tokens ?? EMPTY_TOKENS}
               acceptedTypes={["number", "dimension"]}
-              aria-label="Radius Y"
+              aria-labelledby={ryLabelId}
               min={0}
               max={MAX_CORNER_RADIUS}
             />
@@ -594,7 +662,9 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
        */}
       <Show when={showSmoothing()}>
         <div class="sigil-corner-popover__field" data-testid="corner-popover__smoothing">
-          <label class="sigil-corner-popover__label">Smoothing</label>
+          <label id={smoothingLabelId} class="sigil-corner-popover__label">
+            Smoothing
+          </label>
           <div class="sigil-corner-popover__row">
             <ValueInput
               value={String(gestureSmoothing() ?? currentSmoothing())}
@@ -604,7 +674,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
               onCommit={commitSmoothingFromValueInput}
               tokens={props.tokens ?? EMPTY_TOKENS}
               acceptedTypes={["number"]}
-              aria-label="Smoothing"
+              aria-labelledby={smoothingLabelId}
               min={MIN_SUPERELLIPSE_SMOOTHING}
               max={MAX_SUPERELLIPSE_SMOOTHING}
             />
@@ -620,7 +690,8 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
                   commitSmoothing(v);
                   setGestureSmoothing(null);
                 }}
-                ariaLabel="Smoothing"
+                ariaLabelledBy={smoothingLabelId}
+                ariaValueText={smoothingAriaValueText()}
               />
             </div>
           </div>

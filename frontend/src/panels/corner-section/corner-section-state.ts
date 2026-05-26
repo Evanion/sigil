@@ -8,6 +8,34 @@ import type { Corner, Corners } from "../../types/document";
 
 export type HotspotId = "tl" | "tr" | "br" | "bl" | "top" | "right" | "bottom" | "left" | "center";
 
+/**
+ * RF-009: Tolerance used when comparing `smoothing` values for uniformity.
+ *
+ * Why a tolerance: Kobalte's `<Slider>` normalizes through floating-point
+ * math (clamp + step rounding), so a value the user thinks is "exactly 0.5"
+ * may round-trip back with 1-ULP drift. Strict `===` then reports the
+ * tuple as non-uniform and the popover collapses out of its lock state.
+ *
+ * Why this magnitude: the smoothing domain is `[0, 1]` and the slider's
+ * `step` is `0.01`. `1e-9` sits ~7 decades below the step granularity, so
+ * it cannot collapse two truly distinct user choices into "uniform" — but
+ * it tolerates IEEE 754 round-trip noise. Mirrors the rationale in
+ * frontend-defensive "Display Layers Must Preserve User Intent Across
+ * Lossy Transforms."
+ */
+const SMOOTHING_EPSILON = 1e-9;
+
+/**
+ * Tolerance-aware equality for two finite smoothing values. Returns false
+ * for any non-finite input (defensive against NaN / Infinity propagating
+ * from upstream computations) — non-finite inputs cannot be considered
+ * equal because their equivalence is undefined.
+ */
+function smoothingEqual(a: number, b: number): boolean {
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return Math.abs(a - b) < SMOOTHING_EPSILON;
+}
+
 /** All 9 hotspot ids in their canonical iteration order (TL, TR, BR, BL,
  *  top, right, bottom, left, center). */
 export const ALL_HOTSPOT_IDS: readonly HotspotId[] = [
@@ -35,7 +63,8 @@ function cornerEq(a: Corner, b: Corner): boolean {
   if (a.type !== b.type) return false;
   if (a.radii.x !== b.radii.x || a.radii.y !== b.radii.y) return false;
   if (a.type === "superellipse" && b.type === "superellipse") {
-    return a.smoothing === b.smoothing;
+    // RF-009: tolerance-based equality — see SMOOTHING_EPSILON.
+    return smoothingEqual(a.smoothing, b.smoothing);
   }
   return true;
 }
@@ -48,7 +77,8 @@ export function isLinked(corners: Corners): boolean {
 }
 
 /** True when all four corners are Superellipse with matching smoothing —
- *  triggers the lock state on non-center hotspots per Spec 14 §1.5. */
+ *  triggers the lock state on non-center hotspots per Spec 14 §1.5.
+ *  RF-009: smoothing comparison uses tolerance-based equality. */
 export function isSuperellipseUniform(corners: Corners): boolean {
   const [tl, tr, br, bl] = corners;
   if (tl.type !== "superellipse") return false;
@@ -56,7 +86,9 @@ export function isSuperellipseUniform(corners: Corners): boolean {
   if (br.type !== "superellipse") return false;
   if (bl.type !== "superellipse") return false;
   return (
-    tl.smoothing === tr.smoothing && tl.smoothing === br.smoothing && tl.smoothing === bl.smoothing
+    smoothingEqual(tl.smoothing, tr.smoothing) &&
+    smoothingEqual(tl.smoothing, br.smoothing) &&
+    smoothingEqual(tl.smoothing, bl.smoothing)
   );
 }
 

@@ -48,6 +48,33 @@ describe("isSuperellipseUniform", () => {
     const c: Corners = [superellipse(8, 0.5), superellipse(8, 0.5), superellipse(8, 0.5), round(8)];
     expect(isSuperellipseUniform(c)).toBe(false);
   });
+
+  // RF-009: smoothing equality must tolerate floating-point drift from the
+  // Kobalte Slider's normalization. Strict equality would flag a uniform
+  // tuple as non-uniform when one corner's smoothing carries 1-ULP drift
+  // produced by the slider's step rounding.
+  it("RF-009: treats sub-epsilon smoothing drift as uniform", () => {
+    const c: Corners = [
+      superellipse(8, 0.5),
+      // 1e-12 is far below SMOOTHING_EPSILON (1e-9); should still register
+      // as uniform.
+      superellipse(8, 0.5 + 1e-12),
+      superellipse(8, 0.5),
+      superellipse(8, 0.5),
+    ];
+    expect(isSuperellipseUniform(c)).toBe(true);
+  });
+
+  it("RF-009: treats supra-epsilon smoothing drift as non-uniform", () => {
+    const c: Corners = [
+      superellipse(8, 0.5),
+      // 0.01 is well above SMOOTHING_EPSILON (1e-9); a real divergence.
+      superellipse(8, 0.5 + 0.01),
+      superellipse(8, 0.5),
+      superellipse(8, 0.5),
+    ];
+    expect(isSuperellipseUniform(c)).toBe(false);
+  });
 });
 
 describe("hotspotTargetIndices", () => {

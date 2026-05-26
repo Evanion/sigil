@@ -98,8 +98,8 @@ describe("CornerSection — orchestration", () => {
     fireEvent.click(tl);
     simulatePopoverToggle(true);
     // After the click + toggle simulation, the popover content is rendered.
-    // Look for the popover header text.
-    const headers = Array.from(document.querySelectorAll("h3")).map((h) => h.textContent);
+    // RF-010: popover header is h4 (one level below CornerSection's h3).
+    const headers = Array.from(document.querySelectorAll("h4")).map((h) => h.textContent);
     expect(headers).toContain("Top-left corner");
   });
 
@@ -203,11 +203,18 @@ describe("CornerSection — orchestration", () => {
     simulatePopoverToggle(true);
 
     // Locate the Select trigger inside the corner-popover shape field.
+    // RF-011: the Select is wired via aria-labelledby (visible <label> is
+    // the accessible name). Kobalte composes aria-labelledby from our
+    // label id + its internal value id, so we match by membership.
     const shapeField = document.querySelector(
       '[data-testid="corner-popover__shape"]',
     ) as HTMLElement;
     expect(shapeField).not.toBeNull();
-    const trigger = shapeField.querySelector('button[aria-label="Corner shape"]');
+    const label = shapeField.querySelector("label") as HTMLLabelElement;
+    const trigger = (Array.from(shapeField.querySelectorAll("button")).find((b) => {
+      const lb = b.getAttribute("aria-labelledby");
+      return lb !== null && lb.split(/\s+/).includes(label.id);
+    }) ?? null) as HTMLElement | null;
     expect(trigger).not.toBeNull();
     if (trigger === null) return; // type guard
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
@@ -291,13 +298,39 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
     expect(container.querySelector('[data-testid="corner-section__disabled"]')).not.toBeNull();
   });
 
-  it("the disabled state has a sr-only role=status line with the explanation", () => {
+  // RF-014: the disabled state used to render a duplicate sr-only span with
+  // role="status" alongside the visible <p>. The role re-fired its
+  // announcement every time the user selected a non-corner-bearing node,
+  // flooding SR queues. The visible <p> sits in the reading flow already.
+  it("RF-014: the disabled state renders the explanation as a visible <p> and not as an aria-live status duplicate", () => {
     const { container } = render(() => (
       <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
     ));
-    const status = container.querySelector('[role="status"]');
-    expect(status?.textContent).toContain(
+    // The visible paragraph carries the explanation.
+    const p = container.querySelector(".sigil-corner-section__disabled-text");
+    expect(p?.textContent).toContain(
       "Corner radius applies to rectangles, frames, and images only",
     );
+
+    // No additional role="status" span inside the disabled block — the
+    // role-fire on every selection change is the regression we are
+    // removing. Any role="status" elements elsewhere in the document (e.g.
+    // the CornerPopover's aria-live region when the popover is open) are
+    // unaffected; the disabled block specifically must not host one.
+    const disabledBlock = container.querySelector(
+      '[data-testid="corner-section__disabled"]',
+    ) as HTMLElement;
+    expect(disabledBlock.querySelector('[role="status"]')).toBeNull();
+  });
+
+  // RF-010: CornerSection's heading is h3 (matches sibling sections like
+  // TypographySection). Was previously h2 — that broke heading hierarchy.
+  it("RF-010: CornerSection header is h3 to match sibling section levels", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeRectNode()} onCorners={() => {}} />
+    ));
+    const heading = container.querySelector(".sigil-corner-section__header");
+    expect(heading?.tagName.toLowerCase()).toBe("h3");
+    expect(heading?.textContent).toBe("Corners");
   });
 });

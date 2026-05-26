@@ -65,10 +65,12 @@ function getCorners(node: DocumentNode): Corners | null {
  *  - "active"   — node is rectangle / frame / image; render the preview
  *                 + hotspots + popover.
  *  - "disabled" — node is ellipse / text / group / path / component_instance;
- *                 render a greyed placeholder + an sr-only status line
- *                 explaining why the editor is unavailable, rather than
- *                 vanishing (which would surprise users who selected a
- *                 single non-corner-bearing node).
+ *                 render a greyed placeholder + a visible <p> with the
+ *                 explanation (in the reading flow — RF-014 removed the
+ *                 duplicate role="status" span that flooded SR queues on
+ *                 every selection change). Choosing not-vanishing keeps the
+ *                 panel layout stable when users select a single
+ *                 non-corner-bearing node.
  *
  * The component's `node` prop is non-nullable, so there is no
  * "no-selection" branch — the parent gates rendering when nothing is
@@ -145,16 +147,28 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
 
   return (
     <section class="sigil-corner-section">
-      <h2 class="sigil-corner-section__header">Corners</h2>
+      {/*
+       * RF-010: heading level is h3 (matches sibling sections like
+       * TypographySection). Previously h2 — which jumped the document's
+       * outline because DesignPanel's panel container starts headings at
+       * h2-or-h3 and consistent siblings render at the same level.
+       */}
+      <h3 class="sigil-corner-section__header">Corners</h3>
       <Show
         when={state() === "active" ? corners() : null}
         fallback={
           <div class="sigil-corner-section__disabled" data-testid="corner-section__disabled">
             <div class="sigil-corner-section__disabled-preview" aria-hidden="true" />
+            {/*
+             * RF-014: the visible <p> is the sole carrier of the
+             * explanation. A prior duplicate sr-only role="status" span
+             * re-fired an SR announcement every time the user selected a
+             * non-corner-bearing node — flooding the live-region queue
+             * (banned by a11y-rules.md "aria-live Regions Must Be Scoped
+             * to Discrete Status Changes"). The <p> is already in the
+             * reading flow; SR users hear it on first focus into the panel.
+             */}
             <p class="sigil-corner-section__disabled-text">{DISABLED_EXPLANATION}</p>
-            <span class="sigil-corner-section__sr-only" role="status">
-              {DISABLED_EXPLANATION}
-            </span>
           </div>
         }
       >

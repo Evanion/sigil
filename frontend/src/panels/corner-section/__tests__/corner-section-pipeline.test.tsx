@@ -111,11 +111,18 @@ describe("CornerSection pipeline — UI → store → re-render", () => {
     simulatePopoverToggle(true);
 
     // 2. Open the Kobalte Select trigger inside the shape field.
+    // RF-011: the trigger is wired via aria-labelledby (visible label is
+    // the accessible name); Kobalte composes that attribute from our label
+    // id + an internal value id, so we match by id membership.
     const shapeField = document.querySelector(
       '[data-testid="corner-popover__shape"]',
     ) as HTMLElement;
     expect(shapeField).not.toBeNull();
-    const trigger = shapeField.querySelector('button[aria-label="Corner shape"]');
+    const labelEl = shapeField.querySelector("label") as HTMLLabelElement;
+    const trigger = (Array.from(shapeField.querySelectorAll("button")).find((b) => {
+      const lb = b.getAttribute("aria-labelledby");
+      return lb !== null && lb.split(/\s+/).includes(labelEl.id);
+    }) ?? null) as HTMLElement | null;
     expect(trigger).not.toBeNull();
     if (trigger === null) return; // type guard
     fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" });
