@@ -7,6 +7,7 @@
 import i18next, { type i18n } from "i18next";
 import { TransProvider } from "@mbarzda/solid-i18next";
 import type { JSX } from "solid-js";
+import { render } from "@solidjs/testing-library";
 import commonEn from "../i18n/locales/en/common.json";
 import toolsEn from "../i18n/locales/en/tools.json";
 import panelsEn from "../i18n/locales/en/panels.json";
@@ -111,4 +112,20 @@ export function withI18n(children: () => JSX.Element): JSX.Element {
       {children as unknown as JSX.Element}
     </TransProvider>
   );
+}
+
+/**
+ * Renders a JSX subtree wrapped in a TransProvider. Wraps
+ * `@solidjs/testing-library`'s `render` so test files don't each
+ * re-implement the `<TransProvider>` shim (RF-030).
+ *
+ * Pass an `instance` to use a per-test i18next instance (e.g. when the
+ * test calls `createTestI18n()` in `beforeEach`); otherwise the shared
+ * `getTestI18nInstance()` singleton is used.
+ */
+export function renderWithI18n(ui: () => JSX.Element, instance?: i18n) {
+  const i18nInstance = instance ?? getTestI18nInstance();
+  return render(() => (
+    <TransProvider instance={i18nInstance}>{ui() as unknown as JSX.Element}</TransProvider>
+  ));
 }

@@ -5,12 +5,11 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import type { JSX } from "solid-js";
-import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
-import { TransProvider } from "@mbarzda/solid-i18next";
+import { screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import type { i18n } from "i18next";
 import { FillRow } from "../FillRow";
 import type { Fill, FillSolid, FillLinearGradient, FillRadialGradient } from "../../types/document";
-import { createTestI18n } from "../../test-utils/i18n";
+import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../test-utils/i18n";
 
 const solidFill: FillSolid = {
   type: "solid",
@@ -49,9 +48,7 @@ const imageFill: Fill = {
 
 let i18nInstance: i18n;
 
-function renderWithI18n(ui: () => JSX.Element) {
-  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
-}
+const renderWithI18n = (ui: () => JSX.Element) => renderWithI18nShared(ui, i18nInstance);
 
 describe("FillRow", () => {
   beforeEach(async () => {
