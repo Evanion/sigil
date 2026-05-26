@@ -82,6 +82,9 @@
     "title": "Fill",
     "empty": "No fills",
     "add": "Add fill",
+    "color": "Fill color",
+    "type": "Fill type",
+    "remove": "Remove fill",
     "typeSolid": "Solid",
     "typeLinear": "Linear",
     "typeRadial": "Radial",
@@ -92,7 +95,9 @@
     "title": "Stroke",
     "empty": "No strokes",
     "add": "Add stroke",
-    "remove": "Remove stroke"
+    "remove": "Remove stroke",
+    "color": "Stroke color",
+    "width": "Stroke width"
   },
   "align": {
     "title": "Align",
@@ -118,6 +123,15 @@
       "innerShadow": "Inner Shadow",
       "layerBlur": "Layer Blur",
       "backgroundBlur": "Background Blur"
+    },
+    "fields": {
+      "type": "Effect type",
+      "shadowColor": "Shadow color",
+      "offsetX": "X offset",
+      "offsetY": "Y offset",
+      "blur": "Blur",
+      "spread": "Spread",
+      "radius": "Radius"
     }
   },
   "corners": {

@@ -102,7 +102,7 @@ export function StrokeRow(props: StrokeRowProps) {
         onCommit={handleColorCommit}
         tokens={props.tokens ?? {}}
         acceptedTypes={["color"]}
-        aria-label="Stroke color"
+        aria-label={t("panels:stroke.color")}
       />
 
       <div class="sigil-stroke-row__width">
@@ -112,7 +112,7 @@ export function StrokeRow(props: StrokeRowProps) {
           onCommit={handleWidthCommit}
           tokens={props.tokens ?? {}}
           acceptedTypes={["number", "dimension"]}
-          aria-label="Stroke width"
+          aria-label={t("panels:stroke.width")}
         />
       </div>
 

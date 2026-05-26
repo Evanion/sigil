@@ -287,7 +287,7 @@ export function FillRow(props: FillRowProps) {
             onCommit={handleColorCommit}
             tokens={props.tokens ?? {}}
             acceptedTypes={["color"]}
-            aria-label="Fill color"
+            aria-label={t("panels:fill.color")}
           />
         </Show>
 
@@ -295,7 +295,7 @@ export function FillRow(props: FillRowProps) {
           options={fillTypeOptions()}
           value={fillType()}
           onValueChange={handleTypeChange}
-          aria-label="Fill type"
+          aria-label={t("panels:fill.type")}
           class="sigil-fill-row__type-select"
         />
 
@@ -303,9 +303,10 @@ export function FillRow(props: FillRowProps) {
           class="sigil-fill-row__remove"
           type="button"
           tabIndex={0}
-          aria-label="Remove fill"
+          aria-label={t("panels:fill.remove")}
           onClick={() => props.onRemove(props.index)}
         >
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
           {"\u00D7"}
         </button>
       </div>

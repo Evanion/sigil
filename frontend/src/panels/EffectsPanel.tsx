@@ -146,7 +146,7 @@ export const EffectsPanel: Component = () => {
   }
 
   return (
-    <div class="sigil-effects-panel" role="region" aria-label="Effects">
+    <div class="sigil-effects-panel" role="region" aria-label={t("panels:tabs.effects")}>
       <div class="sigil-effects-panel__header">
         <span class="sigil-effects-panel__title">{t("panels:effects.title")}</span>
         {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
@@ -175,7 +175,7 @@ export const EffectsPanel: Component = () => {
           <div
             role="group"
             tabIndex={0}
-            aria-label={`Effect ${index + 1}`}
+            aria-label={t("a11y:effects.itemLabel", { index: index + 1 })}
             onKeyDown={(e) => handleCardKeyDown(index, e)}
           >
             <EffectCard

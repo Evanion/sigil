@@ -82,6 +82,9 @@
     "title": "Remplissage",
     "empty": "Aucun remplissage",
     "add": "Ajouter un remplissage",
+    "color": "Couleur de remplissage",
+    "type": "Type de remplissage",
+    "remove": "Supprimer le remplissage",
     "typeSolid": "Uni",
     "typeLinear": "Linéaire",
     "typeRadial": "Radial",
@@ -92,7 +95,9 @@
     "title": "Contour",
     "empty": "Aucun contour",
     "add": "Ajouter un contour",
-    "remove": "Supprimer le contour"
+    "remove": "Supprimer le contour",
+    "color": "Couleur du contour",
+    "width": "Épaisseur du contour"
   },
   "align": {
     "title": "Aligner",
@@ -118,6 +123,15 @@
       "innerShadow": "Ombre intérieure",
       "layerBlur": "Flou de calque",
       "backgroundBlur": "Flou d'arrière-plan"
+    },
+    "fields": {
+      "type": "Type d'effet",
+      "shadowColor": "Couleur de l'ombre",
+      "offsetX": "Décalage X",
+      "offsetY": "Décalage Y",
+      "blur": "Flou",
+      "spread": "Étalement",
+      "radius": "Rayon"
     }
   },
   "corners": {

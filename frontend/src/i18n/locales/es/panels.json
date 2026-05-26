@@ -86,13 +86,18 @@
     "typeLinear": "Lineal",
     "typeRadial": "Radial",
     "typeConic": "C\u00f3nico",
-    "typeImage": "Imagen"
+    "typeImage": "Imagen",
+    "color": "Color de relleno",
+    "type": "Tipo de relleno",
+    "remove": "Eliminar relleno"
   },
   "stroke": {
     "title": "Trazo",
     "empty": "Sin trazos",
     "add": "Añadir trazo",
-    "remove": "Eliminar contorno"
+    "remove": "Eliminar trazo",
+    "color": "Color del trazo",
+    "width": "Grosor del trazo"
   },
   "align": {
     "title": "Alinear",
@@ -118,6 +123,15 @@
       "innerShadow": "Sombra interior",
       "layerBlur": "Desenfoque de capa",
       "backgroundBlur": "Desenfoque de fondo"
+    },
+    "fields": {
+      "type": "Tipo de efecto",
+      "shadowColor": "Color de sombra",
+      "offsetX": "Desplazamiento X",
+      "offsetY": "Desplazamiento Y",
+      "blur": "Desenfoque",
+      "spread": "Extensión",
+      "radius": "Radio"
     }
   },
   "corners": {

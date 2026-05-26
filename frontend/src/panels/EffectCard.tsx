@@ -335,7 +335,7 @@ export function EffectCard(props: EffectCardProps) {
           ref={selectRef}
           class="sigil-effect-card__type-select"
           onChange={handleTypeChange}
-          aria-label="Effect type"
+          aria-label={t("panels:effects.fields.type")}
         >
           <option value="drop_shadow">{t("panels:effects.types.dropShadow")}</option>
           <option value="inner_shadow">{t("panels:effects.types.innerShadow")}</option>
@@ -367,7 +367,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleColorCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["color"]}
-              aria-label="Shadow color"
+              aria-label={t("panels:effects.fields.shadowColor")}
             />
           </div>
 
@@ -400,7 +400,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleOffsetXCommit}
               tokens={{}}
               acceptedTypes={["number"]}
-              aria-label="X offset"
+              aria-label={t("panels:effects.fields.offsetX")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
@@ -414,7 +414,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleOffsetYCommit}
               tokens={{}}
               acceptedTypes={["number"]}
-              aria-label="Y offset"
+              aria-label={t("panels:effects.fields.offsetY")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
@@ -428,7 +428,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleBlurCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["number"]}
-              aria-label="Blur"
+              aria-label={t("panels:effects.fields.blur")}
             />
           </div>
           <div class="sigil-effect-card__field-with-prefix">
@@ -442,7 +442,7 @@ export function EffectCard(props: EffectCardProps) {
               onCommit={handleSpreadCommit}
               tokens={props.tokens ?? {}}
               acceptedTypes={["number"]}
-              aria-label="Spread"
+              aria-label={t("panels:effects.fields.spread")}
             />
           </div>
         </div>
@@ -454,7 +454,7 @@ export function EffectCard(props: EffectCardProps) {
             onCommit={handleRadiusCommit}
             tokens={props.tokens ?? {}}
             acceptedTypes={["number"]}
-            aria-label="Radius"
+            aria-label={t("panels:effects.fields.radius")}
           />
         </div>
       )}
