@@ -199,17 +199,15 @@ export function ColorArea(props: ColorAreaProps) {
       onPointerUp={handlePointerUp}
       onKeyDown={handleKeyDown}
     >
-      {/* eslint-disable i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
       <canvas
         ref={canvasRef}
         class="sigil-color-area__canvas"
         aria-hidden="true"
         style={{ width: "100%", height: `${areaHeight()}px` }}
       >
-        {/* Fallback text for non-canvas environments */}
-        Color selection area
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
+        {"Color selection area"}
       </canvas>
-      {/* eslint-enable i18next/no-literal-string */}
       <div
         class="sigil-color-area__cursor"
         style={{

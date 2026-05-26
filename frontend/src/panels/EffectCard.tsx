@@ -343,7 +343,6 @@ export function EffectCard(props: EffectCardProps) {
           <option value="background_blur">{t("panels:effects.types.backgroundBlur")}</option>
         </select>
 
-        {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
         <button
           class="sigil-effect-card__remove"
           type="button"
@@ -351,9 +350,9 @@ export function EffectCard(props: EffectCardProps) {
           aria-label={t("panels:effects.remove")}
           onClick={handleRemove}
         >
-          ×
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
+          {"×"}
         </button>
-        {/* eslint-enable i18next/no-literal-string */}
       </div>
 
       {/* Per-type fields */}

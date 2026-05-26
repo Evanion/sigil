@@ -149,7 +149,6 @@ export const EffectsPanel: Component = () => {
     <div class="sigil-effects-panel" role="region" aria-label={t("panels:tabs.effects")}>
       <div class="sigil-effects-panel__header">
         <span class="sigil-effects-panel__title">{t("panels:effects.title")}</span>
-        {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
         <button
           class="sigil-effects-panel__add"
           type="button"
@@ -157,9 +156,9 @@ export const EffectsPanel: Component = () => {
           disabled={selectedUuid() === null}
           onClick={handleAdd}
         >
-          +
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
+          {"+"}
         </button>
-        {/* eslint-enable i18next/no-literal-string */}
       </div>
 
       <Show when={selectedUuid() === null}>

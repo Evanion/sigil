@@ -111,16 +111,15 @@ export function HexInput(props: HexInputProps) {
         autocomplete="off"
       />
       <Show when={props.isOutOfGamut}>
-        {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative warning glyph; accessible name comes from aria-label/title */}
         <span
           class="sigil-hex-input__gamut-warning"
           title={t("panels:colorPicker.outOfGamut")}
           aria-label={t("panels:colorPicker.outOfGamut")}
           role="img"
         >
-          ⚠
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative warning glyph; accessible name comes from aria-label/title */}
+          {"⚠"}
         </span>
-        {/* eslint-enable i18next/no-literal-string */}
       </Show>
     </div>
   );

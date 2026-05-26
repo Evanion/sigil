@@ -177,16 +177,15 @@ export function HueStrip(props: HueStripProps) {
       onPointerUp={handlePointerUp}
       onKeyDown={handleKeyDown}
     >
-      {/* eslint-disable i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
       <canvas
         ref={canvasRef}
         class="sigil-strip__canvas"
         aria-hidden="true"
         style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       >
-        Hue selection strip
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
+        {"Hue selection strip"}
       </canvas>
-      {/* eslint-enable i18next/no-literal-string */}
       <div
         class="sigil-strip__thumb"
         style={{ left: `${(props.hue / 360) * 100}%` }}

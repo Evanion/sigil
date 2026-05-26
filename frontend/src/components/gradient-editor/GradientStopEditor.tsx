@@ -218,12 +218,13 @@ export function GradientStopEditor(props: GradientStopEditorProps) {
             const stopId = () => stop().id ?? "";
 
             const stopClass = () => {
-              /* eslint-disable i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text */
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               let cls = "sigil-gradient-stop-editor__stop";
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               if (isSelected()) cls += " sigil-gradient-stop-editor__stop--selected";
+              // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: CSS class names, not user-facing text
               if (isRemoving()) cls += " sigil-gradient-stop-editor__stop--removing";
               return cls;
-              /* eslint-enable i18next/no-literal-string */
             };
 
             return (

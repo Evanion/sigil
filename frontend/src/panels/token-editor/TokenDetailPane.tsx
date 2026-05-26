@@ -191,7 +191,6 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
         const fontFamily = validateCssIdentifier(v.font_family) ? v.font_family : "sans-serif";
         return (
           <div class="sigil-token-detail-pane__preview sigil-token-detail-pane__preview--typo">
-            {/* eslint-disable i18next/no-literal-string -- i18n-allow: font preview convention (universal across design tools); not a translatable label */}
             <span
               style={{
                 "font-family": `${fontFamily}, sans-serif`,
@@ -199,9 +198,9 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
                 "font-weight": String(fontWeight),
               }}
             >
-              Aa
+              {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: font preview convention (universal across design tools); not a translatable label */}
+              {"Aa"}
             </span>
-            {/* eslint-enable i18next/no-literal-string */}
           </div>
         );
       }

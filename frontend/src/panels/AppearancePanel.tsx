@@ -399,7 +399,6 @@ export const AppearancePanel: Component = () => {
           <span class="sigil-appearance-panel__section-title" id="appearance-fill-title">
             {t("panels:fill.title")}
           </span>
-          {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
           <button
             class="sigil-appearance-panel__add"
             type="button"
@@ -407,9 +406,9 @@ export const AppearancePanel: Component = () => {
             disabled={selectedUuid() === null}
             onClick={handleAddFill}
           >
-            +
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
+            {"+"}
           </button>
-          {/* eslint-enable i18next/no-literal-string */}
         </div>
 
         <Show when={fills().length === 0}>
@@ -449,7 +448,6 @@ export const AppearancePanel: Component = () => {
           <span class="sigil-appearance-panel__section-title" id="appearance-stroke-title">
             {t("panels:stroke.title")}
           </span>
-          {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
           <button
             class="sigil-appearance-panel__add"
             type="button"
@@ -457,9 +455,9 @@ export const AppearancePanel: Component = () => {
             disabled={selectedUuid() === null}
             onClick={handleAddStroke}
           >
-            +
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
+            {"+"}
           </button>
-          {/* eslint-enable i18next/no-literal-string */}
         </div>
 
         <Show when={strokes().length === 0}>

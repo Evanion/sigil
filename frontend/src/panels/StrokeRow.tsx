@@ -119,7 +119,6 @@ export function StrokeRow(props: StrokeRowProps) {
       {/* Stroke alignment hidden until WebGL renderer supports inside/outside.
           Canvas 2D only renders center-aligned strokes. */}
 
-      {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
       <button
         class="sigil-stroke-row__remove"
         type="button"
@@ -127,9 +126,9 @@ export function StrokeRow(props: StrokeRowProps) {
         aria-label={t("panels:stroke.remove")}
         onClick={handleRemove}
       >
-        ×
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
+        {"×"}
       </button>
-      {/* eslint-enable i18next/no-literal-string */}
     </div>
   );
 }

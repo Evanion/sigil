@@ -116,15 +116,15 @@ export const TokenNavigationPane: Component<TokenNavigationPaneProps> = (rawProp
       <hr class="sigil-token-nav__divider" />
 
       {/* New Token button */}
-      {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph leading translated label */}
       <button
         class="sigil-token-nav__create-button"
         type="button"
         onClick={() => props.onCreateToken()}
       >
-        + {t("panels:tokens.newToken")}
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative add glyph leading translated label */}
+        {"+ "}
+        {t("panels:tokens.newToken")}
       </button>
-      {/* eslint-enable i18next/no-literal-string */}
     </nav>
   );
 };
