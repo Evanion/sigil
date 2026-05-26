@@ -15,7 +15,8 @@
     "rightPanel": "Panel derecho",
     "leftPanelTabs": "Pestañas del panel izquierdo",
     "rightPanelTabs": "Pestañas del panel derecho",
-    "designPanelTabs": "Pestañas del panel de diseño"
+    "designPanelTabs": "Pestañas del panel de diseño",
+    "appearance": "Apariencia"
   },
   "emptyState": {
     "selectLayer": "Selecciona una capa para ver sus propiedades"
@@ -95,7 +96,16 @@
   },
   "align": {
     "title": "Alinear",
-    "distribute": "Distribuir"
+    "distribute": "Distribuir",
+    "toolbar": "Alineación",
+    "alignLeft": "Alinear a la izquierda",
+    "alignCenterHorizontal": "Centrar horizontalmente",
+    "alignRight": "Alinear a la derecha",
+    "alignTop": "Alinear arriba",
+    "alignCenterVertical": "Centrar verticalmente",
+    "alignBottom": "Alinear abajo",
+    "distributeHorizontal": "Distribuir horizontalmente",
+    "distributeVertical": "Distribuir verticalmente"
   },
   "effects": {
     "title": "Efectos",

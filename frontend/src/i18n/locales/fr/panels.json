@@ -15,7 +15,8 @@
     "rightPanel": "Panneau droit",
     "leftPanelTabs": "Onglets du panneau gauche",
     "rightPanelTabs": "Onglets du panneau droit",
-    "designPanelTabs": "Onglets du panneau de design"
+    "designPanelTabs": "Onglets du panneau de design",
+    "appearance": "Apparence"
   },
   "emptyState": {
     "selectLayer": "Sélectionnez un calque pour voir ses propriétés"
@@ -95,7 +96,16 @@
   },
   "align": {
     "title": "Aligner",
-    "distribute": "Distribuer"
+    "distribute": "Distribuer",
+    "toolbar": "Alignement",
+    "alignLeft": "Aligner à gauche",
+    "alignCenterHorizontal": "Centrer horizontalement",
+    "alignRight": "Aligner à droite",
+    "alignTop": "Aligner en haut",
+    "alignCenterVertical": "Centrer verticalement",
+    "alignBottom": "Aligner en bas",
+    "distributeHorizontal": "Distribuer horizontalement",
+    "distributeVertical": "Distribuer verticalement"
   },
   "effects": {
     "title": "Effets",

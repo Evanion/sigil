@@ -49,7 +49,15 @@ export default tseslint.config(
       "i18next/no-literal-string": [
         "error",
         {
-          mode: "jsx-text-only",
+          // framework: Solid uses the same JSX AST as React; plugin has no native
+          // "solid" option. Explicit to avoid relying on the implicit default.
+          framework: "react",
+          // jsx-only mode: validates JSX text AND JSX attribute literals.
+          // jsx-text-only (the previous value) silently bypassed attribute literals,
+          // making the jsx-attributes.include allowlist dead config — see RF-001.
+          mode: "jsx-only",
+          // Validate template-literal attribute values too (RF-006). Defaults to false.
+          "should-validate-template": true,
           "jsx-attributes": {
             include: [
               "aria-label",
@@ -62,9 +70,8 @@ export default tseslint.config(
               "alt",
             ],
           },
-          callees: {
-            include: ["setAnnouncement", "toast", "showToast"],
-          },
+          // NOTE: callees.include is dead config in eslint-plugin-i18next — the plugin
+          // only honors callees.exclude (RF-007). Removed.
           words: {
             exclude: [
               "^[a-z-]+$",

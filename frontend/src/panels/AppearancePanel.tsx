@@ -368,7 +368,7 @@ export const AppearancePanel: Component = () => {
   // ── Render ────────────────────────────────────────────────────────
 
   return (
-    <div class="sigil-appearance-panel" role="region" aria-label="Appearance">
+    <div class="sigil-appearance-panel" role="region" aria-label={t("panels:regions.appearance")}>
       {/* ── Opacity + Blend mode row ─────────────────────────────── */}
       <div class="sigil-appearance-panel__opacity-blend">
         <ValueInput
@@ -377,14 +377,14 @@ export const AppearancePanel: Component = () => {
           onCommit={handleOpacityCommit}
           tokens={store.state.tokens}
           acceptedTypes={["number"]}
-          aria-label="Opacity"
+          aria-label={t("panels:typography.opacity")}
           disabled={selectedUuid() === null}
         />
         <Select
           options={BLEND_MODES}
           value={blendMode()}
           onValueChange={handleBlendModeChange}
-          aria-label="Blend mode"
+          aria-label={t("panels:typography.blendMode")}
           disabled={selectedUuid() === null}
         />
       </div>
@@ -421,7 +421,7 @@ export const AppearancePanel: Component = () => {
             <div
               role="group"
               tabIndex={0}
-              aria-label={`Fill ${index + 1}`}
+              aria-label={t("a11y:fills.itemLabel", { index: index + 1 })}
               onKeyDown={(e) => handleFillKeyDown(index, e)}
             >
               <FillRow
@@ -471,7 +471,7 @@ export const AppearancePanel: Component = () => {
             <div
               role="group"
               tabIndex={0}
-              aria-label={`Stroke ${index + 1}`}
+              aria-label={t("a11y:strokes.itemLabel", { index: index + 1 })}
               onKeyDown={(e) => handleStrokeKeyDown(index, e)}
             >
               <StrokeRow

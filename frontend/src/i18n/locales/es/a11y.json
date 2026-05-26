@@ -68,5 +68,20 @@
     "disconnected": "Desconectado del servidor",
     "nodes": "{{count}} nodos",
     "pages": "{{count}} páginas"
+  },
+  "fills": {
+    "itemLabel": "Relleno {{index}}"
+  },
+  "strokes": {
+    "itemLabel": "Trazo {{index}}"
+  },
+  "effects": {
+    "itemLabel": "Efecto {{index}}"
+  },
+  "gradient": {
+    "stopAtPercent": "Parada de degradado {{index}} en {{percent}}%"
+  },
+  "tokens": {
+    "valuePreview": "Valor: {{value}}"
   }
 }

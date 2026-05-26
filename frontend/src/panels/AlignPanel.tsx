@@ -98,14 +98,14 @@ export const AlignPanel: Component = () => {
 
   return (
     <Show when={selectionCount() >= 2}>
-      <div class="sigil-align-panel" role="toolbar" aria-label="Alignment">
+      <div class="sigil-align-panel" role="toolbar" aria-label={t("panels:align.toolbar")}>
         <span class="sigil-align-panel__section-title">{t("panels:align.title")}</span>
         <div class="sigil-align-panel__row" onKeyDown={handleToolbarKeyDown}>
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align left"
-            title="Align left"
+            aria-label={t("panels:align.alignLeft")}
+            title={t("panels:align.alignLeft")}
             tabIndex={tabIndexFor(0)}
             onClick={() => executeAlign(store, alignLeft)}
           >
@@ -114,8 +114,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align center horizontally"
-            title="Align center horizontally"
+            aria-label={t("panels:align.alignCenterHorizontal")}
+            title={t("panels:align.alignCenterHorizontal")}
             tabIndex={tabIndexFor(1)}
             onClick={() => executeAlign(store, alignCenter)}
           >
@@ -124,8 +124,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align right"
-            title="Align right"
+            aria-label={t("panels:align.alignRight")}
+            title={t("panels:align.alignRight")}
             tabIndex={tabIndexFor(2)}
             onClick={() => executeAlign(store, alignRight)}
           >
@@ -134,8 +134,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align top"
-            title="Align top"
+            aria-label={t("panels:align.alignTop")}
+            title={t("panels:align.alignTop")}
             tabIndex={tabIndexFor(3)}
             onClick={() => executeAlign(store, alignTop)}
           >
@@ -144,8 +144,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align center vertically"
-            title="Align center vertically"
+            aria-label={t("panels:align.alignCenterVertical")}
+            title={t("panels:align.alignCenterVertical")}
             tabIndex={tabIndexFor(4)}
             onClick={() => executeAlign(store, alignMiddle)}
           >
@@ -154,8 +154,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Align bottom"
-            title="Align bottom"
+            aria-label={t("panels:align.alignBottom")}
+            title={t("panels:align.alignBottom")}
             tabIndex={tabIndexFor(5)}
             onClick={() => executeAlign(store, alignBottom)}
           >
@@ -169,8 +169,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Distribute horizontally"
-            title="Distribute horizontally"
+            aria-label={t("panels:align.distributeHorizontal")}
+            title={t("panels:align.distributeHorizontal")}
             tabIndex={tabIndexFor(6)}
             disabled={selectionCount() < 3}
             onClick={() => executeAlign(store, distributeHorizontal, 3)}
@@ -180,8 +180,8 @@ export const AlignPanel: Component = () => {
           <button
             class="sigil-align-panel__button"
             type="button"
-            aria-label="Distribute vertically"
-            title="Distribute vertically"
+            aria-label={t("panels:align.distributeVertical")}
+            title={t("panels:align.distributeVertical")}
             tabIndex={tabIndexFor(7)}
             disabled={selectionCount() < 3}
             onClick={() => executeAlign(store, distributeVertical, 3)}

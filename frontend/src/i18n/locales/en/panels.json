@@ -15,7 +15,8 @@
     "rightPanel": "Right panel",
     "leftPanelTabs": "Left panel tabs",
     "rightPanelTabs": "Right panel tabs",
-    "designPanelTabs": "Design panel tabs"
+    "designPanelTabs": "Design panel tabs",
+    "appearance": "Appearance"
   },
   "emptyState": {
     "selectLayer": "Select a layer to see its properties"
@@ -95,7 +96,16 @@
   },
   "align": {
     "title": "Align",
-    "distribute": "Distribute"
+    "distribute": "Distribute",
+    "toolbar": "Alignment",
+    "alignLeft": "Align left",
+    "alignCenterHorizontal": "Align center horizontally",
+    "alignRight": "Align right",
+    "alignTop": "Align top",
+    "alignCenterVertical": "Align center vertically",
+    "alignBottom": "Align bottom",
+    "distributeHorizontal": "Distribute horizontally",
+    "distributeVertical": "Distribute vertically"
   },
   "effects": {
     "title": "Effects",
