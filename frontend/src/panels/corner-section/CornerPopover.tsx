@@ -19,9 +19,14 @@ import type { Component } from "solid-js";
 import { createEffect, createMemo, createSignal, Show } from "solid-js";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
+import { Slider } from "../../components/slider/Slider";
 import { Toggle } from "../../components/toggle/Toggle";
 import ValueInput from "../../components/value-input/ValueInput";
-import { MAX_CORNER_RADIUS } from "../../store/corners-input";
+import {
+  MAX_CORNER_RADIUS,
+  MAX_SUPERELLIPSE_SMOOTHING,
+  MIN_SUPERELLIPSE_SMOOTHING,
+} from "../../store/corners-input";
 import {
   CORNER_POSITION_LABEL,
   cornersAtHotspot,
@@ -290,6 +295,91 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     props.onCommit(next);
   }
 
+  // --- Center smoothing control (Task 12) ---------------------------------
+  //
+  // The smoothing control is the Superellipse-only knob from Spec 14 §1.5.
+  // It appears ONLY on the center popover AND only when every targeted
+  // corner is currently superellipse. The control is a composite of:
+  //   - ValueInput (literal/token/expression entry — committed via blur/Enter)
+  //   - Slider     (direct scrub — committed as a single history entry per
+  //                 gesture per CLAUDE.md §11 "Continuous-Value Controls
+  //                 Must Coalesce History Entries").
+  //
+  // `gestureSmoothing` tracks the in-gesture slider value so the visual
+  // updates during drag without committing on every tick. It is captured on
+  // pointerdown/keydown via `onChangeStart` and cleared on pointerup/keyup
+  // via `onChangeEnd` (which also fires the single commit).
+  const [gestureSmoothing, setGestureSmoothing] = createSignal<number | null>(null);
+
+  const showSmoothing = createMemo<boolean>(() => {
+    if (props.target !== "center") return false;
+    const ts = targeted();
+    if (ts.length === 0) return false;
+    return ts.every((c) => c.type === "superellipse");
+  });
+
+  /**
+   * Shared smoothing across all targeted corners (display value for the
+   * Slider/ValueInput). When `showSmoothing()` is true every targeted
+   * corner is superellipse, so reading `.smoothing` from the first is safe.
+   * Falls back to a harmless 0.5 when the control is hidden — callers must
+   * gate reads on `showSmoothing()`.
+   */
+  const currentSmoothing = createMemo<number>(() => {
+    const ts = targeted();
+    const first = ts[0];
+    if (first === undefined || first.type !== "superellipse") {
+      return 0.5;
+    }
+    return first.smoothing;
+  });
+
+  /**
+   * Commit a new smoothing value to every targeted corner. Validates the
+   * value against the named constants per CLAUDE.md §11 "Constants Must Be
+   * Enforced" and rejects non-finite values per "Floating-Point Validation".
+   *
+   * Since this is only called from the center popover under
+   * `showSmoothing()` (every targeted corner already superellipse), the
+   * factory branch for non-superellipse corners is a defensive fallback —
+   * if a corner had divergent type at commit time it would be converted
+   * (preserving its radii) rather than silently skipped.
+   */
+  function commitSmoothing(s: number): void {
+    if (!Number.isFinite(s) || s < MIN_SUPERELLIPSE_SMOOTHING || s > MAX_SUPERELLIPSE_SMOOTHING) {
+      console.warn("CornerPopover: smoothing value rejected", {
+        smoothing: s,
+        min: MIN_SUPERELLIPSE_SMOOTHING,
+        max: MAX_SUPERELLIPSE_SMOOTHING,
+        target: props.target,
+      });
+      return;
+    }
+    // Per CLAUDE.md §11 "partial updates of multi-field values": preserve
+    // each corner's radii and only update smoothing. Non-superellipse
+    // corners are converted to superellipse (defensive — the control is
+    // gated by showSmoothing() so this branch is unreachable in practice).
+    const next = writeCorners(props.corners, targets(), (prev) => ({
+      type: "superellipse",
+      radii: { ...prev.radii },
+      smoothing: s,
+    }));
+    props.onCommit(next);
+  }
+
+  /**
+   * Parse a string from the ValueInput's commit event into a number and
+   * route it to `commitSmoothing`. Extracted per frontend-defensive
+   * "Business Logic Must Not Live in Inline JSX Handlers".
+   */
+  function commitSmoothingFromValueInput(raw: string): void {
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) return; // empty commit is a no-op
+    const parsed = Number.parseFloat(trimmed);
+    if (!Number.isFinite(parsed)) return;
+    commitSmoothing(parsed);
+  }
+
   /**
    * Commit a new ry value, preserving each targeted corner's existing rx.
    * Symmetric counterpart to `commitRx`; see that function's comment.
@@ -402,6 +492,52 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
               min={0}
               max={MAX_CORNER_RADIUS}
             />
+          </div>
+        </div>
+      </Show>
+
+      {/*
+       * Center popover only: smoothing control for Superellipse corners.
+       * The Slider fires onChangeStart on pointerdown/keydown, onChange on
+       * every tick during the gesture (preview-only), and a single
+       * onChangeEnd on pointerup/keyup which calls `commitSmoothing` once.
+       * This coalesces the entire drag into a single history entry per
+       * CLAUDE.md §11 "Continuous-Value Controls Must Coalesce History
+       * Entries". `gestureSmoothing` is captured on start and cleared on
+       * end so the displayed value reflects in-gesture preview without
+       * driving a per-tick commit.
+       */}
+      <Show when={showSmoothing()}>
+        <div class="sigil-corner-popover__field" data-testid="corner-popover__smoothing">
+          <label class="sigil-corner-popover__label">Smoothing</label>
+          <div class="sigil-corner-popover__row">
+            <ValueInput
+              value={String(gestureSmoothing() ?? currentSmoothing())}
+              onChange={() => {
+                /* preview-only; commit happens on blur / Enter / token insert */
+              }}
+              onCommit={commitSmoothingFromValueInput}
+              tokens={props.tokens ?? EMPTY_TOKENS}
+              acceptedTypes={["number"]}
+              aria-label="Smoothing"
+              min={MIN_SUPERELLIPSE_SMOOTHING}
+              max={MAX_SUPERELLIPSE_SMOOTHING}
+            />
+            <div data-testid="corner-popover__smoothing-slider">
+              <Slider
+                value={gestureSmoothing() ?? currentSmoothing()}
+                min={MIN_SUPERELLIPSE_SMOOTHING}
+                max={MAX_SUPERELLIPSE_SMOOTHING}
+                step={0.01}
+                onChangeStart={() => setGestureSmoothing(currentSmoothing())}
+                onChange={(v) => setGestureSmoothing(v)}
+                onChangeEnd={(v) => {
+                  commitSmoothing(v);
+                  setGestureSmoothing(null);
+                }}
+                ariaLabel="Smoothing"
+              />
+            </div>
           </div>
         </div>
       </Show>

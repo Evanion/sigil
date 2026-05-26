@@ -185,3 +185,87 @@ describe("CornerPopover — axis-unlock toggle", () => {
     expect(newCorners[0].radii.y).toBe(8); // unchanged
   });
 });
+
+function superellipseAll(s: number): Corners {
+  return [
+    { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: s },
+    { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: s },
+    { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: s },
+    { type: "superellipse", radii: { x: 8, y: 8 }, smoothing: s },
+  ];
+}
+
+describe("CornerPopover — center smoothing control", () => {
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("does NOT render the smoothing control on non-center popovers", () => {
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={ROUND_8} onCommit={() => {}} />
+    ));
+    expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).toBeNull();
+  });
+
+  it("does NOT render the smoothing control on center when shape != superellipse", () => {
+    const { container } = render(() => (
+      <CornerPopover target="center" corners={ROUND_8} onCommit={() => {}} />
+    ));
+    expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).toBeNull();
+  });
+
+  it("renders the smoothing control on center popover when shape = superellipse", () => {
+    const { container } = render(() => (
+      <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={() => {}} />
+    ));
+    expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).not.toBeNull();
+  });
+
+  it("dragging the slider during a gesture batches into a single onCommit at gesture end", () => {
+    // The wrapped Slider's onChangeEnd event drives the single commit
+    // — per CLAUDE.md §11 "Continuous-Value Controls Must Coalesce
+    // History Entries". Intermediate onChange events do NOT call onCommit.
+    //
+    // jsdom does not support a faithful Kobalte drag simulation (no layout,
+    // no pointer-move slider geometry), but the Slider wrapper translates
+    // pointerdown → pointerup into a single onChangeEnd call (see
+    // Slider.test.tsx "should fire onChangeEnd at end of pointer interaction").
+    // That single end event is what the smoothing control wires to onCommit.
+    const handler = vi.fn();
+    const { container } = render(() => (
+      <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={handler} />
+    ));
+    const sliderWrapper = container.querySelector(
+      '[data-testid="corner-popover__smoothing-slider"]',
+    );
+    expect(sliderWrapper).not.toBeNull();
+    if (sliderWrapper === null) return; // type guard
+    const thumb = sliderWrapper.querySelector('span[role="slider"]') as HTMLElement;
+    expect(thumb).not.toBeNull();
+
+    // Simulate a complete pointer gesture: pointerdown → pointerup.
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+    fireEvent.pointerUp(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+
+    // Exactly one commit per gesture, regardless of intermediate updates.
+    expect(handler).toHaveBeenCalledTimes(1);
+    const [committed] = handler.mock.calls[0] as [Corners];
+    // Every committed corner must remain superellipse and carry a finite
+    // smoothing value (Slider final value, not necessarily 0.5).
+    for (const c of committed) {
+      expect(c.type).toBe("superellipse");
+      if (c.type === "superellipse") {
+        expect(Number.isFinite(c.smoothing)).toBe(true);
+      }
+    }
+  });
+});
