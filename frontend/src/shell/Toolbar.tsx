@@ -154,6 +154,7 @@ export const Toolbar: Component = () => {
       {/* RF-029: Use <Index> instead of <For> per CLAUDE.md — preserves DOM elements */}
       <Index each={TOOLS}>
         {(tool, index) => {
+          // eslint-disable-next-line i18next/no-literal-string -- i18n-allow: composes translated label with universal keyboard shortcut (e.g. "Select (V)")
           const label = () => `${t(tool().labelKey)} (${tool().shortcut})`;
           return (
             <Tooltip

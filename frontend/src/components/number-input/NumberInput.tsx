@@ -77,10 +77,16 @@ export function NumberInput(props: NumberInputProps) {
           <span class="sigil-number-input__suffix">{local.suffix}</span>
         </Show>
         <div class="sigil-number-input__buttons">
-          <NumberField.IncrementTrigger aria-label={t("common:increment")} class="sigil-number-input__btn">
+          <NumberField.IncrementTrigger
+            aria-label={t("common:increment")}
+            class="sigil-number-input__btn"
+          >
             <ChevronUp size={12} />
           </NumberField.IncrementTrigger>
-          <NumberField.DecrementTrigger aria-label={t("common:decrement")} class="sigil-number-input__btn">
+          <NumberField.DecrementTrigger
+            aria-label={t("common:decrement")}
+            class="sigil-number-input__btn"
+          >
             <ChevronDown size={12} />
           </NumberField.DecrementTrigger>
         </div>

@@ -279,7 +279,7 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
                 startRename();
               }
             }}
-            title="Click to rename"
+            title={t("panels:tokens.clickToRename")}
           >
             {props.token.name}
           </h3>

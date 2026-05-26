@@ -158,6 +158,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
             props.onToggleExpand(props.node.uuid);
           }}
         >
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative chevron glyph; accessible name on aria-label */}
           {props.isExpanded ? "\u25BE" : "\u25B8"}
         </button>
       </Show>
@@ -201,6 +202,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
         tabindex={-1}
         onClick={handleLockToggle}
       >
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative lock emoji; accessible name on aria-label */}
         {props.node.locked ? "\u{1F512}" : "\u{1F513}"}
       </button>
 
@@ -212,6 +214,7 @@ export const TreeNode: Component<TreeNodeProps> = (props) => {
         tabindex={-1}
         onClick={handleVisibilityToggle}
       >
+        {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative visibility emoji; accessible name on aria-label */}
         {props.node.visible ? "\u{1F441}" : "\u{1F441}\u200D\u{1F5E8}"}
       </button>
     </div>

@@ -21,6 +21,11 @@
   "emptyState": {
     "selectLayer": "Selecciona una capa para ver sus propiedades"
   },
+  "placeholder": {
+    "componentMessage": "Editor de componentes -- próxima especificación",
+    "inspectMessage": "Modo de inspección -- próxima especificación",
+    "comingSoon": "{{title}} -- próximamente"
+  },
   "typography": {
     "title": "Tipografía",
     "fontFamily": "Familia tipográfica",
@@ -155,6 +160,14 @@
     "colorSpace": "Espacio de color",
     "colorChannelValues": "Valores de los canales de color"
   },
+  "valueInput": {
+    "tokenExpression": "Expresión de token",
+    "suggestions": "Sugerencias",
+    "fontSourceGeneric": "Genérico",
+    "fontSourceSystem": "Sistema",
+    "fontSourceWorkspace": "Espacio de trabajo",
+    "fontSourcePlugin": "Extensión"
+  },
   "node": {
     "title": "Nodo",
     "name": "Nombre",
@@ -237,6 +250,16 @@
     "expressionError": "Error de expresion",
     "expressionResolved": "Resuelto: {{value}}",
     "autocompleteHint": "Escribe { para tokens, o comienza a escribir un nombre de funcion",
-    "emptyExpression": "La expresion no puede estar vacia"
+    "emptyExpression": "La expresion no puede estar vacia",
+    "dimensionPlaceholder": "p. ej. 16px, 1.5rem, 50%",
+    "offsetX": "Desplazamiento X",
+    "offsetY": "Desplazamiento Y",
+    "blur": "Desenfoque",
+    "spread": "Extensión",
+    "expression": "Expresión",
+    "clickToRename": "Haz clic para renombrar",
+    "invalidValue": "Valor no válido",
+    "expand": "Expandir",
+    "collapse": "Contraer"
   }
 }

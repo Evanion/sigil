@@ -21,6 +21,11 @@
   "emptyState": {
     "selectLayer": "Select a layer to see its properties"
   },
+  "placeholder": {
+    "componentMessage": "Component editor -- future spec",
+    "inspectMessage": "Inspect mode -- future spec",
+    "comingSoon": "{{title}} -- coming soon"
+  },
   "typography": {
     "title": "Typography",
     "fontFamily": "Font family",
@@ -155,6 +160,14 @@
     "colorSpace": "Color space",
     "colorChannelValues": "Color channel values"
   },
+  "valueInput": {
+    "tokenExpression": "Token expression",
+    "suggestions": "Suggestions",
+    "fontSourceGeneric": "Generic",
+    "fontSourceSystem": "System",
+    "fontSourceWorkspace": "Workspace",
+    "fontSourcePlugin": "Plugin"
+  },
   "node": {
     "title": "Node",
     "name": "Name",
@@ -237,6 +250,16 @@
     "expressionError": "Expression error",
     "expressionResolved": "Resolved: {{value}}",
     "autocompleteHint": "Type { for tokens, or start typing a function name",
-    "emptyExpression": "Expression cannot be empty"
+    "emptyExpression": "Expression cannot be empty",
+    "dimensionPlaceholder": "e.g. 16px, 1.5rem, 50%",
+    "offsetX": "Offset X",
+    "offsetY": "Offset Y",
+    "blur": "Blur",
+    "spread": "Spread",
+    "expression": "Expression",
+    "clickToRename": "Click to rename",
+    "invalidValue": "Invalid value",
+    "expand": "Expand",
+    "collapse": "Collapse"
   }
 }

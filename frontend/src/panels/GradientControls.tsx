@@ -373,7 +373,11 @@ export function GradientControls(props: GradientControlsProps) {
 
       {/* Selected stop detail row */}
       <Show when={selectedStop()}>
-        <div class="sigil-gradient-controls__stop-detail" role="group" aria-label={t("panels:gradient.selectedStop")}>
+        <div
+          class="sigil-gradient-controls__stop-detail"
+          role="group"
+          aria-label={t("panels:gradient.selectedStop")}
+        >
           <ColorSwatch
             color={selectedStopColor()}
             onColorChange={handleStopColorChange}

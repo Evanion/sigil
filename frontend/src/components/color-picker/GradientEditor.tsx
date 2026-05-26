@@ -268,7 +268,11 @@ export function GradientEditor(props: GradientEditorProps) {
   return (
     <div class="sigil-gradient-editor">
       {/* RF-017: Type toggle row — radiogroup with arrow-key navigation */}
-      <div class="sigil-gradient-editor__type-row" role="radiogroup" aria-label={t("panels:gradient.type")}>
+      <div
+        class="sigil-gradient-editor__type-row"
+        role="radiogroup"
+        aria-label={t("panels:gradient.type")}
+      >
         <For each={GRADIENT_TYPE_OPTIONS}>
           {(option, i) => {
             const isActive = () => props.gradientType === option.value;

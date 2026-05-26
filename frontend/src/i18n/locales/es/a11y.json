@@ -72,6 +72,10 @@
   "fills": {
     "itemLabel": "Relleno {{index}}"
   },
+  "disclosure": {
+    "expandSection": "Expandir {{name}}",
+    "collapseSection": "Contraer {{name}}"
+  },
   "strokes": {
     "itemLabel": "Trazo {{index}}"
   },

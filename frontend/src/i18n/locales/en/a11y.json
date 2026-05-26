@@ -72,6 +72,10 @@
   "fills": {
     "itemLabel": "Fill {{index}}"
   },
+  "disclosure": {
+    "expandSection": "Expand {{name}}",
+    "collapseSection": "Collapse {{name}}"
+  },
   "strokes": {
     "itemLabel": "Stroke {{index}}"
   },

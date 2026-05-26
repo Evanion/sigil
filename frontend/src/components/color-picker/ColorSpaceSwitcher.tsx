@@ -71,7 +71,11 @@ export function ColorSpaceSwitcher(props: ColorDisplayModeSwitcherProps) {
   }
 
   return (
-    <div class="sigil-color-space-switcher" role="radiogroup" aria-label={t("panels:colorPicker.colorSpace")}>
+    <div
+      class="sigil-color-space-switcher"
+      role="radiogroup"
+      aria-label={t("panels:colorPicker.colorSpace")}
+    >
       <For each={SPACE_OPTIONS}>
         {(option, i) => {
           const isActive = () => props.value === option.value;

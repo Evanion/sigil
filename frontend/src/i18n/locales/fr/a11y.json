@@ -72,6 +72,10 @@
   "fills": {
     "itemLabel": "Remplissage {{index}}"
   },
+  "disclosure": {
+    "expandSection": "Développer {{name}}",
+    "collapseSection": "Réduire {{name}}"
+  },
   "strokes": {
     "itemLabel": "Contour {{index}}"
   },

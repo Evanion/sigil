@@ -64,6 +64,7 @@ import { getAutocompleteContext } from "./autocomplete-context";
 import type { AutocompleteContext } from "./autocomplete-context";
 import { ColorPicker } from "../color-picker/ColorPicker";
 import { Popover } from "../popover/Popover";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import "./ValueInput.css";
 
 // ── Props ──────────────────────────────────────────────────────────────
@@ -240,6 +241,7 @@ export function getTypeValidationMessage(
 // RF-022: props are accessed directly — splitProps is unnecessary here because
 // all props are consumed by this component (no pass-through to a child element).
 const ValueInput: Component<ValueInputProps> = (props) => {
+  const [t] = useTransContext();
   // eslint-disable-next-line no-unassigned-vars
   let inputRef: HTMLDivElement | undefined;
 
@@ -874,12 +876,12 @@ const ValueInput: Component<ValueInputProps> = (props) => {
               </span>
               <span class="sigil-token-input__ac-desc sigil-token-input__ac-font-source">
                 {font.source === "generic"
-                  ? "Generic"
+                  ? t("panels:valueInput.fontSourceGeneric")
                   : font.source === "system"
-                    ? "System"
+                    ? t("panels:valueInput.fontSourceSystem")
                     : font.source === "workspace"
-                      ? "Workspace"
-                      : "Plugin"}
+                      ? t("panels:valueInput.fontSourceWorkspace")
+                      : t("panels:valueInput.fontSourcePlugin")}
               </span>
             </>
           )}
@@ -917,7 +919,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         aria-label={
           props["aria-labelledby"] !== undefined
             ? undefined
-            : (props["aria-label"] ?? "Token expression")
+            : (props["aria-label"] ?? t("panels:valueInput.tokenExpression"))
         }
         aria-labelledby={props["aria-labelledby"]}
         aria-describedby={statusId}
@@ -1013,7 +1015,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
         id={listboxId}
         class="sigil-token-input__autocomplete"
         role="listbox"
-        aria-label="Suggestions"
+        aria-label={t("panels:valueInput.suggestions")}
         style={{
           display: autocompleteOpen() && suggestions().length > 0 ? "block" : "none",
         }}

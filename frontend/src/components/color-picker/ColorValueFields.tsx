@@ -239,7 +239,11 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
   }
 
   return (
-    <div class="sigil-color-value-fields" role="group" aria-label={t("panels:colorPicker.colorChannelValues")}>
+    <div
+      class="sigil-color-value-fields"
+      role="group"
+      aria-label={t("panels:colorPicker.colorChannelValues")}
+    >
       <Index each={fields()}>
         {(field) => (
           <div class="sigil-color-value-fields__field">
