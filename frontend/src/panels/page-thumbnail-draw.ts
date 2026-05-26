@@ -7,39 +7,26 @@
  * basic shapes with fill colors, suitable for 64x48 previews.
  */
 
-import type { DocumentNode, Transform, ColorSrgb, Fill } from "../types/document";
+import type { DocumentNode, Transform, Fill } from "../types/document";
+import { colorToCss } from "../canvas/color-fill";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
 
 /**
- * Convert an sRGB color to a CSS rgba() string.
- * Returns null when any channel is non-finite (CLAUDE.md: floating-point validation).
- */
-function srgbToRgba(c: ColorSrgb): string | null {
-  if (
-    !Number.isFinite(c.r) ||
-    !Number.isFinite(c.g) ||
-    !Number.isFinite(c.b) ||
-    !Number.isFinite(c.a)
-  ) {
-    return null;
-  }
-  const r = Math.round(c.r * 255);
-  const g = Math.round(c.g * 255);
-  const b = Math.round(c.b * 255);
-  return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
-}
-
-/**
  * Resolve the first solid fill color from a node's fills.
+ *
+ * RF-001 (PR #67): routes via the shared `colorToCss` helper so Display-P3
+ * thumbnail fills emit `color(display-p3 …)` instead of falling back to
+ * the default grey. Token refs cannot be resolved at this layer — they
+ * fall back to DEFAULT_FILL.
  */
 function resolveFill(fills: readonly Fill[]): string {
   for (const fill of fills) {
     if (fill.type === "solid") {
       const cv = fill.color;
-      if (cv.type === "literal" && cv.value.space === "srgb") {
-        return srgbToRgba(cv.value) ?? DEFAULT_FILL;
+      if (cv.type === "literal") {
+        return colorToCss(cv.value);
       }
     }
   }

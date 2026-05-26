@@ -13,6 +13,7 @@ import type { DocumentNode, NodeKindText, Color, StyleValue } from "../types/doc
 import type { Viewport } from "./viewport";
 // RF-031: Import shared constant instead of duplicating.
 import { DEFAULT_FONT_SIZE_PX } from "./text-measure";
+import { colorToCss } from "./color-fill";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -53,23 +54,17 @@ function resolveNumeric(sv: StyleValue<number>, fallback: number): number {
 }
 
 /**
- * Resolve a StyleValue<Color> to a CSS rgba() string.
- * Only srgb colors are fully resolved; other color spaces fall back to black.
+ * Resolve a StyleValue<Color> to a CSS color string.
+ *
+ * RF-001 (PR #67): routes via the shared `colorToCss` helper so Display-P3
+ * colors emit `color(display-p3 …)` instead of falling back to black.
+ * Token refs cannot be resolved at this layer — they fall back to opaque black.
  */
 function resolveColorToCss(sv: StyleValue<Color>): string {
   if (sv.type !== "literal") {
     return "rgba(0, 0, 0, 1)";
   }
-  const c = sv.value;
-  if (c.space === "srgb") {
-    const r = Number.isFinite(c.r) ? Math.round(c.r * 255) : 0;
-    const g = Number.isFinite(c.g) ? Math.round(c.g * 255) : 0;
-    const b = Number.isFinite(c.b) ? Math.round(c.b * 255) : 0;
-    const a = Number.isFinite(c.a) ? c.a : 1;
-    return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(a)})`;
-  }
-  // Non-srgb spaces: fall back to black. Full color space support is deferred.
-  return "rgba(0, 0, 0, 1)";
+  return colorToCss(sv.value);
 }
 
 /**

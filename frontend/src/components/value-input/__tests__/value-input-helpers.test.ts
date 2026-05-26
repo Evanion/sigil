@@ -93,26 +93,27 @@ describe("resolveSwatchColor — hex literals", () => {
   it("should return a ColorSrgb for a valid 6-digit hex literal", () => {
     const result = resolveSwatchColor("#ff0000", emptyTokens);
     expect(result).not.toBeNull();
-    expect(result?.space).toBe("srgb");
-    expect(result?.r).toBeCloseTo(1);
-    expect(result?.g).toBeCloseTo(0);
-    expect(result?.b).toBeCloseTo(0);
-    expect(result?.a).toBeCloseTo(1);
+    if (result === null || result.space !== "srgb") throw new Error("expected sRGB");
+    expect(result.r).toBeCloseTo(1);
+    expect(result.g).toBeCloseTo(0);
+    expect(result.b).toBeCloseTo(0);
+    expect(result.a).toBeCloseTo(1);
   });
 
   it("should return a ColorSrgb for a valid 3-digit hex shorthand", () => {
     const result = resolveSwatchColor("#f00", emptyTokens);
     expect(result).not.toBeNull();
-    expect(result?.space).toBe("srgb");
-    expect(result?.r).toBeCloseTo(1);
-    expect(result?.g).toBeCloseTo(0);
-    expect(result?.b).toBeCloseTo(0);
+    if (result === null || result.space !== "srgb") throw new Error("expected sRGB");
+    expect(result.r).toBeCloseTo(1);
+    expect(result.g).toBeCloseTo(0);
+    expect(result.b).toBeCloseTo(0);
   });
 
   it("should return a ColorSrgb for an 8-digit hex with alpha", () => {
     const result = resolveSwatchColor("#ff000080", emptyTokens);
     expect(result).not.toBeNull();
-    expect(result?.a).toBeCloseTo(128 / 255);
+    if (result === null || result.space !== "srgb") throw new Error("expected sRGB");
+    expect(result.a).toBeCloseTo(128 / 255);
   });
 
   it("should return null for an invalid hex literal", () => {
@@ -154,10 +155,10 @@ describe("resolveSwatchColor — token references", () => {
   it("should return ColorSrgb for a single token ref that resolves to a color", () => {
     const result = resolveSwatchColor("{primary}", tokens);
     expect(result).not.toBeNull();
-    expect(result?.space).toBe("srgb");
-    expect(result?.r).toBeCloseTo(0);
-    expect(result?.g).toBeCloseTo(0.5);
-    expect(result?.b).toBeCloseTo(1);
+    if (result === null || result.space !== "srgb") throw new Error("expected sRGB");
+    expect(result.r).toBeCloseTo(0);
+    expect(result.g).toBeCloseTo(0.5);
+    expect(result.b).toBeCloseTo(1);
   });
 
   it("should return null for a token ref that resolves to a non-color token", () => {

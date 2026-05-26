@@ -30,7 +30,8 @@ import {
   Index,
   type Component,
 } from "solid-js";
-import type { Token, TokenType, Color, ColorSrgb } from "../../types/document";
+import type { Token, TokenType, Color } from "../../types/document";
+import { colorToCss } from "../../canvas/color-fill";
 import { highlightExpression, type HighlightSegment } from "./expression-highlight";
 import {
   parseExpression,
@@ -176,10 +177,14 @@ export function resolveTokenTypeFilter(
 
 /**
  * Resolve a color from the current input value.
- * Returns a ColorSrgb if the value is a hex literal or a single token ref
- * that resolves to a color token. Returns null otherwise.
+ * Returns a Color (sRGB or Display-P3) if the value is a hex literal or a
+ * single token ref that resolves to a color token. Returns null otherwise.
+ *
+ * RF-001 (PR #67): accepts Display-P3 token-ref values so the swatch
+ * renders wide-gamut. Hex literals parse to sRGB; P3 colors arrive via
+ * token refs.
  */
-export function resolveSwatchColor(value: string, tokens: Record<string, Token>): ColorSrgb | null {
+export function resolveSwatchColor(value: string, tokens: Record<string, Token>): Color | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
 
@@ -195,7 +200,7 @@ export function resolveSwatchColor(value: string, tokens: Record<string, Token>)
     const token = tokens[tokenName];
     if (token !== undefined && token.value.type === "color") {
       const c = token.value.value;
-      if (c.space === "srgb") {
+      if (c.space === "srgb" || c.space === "display_p3") {
         return c;
       }
     }
@@ -328,24 +333,22 @@ const ValueInput: Component<ValueInputProps> = (props) => {
   });
 
   /** Resolve the swatch color from the current value. */
-  const swatchColor = createMemo<ColorSrgb | null>(() => {
+  const swatchColor = createMemo<Color | null>(() => {
     if (!acceptsColor()) return null;
     return resolveSwatchColor(liveText(), props.tokens);
   });
 
-  /** CSS background-color string for the swatch. */
+  /**
+   * CSS background-color string for the swatch.
+   *
+   * RF-001 (PR #67): routes via the shared `colorToCss` helper so Display-P3
+   * token swatches emit `color(display-p3 …)` instead of falling back to a
+   * transparent swatch.
+   */
   const swatchBgStyle = createMemo<string>(() => {
     const color = swatchColor();
     if (color === null) return "transparent";
-    // Guard all channels with Number.isFinite before CSS interpolation
-    const r = Math.round(color.r * 255);
-    const g = Math.round(color.g * 255);
-    const b = Math.round(color.b * 255);
-    const a = color.a;
-    if (!Number.isFinite(r) || !Number.isFinite(g) || !Number.isFinite(b) || !Number.isFinite(a)) {
-      return "transparent";
-    }
-    return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(a)})`;
+    return colorToCss(color);
   });
 
   /** Compute autocomplete suggestions. */
