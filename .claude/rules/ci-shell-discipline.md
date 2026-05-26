@@ -51,11 +51,15 @@ sed -n "${start},${lineno}p" -- "$file"
 
 ### Grep-Based Exemption Tokens Must Require Non-Trivial Content
 
-When CI greps for an exemption comment (`// i18n-allow:`, `// eslint-disable-next-line ...:`, `// a11y-ignore:`), the regex MUST require non-empty alphanumeric content after the marker. A bare marker with no rationale is not an exemption — it's a TODO the reviewer forgot.
+When CI greps for an exemption comment (`// i18n-allow:`, `// eslint-disable-next-line ...:`, `// a11y-ignore:`), the regex MUST require non-empty alphabetic content after the marker — at minimum, one 3+-letter word somewhere on the line. A bare marker with no rationale is not an exemption — it's a TODO the reviewer forgot.
 
-Pattern: `grep -qE 'i18n-allow:[[:space:]]*[A-Za-z]+'`
+Pattern: `grep -qE 'i18n-allow:.*[A-Za-z]{3,}'`
 
-Anti-pattern: `grep -q 'i18n-allow:'`
+This admits rationales that begin with punctuation (so `i18n-allow: "= " prefix is decorative` validates) but rejects empty or punctuation-only content.
+
+Anti-patterns:
+- `grep -q 'i18n-allow:'` — accepts empty rationale.
+- `grep -qE 'i18n-allow:[[:space:]]*[A-Za-z]+'` — over-strict; rejects rationales that lead with a quoted glyph or symbol the rationale is explaining.
 
 ### Use Bash Arrays for Multi-Line Accumulators
 

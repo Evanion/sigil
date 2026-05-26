@@ -291,8 +291,12 @@ jobs:
           #           filename containing ':' produces a CI warning rather than a confusing
           #           sed failure. Filenames with ':' are rare; this trades hard enforcement
           #           on unusual filenames for forward-progress on normal ones.
-          #   RF-017: require at least one alphabetic word after `i18n-allow:` so an empty
-          #           rationale (`// i18n-allow:`) does not pass.
+          #   RF-017: require at least one 3+-letter alphabetic word somewhere after
+          #           `i18n-allow:` so an empty rationale (`// i18n-allow:` or a marker
+          #           followed only by punctuation/digits) does not pass. The regex
+          #           tolerates leading punctuation so rationales that quote a glyph
+          #           before the explanation (`i18n-allow: "= " prefix is decorative`)
+          #           still validate.
           #   RF-032: bash array accumulator emitted via `printf '%s\n'` — the previous
           #           `bad="$bad\n..."` form left a leading blank line in error output when
           #           bad started empty.
@@ -320,14 +324,18 @@ jobs:
             start=$((lineno > 1 ? lineno - 1 : 1))
             # `--` guards against filenames beginning with '-' being parsed as flags.
             window=$(sed -n "${start},${lineno}p" -- "$file")
-            # Require at least one alphabetic word after the colon — an empty
-            # `// i18n-allow:` does not constitute a rationale.
-            if ! echo "$window" | grep -qE 'i18n-allow:[[:space:]]*[A-Za-z]+'; then
+            # Require at least one 3+-letter alphabetic word somewhere after the
+            # `i18n-allow:` marker. An empty `// i18n-allow:` (or one followed
+            # only by punctuation/digits) does not constitute a rationale.
+            # Allowing leading non-alphabetic characters accommodates rationales
+            # that quote a glyph or symbol before the explanation
+            # (e.g. `i18n-allow: "= " prefix is a decorative marker`).
+            if ! echo "$window" | grep -qE 'i18n-allow:.*[A-Za-z]{3,}'; then
               bad+=("$file:$lineno")
             fi
           done <<< "$matches"
           if [ "${#bad[@]}" -gt 0 ]; then
-            echo "::error::eslint-disable for i18next/no-literal-string lacks a meaningful // i18n-allow: rationale comment. Add a rationale (at least one alphabetic word after the colon) or restructure to avoid the disable."
+            echo "::error::eslint-disable for i18next/no-literal-string lacks a meaningful // i18n-allow: rationale comment. Add a rationale (at least one 3+-letter alphabetic word after the colon) or restructure to avoid the disable."
             printf '  %s\n' "${bad[@]}"
             exit 1
           fi
