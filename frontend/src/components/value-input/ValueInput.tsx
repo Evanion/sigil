@@ -88,6 +88,14 @@ export interface ValueInputProps {
   readonly disabled?: boolean;
   readonly "aria-label"?: string;
   /**
+   * ID of an external element that labels this input. When provided, the
+   * combobox root receives `aria-labelledby` so a visible `<label>` becomes
+   * the accessible name. Per a11y-rules.md "Label association" — callers must
+   * pick ONE of `aria-label` or `aria-labelledby`, never both. When both are
+   * supplied, `aria-labelledby` wins.
+   */
+  readonly "aria-labelledby"?: string;
+  /**
    * RF-020: Lower numeric bound — when set and the detected mode is
    * `literal-number`, surfaces via `aria-valuemin` so screen readers announce
    * the input's numeric domain. Passing this does NOT clamp the value; it only
@@ -906,7 +914,12 @@ const ValueInput: Component<ValueInputProps> = (props) => {
           [modeClass()]: modeClass() !== "",
         }}
         role="combobox"
-        aria-label={props["aria-label"] ?? "Token expression"}
+        aria-label={
+          props["aria-labelledby"] !== undefined
+            ? undefined
+            : (props["aria-label"] ?? "Token expression")
+        }
+        aria-labelledby={props["aria-labelledby"]}
         aria-describedby={statusId}
         aria-haspopup="listbox"
         aria-autocomplete="list"

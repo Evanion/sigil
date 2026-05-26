@@ -4,7 +4,6 @@ import type { DocumentStoreAPI } from "../store/document-store-solid";
 import type { PropertySchema } from "./schema/types";
 import { SchemaSection } from "./SchemaSection";
 import type { DocumentNode } from "../types/document";
-import { handleCornersFieldChange } from "./schema-panel-corners-handler";
 import "./SchemaPanel.css";
 
 interface SchemaPanelProps {
@@ -72,12 +71,6 @@ const MUTATION_MAP: ReadonlyArray<{ prefix: string; handler: MutationHandler }> 
     prefix: "locked",
     handler: (store, uuid, _key, value) => {
       if (typeof value === "boolean") store.setLocked(uuid, value);
-    },
-  },
-  {
-    prefix: "kind.corners.",
-    handler: (store, uuid, key, value, node) => {
-      handleCornersFieldChange(store, uuid, key, value, node);
     },
   },
   {

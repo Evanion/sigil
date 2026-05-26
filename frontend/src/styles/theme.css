@@ -112,4 +112,19 @@
   --color-picker-checkerboard-dark: #444444;
   --color-picker-checkerboard-light: #666666;
   --color-picker-thumb-border: #ffffff;
+
+  /* RF-017: Hotspot tokens for the corner-editor preview SVG. The
+     hotspot affordances render over a small SVG shape; resting-state
+     colors are derived from the surface palette (subtle, not
+     attention-grabbing) and hover-state colors map to the accent
+     palette so the affordance reads "interactive on this surface".
+     The locked-state border uses the same accent color but is paired
+     with a dashed border-style in the consuming CSS to communicate
+     "present but not currently operable". */
+  --hotspot-accent: var(--accent);
+  --hotspot-bg-resting: rgba(255, 255, 255, 0.04);
+  --hotspot-bg-hover: rgba(13, 153, 255, 0.3);
+  --hotspot-border-resting: rgba(255, 255, 255, 0.25);
+  --hotspot-border-revealed: rgba(255, 255, 255, 0.3);
+  --hotspot-border-hover: rgba(13, 153, 255, 0.9);
 }

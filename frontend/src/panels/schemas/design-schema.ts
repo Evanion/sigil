@@ -1,5 +1,4 @@
 import type { PropertySchema } from "../schema/types";
-import { MAX_CORNER_RADIUS } from "../../store/corners-input";
 
 /**
  * Property schema for the "Design" panel — Layout sub-tab.
@@ -7,6 +6,11 @@ import { MAX_CORNER_RADIUS } from "../../store/corners-input";
  * Defines which fields are shown for each node kind. The SchemaPanel
  * renders these definitions into NumberInput/Toggle/Select editors
  * automatically.
+ *
+ * Note: Corner Radius was previously a schema-driven 4-input grid in
+ * this file. Plan 14d (Spec 14 corner editor UI) replaced it with the
+ * dedicated <CornerSection /> component rendered in DesignPanel's
+ * Appearance tab. Corner editing no longer flows through this schema.
  */
 export const designSchema: PropertySchema = {
   sections: [
@@ -61,53 +65,6 @@ export const designSchema: PropertySchema = {
           type: "number",
           step: 0.1,
           suffix: "deg",
-        },
-      ],
-    },
-    {
-      name: "Corner Radius",
-      when: ["rectangle", "frame", "image"],
-      fields: [
-        // `max` is bounded by MAX_CORNER_RADIUS — symmetric with the Rust
-        // validate.rs constant. Per CLAUDE.md §11 "Constants Must Be
-        // Enforced": every NumberInput max must be a named constant.
-        // RF-024: ariaLabel expands the 2-letter compass labels so screen
-        // readers announce the full corner name instead of "TL", "TR", etc.
-        {
-          key: "kind.corners.0.radii.x",
-          label: "TL",
-          ariaLabel: "Top-left corner radius",
-          type: "number",
-          step: 1,
-          min: 0,
-          max: MAX_CORNER_RADIUS,
-        },
-        {
-          key: "kind.corners.1.radii.x",
-          label: "TR",
-          ariaLabel: "Top-right corner radius",
-          type: "number",
-          step: 1,
-          min: 0,
-          max: MAX_CORNER_RADIUS,
-        },
-        {
-          key: "kind.corners.2.radii.x",
-          label: "BR",
-          ariaLabel: "Bottom-right corner radius",
-          type: "number",
-          step: 1,
-          min: 0,
-          max: MAX_CORNER_RADIUS,
-        },
-        {
-          key: "kind.corners.3.radii.x",
-          label: "BL",
-          ariaLabel: "Bottom-left corner radius",
-          type: "number",
-          step: 1,
-          min: 0,
-          max: MAX_CORNER_RADIUS,
         },
       ],
     },

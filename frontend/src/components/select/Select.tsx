@@ -17,6 +17,21 @@ export interface SelectProps {
   disabled?: boolean;
   class?: string;
   "aria-label"?: string;
+  /**
+   * ID of an external element that labels the trigger. When provided, the
+   * Trigger button receives `aria-labelledby` so a visible `<label>` becomes
+   * the accessible name without duplicating announcement via `aria-label`.
+   * Per a11y-rules.md "Label association" — callers must pick ONE of
+   * `aria-label` or `aria-labelledby`, never both.
+   */
+  "aria-labelledby"?: string;
+  /**
+   * ID(s) of element(s) that describe the trigger (e.g., a "Mixed" badge that
+   * communicates non-uniform underlying state). Surfaced via
+   * `aria-describedby` on the Trigger button so screen readers announce the
+   * description as part of the control's accessible context.
+   */
+  "aria-describedby"?: string;
 }
 
 export function Select(props: SelectProps) {
@@ -29,6 +44,8 @@ export function Select(props: SelectProps) {
     "disabled",
     "class",
     "aria-label",
+    "aria-labelledby",
+    "aria-describedby",
   ]);
 
   const className = (): string => {
@@ -69,7 +86,11 @@ export function Select(props: SelectProps) {
       </Show>
       <KobalteSelect.Trigger
         class="sigil-select__trigger"
-        aria-label={!local.label ? local["aria-label"] : undefined}
+        aria-label={
+          local["aria-labelledby"] === undefined && !local.label ? local["aria-label"] : undefined
+        }
+        aria-labelledby={local["aria-labelledby"]}
+        aria-describedby={local["aria-describedby"]}
       >
         <KobalteSelect.Value<SelectOption>>
           {(state) => state.selectedOption()?.label ?? local.placeholder ?? ""}

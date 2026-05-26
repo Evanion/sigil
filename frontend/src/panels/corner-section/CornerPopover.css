@@ -1,0 +1,47 @@
+/* CornerPopover body — rendered inside the project's native Popover wrapper.
+ * Uses theme.css tokens for colors and Open Props for spacing/typography
+ * so the popover tracks the rest of the inspector's visual language. */
+
+.sigil-corner-popover {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-3, 12px);
+  padding: var(--size-3, 12px);
+  min-width: 220px;
+  background: var(--surface-2);
+  color: var(--text-1);
+  border-radius: var(--radius-2, 4px);
+}
+
+.sigil-corner-popover__header {
+  margin: 0 0 var(--size-1, 4px) 0;
+  font-size: var(--font-size-0, 12px);
+  font-weight: var(--font-weight-6, 600);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.sigil-corner-popover__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1, 4px);
+}
+
+.sigil-corner-popover__label {
+  font-size: var(--font-size-00, 11px);
+  color: var(--text-2);
+}
+
+.sigil-corner-popover__mixed {
+  font-size: var(--font-size-00, 11px);
+  color: var(--warning);
+  align-self: flex-start;
+}
+
+/* Two-column grid for the rx/ry pair shown when "Unlock axes" is ON. */
+.sigil-corner-popover__row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--size-2, 8px);
+}

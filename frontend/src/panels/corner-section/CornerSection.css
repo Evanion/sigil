@@ -1,0 +1,50 @@
+/**
+ * Styles for the Corner Editor section (CornerSection.tsx). Mirrors
+ * the appearance of other panel sections (border-top divider, padded
+ * column layout, dim uppercase header label).
+ */
+.sigil-corner-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-3);
+  padding: var(--size-3);
+  border-top: 1px solid var(--border-1);
+}
+
+.sigil-corner-section__header {
+  margin: 0;
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-6);
+  text-transform: uppercase;
+  letter-spacing: var(--font-letterspacing-2);
+  color: var(--text-2);
+}
+
+/**
+ * RF-038 disabled state: ellipse/text/group/path/component_instance
+ * nodes render a greyed-out placeholder + explanatory text rather than
+ * vanishing. The greyed shape matches the live preview's dimensions so
+ * the section keeps a stable vertical footprint across kinds.
+ */
+.sigil-corner-section__disabled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--size-2);
+  padding: var(--size-3) var(--size-2);
+  opacity: 0.55;
+}
+
+.sigil-corner-section__disabled-preview {
+  width: 120px;
+  height: 90px;
+  border: 1.5px dashed var(--border-2);
+  border-radius: var(--radius-2);
+}
+
+.sigil-corner-section__disabled-text {
+  margin: 0;
+  font-size: var(--font-size-0);
+  text-align: center;
+  color: var(--text-3);
+}

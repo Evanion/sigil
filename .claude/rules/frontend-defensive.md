@@ -20,7 +20,7 @@ Checklist for any new display↔storage transform:
 3. When reading for render, use the cached value if the derived value falls in the collapsed region.
 4. Add a regression test: enter a value in the collapsed region, assert that the displayed value on the next render matches the entry (not the round-tripped collapse).
 
-Precedent: RF-D01 (PR #57 color picker — HSL hue/saturation lost on achromatic colors).
+Precedent: RF-D01 (PR #57 color picker — HSL hue/saturation lost on achromatic colors), PR #65 RF-006 (`createEffect` re-collapsing user "Unlock axes" toggle after symmetric-radii commit — same pattern, different surface).
 
 ### User-Initiated Mutations Must Use Optimistic Updates
 

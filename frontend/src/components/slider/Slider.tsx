@@ -19,8 +19,19 @@ export interface SliderProps {
    * final value. Use this to commit a single history entry per gesture.
    */
   onChangeEnd?: (value: number) => void;
-  /** Accessible label (required). */
-  ariaLabel: string;
+  /**
+   * Accessible label. Required UNLESS `ariaLabelledBy` is supplied — exactly
+   * one of `ariaLabel` or `ariaLabelledBy` MUST be provided. When both are
+   * provided, `ariaLabelledBy` wins and `aria-label` is omitted (per
+   * a11y-rules.md "Label association").
+   */
+  ariaLabel?: string;
+  /**
+   * ID of an external element that labels the slider thumb. When set, the
+   * thumb's `aria-label` is omitted so the visible label becomes the sole
+   * accessible name.
+   */
+  ariaLabelledBy?: string;
   /** Human-readable description of the current value for screen readers. */
   ariaValueText?: string;
   min?: number;
@@ -89,6 +100,7 @@ export function Slider(props: SliderProps) {
     "onChangeStart",
     "onChangeEnd",
     "ariaLabel",
+    "ariaLabelledBy",
     "ariaValueText",
     "min",
     "max",
@@ -129,7 +141,8 @@ export function Slider(props: SliderProps) {
       maxValue={local.max}
       step={local.step}
       disabled={local.disabled}
-      aria-label={local.ariaLabel}
+      aria-label={local.ariaLabelledBy !== undefined ? undefined : local.ariaLabel}
+      aria-labelledby={local.ariaLabelledBy}
     >
       <KobalteSlider.Track class="sigil-slider__track">
         <KobalteSlider.Fill class="sigil-slider__fill" />
