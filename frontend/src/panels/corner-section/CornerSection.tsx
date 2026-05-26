@@ -1,38 +1,34 @@
 /**
  * The Corner Editor section that lives in DesignPanel's Appearance tab.
  *
- * Responsibilities (this task — scaffold only):
+ * Responsibilities:
  *  - Render the preview + hotspots (delegated to CornerPreviewSvg).
  *  - On hotspot click, open the project's native Popover wrapper with
- *    CornerPopover as its content.
+ *    CornerPopover as its content, anchored visually at the clicked
+ *    hotspot via the Popover wrapper's `anchorRef` prop.
+ *  - Restore focus to the activating hotspot when the popover closes
+ *    (Escape, light-dismiss outside click, commit).
  *  - Route popover commits to the parent (CornerSection is itself a
  *    presentational component; the store-write happens at the
  *    DesignPanel level via the `onCorners` callback).
  *
- * Composition note — the Popover wrapper's actual API:
- *   `frontend/src/components/popover/Popover.tsx` accepts `trigger` as
- *   JSX content (NOT as an external HTMLButtonElement reference) and
- *   renders its OWN <button class="sigil-popover-trigger"> around it
- *   with `anchor-name` for CSS Anchor Positioning. The plan's
- *   suggested `trigger={anchorButton()!}` pattern (passing an external
- *   button ref) does not match the wrapper.
+ * Anchoring (RF-001 / Batch A landed in ac39fc6):
+ *   The Popover wrapper accepts an external `anchorRef: HTMLElement | null`
+ *   prop. When provided, the wrapper skips rendering its internal
+ *   trigger button, applies CSS Anchor Positioning to the external
+ *   element (so the popover floats over the clicked hotspot), and
+ *   mirrors ARIA expand-state attributes onto it. CornerSection captures
+ *   the clicked hotspot element from CornerPreviewSvg's onHotspotActivate
+ *   callback and feeds it into the wrapper as the anchor.
  *
- *   We therefore use the wrapper in **controlled mode**: it always
- *   renders, with `open` driven by `activeHotspot() !== null`. The
- *   wrapper's internal trigger button is rendered hidden (visually,
- *   aria-hidden) — the visible "triggers" remain the 9 hotspot
- *   buttons inside CornerPreviewSvg. When a hotspot is activated,
- *   CornerSection flips `activeHotspot` to that id, which (a) opens
- *   the popover via the controlled `open` prop and (b) tells
- *   CornerPopover which hotspot to edit. Visual anchoring to the
- *   clicked hotspot is a polish concern for a later task — the
- *   current popover anchors to its internal hidden trigger, which is
- *   sufficient for the scaffold + tests.
- *
- * Subsequent tasks add:
- *  - Task 14: auto-link + superellipse lock state on the preview.
- *  - Task 15: RF-038 disabled state for non-corner-bearing kinds.
- *  - Task 16: wire-up to DesignPanel + store.
+ * Focus return (RF-002):
+ *   The activating element is also remembered separately as
+ *   `lastTriggerEl` so we can restore focus when the popover closes —
+ *   `anchorEl` is cleared eagerly on close to release the ARIA mirror,
+ *   but focus restoration needs the element AFTER the popover unmount
+ *   completes. The restore call is scheduled via `queueMicrotask` so the
+ *   popover's own cleanup runs first (otherwise it can steal focus back
+ *   to its default placement).
  */
 
 import type { Component } from "solid-js";
@@ -95,14 +91,52 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
     const c = corners();
     return c !== null && isSuperellipseUniform(c);
   });
-  const [activeHotspot, setActiveHotspot] = createSignal<HotspotId | null>(null);
 
-  function handleHotspotActivate(id: HotspotId): void {
+  /**
+   * Which hotspot is currently being edited. Drives both (a) the
+   * Popover wrapper's `open` prop, and (b) which corner indices
+   * CornerPopover targets.
+   */
+  const [activeHotspot, setActiveHotspot] = createSignal<HotspotId | null>(null);
+  /**
+   * The DOM element the popover is currently anchored to. Passed to the
+   * Popover wrapper as `anchorRef` — see the wrapper's external-anchor
+   * effect for the CSS Anchor Positioning + ARIA mirror behavior. Cleared
+   * on close so the wrapper releases its ARIA mutations on the hotspot.
+   */
+  const [anchorEl, setAnchorEl] = createSignal<HTMLButtonElement | null>(null);
+  /**
+   * The most-recent activating element, retained beyond `anchorEl` so we
+   * can restore focus to it after the popover closes (RF-002). We can't
+   * read `anchorEl()` for this because it's cleared in handleOpenChange
+   * BEFORE the focus restoration so the wrapper releases its ARIA
+   * mirroring; `lastTriggerEl` outlives that clear and is the focus
+   * target.
+   */
+  const [lastTriggerEl, setLastTriggerEl] = createSignal<HTMLButtonElement | null>(null);
+
+  function handleHotspotActivate(id: HotspotId, element: HTMLButtonElement): void {
+    setAnchorEl(element);
+    setLastTriggerEl(element);
     setActiveHotspot(id);
   }
 
   function handleOpenChange(open: boolean): void {
-    if (!open) setActiveHotspot(null);
+    if (open) return;
+    // Capture the focus-return target BEFORE clearing the anchor — the
+    // anchor clear releases the wrapper's ARIA mirroring eagerly so the
+    // hotspot's aria-expanded flips back to "false" immediately, but
+    // focus restoration must outlive that clear because the popover's
+    // own onCleanup may run between now and the next microtask.
+    const trigger = lastTriggerEl();
+    setActiveHotspot(null);
+    setAnchorEl(null);
+    // Restore focus AFTER the wrapper's teardown completes. Without this
+    // microtask deferral the popover's hidePopover() implementation can
+    // steal focus back to its default placement, defeating the restore.
+    queueMicrotask(() => {
+      trigger?.focus();
+    });
   }
 
   function handleCommit(newCorners: Corners): void {
@@ -132,25 +166,27 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
               nonCenterHotspotsDisabled={locked()}
             />
             {/*
-             * Controlled-mode Popover. The wrapper renders its own
-             * <button class="sigil-popover-trigger"> internally — we
-             * visually hide it because the hotspot buttons inside
-             * CornerPreviewSvg are the real triggers (clicking a hotspot
-             * sets `activeHotspot`, which opens the popover via `open`).
+             * Popover anchored directly at the clicked hotspot via the
+             * wrapper's `anchorRef` prop. The wrapper skips rendering
+             * its own trigger button when `anchorRef` is provided —
+             * there is no aria-hidden host wrapper anymore (RF-001).
+             *
+             * `trigger` is required by the Popover prop type even when
+             * `anchorRef` is supplied (the wrapper ignores it in that
+             * mode), so we pass an empty fragment.
              */}
-            <div class="sigil-corner-section__popover-host" aria-hidden="true">
-              <Popover
-                open={activeHotspot() !== null}
-                onOpenChange={handleOpenChange}
-                trigger={<span class="sigil-corner-section__popover-anchor" />}
-                placement="bottom"
-                modal
-              >
-                <Show when={activeHotspot()}>
-                  {(id) => <CornerPopover target={id()} corners={c()} onCommit={handleCommit} />}
-                </Show>
-              </Popover>
-            </div>
+            <Popover
+              open={activeHotspot() !== null}
+              onOpenChange={handleOpenChange}
+              anchorRef={anchorEl()}
+              trigger={null}
+              placement="bottom"
+              modal
+            >
+              <Show when={activeHotspot()}>
+                {(id) => <CornerPopover target={id()} corners={c()} onCommit={handleCommit} />}
+              </Show>
+            </Popover>
           </>
         )}
       </Show>

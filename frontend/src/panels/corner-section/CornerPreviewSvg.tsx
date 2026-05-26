@@ -11,7 +11,7 @@
  */
 
 import type { Component } from "solid-js";
-import { createMemo, For } from "solid-js";
+import { createMemo, createUniqueId, For, Show } from "solid-js";
 import type { Corners } from "../../types/document";
 import { appendCornerPath } from "../../canvas/corner-path";
 import { SvgPathBuilder } from "./corner-svg-builder";
@@ -60,6 +60,14 @@ const NON_CENTER_LOCKED_TITLE =
   "Superellipse applies to all corners. Change the shape to edit corners individually.";
 
 export const CornerPreviewSvg: Component<CornerPreviewSvgProps> = (props) => {
+  /**
+   * Stable id for the shared lock-state description (RF-004). Generated
+   * unconditionally so server-rendered output stays deterministic; the
+   * sr-only span is only rendered when `nonCenterHotspotsDisabled` is
+   * true, and each locked hotspot points at it via `aria-describedby`.
+   */
+  const lockedDescriptionId = createUniqueId();
+
   const pathD = createMemo(() => {
     const builder = new SvgPathBuilder();
     appendCornerPath(
@@ -93,25 +101,38 @@ export const CornerPreviewSvg: Component<CornerPreviewSvgProps> = (props) => {
       </svg>
       <div class="sigil-corner-preview__hotspots">
         <For each={ALL_HOTSPOT_IDS}>
-          {(id) => (
-            <button
-              type="button"
-              class={`sigil-corner-preview__hotspot sigil-corner-preview__hotspot--${id}`}
-              aria-label={HOTSPOT_ARIA[id]}
-              aria-disabled={
-                props.nonCenterHotspotsDisabled && id !== "center" ? "true" : undefined
-              }
-              data-hotspot={id}
-              title={
-                props.nonCenterHotspotsDisabled && id !== "center"
-                  ? NON_CENTER_LOCKED_TITLE
-                  : undefined
-              }
-              onClick={(e) => handleClick(id, e)}
-            />
-          )}
+          {(id) => {
+            const isLocked = (): boolean =>
+              props.nonCenterHotspotsDisabled === true && id !== "center";
+            return (
+              <button
+                type="button"
+                class={`sigil-corner-preview__hotspot sigil-corner-preview__hotspot--${id}`}
+                classList={{ "sigil-corner-preview__hotspot--locked": isLocked() }}
+                aria-label={HOTSPOT_ARIA[id]}
+                aria-disabled={isLocked() ? "true" : undefined}
+                aria-describedby={isLocked() ? lockedDescriptionId : undefined}
+                data-hotspot={id}
+                title={isLocked() ? NON_CENTER_LOCKED_TITLE : undefined}
+                onClick={(e) => handleClick(id, e)}
+              />
+            );
+          }}
         </For>
       </div>
+      {/*
+       * Shared screen-reader-only explanation for locked hotspots
+       * (RF-004). One span per preview; every disabled hotspot points
+       * at it via aria-describedby. Rendered only while locked so AT
+       * scanning the DOM doesn't surface a stale description when the
+       * lock state is inactive. The visible `title` attribute remains
+       * on each hotspot for sighted mouse users.
+       */}
+      <Show when={props.nonCenterHotspotsDisabled === true}>
+        <span id={lockedDescriptionId} class="sr-only">
+          {NON_CENTER_LOCKED_TITLE}
+        </span>
+      </Show>
     </div>
   );
 };

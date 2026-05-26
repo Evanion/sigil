@@ -18,16 +18,23 @@
   pointer-events: none;
 }
 
+/*
+ * Hotspots are always visible at a faint resting opacity (RF-003).
+ * The previous `opacity: 0` default made them invisible until hover,
+ * which violates "controls must be discoverable for keyboard / touch
+ * users who can't hover" — a faint-but-present dot communicates the
+ * affordance.
+ */
 .sigil-corner-preview__hotspot {
   position: absolute;
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: transparent;
-  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   cursor: pointer;
   pointer-events: auto;
-  opacity: 0;
+  opacity: 0.35;
   transition:
     opacity 120ms ease,
     border-color 120ms ease,
@@ -40,7 +47,7 @@
   }
 }
 
-/* Reveal on section hover or focus-within. */
+/* Reveal on section hover or focus-within (stronger affordance). */
 .sigil-corner-preview:hover .sigil-corner-preview__hotspot,
 .sigil-corner-preview:focus-within .sigil-corner-preview__hotspot {
   opacity: 1;
@@ -60,9 +67,31 @@
   outline-offset: 2px;
 }
 
+/*
+ * Disabled (locked) hotspots stay visibly dimmed (RF-003): they remain
+ * present in the DOM AND visible to communicate "I exist but am
+ * currently locked" rather than vanishing entirely. The dashed border
+ * + not-allowed cursor reinforces the lock-state affordance.
+ * Important: do NOT set opacity: 0 here — that would re-introduce the
+ * "invisible disabled control" anti-pattern.
+ */
 .sigil-corner-preview__hotspot[aria-disabled="true"] {
   cursor: not-allowed;
-  opacity: 0;
+  opacity: 0.15;
+  border-style: dashed;
+}
+
+/*
+ * Even on section hover/focus-within, locked hotspots stay dimmed —
+ * the hover state should not falsely promise interactivity for a
+ * control the user cannot operate. The non-locked center hotspot
+ * still reveals at full opacity via the rule above.
+ */
+.sigil-corner-preview:hover .sigil-corner-preview__hotspot[aria-disabled="true"],
+.sigil-corner-preview:focus-within .sigil-corner-preview__hotspot[aria-disabled="true"] {
+  opacity: 0.25;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.25);
 }
 
 /* Hotspot positions — percentages relative to the wrapper. */

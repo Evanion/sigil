@@ -21,27 +21,6 @@
 }
 
 /**
- * The Popover wrapper renders its own <button class="sigil-popover-trigger">
- * — we visually hide it because the real triggers are the hotspot buttons
- * inside CornerPreviewSvg. Keeping the wrapper's trigger in the DOM (zero
- * size + aria-hidden) preserves the wrapper's anchor-name / popovertarget
- * wiring while removing it from the visual layout and the focus order.
- */
-.sigil-corner-section__popover-host {
-  position: absolute;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  pointer-events: none;
-}
-
-.sigil-corner-section__popover-anchor {
-  display: block;
-  width: 0;
-  height: 0;
-}
-
-/**
  * RF-038 disabled state: ellipse/text/group/path/component_instance
  * nodes render a greyed-out placeholder + explanatory text rather than
  * vanishing. The greyed shape matches the live preview's dimensions so

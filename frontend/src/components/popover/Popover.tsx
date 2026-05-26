@@ -333,11 +333,23 @@ export function Popover(props: PopoverProps) {
    * Mirror `aria-expanded` on the external anchor whenever the open state
    * changes. Kept separate from the setup effect so that opening/closing
    * does not re-trigger anchor-name reassignment or other DOM mutation.
+   *
+   * IMPORTANT: read `isOpen()` BEFORE the early-return so this effect
+   * always subscribes to the open-state signal. If we return before
+   * reading `isOpen()`, Solid only tracks signals read during the
+   * effect's synchronous body — and a subsequent change to `isOpen()`
+   * would not re-run the effect, leaving `aria-expanded` stale.
+   * Reading the signal first guarantees the dependency is registered
+   * on every invocation, including the first when `managedAnchor` is
+   * still null. (See CLAUDE.md frontend-defensive.md "Effects That
+   * Call Helper Functions Inherit the Helper's Reactive Reads" — the
+   * same tracking contract applies to direct signal reads.)
    */
   createEffect(() => {
+    const open = isOpen();
     const el = managedAnchor;
     if (!el) return;
-    el.setAttribute("aria-expanded", isOpen() ? "true" : "false");
+    el.setAttribute("aria-expanded", open ? "true" : "false");
   });
 
   onCleanup(() => {

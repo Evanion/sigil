@@ -6,6 +6,21 @@ import { render, fireEvent, cleanup } from "@solidjs/testing-library";
 import { CornerSection } from "../CornerSection";
 import type { DocumentNode } from "../../../types/document";
 
+/** Wait for queueMicrotask-scheduled focus restoration to flush. */
+function flushMicrotasks(): Promise<void> {
+  return new Promise((resolve) => queueMicrotask(resolve));
+}
+
+/** Wait for multiple ticks of microtask / Solid reactive flushing. */
+async function flushReactive(ticks = 4): Promise<void> {
+  for (let i = 0; i < ticks; i++) {
+    await flushMicrotasks();
+    // A `Promise.resolve()` await is a separate microtask checkpoint
+    // than queueMicrotask, helping Solid's effect scheduler catch up.
+    await Promise.resolve();
+  }
+}
+
 function makeRectNode(uuid = "n1"): DocumentNode {
   return {
     id: { index: 1, generation: 0 },
@@ -86,6 +101,94 @@ describe("CornerSection — orchestration", () => {
     // Look for the popover header text.
     const headers = Array.from(document.querySelectorAll("h3")).map((h) => h.textContent);
     expect(headers).toContain("Top-left corner");
+  });
+
+  it("does not wrap the popover in an aria-hidden host element (RF-001)", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeRectNode()} onCorners={() => {}} />
+    ));
+    // The legacy aria-hidden host wrapper around the Popover wrapper has
+    // been removed — the Popover is anchored via the new anchorRef API
+    // directly to the clicked hotspot button.
+    expect(container.querySelector(".sigil-corner-section__popover-host")).toBeNull();
+    // Sanity: no aria-hidden container should sit between the preview and
+    // any focusable popover element it controls.
+    const ariaHiddenContainers = container.querySelectorAll('[aria-hidden="true"]');
+    for (const el of ariaHiddenContainers) {
+      // Allow the disabled-preview decoration; reject anything that holds
+      // a focusable button.
+      expect(el.querySelector("button")).toBeNull();
+    }
+  });
+
+  it("mirrors aria-expanded onto the clicked hotspot when the popover opens (RF-001 anchorRef)", async () => {
+    const { container } = render(() => (
+      <CornerSection node={makeRectNode()} onCorners={() => {}} />
+    ));
+    const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
+    // Before activation, no anchor is bound so the wrapper hasn't yet
+    // mirrored ARIA expand-state onto the hotspot. After click + toggle,
+    // the wrapper's external-anchor effect adopts the element and
+    // mirrors `aria-expanded` + `aria-haspopup` + `aria-controls`.
+    fireEvent.click(tl);
+    simulatePopoverToggle(true);
+    await flushReactive();
+    expect(tl.getAttribute("aria-expanded")).toBe("true");
+    expect(tl.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(tl.getAttribute("aria-controls")).not.toBeNull();
+  });
+
+  it("focus returns to the activating hotspot when handleOpenChange(false) fires (RF-002)", async () => {
+    // Install a second focusable element to simulate focus moving inside
+    // the popover content (jsdom does not move focus when the body or a
+    // non-tabbable element is targeted by .focus()).
+    const sink = document.createElement("button");
+    sink.textContent = "focus sink";
+    document.body.appendChild(sink);
+    try {
+      const { container } = render(() => (
+        <CornerSection node={makeRectNode()} onCorners={() => {}} />
+      ));
+      const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
+      tl.focus();
+      fireEvent.click(tl);
+      simulatePopoverToggle(true);
+      // Move focus AWAY from the trigger — this is what would happen
+      // when focus moves into the popover content in a real browser.
+      sink.focus();
+      expect(document.activeElement).toBe(sink);
+      // Close via the Popover wrapper's toggle event.
+      simulatePopoverToggle(false);
+      // Focus restoration is scheduled via queueMicrotask so the popover's
+      // own teardown completes first.
+      await flushMicrotasks();
+      expect(document.activeElement).toBe(tl);
+    } finally {
+      sink.remove();
+    }
+  });
+
+  it("focus returns to the activating hotspot when the popover closes via Escape (RF-002)", async () => {
+    const sink = document.createElement("button");
+    sink.textContent = "focus sink";
+    document.body.appendChild(sink);
+    try {
+      const { container } = render(() => (
+        <CornerSection node={makeRectNode()} onCorners={() => {}} />
+      ));
+      const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
+      tl.focus();
+      fireEvent.click(tl);
+      simulatePopoverToggle(true);
+      sink.focus();
+      // Escape triggers the Popover wrapper's hidePopover which in turn
+      // fires a toggle event (newState=closed). Simulate that here.
+      simulatePopoverToggle(false);
+      await flushMicrotasks();
+      expect(document.activeElement).toBe(tl);
+    } finally {
+      sink.remove();
+    }
   });
 
   it("committing from the popover invokes onCorners with the new array", async () => {
