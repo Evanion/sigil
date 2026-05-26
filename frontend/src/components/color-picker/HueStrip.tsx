@@ -171,6 +171,7 @@ export function HueStrip(props: HueStripProps) {
       aria-valuemin={0}
       aria-valuemax={360}
       aria-valuenow={Math.round(props.hue)}
+      aria-valuetext={`${Math.round(props.hue)}°`}
       style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

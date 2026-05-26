@@ -169,6 +169,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(props.alpha * 100)}
+      aria-valuetext={`${Math.round(props.alpha * 100)}%`}
       style={{ width: "100%", height: `${STRIP_HEIGHT}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}

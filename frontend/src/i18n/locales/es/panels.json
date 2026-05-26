@@ -170,7 +170,8 @@
     }
   },
   "colorPicker": {
-    "outOfGamut": "El color está fuera del gamut sRGB",
+    "outOfGamutShort": "Fuera del gamut sRGB",
+    "outOfGamutLong": "El color está fuera del gamut sRGB",
     "title": "Selector de color",
     "areaLabel": "Saturación y luminosidad del color",
     "hue": "Tono",

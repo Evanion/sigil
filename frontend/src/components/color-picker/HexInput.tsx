@@ -113,8 +113,8 @@ export function HexInput(props: HexInputProps) {
       <Show when={props.isOutOfGamut}>
         <span
           class="sigil-hex-input__gamut-warning"
-          title={t("panels:colorPicker.outOfGamut")}
-          aria-label={t("panels:colorPicker.outOfGamut")}
+          title={t("panels:colorPicker.outOfGamutLong")}
+          aria-label={t("panels:colorPicker.outOfGamutShort")}
           role="img"
         >
           {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative warning glyph; accessible name comes from aria-label/title */}

@@ -170,7 +170,8 @@
     }
   },
   "colorPicker": {
-    "outOfGamut": "La couleur est hors de la gamme sRGB",
+    "outOfGamutShort": "Hors gamme sRGB",
+    "outOfGamutLong": "La couleur est hors de la gamme sRGB",
     "title": "Sélecteur de couleur",
     "areaLabel": "Saturation et luminosité de la couleur",
     "hue": "Teinte",

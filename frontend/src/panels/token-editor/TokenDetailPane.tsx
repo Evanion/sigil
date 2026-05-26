@@ -192,13 +192,14 @@ export const TokenDetailPane: Component<TokenDetailPaneProps> = (rawProps) => {
         return (
           <div class="sigil-token-detail-pane__preview sigil-token-detail-pane__preview--typo">
             <span
+              aria-hidden="true"
               style={{
                 "font-family": `${fontFamily}, sans-serif`,
                 "font-size": `${fontSize}px`,
                 "font-weight": String(fontWeight),
               }}
             >
-              {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: font preview convention (universal across design tools); not a translatable label */}
+              {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: decorative font preview convention (universal across design tools); aria-hidden so SR users don't hear "Aa" */}
               {"Aa"}
             </span>
           </div>
