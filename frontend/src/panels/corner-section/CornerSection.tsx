@@ -53,9 +53,9 @@ interface CornerSectionProps {
 
 /**
  * Returns the node's `corners` tuple if the node is corner-bearing
- * (rectangle, frame, image), otherwise null. Task 13 simply hides the
- * section for non-corner-bearing kinds via `<Show>`; Task 15 adds the
- * RF-038 disabled state with a tooltip explanation.
+ * (rectangle, frame, image), otherwise null. Task 15 renders a disabled
+ * placeholder (rather than hiding the section) for non-corner-bearing
+ * kinds — see `sectionState` below and the RF-038 entry in Spec 14 §13.
  */
 function getCorners(node: DocumentNode): Corners | null {
   if (node.kind.type === "rectangle" || node.kind.type === "frame" || node.kind.type === "image") {
@@ -64,7 +64,32 @@ function getCorners(node: DocumentNode): Corners | null {
   return null;
 }
 
+/**
+ * Tri-state for the section, per Spec 14 §13 RF-038:
+ *  - "active"   — node is rectangle / frame / image; render the preview
+ *                 + hotspots + popover.
+ *  - "disabled" — node is ellipse / text / group / path / component_instance;
+ *                 render a greyed placeholder + an sr-only status line
+ *                 explaining why the editor is unavailable, rather than
+ *                 vanishing (which would surprise users who selected a
+ *                 single non-corner-bearing node).
+ *
+ * The component's `node` prop is non-nullable, so there is no
+ * "no-selection" branch — the parent gates rendering when nothing is
+ * selected.
+ */
+type CornerSectionState = "active" | "disabled";
+
+function sectionState(node: DocumentNode): CornerSectionState {
+  const kind = node.kind.type;
+  if (kind === "rectangle" || kind === "frame" || kind === "image") return "active";
+  return "disabled";
+}
+
+const DISABLED_EXPLANATION = "Corner radius applies to rectangles, frames, and images only.";
+
 export const CornerSection: Component<CornerSectionProps> = (props) => {
+  const state = createMemo<CornerSectionState>(() => sectionState(props.node));
   const corners = createMemo<Corners | null>(() => getCorners(props.node));
   const locked = createMemo(() => {
     const c = corners();
@@ -85,37 +110,53 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
   }
 
   return (
-    <Show when={corners()} fallback={<></>}>
-      {(c) => (
-        <section class="sigil-corner-section">
-          <h2 class="sigil-corner-section__header">Corners</h2>
-          <CornerPreviewSvg
-            corners={c()}
-            onHotspotActivate={handleHotspotActivate}
-            nonCenterHotspotsDisabled={locked()}
-          />
-          {/*
-           * Controlled-mode Popover. The wrapper renders its own
-           * <button class="sigil-popover-trigger"> internally — we
-           * visually hide it because the hotspot buttons inside
-           * CornerPreviewSvg are the real triggers (clicking a hotspot
-           * sets `activeHotspot`, which opens the popover via `open`).
-           */}
-          <div class="sigil-corner-section__popover-host" aria-hidden="true">
-            <Popover
-              open={activeHotspot() !== null}
-              onOpenChange={handleOpenChange}
-              trigger={<span class="sigil-corner-section__popover-anchor" />}
-              placement="bottom"
-              modal
-            >
-              <Show when={activeHotspot()}>
-                {(id) => <CornerPopover target={id()} corners={c()} onCommit={handleCommit} />}
-              </Show>
-            </Popover>
+    <section class="sigil-corner-section">
+      <h2 class="sigil-corner-section__header">Corners</h2>
+      <Show
+        when={state() === "active" ? corners() : null}
+        fallback={
+          <div
+            class="sigil-corner-section__disabled"
+            data-testid="corner-section__disabled"
+          >
+            <div class="sigil-corner-section__disabled-preview" aria-hidden="true" />
+            <p class="sigil-corner-section__disabled-text">{DISABLED_EXPLANATION}</p>
+            <span class="sigil-corner-section__sr-only" role="status">
+              {DISABLED_EXPLANATION}
+            </span>
           </div>
-        </section>
-      )}
-    </Show>
+        }
+      >
+        {(c) => (
+          <>
+            <CornerPreviewSvg
+              corners={c()}
+              onHotspotActivate={handleHotspotActivate}
+              nonCenterHotspotsDisabled={locked()}
+            />
+            {/*
+             * Controlled-mode Popover. The wrapper renders its own
+             * <button class="sigil-popover-trigger"> internally — we
+             * visually hide it because the hotspot buttons inside
+             * CornerPreviewSvg are the real triggers (clicking a hotspot
+             * sets `activeHotspot`, which opens the popover via `open`).
+             */}
+            <div class="sigil-corner-section__popover-host" aria-hidden="true">
+              <Popover
+                open={activeHotspot() !== null}
+                onOpenChange={handleOpenChange}
+                trigger={<span class="sigil-corner-section__popover-anchor" />}
+                placement="bottom"
+                modal
+              >
+                <Show when={activeHotspot()}>
+                  {(id) => <CornerPopover target={id()} corners={c()} onCommit={handleCommit} />}
+                </Show>
+              </Popover>
+            </div>
+          </>
+        )}
+      </Show>
+    </section>
   );
 };

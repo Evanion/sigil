@@ -40,3 +40,50 @@
   width: 0;
   height: 0;
 }
+
+/**
+ * RF-038 disabled state: ellipse/text/group/path/component_instance
+ * nodes render a greyed-out placeholder + explanatory text rather than
+ * vanishing. The greyed shape matches the live preview's dimensions so
+ * the section keeps a stable vertical footprint across kinds.
+ */
+.sigil-corner-section__disabled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--size-2);
+  padding: var(--size-3) var(--size-2);
+  opacity: 0.55;
+}
+
+.sigil-corner-section__disabled-preview {
+  width: 120px;
+  height: 90px;
+  border: 1.5px dashed var(--border-2);
+  border-radius: var(--radius-2);
+}
+
+.sigil-corner-section__disabled-text {
+  margin: 0;
+  font-size: var(--font-size-0);
+  text-align: center;
+  color: var(--text-3);
+}
+
+/**
+ * Screen-reader-only utility — visually hidden but discoverable by
+ * assistive tech. Identical pattern to the global `.sr-only` rule used
+ * elsewhere; duplicated here so the disabled-state status line stays
+ * self-contained.
+ */
+.sigil-corner-section__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

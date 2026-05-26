@@ -154,3 +154,51 @@ describe("CornerSection — superellipse lock state", () => {
     );
   });
 });
+
+function makeEllipseNode(): DocumentNode {
+  return {
+    ...makeRectNode("n-e"),
+    kind: { type: "ellipse" },
+  } as DocumentNode;
+}
+
+function makeGroupNode(): DocumentNode {
+  return {
+    ...makeRectNode("n-g"),
+    kind: { type: "group" },
+  } as DocumentNode;
+}
+
+describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds", () => {
+  it("renders the disabled placeholder for an ellipse node", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
+    ));
+    expect(
+      container.querySelector('[data-testid="corner-section__disabled"]'),
+    ).not.toBeNull();
+    expect(container.querySelector("button[data-hotspot]")).toBeNull();
+    expect(container.textContent).toContain(
+      "Corner radius applies to rectangles, frames, and images only",
+    );
+  });
+
+  it("renders the disabled placeholder for a group node", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeGroupNode()} onCorners={() => {}} />
+    ));
+    expect(
+      container.querySelector('[data-testid="corner-section__disabled"]'),
+    ).not.toBeNull();
+  });
+
+  it("the disabled state has a sr-only role=status line with the explanation", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
+    ));
+    const status = container.querySelector('[role="status"]');
+    expect(status?.textContent).toContain(
+      "Corner radius applies to rectangles, frames, and images only",
+    );
+  });
+});
