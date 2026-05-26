@@ -1,7 +1,106 @@
+.sigil-corner-preview {
+  position: relative;
+  width: 100%;
+  max-width: 200px;
+  margin: 0 auto;
+  aspect-ratio: 200 / 150;
+}
+
 .sigil-corner-preview__svg {
   display: block;
   width: 100%;
   height: auto;
-  max-width: 200px;
-  max-height: 150px;
+}
+
+.sigil-corner-preview__hotspots {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sigil-corner-preview__hotspot {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  opacity: 0;
+  transition: opacity 120ms ease, border-color 120ms ease, background-color 120ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-corner-preview__hotspot {
+    transition: none;
+  }
+}
+
+/* Reveal on section hover or focus-within. */
+.sigil-corner-preview:hover .sigil-corner-preview__hotspot,
+.sigil-corner-preview:focus-within .sigil-corner-preview__hotspot {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.sigil-corner-preview__hotspot:hover,
+.sigil-corner-preview__hotspot:focus {
+  background: rgba(74, 158, 255, 0.3);
+  border-color: rgba(74, 158, 255, 0.9);
+  outline: none;
+}
+
+.sigil-corner-preview__hotspot:focus-visible {
+  outline: 2px solid var(--sigil-focus-ring, #4a9eff);
+  outline-offset: 2px;
+}
+
+.sigil-corner-preview__hotspot[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0;
+}
+
+/* Hotspot positions — percentages relative to the wrapper. */
+.sigil-corner-preview__hotspot--tl {
+  top: 10%;
+  left: 12%;
+}
+.sigil-corner-preview__hotspot--tr {
+  top: 10%;
+  right: 12%;
+}
+.sigil-corner-preview__hotspot--br {
+  bottom: 10%;
+  right: 12%;
+}
+.sigil-corner-preview__hotspot--bl {
+  bottom: 10%;
+  left: 12%;
+}
+.sigil-corner-preview__hotspot--top {
+  top: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sigil-corner-preview__hotspot--bottom {
+  bottom: 10%;
+  left: 50%;
+  transform: translateX(-50%);
+}
+.sigil-corner-preview__hotspot--left {
+  top: 50%;
+  left: 12%;
+  transform: translateY(-50%);
+}
+.sigil-corner-preview__hotspot--right {
+  top: 50%;
+  right: 12%;
+  transform: translateY(-50%);
+}
+.sigil-corner-preview__hotspot--center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
 }
