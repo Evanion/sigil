@@ -11,21 +11,21 @@
 import { describe, it, expect } from "vitest";
 import { render } from "@solidjs/testing-library";
 import { TransProvider, useTransContext } from "@mbarzda/solid-i18next";
-import i18next from "i18next";
+import i18next, { type Resource } from "i18next";
 import commonEn from "../locales/en/common.json";
 import commonFr from "../locales/fr/common.json";
 import commonEs from "../locales/es/common.json";
 
 interface LocaleCase {
   readonly lng: "en" | "fr" | "es";
-  readonly resources: Record<string, Record<string, unknown>>;
+  readonly resources: Resource;
   readonly expectedCancel: string;
 }
 
 const cases: readonly LocaleCase[] = [
-  { lng: "en", resources: { en: { common: commonEn } }, expectedCancel: commonEn.cancel as string },
-  { lng: "fr", resources: { fr: { common: commonFr } }, expectedCancel: commonFr.cancel as string },
-  { lng: "es", resources: { es: { common: commonEs } }, expectedCancel: commonEs.cancel as string },
+  { lng: "en", resources: { en: { common: commonEn } }, expectedCancel: commonEn.cancel },
+  { lng: "fr", resources: { fr: { common: commonFr } }, expectedCancel: commonFr.cancel },
+  { lng: "es", resources: { es: { common: commonEs } }, expectedCancel: commonEs.cancel },
 ];
 
 function TestButton() {
