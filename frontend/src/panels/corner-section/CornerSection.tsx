@@ -85,8 +85,6 @@ function sectionState(node: DocumentNode): CornerSectionState {
   return "disabled";
 }
 
-const DISABLED_EXPLANATION = "Corner radius applies to rectangles, frames, and images only.";
-
 export const CornerSection: Component<CornerSectionProps> = (props) => {
   const [t] = useTransContext();
   const state = createMemo<CornerSectionState>(() => sectionState(props.node));
@@ -170,7 +168,9 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
              * to Discrete Status Changes"). The <p> is already in the
              * reading flow; SR users hear it on first focus into the panel.
              */}
-            <p class="sigil-corner-section__disabled-text">{DISABLED_EXPLANATION}</p>
+            <p class="sigil-corner-section__disabled-text">
+              {t("panels:corners.disabledExplanation")}
+            </p>
           </div>
         }
       >

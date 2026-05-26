@@ -148,7 +148,8 @@
     "title": "Coins",
     "shape": "Forme",
     "mixed": "Mixte",
-    "smoothing": "Lissage"
+    "smoothing": "Lissage",
+    "disabledExplanation": "Le rayon des coins s'applique uniquement aux rectangles, cadres et images."
   },
   "colorPicker": {
     "outOfGamut": "La couleur est hors de la gamme sRGB",

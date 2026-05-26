@@ -148,7 +148,8 @@
     "title": "Corners",
     "shape": "Shape",
     "mixed": "Mixed",
-    "smoothing": "Smoothing"
+    "smoothing": "Smoothing",
+    "disabledExplanation": "Corner radius applies to rectangles, frames, and images only."
   },
   "colorPicker": {
     "outOfGamut": "Color is outside the sRGB gamut",

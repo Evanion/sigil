@@ -148,7 +148,8 @@
     "title": "Esquinas",
     "shape": "Forma",
     "mixed": "Mixto",
-    "smoothing": "Suavizado"
+    "smoothing": "Suavizado",
+    "disabledExplanation": "El radio de las esquinas se aplica solo a rectángulos, marcos e imágenes."
   },
   "colorPicker": {
     "outOfGamut": "El color está fuera del gamut sRGB",
