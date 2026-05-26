@@ -310,13 +310,35 @@ Path forward selected by maintainer: **Fix-in-PR** (Path 1).
 
 ## Remediation plan
 
-Path 1 chosen. Batches dispatched per-finding-group in subsequent commits:
+Path 1 chosen. Batches dispatched per-finding-group in subsequent commits.
 
-- **Batch A** — Fix the gate + complete the migration: RF-001 + RF-002 + RF-006 + RF-007 + RF-019 (eslint config), then migrate the now-revealed 83+ violations
-- **Batch B** — Specific hardcoded-string + missing-key bugs: RF-003 + RF-004 + RF-008
-- **Batch C** — Bash/CI hardening: RF-005 + RF-015 + RF-016 + RF-017 + RF-018 + RF-032
-- **Batch D** — Parity script hardening: RF-010 + RF-011 + RF-013 + RF-020 + RF-021
-- **Batch E** — Spanish translation fix: RF-012
+### Status (final)
+
+- **31 findings resolved** (all Critical, High, Major + most Medium and Minor).
+- **2 wont-fix:** RF-029 (eager locale loading — deferred backlog), RF-033 (lodash transitive — informational).
+
+### Final quality gate (post-remediation)
+
+- `pnpm lint`: 0 errors, 0 warnings
+- `tsc --noEmit`: clean
+- `prettier --check`: all files match style
+- `pnpm build`: clean (3.87s)
+- `pnpm test`: 96 test files / 1992 tests passing
+- `node frontend/scripts/check-locale-parity.mjs`: ✓ key trees and placeholder sets match
+- `node frontend/scripts/check-locale-usage.mjs --no-orphans`: ✓ all `t()` references resolve
+
+### Batches dispatched
+
+- **Batch A** — Fix the gate + complete the migration: RF-001 + RF-002 + RF-006 + RF-007 + RF-019 (eslint config), then migrated the 95 newly-revealed violations across 41 source files + 7 test files + 1 helper rename. 60 new keys across en/fr/es. 5 sub-commits.
+- **Batch B** — Specific hardcoded-string + missing-key bugs: RF-003 (DISABLED_EXPLANATION) + RF-004 (returnNull + missing key) + RF-008 (CornerPopover helper refactor + module-scope option arrays). 4 commits. Also folded in RF-023 (teardownI18n) + RF-031 (escapeValue comment).
+- **Batch C** — CI bash hardening: RF-005 + RF-015 + RF-016 + RF-017 + RF-018 (13 block-form disables → next-line) + RF-032. 2 commits.
+- **Batch D** — Parity script hardening: RF-010 (placeholder parity) + RF-011 (depth guard) + RF-013 (new `check-locale-usage.mjs` + CI job) + RF-020 (portable invocation) + RF-021 (test coverage). 5→40 tests in scripts/. 2 commits.
+- **Batch E** — Spanish translation fix: RF-012. Resolved incidentally during Batch A.
+- **Batch F** — A11y improvements: RF-014 (aria-valuetext) + RF-026 (outOfGamut split) + RF-027 (Aa aria-hidden) + RF-028 (smoke test 3→9 tests). 1 commit.
+- **Batch G** — Spec alignment: RF-009 (drop `_meta` mandate) + RF-024 (document shipped persistence). 1 commit.
+- **Batch H** — RF-022 (ESLint rule smoke test, 10 cases) + RF-030 (extract `renderWithI18n` across 10 test files). 2 commits.
+
+Total remediation: 14 commits.
 - **Batch F** — A11y improvements: RF-014 + RF-026 + RF-027 + RF-028
 - **Batch G** — Spec alignment: RF-009 + RF-024
 - **Batch H** — Test smoke + small items: RF-022 + RF-023 + RF-030 + RF-031
