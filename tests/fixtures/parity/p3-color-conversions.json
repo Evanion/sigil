@@ -1,5 +1,5 @@
 {
-  "description": "Cross-language parity vectors for Display-P3 ↔ sRGB conversion (Spec 18). Verifies that the Rust and TypeScript implementations produce identical outputs to within 1e-6. Pipeline: gamma-decoded channels → CIE XYZ (D65) → gamma-encoded channels via the matrices in W3C css-color-4 §10.6 (https://www.w3.org/TR/css-color-4/#color-conversion-code). Expected values were bootstrapped from the Rust implementation and the TypeScript implementation is asserted to match. See CLAUDE.md 'Parallel Implementations Must Have Parity Tests'.",
+  "description": "Cross-language parity vectors for Display-P3 ↔ sRGB conversion (Spec 18). Values are computed directly from W3C css-color-4 §10 matrices (https://www.w3.org/TR/css-color-4/#color-conversion-code) via the script at frontend/scripts/generate-p3-parity.mjs. Both Rust and TypeScript implementations are asserted to match these computed values within tolerance, providing independent ground truth (RF-010). Re-run the generator after any matrix change. See CLAUDE.md 'Parallel Implementations Must Have Parity Tests'.",
   "tolerance": 1e-6,
   "p3_to_srgb": [
     { "name": "black", "p3": [0.0, 0.0, 0.0], "srgb": [0.0, 0.0, 0.0] },
