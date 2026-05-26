@@ -1,7 +1,9 @@
 import { Toast, toaster } from "@kobalte/core/toast";
 import { Portal } from "solid-js/web";
 import type { JSX } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { X } from "lucide-solid";
+import { i18nInstance } from "../../i18n";
 import "./Toast.css";
 
 export type ToastVariant = "info" | "success" | "error" | "warning";
@@ -24,7 +26,7 @@ export function showToast(data: ToastData): void {
       {data.description && (
         <Toast.Description class="sigil-toast__description">{data.description}</Toast.Description>
       )}
-      <Toast.CloseButton class="sigil-toast__close" aria-label="Close">
+      <Toast.CloseButton class="sigil-toast__close" aria-label={i18nInstance.t("common:close")}>
         <X size={14} />
       </Toast.CloseButton>
     </Toast>
@@ -32,9 +34,10 @@ export function showToast(data: ToastData): void {
 }
 
 export function ToastRegion(): JSX.Element {
+  const [t] = useTransContext();
   return (
     <Portal>
-      <Toast.Region aria-label="Notifications">
+      <Toast.Region aria-label={t("common:notifications")}>
         <Toast.List class="sigil-toast-region" />
       </Toast.Region>
     </Portal>

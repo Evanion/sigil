@@ -268,7 +268,7 @@ export function GradientEditor(props: GradientEditorProps) {
   return (
     <div class="sigil-gradient-editor">
       {/* RF-017: Type toggle row — radiogroup with arrow-key navigation */}
-      <div class="sigil-gradient-editor__type-row" role="radiogroup" aria-label="Gradient type">
+      <div class="sigil-gradient-editor__type-row" role="radiogroup" aria-label={t("panels:gradient.type")}>
         <For each={GRADIENT_TYPE_OPTIONS}>
           {(option, i) => {
             const isActive = () => props.gradientType === option.value;
@@ -309,7 +309,7 @@ export function GradientEditor(props: GradientEditorProps) {
         onKeyDown={handleBarKeyDown}
         tabindex={0}
         role="group"
-        aria-label="Gradient stops"
+        aria-label={t("panels:gradient.stops")}
       >
         <For each={props.stops}>
           {(stop, i) => {
@@ -327,7 +327,10 @@ export function GradientEditor(props: GradientEditorProps) {
                 }}
                 role="slider"
                 tabindex={0}
-                aria-label={`Gradient stop ${i() + 1} at ${Math.round(stop.position * 100)}%`}
+                aria-label={t("a11y:gradient.stopAtPercent", {
+                  index: i() + 1,
+                  percent: Math.round(stop.position * 100),
+                })}
                 aria-valuenow={Math.round(stop.position * 100)}
                 aria-valuemin={0}
                 aria-valuemax={100}
@@ -361,7 +364,7 @@ export function GradientEditor(props: GradientEditorProps) {
             min={0}
             max={360}
             suffix="deg"
-            aria-label="Gradient angle"
+            aria-label={t("panels:gradient.angle")}
           />
         </div>
       </Show>

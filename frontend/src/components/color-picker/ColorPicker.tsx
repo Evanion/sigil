@@ -14,6 +14,7 @@
  */
 import { createEffect, createMemo, createSignal, untrack } from "solid-js";
 import { createStore } from "solid-js/store";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Color } from "../../types/document";
 import type { ColorDisplayMode } from "./types";
 import {
@@ -65,6 +66,7 @@ interface InternalState {
 }
 
 export function ColorPicker(props: ColorPickerProps) {
+  const [t] = useTransContext();
   // ── Internal state ─────────────────────────────────────────────────────
   // Initialise from props.color synchronously so that children (HexInput,
   // ColorValueFields, HueStrip, AlphaStrip) receive the correct sRGB values
@@ -386,27 +388,27 @@ export function ColorPicker(props: ColorPickerProps) {
   const outOfGamut = createMemo(() => isOutOfSrgbGamut(props.color));
 
   return (
-    <div class="sigil-color-picker" aria-label="Color picker">
+    <div class="sigil-color-picker" aria-label={t("panels:colorPicker.title")}>
       <ColorArea
         xValue={areaPos().x}
         yValue={areaPos().y}
         onChange={handleAreaChange}
         onCommit={commitColor}
         renderBackground={renderAreaBackground()}
-        aria-label="Color saturation and lightness"
+        aria-label={t("panels:colorPicker.areaLabel")}
       />
       <HueStrip
         hue={state.hue}
         onChange={handleHueChange}
         onCommit={commitColor}
-        aria-label="Hue"
+        aria-label={t("panels:colorPicker.hue")}
       />
       <AlphaStrip
         alpha={state.alpha}
         colorCss={alphaCss()}
         onChange={handleAlphaChange}
         onCommit={commitColor}
-        aria-label="Opacity"
+        aria-label={t("panels:colorPicker.opacity")}
       />
       <HexInput
         r={state.r}

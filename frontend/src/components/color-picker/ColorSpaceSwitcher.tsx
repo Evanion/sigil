@@ -13,6 +13,7 @@
  * (wrapping at ends), calling onChange and moving focus (RF-001).
  */
 import { For } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { ColorDisplayMode } from "./types";
 import "./ColorPicker.css";
 
@@ -43,6 +44,7 @@ export interface ColorDisplayModeSwitcherProps {
 }
 
 export function ColorSpaceSwitcher(props: ColorDisplayModeSwitcherProps) {
+  const [t] = useTransContext();
   const buttonRefs: (HTMLButtonElement | undefined)[] = [];
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -69,7 +71,7 @@ export function ColorSpaceSwitcher(props: ColorDisplayModeSwitcherProps) {
   }
 
   return (
-    <div class="sigil-color-space-switcher" role="radiogroup" aria-label="Color space">
+    <div class="sigil-color-space-switcher" role="radiogroup" aria-label={t("panels:colorPicker.colorSpace")}>
       <For each={SPACE_OPTIONS}>
         {(option, i) => {
           const isActive = () => props.value === option.value;

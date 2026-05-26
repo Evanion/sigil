@@ -23,5 +23,8 @@
   "off": "Off",
   "connected": "Connected",
   "disconnected": "Disconnected",
-  "panelLabel": "{{name}} panel"
+  "panelLabel": "{{name}} panel",
+  "increment": "Increment",
+  "decrement": "Decrement",
+  "notifications": "Notifications"
 }

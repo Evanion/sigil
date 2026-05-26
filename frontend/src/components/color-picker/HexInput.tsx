@@ -101,7 +101,7 @@ export function HexInput(props: HexInputProps) {
         classList={{ "sigil-hex-input__input--error": isError() }}
         type="text"
         maxLength={7}
-        aria-label="Hex color"
+        aria-label={t("panels:colorPicker.hexColor")}
         value={displayValue()}
         onFocus={handleFocus}
         onBlur={handleBlur}

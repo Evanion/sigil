@@ -76,7 +76,12 @@
     "removeStop": "Remove color stop",
     "radius": "Radius",
     "editGradient": "Edit gradient",
-    "repeating": "Repeating"
+    "repeating": "Repeating",
+    "controls": "Gradient controls",
+    "selectedStop": "Selected stop",
+    "type": "Gradient type",
+    "stops": "Gradient stops",
+    "colorStop": "Color stop"
   },
   "fill": {
     "title": "Fill",
@@ -141,7 +146,14 @@
     "smoothing": "Smoothing"
   },
   "colorPicker": {
-    "outOfGamut": "Color is outside the sRGB gamut"
+    "outOfGamut": "Color is outside the sRGB gamut",
+    "title": "Color picker",
+    "areaLabel": "Color saturation and lightness",
+    "hue": "Hue",
+    "opacity": "Opacity",
+    "hexColor": "Hex color",
+    "colorSpace": "Color space",
+    "colorChannelValues": "Color channel values"
   },
   "node": {
     "title": "Node",

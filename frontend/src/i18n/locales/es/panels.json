@@ -76,7 +76,12 @@
     "removeStop": "Eliminar parada de color",
     "radius": "Radio",
     "editGradient": "Editar degradado",
-    "repeating": "Repetir"
+    "repeating": "Repetir",
+    "controls": "Controles del degradado",
+    "selectedStop": "Parada seleccionada",
+    "type": "Tipo de degradado",
+    "stops": "Paradas del degradado",
+    "colorStop": "Parada de color"
   },
   "fill": {
     "title": "Relleno",
@@ -141,7 +146,14 @@
     "smoothing": "Suavizado"
   },
   "colorPicker": {
-    "outOfGamut": "El color está fuera del gamut sRGB"
+    "outOfGamut": "El color está fuera del gamut sRGB",
+    "title": "Selector de color",
+    "areaLabel": "Saturación y luminosidad del color",
+    "hue": "Tono",
+    "opacity": "Opacidad",
+    "hexColor": "Color hexadecimal",
+    "colorSpace": "Espacio de color",
+    "colorChannelValues": "Valores de los canales de color"
   },
   "node": {
     "title": "Nodo",
