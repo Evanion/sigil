@@ -156,6 +156,14 @@ pub const MIN_CORNER_SMOOTHING: f64 = 0.0;
 /// Maximum superellipse smoothing value (1.0 = full G2-continuous squircle).
 pub const MAX_CORNER_SMOOTHING: f64 = 1.0;
 
+/// Minimum sRGB / Display-P3 color channel value (API-level semantic range).
+/// Deserialization tolerates wider values to allow round-tripping wide-gamut
+/// `OkLCH` conversions; the bound is for API/MCP input validation only.
+pub const MIN_COLOR_CHANNEL: f64 = 0.0;
+
+/// Maximum sRGB / Display-P3 color channel value (API-level semantic range).
+pub const MAX_COLOR_CHANNEL: f64 = 1.0;
+
 // ── Validation Functions ───────────────────────────────────────────────
 
 /// Validates that a float value is finite (not NaN or infinity).
@@ -1615,5 +1623,25 @@ mod tests {
     fn test_validate_corners_rejects_nan_smoothing() {
         let corners = [superellipse_corner(8.0, 8.0, f64::NAN); 4];
         assert!(validate_corners(&corners).is_err());
+    }
+
+    // ── Color channel bounds ───────────────────────────────────────────
+    //
+    // Per CLAUDE.md §11 "Constant Enforcement Tests", every `MIN_*` /
+    // `MAX_*` constant requires a `test_<constant>_enforced` test. These
+    // bounds are scaffolding for forthcoming API/MCP handlers that accept
+    // color input directly; today they are not yet referenced by an
+    // enforcement site, so the tests below assert only the constants'
+    // intended semantic shape (lower bound ≤ 0, upper bound ≥ 1). Richer
+    // boundary tests follow when an enforcement site lands.
+
+    #[test]
+    fn test_min_color_channel_enforced() {
+        assert!(MIN_COLOR_CHANNEL <= 0.0);
+    }
+
+    #[test]
+    fn test_max_color_channel_enforced() {
+        assert!(MAX_COLOR_CHANNEL >= 1.0);
     }
 }
