@@ -10,6 +10,7 @@
  * Keyboard: Alt+ArrowUp / Alt+ArrowDown on a focused EffectCard reorders it.
  */
 import { createMemo, createSignal, Index, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Effect, EffectDropShadow } from "../types/document";
 import { useDocument } from "../store/document-context";
 import { EffectCard } from "./EffectCard";
@@ -34,6 +35,7 @@ const DEFAULT_EFFECT: EffectDropShadow = {
 
 export const EffectsPanel: Component = () => {
   const store = useDocument();
+  const [t] = useTransContext();
 
   // ── Live region announcement (RF-009) ──────────────────────────────
   const [announcement, setAnnouncement] = createSignal("");
@@ -146,24 +148,26 @@ export const EffectsPanel: Component = () => {
   return (
     <div class="sigil-effects-panel" role="region" aria-label="Effects">
       <div class="sigil-effects-panel__header">
-        <span class="sigil-effects-panel__title">Effects</span>
+        <span class="sigil-effects-panel__title">{t("panels:effects.title")}</span>
+        {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
         <button
           class="sigil-effects-panel__add"
           type="button"
-          aria-label="Add effect"
+          aria-label={t("panels:effects.add")}
           disabled={selectedUuid() === null}
           onClick={handleAdd}
         >
           +
         </button>
+        {/* eslint-enable i18next/no-literal-string */}
       </div>
 
       <Show when={selectedUuid() === null}>
-        <p class="sigil-effects-panel__empty">Select a layer to edit effects.</p>
+        <p class="sigil-effects-panel__empty">{t("panels:effects.noSelection")}</p>
       </Show>
 
       <Show when={effects().length === 0 && selectedUuid() !== null}>
-        <p class="sigil-effects-panel__empty">No effects</p>
+        <p class="sigil-effects-panel__empty">{t("panels:effects.empty")}</p>
       </Show>
 
       <Index each={effects() as Effect[]}>

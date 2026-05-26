@@ -1065,6 +1065,7 @@ const ValueInput: Component<ValueInputProps> = (props) => {
             evalResult().resolved !== null
           }
         >
+          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: "= " prefix is a decorative unit-like marker for the resolved value */}
           <span class="sigil-token-input__resolved">= {evalResult().resolved}</span>
         </Show>
       </div>

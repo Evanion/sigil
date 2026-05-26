@@ -33,6 +33,7 @@
 
 import type { Component } from "solid-js";
 import { createMemo, createSignal, Show } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Corners, DocumentNode } from "../../types/document";
 import { Popover } from "../../components/popover/Popover";
 import { CornerPreviewSvg } from "./CornerPreviewSvg";
@@ -87,6 +88,7 @@ function sectionState(node: DocumentNode): CornerSectionState {
 const DISABLED_EXPLANATION = "Corner radius applies to rectangles, frames, and images only.";
 
 export const CornerSection: Component<CornerSectionProps> = (props) => {
+  const [t] = useTransContext();
   const state = createMemo<CornerSectionState>(() => sectionState(props.node));
   const corners = createMemo<Corners | null>(() => getCorners(props.node));
   const locked = createMemo(() => {
@@ -153,7 +155,7 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
        * outline because DesignPanel's panel container starts headings at
        * h2-or-h3 and consistent siblings render at the same level.
        */}
-      <h3 class="sigil-corner-section__header">Corners</h3>
+      <h3 class="sigil-corner-section__header">{t("panels:corners.title")}</h3>
       <Show
         when={state() === "active" ? corners() : null}
         fallback={

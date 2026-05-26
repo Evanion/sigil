@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import type { JSX } from "solid-js";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { EffectCard } from "../EffectCard";
 import type { EffectDropShadow, EffectLayerBlur } from "../../types/document";
+import { createTestI18n } from "../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+function renderWithI18n(ui: () => JSX.Element) {
+  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
+}
 
 const dropShadow: EffectDropShadow = {
   type: "drop_shadow",
@@ -27,7 +37,8 @@ const dropShadowBlur12: EffectDropShadow = {
 describe("EffectCard", () => {
   // jsdom does not implement the native popover API — stub the methods so
   // ValueInput's Popover component does not throw on mount.
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -41,14 +52,14 @@ describe("EffectCard", () => {
   });
 
   it("should render the card container with sigil-effect-card class", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     expect(document.querySelector(".sigil-effect-card")).toBeTruthy();
   });
 
   it("should render a drag handle that is aria-hidden", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     const handle = document.querySelector(".sigil-effect-card__handle");
@@ -57,7 +68,7 @@ describe("EffectCard", () => {
   });
 
   it("should render a type select with Drop Shadow selected", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     const select = document.querySelector(
@@ -68,7 +79,9 @@ describe("EffectCard", () => {
   });
 
   it("should render a type select with Layer Blur selected for layer_blur effect", () => {
-    render(() => <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />);
+    renderWithI18n(() => (
+      <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
+    ));
     const select = document.querySelector(
       "select.sigil-effect-card__type-select",
     ) as HTMLSelectElement;
@@ -77,7 +90,7 @@ describe("EffectCard", () => {
   });
 
   it("should render a remove button with accessible label", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     const removeBtn = screen.getByRole("button", { name: "Remove effect" });
@@ -86,7 +99,7 @@ describe("EffectCard", () => {
 
   it("should call onRemove with the correct index when remove is clicked", () => {
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={2} onUpdate={vi.fn()} onRemove={onRemove} />
     ));
     fireEvent.click(screen.getByRole("button", { name: "Remove effect" }));
@@ -94,7 +107,7 @@ describe("EffectCard", () => {
   });
 
   it("should render four ValueInputs for drop_shadow effects (X, Y, blur, spread)", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     // drop_shadow has: X offset, Y offset, blur, spread (4 numeric ValueInputs,
@@ -107,7 +120,7 @@ describe("EffectCard", () => {
   });
 
   it("should render X offset ValueInput showing correct value for drop_shadow", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     // X = 0, Y = 4
@@ -118,7 +131,7 @@ describe("EffectCard", () => {
   });
 
   it("should render blur and spread ValueInputs for drop_shadow effects", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     const blur = screen.getByRole("combobox", { name: "Blur" });
@@ -128,13 +141,17 @@ describe("EffectCard", () => {
   });
 
   it("should render one ValueInput for layer_blur effects (radius)", () => {
-    render(() => <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />);
+    renderWithI18n(() => (
+      <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
+    ));
     const radius = screen.getByRole("combobox", { name: "Radius" });
     expect(radius.textContent).toContain("4");
   });
 
   it("should not render shadow-only fields for layer_blur effects", () => {
-    render(() => <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />);
+    renderWithI18n(() => (
+      <EffectCard effect={layerBlur} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
+    ));
     // layer_blur only exposes radius — no offset, blur, or spread comboboxes.
     expect(screen.queryByRole("combobox", { name: "X offset" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Y offset" })).toBeNull();
@@ -144,7 +161,7 @@ describe("EffectCard", () => {
 
   it("should call onUpdate when type is changed from drop_shadow to layer_blur", () => {
     const onUpdate = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={1} onUpdate={onUpdate} onRemove={vi.fn()} />
     ));
     const select = document.querySelector(
@@ -157,7 +174,7 @@ describe("EffectCard", () => {
 
   it("should call onUpdate when type is changed from layer_blur to drop_shadow", () => {
     const onUpdate = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={layerBlur} index={0} onUpdate={onUpdate} onRemove={vi.fn()} />
     ));
     const select = document.querySelector(
@@ -170,7 +187,7 @@ describe("EffectCard", () => {
 
   it("should show blur value of 12 in the blur input for a drop_shadow with blur=12", () => {
     const onUpdate = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadowBlur12} index={0} onUpdate={onUpdate} onRemove={vi.fn()} />
     ));
     const blur = screen.getByRole("combobox", { name: "Blur" });
@@ -178,7 +195,7 @@ describe("EffectCard", () => {
   });
 
   it("should render a Shadow color ValueInput with swatch trigger for drop_shadow effects", () => {
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard effect={dropShadow} index={0} onUpdate={vi.fn()} onRemove={vi.fn()} />
     ));
     const combobox = screen.getByRole("combobox", { name: "Shadow color" });
@@ -193,7 +210,7 @@ describe("EffectCard", () => {
 
   it("should invoke onCommit when the shadow color ValueInput commits via Enter", () => {
     const onCommit = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard
         effect={dropShadow}
         index={0}
@@ -213,7 +230,7 @@ describe("EffectCard", () => {
 
   it("should invoke onCommit when the blur ValueInput commits via Enter", () => {
     const onCommit = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard
         effect={dropShadow}
         index={0}
@@ -230,7 +247,7 @@ describe("EffectCard", () => {
 
   it("should invoke onCommit when the radius ValueInput commits via Enter", () => {
     const onCommit = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <EffectCard
         effect={layerBlur}
         index={0}

@@ -17,6 +17,7 @@
 
 import type { Component } from "solid-js";
 import { createMemo, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
 import { Slider } from "../../components/slider/Slider";
@@ -161,6 +162,7 @@ export function writeCorners(
 const EMPTY_TOKENS: Record<string, Token> = {};
 
 export const CornerPopover: Component<CornerPopoverProps> = (props) => {
+  const [t] = useTransContext();
   const targets = createMemo(() => hotspotTargetIndices(props.target));
   const targeted = createMemo(() => cornersAtHotspot(props.corners, props.target));
   const isMixed = createMemo(() => hotspotShapeIsMixed(props.corners, props.target));
@@ -595,7 +597,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
 
       <div class="sigil-corner-popover__field" data-testid="corner-popover__shape">
         <label id={shapeLabelId} class="sigil-corner-popover__label">
-          Shape
+          {t("panels:corners.shape")}
         </label>
         <Show when={isMixed()}>
           <span
@@ -603,7 +605,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
             class="sigil-corner-popover__mixed"
             data-testid="corner-popover__mixed-indicator"
           >
-            Mixed
+            {t("panels:corners.mixed")}
           </span>
         </Show>
         <Select
@@ -731,7 +733,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
           return (
             <div class="sigil-corner-popover__field" data-testid="corner-popover__smoothing">
               <label id={smoothingLabelId} class="sigil-corner-popover__label">
-                Smoothing
+                {t("panels:corners.smoothing")}
               </label>
               <div class="sigil-corner-popover__row">
                 <ValueInput

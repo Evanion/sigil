@@ -23,6 +23,7 @@
  * spec, switch to ID-based dispatch here.
  */
 import { createMemo, createSignal, Index, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { BlendMode, Fill, FillSolid, Stroke, StyleValue } from "../types/document";
 import { useDocument } from "../store/document-context";
 import ValueInput from "../components/value-input/ValueInput";
@@ -80,6 +81,7 @@ const DEFAULT_STROKE: Stroke = {
 
 export const AppearancePanel: Component = () => {
   const store = useDocument();
+  const [t] = useTransContext();
 
   // ── Live region announcement (RF-009) ──────────────────────────────
   const [announcement, setAnnouncement] = createSignal("");
@@ -395,21 +397,23 @@ export const AppearancePanel: Component = () => {
       >
         <div class="sigil-appearance-panel__section-header">
           <span class="sigil-appearance-panel__section-title" id="appearance-fill-title">
-            Fill
+            {t("panels:fill.title")}
           </span>
+          {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
           <button
             class="sigil-appearance-panel__add"
             type="button"
-            aria-label="Add fill"
+            aria-label={t("panels:fill.add")}
             disabled={selectedUuid() === null}
             onClick={handleAddFill}
           >
             +
           </button>
+          {/* eslint-enable i18next/no-literal-string */}
         </div>
 
         <Show when={fills().length === 0}>
-          <p class="sigil-appearance-panel__empty">No fills</p>
+          <p class="sigil-appearance-panel__empty">{t("panels:fill.empty")}</p>
         </Show>
 
         <Index each={fills() as Fill[]}>
@@ -443,21 +447,23 @@ export const AppearancePanel: Component = () => {
       >
         <div class="sigil-appearance-panel__section-header">
           <span class="sigil-appearance-panel__section-title" id="appearance-stroke-title">
-            Stroke
+            {t("panels:stroke.title")}
           </span>
+          {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative add glyph; accessible name on aria-label */}
           <button
             class="sigil-appearance-panel__add"
             type="button"
-            aria-label="Add stroke"
+            aria-label={t("panels:stroke.add")}
             disabled={selectedUuid() === null}
             onClick={handleAddStroke}
           >
             +
           </button>
+          {/* eslint-enable i18next/no-literal-string */}
         </div>
 
         <Show when={strokes().length === 0}>
-          <p class="sigil-appearance-panel__empty">No strokes</p>
+          <p class="sigil-appearance-panel__empty">{t("panels:stroke.empty")}</p>
         </Show>
 
         <Index each={strokes() as Stroke[]}>

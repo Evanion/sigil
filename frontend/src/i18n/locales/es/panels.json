@@ -90,7 +90,34 @@
   "stroke": {
     "title": "Trazo",
     "empty": "Sin trazos",
-    "add": "Añadir trazo"
+    "add": "Añadir trazo",
+    "remove": "Eliminar contorno"
+  },
+  "align": {
+    "title": "Alinear",
+    "distribute": "Distribuir"
+  },
+  "effects": {
+    "title": "Efectos",
+    "empty": "Sin efectos",
+    "noSelection": "Selecciona una capa para editar los efectos.",
+    "add": "Añadir efecto",
+    "remove": "Eliminar efecto",
+    "types": {
+      "dropShadow": "Sombra paralela",
+      "innerShadow": "Sombra interior",
+      "layerBlur": "Desenfoque de capa",
+      "backgroundBlur": "Desenfoque de fondo"
+    }
+  },
+  "corners": {
+    "title": "Esquinas",
+    "shape": "Forma",
+    "mixed": "Mixto",
+    "smoothing": "Suavizado"
+  },
+  "colorPicker": {
+    "outOfGamut": "El color está fuera del gamut sRGB"
   },
   "node": {
     "title": "Nodo",

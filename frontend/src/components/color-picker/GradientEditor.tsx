@@ -21,6 +21,7 @@
  * Guard: all NumberInput values checked with Number.isFinite() before use.
  */
 import { createSignal, For, Show } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { GradientStop, Color } from "../../types/document";
 import { colorToSrgb, srgbToHex, colorAlpha } from "./color-math";
 import { NumberInput } from "../number-input/NumberInput";
@@ -104,6 +105,7 @@ function stopHandleColor(stop: GradientStop): string {
 }
 
 export function GradientEditor(props: GradientEditorProps) {
+  const [t] = useTransContext();
   // eslint-disable-next-line no-unassigned-vars
   let barRef: HTMLDivElement | undefined;
   const [draggingIndex, setDraggingIndex] = createSignal<number | null>(null);
@@ -347,7 +349,7 @@ export function GradientEditor(props: GradientEditorProps) {
       {/* Angle input — linear only */}
       <Show when={props.gradientType === "linear"}>
         <div class="sigil-gradient-editor__angle-row">
-          <span class="sigil-gradient-editor__angle-label">Angle</span>
+          <span class="sigil-gradient-editor__angle-label">{t("panels:gradient.angle")}</span>
           <NumberInput
             value={props.angle}
             onValueChange={(val) => {

@@ -90,7 +90,34 @@
   "stroke": {
     "title": "Contour",
     "empty": "Aucun contour",
-    "add": "Ajouter un contour"
+    "add": "Ajouter un contour",
+    "remove": "Supprimer le contour"
+  },
+  "align": {
+    "title": "Aligner",
+    "distribute": "Distribuer"
+  },
+  "effects": {
+    "title": "Effets",
+    "empty": "Aucun effet",
+    "noSelection": "Sélectionnez un calque pour modifier les effets.",
+    "add": "Ajouter un effet",
+    "remove": "Supprimer l'effet",
+    "types": {
+      "dropShadow": "Ombre portée",
+      "innerShadow": "Ombre intérieure",
+      "layerBlur": "Flou de calque",
+      "backgroundBlur": "Flou d'arrière-plan"
+    }
+  },
+  "corners": {
+    "title": "Coins",
+    "shape": "Forme",
+    "mixed": "Mixte",
+    "smoothing": "Lissage"
+  },
+  "colorPicker": {
+    "outOfGamut": "La couleur est hors de la gamme sRGB"
   },
   "node": {
     "title": "Noeud",

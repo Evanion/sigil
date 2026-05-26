@@ -12,6 +12,7 @@
  * only the active button is in tab order; ArrowLeft/ArrowRight cycles focus.
  */
 import { createMemo, createSignal, Show, type Component } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { useDocument } from "../store/document-context";
 import {
   alignLeft,
@@ -47,6 +48,7 @@ const BUTTON_COUNT = 8;
 
 export const AlignPanel: Component = () => {
   const store = useDocument();
+  const [t] = useTransContext();
 
   const selectedIds = createMemo(() => store.selectedNodeIds());
 
@@ -97,7 +99,7 @@ export const AlignPanel: Component = () => {
   return (
     <Show when={selectionCount() >= 2}>
       <div class="sigil-align-panel" role="toolbar" aria-label="Alignment">
-        <span class="sigil-align-panel__section-title">Align</span>
+        <span class="sigil-align-panel__section-title">{t("panels:align.title")}</span>
         <div class="sigil-align-panel__row" onKeyDown={handleToolbarKeyDown}>
           <button
             class="sigil-align-panel__button"
@@ -162,7 +164,7 @@ export const AlignPanel: Component = () => {
         </div>
 
         {/* RF-030: Distribute buttons always visible when 2+ selected, disabled when < 3. */}
-        <span class="sigil-align-panel__section-title">Distribute</span>
+        <span class="sigil-align-panel__section-title">{t("panels:align.distribute")}</span>
         <div class="sigil-align-panel__row" onKeyDown={handleToolbarKeyDown}>
           <button
             class="sigil-align-panel__button"

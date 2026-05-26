@@ -8,6 +8,7 @@
  * before use per CLAUDE.md §11 Floating-Point Validation.
  */
 import { createMemo } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import type { Stroke, Token } from "../types/document";
 import { GripVertical } from "lucide-solid";
 import ValueInput from "../components/value-input/ValueInput";
@@ -44,6 +45,7 @@ export interface StrokeRowProps {
 // ── StrokeRow component ────────────────────────────────────────────────
 
 export function StrokeRow(props: StrokeRowProps) {
+  const [t] = useTransContext();
   const colorDisplay = createMemo(() => formatColorStyleValue(props.stroke.color));
   const widthDisplay = createMemo(() => formatNumberStyleValue(props.stroke.width));
 
@@ -117,15 +119,17 @@ export function StrokeRow(props: StrokeRowProps) {
       {/* Stroke alignment hidden until WebGL renderer supports inside/outside.
           Canvas 2D only renders center-aligned strokes. */}
 
+      {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative close glyph; accessible name on aria-label */}
       <button
         class="sigil-stroke-row__remove"
         type="button"
         tabIndex={-1}
-        aria-label="Remove stroke"
+        aria-label={t("panels:stroke.remove")}
         onClick={handleRemove}
       >
         ×
       </button>
+      {/* eslint-enable i18next/no-literal-string */}
     </div>
   );
 }

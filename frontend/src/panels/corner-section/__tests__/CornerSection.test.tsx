@@ -2,9 +2,19 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { JSX } from "solid-js";
 import { render, fireEvent, cleanup } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { CornerSection } from "../CornerSection";
 import type { DocumentNode } from "../../../types/document";
+import { createTestI18n } from "../../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+function renderWithI18n(ui: () => JSX.Element) {
+  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
+}
 
 /** Wait for queueMicrotask-scheduled focus restoration to flush. */
 function flushMicrotasks(): Promise<void> {
@@ -69,7 +79,8 @@ function simulatePopoverToggle(open: boolean): void {
 }
 
 describe("CornerSection — orchestration", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     // Stub native popover methods — Popover wrapper calls show/hidePopover.
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
@@ -84,14 +95,14 @@ describe("CornerSection — orchestration", () => {
   });
 
   it("renders preview + 9 hotspots when given a rectangle node", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeRectNode()} onCorners={() => {}} />
     ));
     expect(container.querySelectorAll("button[data-hotspot]").length).toBe(9);
   });
 
   it("clicking a hotspot opens a popover anchored to that hotspot", async () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeRectNode()} onCorners={() => {}} />
     ));
     const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -104,7 +115,7 @@ describe("CornerSection — orchestration", () => {
   });
 
   it("does not wrap the popover in an aria-hidden host element (RF-001)", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeRectNode()} onCorners={() => {}} />
     ));
     // The legacy aria-hidden host wrapper around the Popover wrapper has
@@ -122,7 +133,7 @@ describe("CornerSection — orchestration", () => {
   });
 
   it("mirrors aria-expanded onto the clicked hotspot when the popover opens (RF-001 anchorRef)", async () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeRectNode()} onCorners={() => {}} />
     ));
     const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -146,7 +157,7 @@ describe("CornerSection — orchestration", () => {
     sink.textContent = "focus sink";
     document.body.appendChild(sink);
     try {
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <CornerSection node={makeRectNode()} onCorners={() => {}} />
       ));
       const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -173,7 +184,7 @@ describe("CornerSection — orchestration", () => {
     sink.textContent = "focus sink";
     document.body.appendChild(sink);
     try {
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <CornerSection node={makeRectNode()} onCorners={() => {}} />
       ));
       const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -197,7 +208,9 @@ describe("CornerSection — orchestration", () => {
     // pointerDown the trigger to open the portaled listbox, then click the
     // "Bevel" option.
     const handler = vi.fn();
-    const { container } = render(() => <CornerSection node={makeRectNode()} onCorners={handler} />);
+    const { container } = renderWithI18n(() => (
+      <CornerSection node={makeRectNode()} onCorners={handler} />
+    ));
     const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
     fireEvent.click(tl);
     simulatePopoverToggle(true);
@@ -245,7 +258,7 @@ function makeSuperellipseRectNode(): DocumentNode {
 
 describe("CornerSection — superellipse lock state", () => {
   it("disables the 8 non-center hotspots when the node is uniform-superellipse", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeSuperellipseRectNode()} onCorners={() => {}} />
     ));
     const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -255,7 +268,7 @@ describe("CornerSection — superellipse lock state", () => {
   });
 
   it("the disabled hotspots carry the locked-state tooltip via the title attribute", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeSuperellipseRectNode()} onCorners={() => {}} />
     ));
     const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
@@ -281,7 +294,7 @@ function makeGroupNode(): DocumentNode {
 
 describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds", () => {
   it("renders the disabled placeholder for an ellipse node", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-section__disabled"]')).not.toBeNull();
@@ -292,7 +305,7 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
   });
 
   it("renders the disabled placeholder for a group node", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeGroupNode()} onCorners={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-section__disabled"]')).not.toBeNull();
@@ -303,7 +316,7 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
   // announcement every time the user selected a non-corner-bearing node,
   // flooding SR queues. The visible <p> sits in the reading flow already.
   it("RF-014: the disabled state renders the explanation as a visible <p> and not as an aria-live status duplicate", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
     ));
     // The visible paragraph carries the explanation.
@@ -326,7 +339,7 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
   // RF-010: CornerSection's heading is h3 (matches sibling sections like
   // TypographySection). Was previously h2 — that broke heading hierarchy.
   it("RF-010: CornerSection header is h3 to match sibling section levels", () => {
-    const { container } = render(() => (
+    const { container } = renderWithI18n(() => (
       <CornerSection node={makeRectNode()} onCorners={() => {}} />
     ));
     const heading = container.querySelector(".sigil-corner-section__header");

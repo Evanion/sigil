@@ -1,7 +1,17 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import type { JSX } from "solid-js";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { StrokeRow } from "../StrokeRow";
 import type { Stroke } from "../../types/document";
+import { createTestI18n } from "../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+function renderWithI18n(ui: () => JSX.Element) {
+  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
+}
 
 const baseStroke: Stroke = {
   color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
@@ -19,7 +29,8 @@ const tokenRefWidthStroke: Stroke = {
 describe("StrokeRow", () => {
   // jsdom does not implement the native popover API — stub the methods so
   // ValueInput's Popover component does not throw on mount.
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     if (!HTMLElement.prototype.showPopover) {
       HTMLElement.prototype.showPopover = vi.fn();
     }
@@ -35,7 +46,7 @@ describe("StrokeRow", () => {
   it("should render the row container with sigil-stroke-row class", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const row = document.querySelector(".sigil-stroke-row");
@@ -45,7 +56,7 @@ describe("StrokeRow", () => {
   it("should render a drag handle that is aria-hidden", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const handle = document.querySelector(".sigil-stroke-row__handle");
@@ -56,7 +67,7 @@ describe("StrokeRow", () => {
   it("should render a Stroke color ValueInput combobox with swatch trigger", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const combobox = screen.getByRole("combobox", { name: "Stroke color" });
@@ -73,7 +84,7 @@ describe("StrokeRow", () => {
   it("should render a remove button with aria-label", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const removeBtn = screen.getByRole("button", { name: "Remove stroke" });
@@ -83,7 +94,7 @@ describe("StrokeRow", () => {
   it("should call onRemove with the correct index when remove is clicked", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={3} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const removeBtn = screen.getByRole("button", { name: "Remove stroke" });
@@ -94,7 +105,7 @@ describe("StrokeRow", () => {
   it("should render a width ValueInput showing the literal value", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={baseStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     const combobox = screen.getByRole("combobox", { name: "Stroke width" });
@@ -105,7 +116,7 @@ describe("StrokeRow", () => {
   it("should render width as {name} for token_ref widths", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow stroke={tokenRefWidthStroke} index={0} onUpdate={onUpdate} onRemove={onRemove} />
     ));
     // ValueInput renders token refs as "{name}" rather than a number.
@@ -119,7 +130,7 @@ describe("StrokeRow", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     const onCommit = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow
         stroke={baseStroke}
         index={0}
@@ -139,7 +150,7 @@ describe("StrokeRow", () => {
     const onUpdate = vi.fn();
     const onRemove = vi.fn();
     const onCommit = vi.fn();
-    render(() => (
+    renderWithI18n(() => (
       <StrokeRow
         stroke={baseStroke}
         index={0}

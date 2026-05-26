@@ -147,6 +147,7 @@ export const Toolbar: Component = () => {
       aria-orientation="vertical"
       onKeyDown={handleToolbarKeydown}
     >
+      {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: app name, proper noun, do not translate */}
       <div class="toolbar__logo" aria-hidden="true">
         SIGIL
       </div>

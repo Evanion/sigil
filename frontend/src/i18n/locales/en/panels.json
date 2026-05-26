@@ -90,7 +90,34 @@
   "stroke": {
     "title": "Stroke",
     "empty": "No strokes",
-    "add": "Add stroke"
+    "add": "Add stroke",
+    "remove": "Remove stroke"
+  },
+  "align": {
+    "title": "Align",
+    "distribute": "Distribute"
+  },
+  "effects": {
+    "title": "Effects",
+    "empty": "No effects",
+    "noSelection": "Select a layer to edit effects.",
+    "add": "Add effect",
+    "remove": "Remove effect",
+    "types": {
+      "dropShadow": "Drop Shadow",
+      "innerShadow": "Inner Shadow",
+      "layerBlur": "Layer Blur",
+      "backgroundBlur": "Background Blur"
+    }
+  },
+  "corners": {
+    "title": "Corners",
+    "shape": "Shape",
+    "mixed": "Mixed",
+    "smoothing": "Smoothing"
+  },
+  "colorPicker": {
+    "outOfGamut": "Color is outside the sRGB gamut"
   },
   "node": {
     "title": "Node",

@@ -1,10 +1,20 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import type { JSX } from "solid-js";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { createSignal } from "solid-js";
 import { EffectsPanel } from "../EffectsPanel";
 import { DocumentProvider } from "../../store/document-context";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
 import type { Effect } from "../../types/document";
+import { createTestI18n } from "../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+function renderWithI18n(ui: () => JSX.Element) {
+  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
+}
 
 function createMockStore(
   selectedId: string | null = null,
@@ -101,13 +111,17 @@ const nodeWithEffects = {
 };
 
 describe("EffectsPanel", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+  });
+
   afterEach(() => {
     cleanup();
   });
 
   it("should render the panel with sigil-effects-panel class", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -117,7 +131,7 @@ describe("EffectsPanel", () => {
 
   it("should render the Effects section header", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -127,7 +141,7 @@ describe("EffectsPanel", () => {
 
   it("should render an add button labeled Add effect", () => {
     const store = createMockStore();
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -137,7 +151,7 @@ describe("EffectsPanel", () => {
 
   it("should show empty state when no node is selected", () => {
     const store = createMockStore(null, {});
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -151,7 +165,7 @@ describe("EffectsPanel", () => {
 
   it("should render an EffectCard for each effect on the selected node", () => {
     const store = createMockStore("node-1", { "node-1": nodeWithEffects });
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -164,7 +178,7 @@ describe("EffectsPanel", () => {
     const setEffects = vi.fn();
     const store = createMockStore("node-1", { "node-1": nodeWithEffects });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -181,7 +195,7 @@ describe("EffectsPanel", () => {
     const setEffects = vi.fn();
     const store = createMockStore("node-1", { "node-1": nodeWithEffects });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -195,7 +209,7 @@ describe("EffectsPanel", () => {
     const setEffects = vi.fn();
     const store = createMockStore("node-1", { "node-1": nodeWithEffects });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -224,7 +238,7 @@ describe("EffectsPanel", () => {
     };
     const store = createMockStore("node-1", { "node-1": nodeWith2Effects });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -249,7 +263,7 @@ describe("EffectsPanel", () => {
     };
     const store = createMockStore("node-1", { "node-1": nodeWith2Effects });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>
@@ -276,7 +290,7 @@ describe("EffectsPanel", () => {
       },
     });
     store.setEffects = setEffects;
-    render(() => (
+    renderWithI18n(() => (
       <DocumentProvider store={store}>
         <EffectsPanel />
       </DocumentProvider>

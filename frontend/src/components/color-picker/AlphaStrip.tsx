@@ -175,6 +175,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       onPointerUp={handlePointerUp}
       onKeyDown={handleKeyDown}
     >
+      {/* eslint-disable i18next/no-literal-string -- i18n-allow: canvas fallback text inside aria-hidden canvas; never reaches screen readers or modern browsers */}
       <canvas
         ref={canvasRef}
         class="sigil-strip__canvas"
@@ -183,6 +184,7 @@ export function AlphaStrip(props: AlphaStripProps) {
       >
         Opacity selection strip
       </canvas>
+      {/* eslint-enable i18next/no-literal-string */}
       <div
         class="sigil-strip__thumb"
         style={{ left: `${props.alpha * 100}%` }}

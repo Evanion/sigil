@@ -10,6 +10,7 @@
  * text, so the user sees the current color while typing.
  */
 import { createSignal, Show } from "solid-js";
+import { useTransContext } from "@mbarzda/solid-i18next";
 import { srgbToHex, hexToSrgb } from "./color-math";
 import "./ColorPicker.css";
 
@@ -27,6 +28,7 @@ export interface HexInputProps {
 }
 
 export function HexInput(props: HexInputProps) {
+  const [t] = useTransContext();
   const [isEditing, setIsEditing] = createSignal(false);
   const [editValue, setEditValue] = createSignal("");
   const [isError, setIsError] = createSignal(false);
@@ -109,14 +111,16 @@ export function HexInput(props: HexInputProps) {
         autocomplete="off"
       />
       <Show when={props.isOutOfGamut}>
+        {/* eslint-disable i18next/no-literal-string -- i18n-allow: decorative warning glyph; accessible name comes from aria-label/title */}
         <span
           class="sigil-hex-input__gamut-warning"
-          title="Color is outside the sRGB gamut"
-          aria-label="Out of sRGB gamut"
+          title={t("panels:colorPicker.outOfGamut")}
+          aria-label={t("panels:colorPicker.outOfGamut")}
           role="img"
         >
           ⚠
         </span>
+        {/* eslint-enable i18next/no-literal-string */}
       </Show>
     </div>
   );

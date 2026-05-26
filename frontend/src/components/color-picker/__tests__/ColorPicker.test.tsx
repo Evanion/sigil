@@ -9,10 +9,20 @@
  * drag tick would create a new undo entry.
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import type { JSX } from "solid-js";
 import { render, cleanup, fireEvent } from "@solidjs/testing-library";
+import { TransProvider } from "@mbarzda/solid-i18next";
+import type { i18n } from "i18next";
 import { createSignal } from "solid-js";
 import { ColorPicker } from "../ColorPicker";
 import type { Color } from "../../../types/document";
+import { createTestI18n } from "../../../test-utils/i18n";
+
+let i18nInstance: i18n;
+
+function renderWithI18n(ui: () => JSX.Element) {
+  return render(() => <TransProvider instance={i18nInstance}>{ui()}</TransProvider>);
+}
 
 // JSDOM doesn't implement ResizeObserver; the color-picker children
 // (ColorArea, HueStrip, AlphaStrip) construct one in onMount.
@@ -46,7 +56,8 @@ function makeColor(r: number, g: number, b: number, a = 1): Color {
 }
 
 describe("ColorPicker", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
     (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
       MockResizeObserver;
     mockMatchMedia();
@@ -62,7 +73,7 @@ describe("ColorPicker", () => {
       const onColorCommit = vi.fn();
       const [color, setColor] = createSignal<Color>(makeColor(1, 0, 0));
 
-      render(() => (
+      renderWithI18n(() => (
         <ColorPicker color={color()} onColorChange={onColorChange} onColorCommit={onColorCommit} />
       ));
 
@@ -86,7 +97,7 @@ describe("ColorPicker", () => {
       const onColorCommit = vi.fn();
       const [color, setColor] = createSignal<Color>(makeColor(1, 0, 0));
 
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <ColorPicker color={color()} onColorChange={onColorChange} onColorCommit={onColorCommit} />
       ));
 
@@ -147,7 +158,7 @@ describe("ColorPicker", () => {
       const onColorCommit = vi.fn();
       const [color, setColor] = createSignal<Color>(makeColor(1, 0, 0));
 
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <ColorPicker color={color()} onColorChange={onColorChange} onColorCommit={onColorCommit} />
       ));
 
@@ -199,7 +210,7 @@ describe("ColorPicker", () => {
       const onColorCommit = vi.fn();
       const [color, setColor] = createSignal<Color>(makeColor(1, 0, 0, 1));
 
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <ColorPicker color={color()} onColorChange={onColorChange} onColorCommit={onColorCommit} />
       ));
 
@@ -253,7 +264,7 @@ describe("ColorPicker", () => {
       // 13, 153, 255 at first paint without any user interaction or prop
       // update.
       const onColorChange = vi.fn();
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <ColorPicker
           color={makeColor(13 / 255, 153 / 255, 255 / 255)}
           onColorChange={onColorChange}
@@ -284,7 +295,7 @@ describe("ColorPicker", () => {
       const onColorCommit = vi.fn();
       const [color, setColor] = createSignal<Color>(makeColor(100 / 255, 100 / 255, 100 / 255));
 
-      const { container } = render(() => (
+      const { container } = renderWithI18n(() => (
         <ColorPicker color={color()} onColorChange={onColorChange} onColorCommit={onColorCommit} />
       ));
 
