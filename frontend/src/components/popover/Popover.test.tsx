@@ -183,4 +183,99 @@ describe("Popover", () => {
     // In jsdom, hidePopover is a stub, so we verify the method was called
     expect(HTMLElement.prototype.hidePopover).toHaveBeenCalled();
   });
+
+  describe("external anchorRef", () => {
+    it("renders without an internal trigger when anchorRef is set", () => {
+      // Create an external anchor element rendered outside the Popover wrapper.
+      const externalAnchor = document.createElement("button");
+      externalAnchor.textContent = "External anchor";
+      externalAnchor.setAttribute("data-testid", "external-anchor");
+      document.body.appendChild(externalAnchor);
+
+      try {
+        render(() => (
+          <Popover
+            trigger={<span>Ignored internal trigger</span>}
+            anchorRef={externalAnchor}
+            open={false}
+          >
+            <p>Anchored content</p>
+          </Popover>
+        ));
+
+        // The Popover's internal trigger button should NOT be in the DOM
+        // when an external anchorRef is provided. The "Ignored internal trigger"
+        // span passed via the `trigger` prop must not be rendered.
+        expect(screen.queryByText("Ignored internal trigger")).toBeNull();
+
+        // The popover panel element should still render.
+        const popoverEl = document.querySelector(".sigil-popover");
+        expect(popoverEl).toBeTruthy();
+
+        // The internal trigger class should not be present in the rendered output.
+        expect(document.querySelector(".sigil-popover-trigger")).toBeNull();
+      } finally {
+        externalAnchor.remove();
+      }
+    });
+
+    it("applies anchor-name to the provided HTMLElement", () => {
+      const externalAnchor = document.createElement("button");
+      externalAnchor.textContent = "Anchor";
+      document.body.appendChild(externalAnchor);
+
+      try {
+        render(() => (
+          <Popover trigger={<span>Ignored</span>} anchorRef={externalAnchor} open={false}>
+            <p>Content</p>
+          </Popover>
+        ));
+
+        // The wrapper must set an `anchor-name` CSS property on the external
+        // anchor element so CSS Anchor Positioning can resolve the popover's
+        // `position-anchor: <name>` reference against it.
+        const anchorName = externalAnchor.style.getPropertyValue("anchor-name");
+        expect(anchorName).toBeTruthy();
+        expect(anchorName.startsWith("--sigil-popover-anchor-")).toBe(true);
+
+        // The popover element should reference the same anchor name via
+        // its `position-anchor` style.
+        const popoverEl = document.querySelector(".sigil-popover") as HTMLElement | null;
+        expect(popoverEl).toBeTruthy();
+        const positionAnchor = popoverEl?.style.getPropertyValue("position-anchor");
+        expect(positionAnchor).toBe(anchorName);
+
+        // ARIA wiring must move to the external anchor since there is no
+        // internal trigger button.
+        expect(externalAnchor.getAttribute("aria-expanded")).toBeTruthy();
+        expect(externalAnchor.getAttribute("aria-controls")).toBeTruthy();
+        expect(externalAnchor.getAttribute("aria-controls")).toBe(popoverEl?.id ?? null);
+      } finally {
+        externalAnchor.remove();
+      }
+    });
+
+    it("opens via controlled `open` prop when anchorRef + open=true", () => {
+      const externalAnchor = document.createElement("button");
+      externalAnchor.textContent = "Anchor";
+      document.body.appendChild(externalAnchor);
+
+      try {
+        render(() => (
+          <Popover trigger={<span>Ignored</span>} anchorRef={externalAnchor} open={true}>
+            <p>Visible content</p>
+          </Popover>
+        ));
+
+        // showPopover should have been invoked via the controlled-open effect.
+        // In jsdom, showPopover is a stub — verify it was called.
+        expect(HTMLElement.prototype.showPopover).toHaveBeenCalled();
+
+        // aria-expanded should reflect the open state on the external anchor.
+        expect(externalAnchor.getAttribute("aria-expanded")).toBe("true");
+      } finally {
+        externalAnchor.remove();
+      }
+    });
+  });
 });

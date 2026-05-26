@@ -36,7 +36,11 @@ import "./Popover.css";
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
 
 export interface PopoverProps {
-  /** The element that triggers the popover on click. */
+  /**
+   * The element that triggers the popover on click. Ignored when `anchorRef`
+   * is provided — in that case the caller-owned external element is the
+   * anchor and the wrapper does not render its own internal trigger button.
+   */
   trigger: JSX.Element;
   /** Content displayed inside the popover panel. */
   children: JSX.Element;
@@ -55,6 +59,28 @@ export interface PopoverProps {
   open?: boolean;
   /** Called when the popover's open state changes. */
   onOpenChange?: (open: boolean) => void;
+  /**
+   * Optional external anchor element. When provided, the wrapper does NOT
+   * render its internal trigger button — the `trigger` prop is ignored.
+   * Instead, the wrapper:
+   *   1. applies `anchor-name: <unique-id>` to this element via inline style
+   *      so CSS Anchor Positioning resolves the popover's `position-anchor`
+   *      reference against it,
+   *   2. mirrors the ARIA expand-state attributes (`aria-expanded`,
+   *      `aria-controls`, `aria-haspopup`) onto the element so screen
+   *      readers announce it as the controlling trigger,
+   *   3. continues to honor controlled `open` / `onOpenChange`.
+   *
+   * The caller is responsible for wiring click/focus handlers on the
+   * external element to toggle `open`. The wrapper does NOT install
+   * click handlers on the external anchor — that would conflict with
+   * the caller's own behavior (e.g., a corner hotspot that does its
+   * own selection/focus management).
+   *
+   * Passing `null` is treated identically to omitting the prop —
+   * the wrapper falls back to its internal trigger button.
+   */
+  anchorRef?: HTMLElement | null;
 }
 
 /** Map placement prop to CSS position-area value. */
@@ -93,7 +119,16 @@ export function Popover(props: PopoverProps) {
     "triggerAriaLabel",
     "open",
     "onOpenChange",
+    "anchorRef",
   ]);
+
+  /**
+   * True when the caller supplied an external anchor element. The internal
+   * trigger button is omitted and ARIA + anchor-name are mirrored onto the
+   * caller's element instead. Using a function so the JSX read is reactive
+   * if the prop transitions between null/element values across renders.
+   */
+  const useExternalAnchor = () => local.anchorRef != null;
 
   const anchorName = `--sigil-popover-anchor-${createUniqueId()}`;
   const popoverId = `sigil-popover-${createUniqueId()}`;
@@ -156,13 +191,15 @@ export function Popover(props: PopoverProps) {
     }
   }
 
-  /** Position the arrow to point at the trigger's center along the popover edge. */
+  /** Position the arrow to point at the anchor's center along the popover edge. */
   function positionArrow(): void {
-    if (!popoverRef || !triggerRef) return;
+    if (!popoverRef) return;
+    const anchor = local.anchorRef ?? triggerRef;
+    if (!anchor) return;
     const arrow = popoverRef.querySelector(".sigil-popover__arrow") as HTMLElement | null;
     if (!arrow) return;
 
-    const triggerRect = triggerRef.getBoundingClientRect();
+    const triggerRect = anchor.getBoundingClientRect();
     const popoverRect = popoverRef.getBoundingClientRect();
     const p = placement();
 
@@ -212,14 +249,16 @@ export function Popover(props: PopoverProps) {
   }
 
   /**
-   * Walk ancestors from `triggerRef` and return true if any is an
+   * Walk ancestors from the anchor (external `anchorRef` if provided,
+   * otherwise the internal `triggerRef`) and return true if any is an
    * open modal `<dialog>` (`.matches(':modal')`). The `:modal`
    * pseudo-class matches any element currently in the browser's
    * top-layer via `showModal()`.
    */
   function detectModalDialogAncestor(): boolean {
-    if (!triggerRef) return false;
-    let current: Element | null = triggerRef.parentElement;
+    const start = local.anchorRef ?? triggerRef;
+    if (!start) return false;
+    let current: Element | null = start.parentElement;
     while (current) {
       if (current instanceof HTMLDialogElement) {
         try {
@@ -243,15 +282,67 @@ export function Popover(props: PopoverProps) {
     // Only run for auto-detected nesting — callers using explicit
     // `modal=true` manage their own dismissal.
     if (local.modal === true || !insideModalDialog()) return;
-    if (!popoverRef || !triggerRef) return;
+    if (!popoverRef) return;
+    const anchor = local.anchorRef ?? triggerRef;
+    if (!anchor) return;
     const target = e.target as Node | null;
     if (!target) return;
-    if (popoverRef.contains(target) || triggerRef.contains(target)) return;
+    if (popoverRef.contains(target) || anchor.contains(target)) return;
     hidePopover();
   }
 
   onMount(() => {
     setInsideModalDialog(detectModalDialogAncestor());
+  });
+
+  /**
+   * External-anchor effect: when `anchorRef` is provided, mirror the
+   * anchor-name and static ARIA attributes (`aria-controls`,
+   * `aria-haspopup`) onto the caller's element. Tracks the previously-
+   * managed element so we can fully clean up its anchor-name and ARIA
+   * attributes if the prop changes or the wrapper unmounts.
+   *
+   * `aria-expanded` is updated by a separate effect (below) so that it
+   * tracks the reactive `isOpen()` signal without re-running this
+   * setup-and-teardown effect on every open/close.
+   */
+  let managedAnchor: HTMLElement | null = null;
+  function clearExternalAnchor(el: HTMLElement | null): void {
+    if (!el) return;
+    el.style.removeProperty("anchor-name");
+    el.removeAttribute("aria-controls");
+    el.removeAttribute("aria-haspopup");
+    el.removeAttribute("aria-expanded");
+  }
+  createEffect(() => {
+    const next = local.anchorRef ?? null;
+    if (next === managedAnchor) return;
+    // Clear the previously-managed element before adopting the new one.
+    clearExternalAnchor(managedAnchor);
+    managedAnchor = next;
+    if (!next) return;
+    next.style.setProperty("anchor-name", anchorName);
+    next.setAttribute("aria-controls", popoverId);
+    next.setAttribute("aria-haspopup", "dialog");
+    // Seed aria-expanded with the current open state. The expand-state
+    // effect below will keep it in sync going forward.
+    next.setAttribute("aria-expanded", isOpen() ? "true" : "false");
+  });
+
+  /**
+   * Mirror `aria-expanded` on the external anchor whenever the open state
+   * changes. Kept separate from the setup effect so that opening/closing
+   * does not re-trigger anchor-name reassignment or other DOM mutation.
+   */
+  createEffect(() => {
+    const el = managedAnchor;
+    if (!el) return;
+    el.setAttribute("aria-expanded", isOpen() ? "true" : "false");
+  });
+
+  onCleanup(() => {
+    clearExternalAnchor(managedAnchor);
+    managedAnchor = null;
   });
 
   // Controlled mode
@@ -282,18 +373,20 @@ export function Popover(props: PopoverProps) {
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        class="sigil-popover-trigger"
-        aria-label={local.triggerAriaLabel}
-        aria-expanded={isOpen()}
-        aria-controls={popoverId}
-        popovertarget={effectiveModal() ? undefined : popoverId}
-        onClick={handleTriggerClick}
-        style={{ "anchor-name": anchorName }}
-      >
-        {local.trigger}
-      </button>
+      <Show when={!useExternalAnchor()}>
+        <button
+          ref={triggerRef}
+          class="sigil-popover-trigger"
+          aria-label={local.triggerAriaLabel}
+          aria-expanded={isOpen()}
+          aria-controls={popoverId}
+          popovertarget={effectiveModal() ? undefined : popoverId}
+          onClick={handleTriggerClick}
+          style={{ "anchor-name": anchorName }}
+        >
+          {local.trigger}
+        </button>
+      </Show>
       <div
         ref={popoverRef}
         id={popoverId}
