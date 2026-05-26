@@ -10,9 +10,15 @@
  *   (`role="listbox"` / `role="option"`) instead of `.options`.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createSignal } from "solid-js";
 import { render, fireEvent, screen, cleanup } from "@solidjs/testing-library";
 import { CornerPopover } from "../CornerPopover";
 import { hotspotHasAsymmetricRadii } from "../corner-section-state";
+import {
+  MAX_CORNER_RADIUS,
+  MAX_SUPERELLIPSE_SMOOTHING,
+  MIN_SUPERELLIPSE_SMOOTHING,
+} from "../../../store/corners-input";
 import type { Corner, Corners } from "../../../types/document";
 
 function round(r: number): Corner {
@@ -267,5 +273,264 @@ describe("CornerPopover — center smoothing control", () => {
         expect(Number.isFinite(c.smoothing)).toBe(true);
       }
     }
+  });
+});
+
+/**
+ * RF-006: the previous implementation re-derived the `unlocked` toggle on
+ * every reactive corners change via a `createEffect`. After the user
+ * manually toggled "Unlock axes" ON, any commit that wrote symmetric radii
+ * (rx === ry) would fire the effect → setUnlocked(false), clobbering the
+ * user's choice. The fix is to delete that effect — the toggle is owned by
+ * the user after initial mount.
+ */
+describe("CornerPopover — RF-006 axis-unlock toggle persistence", () => {
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("Unlock axes toggle persists when a commit drives radii back to symmetric", () => {
+    // Start asymmetric so unlocked is pre-toggled ON via the initial
+    // createSignal — and so the rx/ry fields are rendered without needing
+    // a user click on the toggle.
+    const initial: Corners = [
+      { type: "round", radii: { x: 30, y: 10 } },
+      round(8),
+      round(8),
+      round(8),
+    ];
+    const [corners, setCorners] = createSignal<Corners>(initial);
+    const onCommit = vi.fn((next: Corners) => {
+      setCorners(next);
+    });
+
+    const { container, unmount } = render(() => (
+      <CornerPopover target="tl" corners={corners()} onCommit={onCommit} />
+    ));
+
+    const sw = container.querySelector(
+      '[data-testid="corner-popover__unlock"] [role="switch"]',
+    ) as HTMLElement | null;
+    expect(sw).not.toBeNull();
+    if (sw === null) {
+      unmount();
+      return;
+    }
+    // Pre-toggled ON because radii are asymmetric on mount.
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+
+    // Drive a commit through rx that produces SYMMETRIC radii (rx === ry === 10).
+    // Under the broken createEffect, this re-runs `setUnlocked(false)` on the
+    // next reactive tick and collapses the toggle the user is actively using.
+    const rxField = container.querySelector(
+      '[data-testid="corner-popover__rx"]',
+    ) as HTMLElement | null;
+    expect(rxField).not.toBeNull();
+    if (rxField === null) {
+      unmount();
+      return;
+    }
+    const rxTextbox = rxField.querySelector('[role="textbox"]') as HTMLElement | null;
+    expect(rxTextbox).not.toBeNull();
+    if (rxTextbox === null) {
+      unmount();
+      return;
+    }
+    rxTextbox.textContent = "10";
+    fireEvent.input(rxTextbox);
+    fireEvent.blur(rxTextbox);
+
+    // Sanity check: the commit fired and produced symmetric radii.
+    expect(onCommit).toHaveBeenCalled();
+    const lastCommit = onCommit.mock.calls[onCommit.mock.calls.length - 1] as [Corners];
+    expect(lastCommit[0][0].radii.x).toBe(10);
+    expect(lastCommit[0][0].radii.y).toBe(10);
+
+    // The toggle must remain ON — the user is in the middle of editing axes
+    // independently. The popover unmounts on close (per CornerSection),
+    // so re-deriving from corners only happens at mount, never after.
+    expect(sw.getAttribute("aria-checked")).toBe("true");
+    unmount();
+  });
+});
+
+/**
+ * RF-007 / RF-019: each numeric commit handler (commitRadius, commitRx,
+ * commitRy, commitSmoothingFromValueInput) previously silently early-
+ * returned on non-finite or out-of-range input. Banned by CLAUDE.md §11
+ * "Handlers Must Surface Validation Failures" and frontend-defensive
+ * "Internal Mutation Entry Points Must Diagnose Their Own No-Ops".
+ */
+describe("CornerPopover — RF-007/RF-019 commit-handler diagnostics", () => {
+  beforeEach(() => {
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn();
+    }
+    if (!HTMLElement.prototype.hidePopover) {
+      HTMLElement.prototype.hidePopover = vi.fn();
+    }
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function findStatusRegion(container: HTMLElement): HTMLElement {
+    // The popover root carries a visually-hidden role="status" span with
+    // aria-live="polite". Its initial text is empty.
+    const all = Array.from(container.querySelectorAll('[role="status"]')) as HTMLElement[];
+    const liveStatus = all.find((el) => el.getAttribute("aria-live") === "polite");
+    expect(liveStatus, "popover should render an aria-live status region").toBeDefined();
+    return liveStatus as HTMLElement;
+  }
+
+  function driveCommit(field: HTMLElement, value: string): void {
+    const tb = field.querySelector('[role="textbox"]') as HTMLElement | null;
+    expect(tb).not.toBeNull();
+    if (tb === null) return;
+    tb.textContent = value;
+    fireEvent.input(tb);
+    fireEvent.blur(tb);
+  }
+
+  it("commitRadius logs structured warn + sets aria-live status on out-of-range", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = vi.fn();
+    const corners: Corners = [round(8), round(8), round(8), round(8)];
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={corners} onCommit={handler} />
+    ));
+
+    const radiusField = container.querySelector(
+      '[data-testid="corner-popover__radius"]',
+    ) as HTMLElement | null;
+    expect(radiusField).not.toBeNull();
+    if (radiusField === null) return;
+
+    // MAX_CORNER_RADIUS + 1 is out of range.
+    driveCommit(radiusField, String(MAX_CORNER_RADIUS + 1));
+
+    // No commit should have fired.
+    expect(handler).not.toHaveBeenCalled();
+
+    // Structured warn was emitted (first arg = message, second arg = payload).
+    expect(warn).toHaveBeenCalled();
+    const call = warn.mock.calls.find((c) =>
+      typeof c[0] === "string" && c[0].includes("radius rejected"),
+    );
+    expect(call, "expected a structured warn for radius rejection").toBeDefined();
+    if (call !== undefined) {
+      expect(typeof call[1]).toBe("object");
+    }
+
+    // aria-live status region updated with a user-readable message.
+    const status = findStatusRegion(container);
+    expect(status.textContent).toMatch(/Radius must be between 0 and/);
+  });
+
+  it("commitRx logs structured warn on non-finite input", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = vi.fn();
+    // Start with asymmetric radii so the rx/ry inputs are rendered.
+    const corners: Corners = [
+      { type: "round", radii: { x: 30, y: 10 } },
+      round(8),
+      round(8),
+      round(8),
+    ];
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={corners} onCommit={handler} />
+    ));
+
+    const rxField = container.querySelector(
+      '[data-testid="corner-popover__rx"]',
+    ) as HTMLElement | null;
+    expect(rxField).not.toBeNull();
+    if (rxField === null) return;
+
+    // "abc" parses to NaN — non-finite.
+    driveCommit(rxField, "abc");
+
+    expect(handler).not.toHaveBeenCalled();
+
+    const nonFiniteCall = warn.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("non-finite"),
+    );
+    expect(nonFiniteCall, "expected a non-finite-rejection warn for rx").toBeDefined();
+
+    const status = findStatusRegion(container);
+    expect(status.textContent).toMatch(/Radius X must be a number/);
+  });
+
+  it("commitSmoothingFromValueInput logs warn + sets status on out-of-range", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = vi.fn();
+    const { container } = render(() => (
+      <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={handler} />
+    ));
+
+    const smoothingField = container.querySelector(
+      '[data-testid="corner-popover__smoothing"]',
+    ) as HTMLElement | null;
+    expect(smoothingField).not.toBeNull();
+    if (smoothingField === null) return;
+
+    // Bypass the Slider — drive the ValueInput inside the smoothing field
+    // directly with an out-of-range value.
+    const tb = smoothingField.querySelector('[role="textbox"]') as HTMLElement | null;
+    expect(tb).not.toBeNull();
+    if (tb === null) return;
+    tb.textContent = String(MAX_SUPERELLIPSE_SMOOTHING + 1);
+    fireEvent.input(tb);
+    fireEvent.blur(tb);
+
+    expect(handler).not.toHaveBeenCalled();
+
+    const smoothCall = warn.mock.calls.find(
+      (c) => typeof c[0] === "string" && c[0].includes("smoothing"),
+    );
+    expect(smoothCall, "expected a smoothing-rejection warn").toBeDefined();
+
+    const status = findStatusRegion(container);
+    expect(status.textContent).toMatch(
+      new RegExp(
+        `Smoothing must be between ${MIN_SUPERELLIPSE_SMOOTHING} and ${MAX_SUPERELLIPSE_SMOOTHING}`,
+      ),
+    );
+  });
+
+  it("Status message clears after a successful commit", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const handler = vi.fn();
+    const corners: Corners = [round(8), round(8), round(8), round(8)];
+    const { container } = render(() => (
+      <CornerPopover target="tl" corners={corners} onCommit={handler} />
+    ));
+
+    const radiusField = container.querySelector(
+      '[data-testid="corner-popover__radius"]',
+    ) as HTMLElement | null;
+    expect(radiusField).not.toBeNull();
+    if (radiusField === null) return;
+
+    // Drive an invalid commit first.
+    driveCommit(radiusField, String(MAX_CORNER_RADIUS + 1));
+    const status = findStatusRegion(container);
+    expect(status.textContent).not.toBe("");
+
+    // Now drive a valid commit.
+    driveCommit(radiusField, "16");
+    expect(handler).toHaveBeenCalled();
+    expect(status.textContent).toBe("");
   });
 });

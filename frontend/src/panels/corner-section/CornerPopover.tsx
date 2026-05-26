@@ -16,7 +16,7 @@
  */
 
 import type { Component } from "solid-js";
-import { createEffect, createMemo, createSignal, Show } from "solid-js";
+import { createMemo, createSignal, Show } from "solid-js";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
 import { Slider } from "../../components/slider/Slider";
@@ -153,6 +153,15 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
   const isMixed = createMemo(() => hotspotShapeIsMixed(props.corners, props.target));
   const isCenter = createMemo(() => props.target === "center");
 
+  // RF-007 / RF-019: every commit handler must surface validation failures
+  // to a user-visible channel per CLAUDE.md §11 "Handlers Must Surface
+  // Validation Failures." The popover renders a visually-hidden role="status"
+  // / aria-live="polite" span at the top; commit handlers write a message
+  // here on rejection and clear it on a successful commit. The message text
+  // composes with a structured console.warn that carries the full context
+  // (raw input, target hotspot, bounds) for diagnostic queries.
+  const [status, setStatus] = createSignal("");
+
   /**
    * Show the first targeted corner's shape as the Select value when the
    * hotspot is uniform. When the targeted corners are mixed, fall back
@@ -214,8 +223,25 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return; // empty commit is a no-op (don't reset to 0)
     const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) return;
+    if (!Number.isFinite(parsed)) {
+      console.warn("CornerPopover: radius rejected (non-finite)", {
+        raw,
+        target: props.target,
+      });
+      setStatus("Radius must be a number.");
+      return;
+    }
+    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) {
+      console.warn("CornerPopover: radius rejected (out of range)", {
+        raw,
+        parsed,
+        min: 0,
+        max: MAX_CORNER_RADIUS,
+        target: props.target,
+      });
+      setStatus(`Radius must be between 0 and ${MAX_CORNER_RADIUS}.`);
+      return;
+    }
     const next = writeCorners(props.corners, targets(), (prev) => {
       // Preserve discriminant + smoothing (when superellipse); only edit radii.
       if (prev.type === "superellipse") {
@@ -224,6 +250,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       return { type: prev.type, radii: { x: parsed, y: parsed } };
     });
     props.onCommit(next);
+    setStatus(""); // clear any prior error on successful commit
   }
 
   // --- Axis unlock (Task 11) ----------------------------------------------
@@ -231,17 +258,19 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
   // Spec 14 §1.5 auto-link: the popover opens with "Unlock axes" pre-toggled
   // ON whenever any targeted corner has rx ≠ ry. The user can toggle it
   // OFF to re-link the axes (next radius commit writes rx = ry).
+  //
+  // RF-006: the initial value is derived from corners at mount via this
+  // createSignal initializer ONLY. We deliberately do NOT install a
+  // createEffect that re-runs `setUnlocked(hotspotHasAsymmetricRadii(...))`
+  // on every reactive corners refresh — that pattern would clobber the
+  // user's manual toggle every time a commit produced symmetric radii.
+  // The popover unmounts when its hotspot closes (see CornerSection's
+  // <Show when={activeHotspot()}>), so re-mounting on next open is the
+  // single, intended point at which "auto-derived from corners" applies.
+  // After mount, the toggle is owned by the user.
   const [unlocked, setUnlocked] = createSignal(
     hotspotHasAsymmetricRadii(props.corners, props.target),
   );
-
-  // If `corners` or `target` change reactively after mount (e.g., another
-  // panel edits the field while this popover is open), reflect that in the
-  // local toggle state. Effects re-run when their reactive reads change;
-  // here we depend only on the targeted-corner asymmetry predicate.
-  createEffect(() => {
-    setUnlocked(hotspotHasAsymmetricRadii(props.corners, props.target));
-  });
 
   /**
    * Shared rx across all targeted corners (display value for the rx field
@@ -280,8 +309,25 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return;
     const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) return;
+    if (!Number.isFinite(parsed)) {
+      console.warn("CornerPopover: rx rejected (non-finite)", {
+        raw,
+        target: props.target,
+      });
+      setStatus("Radius X must be a number.");
+      return;
+    }
+    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) {
+      console.warn("CornerPopover: rx rejected (out of range)", {
+        raw,
+        parsed,
+        min: 0,
+        max: MAX_CORNER_RADIUS,
+        target: props.target,
+      });
+      setStatus(`Radius X must be between 0 and ${MAX_CORNER_RADIUS}.`);
+      return;
+    }
     const next = writeCorners(props.corners, targets(), (prev) => {
       if (prev.type === "superellipse") {
         return {
@@ -293,6 +339,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       return { type: prev.type, radii: { x: parsed, y: prev.radii.y } };
     });
     props.onCommit(next);
+    setStatus("");
   }
 
   // --- Center smoothing control (Task 12) ---------------------------------
@@ -353,6 +400,9 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
         max: MAX_SUPERELLIPSE_SMOOTHING,
         target: props.target,
       });
+      setStatus(
+        `Smoothing must be between ${MIN_SUPERELLIPSE_SMOOTHING} and ${MAX_SUPERELLIPSE_SMOOTHING}.`,
+      );
       return;
     }
     // Per CLAUDE.md §11 "partial updates of multi-field values": preserve
@@ -365,6 +415,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       smoothing: s,
     }));
     props.onCommit(next);
+    setStatus("");
   }
 
   /**
@@ -376,7 +427,14 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return; // empty commit is a no-op
     const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return;
+    if (!Number.isFinite(parsed)) {
+      console.warn("CornerPopover: smoothing rejected (non-finite)", {
+        raw,
+        target: props.target,
+      });
+      setStatus("Smoothing must be a number.");
+      return;
+    }
     commitSmoothing(parsed);
   }
 
@@ -388,8 +446,25 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     const trimmed = raw.trim();
     if (trimmed.length === 0) return;
     const parsed = Number.parseFloat(trimmed);
-    if (!Number.isFinite(parsed)) return;
-    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) return;
+    if (!Number.isFinite(parsed)) {
+      console.warn("CornerPopover: ry rejected (non-finite)", {
+        raw,
+        target: props.target,
+      });
+      setStatus("Radius Y must be a number.");
+      return;
+    }
+    if (parsed < 0 || parsed > MAX_CORNER_RADIUS) {
+      console.warn("CornerPopover: ry rejected (out of range)", {
+        raw,
+        parsed,
+        min: 0,
+        max: MAX_CORNER_RADIUS,
+        target: props.target,
+      });
+      setStatus(`Radius Y must be between 0 and ${MAX_CORNER_RADIUS}.`);
+      return;
+    }
     const next = writeCorners(props.corners, targets(), (prev) => {
       if (prev.type === "superellipse") {
         return {
@@ -401,10 +476,20 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
       return { type: prev.type, radii: { x: prev.radii.x, y: parsed } };
     });
     props.onCommit(next);
+    setStatus("");
   }
 
   return (
     <div class="sigil-corner-popover" role="group" aria-label={headerLabel(props.target)}>
+      {/*
+       * RF-007 / RF-019: visually-hidden aria-live region. Updated only on
+       * discrete commit attempts (not on every keystroke), per a11y-rules.md
+       * "aria-live Regions Must Be Scoped to Discrete Status Changes."
+       * Successful commits clear the region so a stale error never lingers.
+       */}
+      <span class="sr-only" role="status" aria-live="polite">
+        {status()}
+      </span>
       <h3 class="sigil-corner-popover__header">{headerLabel(props.target)}</h3>
 
       <div class="sigil-corner-popover__field" data-testid="corner-popover__shape">
