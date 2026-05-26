@@ -51,9 +51,7 @@ export class SvgPathBuilder implements PathBuilder {
     x: number,
     y: number,
   ): void {
-    this.parts.push(
-      `C ${fmt(cp1x)} ${fmt(cp1y)} ${fmt(cp2x)} ${fmt(cp2y)} ${fmt(x)} ${fmt(y)}`,
-    );
+    this.parts.push(`C ${fmt(cp1x)} ${fmt(cp1y)} ${fmt(cp2x)} ${fmt(cp2y)} ${fmt(x)} ${fmt(y)}`);
   }
 
   ellipse(
