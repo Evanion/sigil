@@ -281,25 +281,54 @@ jobs:
           # inline; an unannotated disable fails the build. If the count grows beyond a
           # handful, the rule's scope should be reconsidered rather than silently
           # accumulate unannotated disables.
+          #
+          # Hardening (PR #66 review):
+          #   RF-005: clamp sed lower bound so a line-1 disable does not produce "sed 0,1p".
+          #   RF-015: validate lineno is digit-only before arithmetic — bash arithmetic
+          #           recursively expands variables, so an attacker-controlled string flowing
+          #           into $((lineno - 1)) would be a command-injection sink.
+          #   RF-016: parse grep output with parameter expansion instead of `cut -d:` so a
+          #           filename containing ':' produces a CI warning rather than a confusing
+          #           sed failure. Filenames with ':' are rare; this trades hard enforcement
+          #           on unusual filenames for forward-progress on normal ones.
+          #   RF-017: require at least one alphabetic word after `i18n-allow:` so an empty
+          #           rationale (`// i18n-allow:`) does not pass.
+          #   RF-032: bash array accumulator emitted via `printf '%s\n'` — the previous
+          #           `bad="$bad\n..."` form left a leading blank line in error output when
+          #           bad started empty.
           matches=$(grep -rEn 'eslint-disable(-next-line)?[^\n]*i18next/no-literal-string' frontend/src --include='*.ts' --include='*.tsx' || true)
           if [ -z "$matches" ]; then
             echo "No i18next/no-literal-string disables found — nothing to check."
             exit 0
           fi
-          bad=""
+          bad=()
           while IFS= read -r line; do
-            if [ -z "$line" ]; then continue; fi
-            file=$(echo "$line" | cut -d: -f1)
-            lineno=$(echo "$line" | cut -d: -f2)
-            # Look at the line itself and the line above for "i18n-allow:".
-            window=$(sed -n "$((lineno - 1)),${lineno}p" "$file")
-            if ! echo "$window" | grep -q 'i18n-allow:'; then
-              bad="$bad\n$file:$lineno"
+            [ -z "$line" ] && continue
+            # grep -n format is "<file>:<lineno>:<rest>". Parameter expansion is purely
+            # textual — no field splitting, no shell evaluation — so it tolerates ':' in
+            # rest without misparsing. If the filename itself contains ':' the second
+            # split picks up filename bytes instead of digits; the digit-only check below
+            # detects that and skips with a CI warning instead of crashing sed.
+            file="${line%%:*}"
+            rest="${line#*:}"
+            lineno="${rest%%:*}"
+            if ! [[ "$lineno" =~ ^[0-9]+$ ]]; then
+              echo "::warning::Skipping grep line with non-numeric line field (filename may contain ':'): $line"
+              continue
+            fi
+            # Clamp: sed rejects address 0, and `set -e` makes that fatal.
+            start=$((lineno > 1 ? lineno - 1 : 1))
+            # `--` guards against filenames beginning with '-' being parsed as flags.
+            window=$(sed -n "${start},${lineno}p" -- "$file")
+            # Require at least one alphabetic word after the colon — an empty
+            # `// i18n-allow:` does not constitute a rationale.
+            if ! echo "$window" | grep -qE 'i18n-allow:[[:space:]]*[A-Za-z]+'; then
+              bad+=("$file:$lineno")
             fi
           done <<< "$matches"
-          if [ -n "$bad" ]; then
-            echo "::error::eslint-disable for i18next/no-literal-string lacks an // i18n-allow: rationale comment. Add a rationale or restructure to avoid the disable."
-            echo -e "$bad"
+          if [ "${#bad[@]}" -gt 0 ]; then
+            echo "::error::eslint-disable for i18next/no-literal-string lacks a meaningful // i18n-allow: rationale comment. Add a rationale (at least one alphabetic word after the colon) or restructure to avoid the disable."
+            printf '  %s\n' "${bad[@]}"
             exit 1
           fi
           echo "All i18next/no-literal-string disables have rationale comments."
