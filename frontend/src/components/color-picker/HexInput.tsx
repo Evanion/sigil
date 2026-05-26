@@ -9,7 +9,7 @@
  * The swatch always reflects the committed (props) color, not the in-progress
  * text, so the user sees the current color while typing.
  */
-import { createSignal, Show } from "solid-js";
+import { createSignal, createUniqueId, Show } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { srgbToHex, hexToSrgb } from "./color-math";
 import "./ColorPicker.css";
@@ -34,6 +34,12 @@ export function HexInput(props: HexInputProps) {
   const [isEditing, setIsEditing] = createSignal(false);
   const [editValue, setEditValue] = createSignal("");
   const [isError, setIsError] = createSignal(false);
+  // RF-017: stable id so the input's `aria-describedby` can reference the
+  // P3 badge while the picker is in P3 mode. The badge keeps
+  // `aria-hidden="true"` to skip tab order; `aria-describedby` walks
+  // through aria-hidden referenced elements per ARIA spec, so screen-reader
+  // users tabbing into the hex input still receive the spoken hint.
+  const p3HintId = createUniqueId();
 
   const committedHex = () => srgbToHex(props.r, props.g, props.b);
   const swatchColor = () => committedHex();
@@ -104,6 +110,7 @@ export function HexInput(props: HexInputProps) {
         type="text"
         maxLength={7}
         aria-label={t("panels:colorPicker.hexColor")}
+        aria-describedby={props.isP3Mode ? p3HintId : undefined}
         value={displayValue()}
         onFocus={handleFocus}
         onBlur={handleBlur}
@@ -124,14 +131,23 @@ export function HexInput(props: HexInputProps) {
         </span>
       </Show>
       <Show when={props.isP3Mode}>
-        <span
-          class="sigil-hex-input__p3-badge"
-          aria-hidden="true"
-          title={t("panels:colorPicker.p3HexHint")}
-        >
-          {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: abbreviated mode label, full name in title attribute */}
-          {"P3"}
-        </span>
+        <>
+          <span
+            class="sigil-hex-input__p3-badge"
+            aria-hidden="true"
+            title={t("panels:colorPicker.p3HexHint")}
+          >
+            {/* eslint-disable-next-line i18next/no-literal-string -- i18n-allow: abbreviated mode label, full name in title attribute */}
+            {"P3"}
+          </span>
+          {/* RF-017: full-text description referenced by the input's
+              aria-describedby so keyboard / screen-reader users discover the
+              P3 hint on focus. The badge above keeps its 2-glyph visible
+              label; this hidden node carries the spoken text. */}
+          <span id={p3HintId} class="sr-only">
+            {t("panels:colorPicker.p3HexHint")}
+          </span>
+        </>
       </Show>
     </div>
   );

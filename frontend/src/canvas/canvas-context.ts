@@ -12,6 +12,15 @@
  * all honor the colorSpace argument. Earlier versions ignore unknown
  * properties (per spec) and return an sRGB context; we accept that
  * fallback silently.
+ *
+ * RF-013: Call this helper at most ONCE per canvas element lifetime. Per
+ * the HTML Canvas spec, subsequent `getContext("2d", ...)` calls on the
+ * same canvas return the existing context regardless of the new options —
+ * a second acquire with different `colorSpace` does NOT reconfigure the
+ * existing context. This function does not memoize; the existing
+ * consumers (main canvas + 3 picker canvases) each acquire once on mount.
+ * Re-acquiring is undefined behavior — the original context's color space
+ * persists, and the second call silently returns the same handle.
  */
 export function acquireWideGamut2D(canvas: HTMLCanvasElement): CanvasRenderingContext2D | null {
   try {
