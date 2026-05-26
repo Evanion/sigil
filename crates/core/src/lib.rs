@@ -4,6 +4,7 @@
 
 pub mod arena;
 pub mod boolean;
+pub mod color_matrix;
 pub mod command;
 pub mod commands;
 pub mod component;
