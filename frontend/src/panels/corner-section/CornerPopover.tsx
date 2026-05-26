@@ -82,7 +82,7 @@ const DEFAULT_SUPERELLIPSE_SMOOTHING = 0.5;
  * @internal — exported for unit tests only; not part of the module's
  * public API.
  */
-export function headerLabel(target: HotspotId): string {
+export function popoverHeaderLabel(target: HotspotId): string {
   switch (target) {
     case "tl":
     case "tr":
@@ -104,7 +104,7 @@ export function headerLabel(target: HotspotId): string {
       return "All corners";
     default: {
       const _exhaustive: never = target;
-      throw new Error(`headerLabel: unexpected target ${String(_exhaustive)}`);
+      throw new Error(`popoverHeaderLabel: unexpected target ${String(_exhaustive)}`);
     }
   }
 }
@@ -144,10 +144,14 @@ export function writeCorners(
   targets: readonly number[],
   factory: (prev: Corner) => Corner,
 ): Corners {
-  const next = corners.map((c, i) => (targets.includes(i) ? factory(c) : c));
-  // Corners is `readonly [Corner, Corner, Corner, Corner]`; we just mapped
-  // a 4-tuple in place so the result is still a 4-element array.
-  return next as unknown as Corners;
+  // Explicit 4-tuple construction (RF-031): avoids `as unknown as Corners`
+  // double-cast. `Corners` is `readonly [Corner, Corner, Corner, Corner]`,
+  // so listing each position explicitly preserves the tuple type without
+  // any unsafe assertion. Positions not listed in `targets` are returned
+  // unchanged so external mutations to those corners are preserved.
+  const apply = (i: 0 | 1 | 2 | 3): Corner =>
+    targets.includes(i) ? factory(corners[i]) : corners[i];
+  return [apply(0), apply(1), apply(2), apply(3)];
 }
 
 /**
@@ -385,6 +389,18 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     const ts = targeted();
     const first = ts[0];
     if (first === undefined || first.type !== "superellipse") {
+      // RF-030 / frontend-defensive "Internal Mutation Entry Points Must
+      // Diagnose Their Own No-Ops" — every render-time access to this memo
+      // is gated by `showSmoothing()` at the JSX call site, so reaching the
+      // fallback indicates a gate failure (caller bypassed the gate). Emit
+      // a structured warn so the regression is visible in development.
+      console.warn(
+        "CornerPopover: currentSmoothing called with non-superellipse target — using 0.5 fallback (gate failure)",
+        {
+          target: props.target,
+          types: ts.map((c) => c.type),
+        },
+      );
       return 0.5;
     }
     return first.smoothing;
@@ -452,6 +468,19 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
     });
     props.onCommit(next);
     setStatus("");
+  }
+
+  /**
+   * Slider gesture-end handler (RF-033): commits the final smoothing value
+   * and clears the in-gesture preview state in one call. Extracted from the
+   * inline `onChangeEnd={(v) => { commitSmoothing(v); setGestureSmoothing(null); }}`
+   * arrow per frontend-defensive "Business Logic Must Not Live in Inline
+   * JSX Handlers" — even a two-statement handler qualifies, and an extracted
+   * named function is independently testable and greppable.
+   */
+  function endSmoothingGesture(v: number): void {
+    commitSmoothing(v);
+    setGestureSmoothing(null);
   }
 
   /**
@@ -548,7 +577,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
   });
 
   return (
-    <div class="sigil-corner-popover" role="group" aria-label={headerLabel(props.target)}>
+    <div class="sigil-corner-popover" role="group" aria-label={popoverHeaderLabel(props.target)}>
       {/*
        * RF-007 / RF-019: visually-hidden aria-live region. Updated only on
        * discrete commit attempts (not on every keystroke), per a11y-rules.md
@@ -562,7 +591,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
        * RF-010: popover header is h4 — one level below CornerSection's h3.
        * Keeps the document outline coherent (h3 = section, h4 = sub-control).
        */}
-      <h4 class="sigil-corner-popover__header">{headerLabel(props.target)}</h4>
+      <h4 class="sigil-corner-popover__header">{popoverHeaderLabel(props.target)}</h4>
 
       <div class="sigil-corner-popover__field" data-testid="corner-popover__shape">
         <label id={shapeLabelId} class="sigil-corner-popover__label">
@@ -725,10 +754,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
                     step={0.01}
                     onChangeStart={() => setGestureSmoothing(currentSmoothing())}
                     onChange={(v) => setGestureSmoothing(v)}
-                    onChangeEnd={(v) => {
-                      commitSmoothing(v);
-                      setGestureSmoothing(null);
-                    }}
+                    onChangeEnd={endSmoothingGesture}
                     ariaLabelledBy={smoothingLabelId}
                     ariaValueText={smoothingAriaValueText()}
                   />

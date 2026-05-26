@@ -8,6 +8,18 @@
  * - `popover="auto"` (default): light dismiss (click outside closes)
  * - `popover="manual"` (modal=true): no light dismiss, close via Escape or programmatically
  *
+ * **Controlled mode without a visible trigger** (RF-029): if you need to
+ * drive the popover from an external element (e.g., a custom toolbar
+ * button, an SVG hotspot, a canvas-rendered control) and the wrapper's
+ * default `<button class="sigil-popover-trigger">` would be a layout or
+ * a11y hazard, pass an `anchorRef` pointing at the existing element in
+ * your tree. The wrapper then skips rendering its internal trigger
+ * button entirely and mirrors `anchor-name` + ARIA expand-state
+ * attributes onto your element instead. Combine with the controlled
+ * `open` / `onOpenChange` props to drive open/close from the caller.
+ * See `frontend/src/panels/corner-section/CornerSection.tsx` for the
+ * canonical example.
+ *
  * **Modal-dialog nesting**: when a Popover renders inside an open modal
  * `<dialog>` (detected by walking `triggerRef`'s ancestors for a `:modal`
  * match on mount), the browser's native `popover="auto"` light-dismiss

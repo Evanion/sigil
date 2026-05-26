@@ -13,10 +13,10 @@ import type { Meta, StoryObj } from "storybook-solidjs-vite";
 import { CornerSection } from "./CornerSection";
 import type { Corner, Corners, DocumentNode } from "../../types/document";
 
-function rectWith(corners: Corners): DocumentNode {
+function rectWith(corners: Corners, uuid: string = "story-rect"): DocumentNode {
   return {
     id: { index: 1, generation: 0 },
-    uuid: "story-rect",
+    uuid,
     kind: { type: "rectangle", corners },
     name: "Demo Rect",
     parent: null,
@@ -37,15 +37,17 @@ function rectWith(corners: Corners): DocumentNode {
 }
 
 function ellipseNode(): DocumentNode {
-  const base = rectWith([
-    { type: "round", radii: { x: 0, y: 0 } },
-    { type: "round", radii: { x: 0, y: 0 } },
-    { type: "round", radii: { x: 0, y: 0 } },
-    { type: "round", radii: { x: 0, y: 0 } },
-  ]);
+  const base = rectWith(
+    [
+      { type: "round", radii: { x: 0, y: 0 } },
+      { type: "round", radii: { x: 0, y: 0 } },
+      { type: "round", radii: { x: 0, y: 0 } },
+      { type: "round", radii: { x: 0, y: 0 } },
+    ],
+    "story-ellipse",
+  );
   return {
     ...base,
-    uuid: "story-ellipse",
     kind: { type: "ellipse", arc_start: 0, arc_end: 360 },
   };
 }
@@ -69,26 +71,29 @@ const sup = (r: number, s: number): Corner => ({
 
 export const AllRoundDefault: Story = {
   args: {
-    node: rectWith([round(8), round(8), round(8), round(8)]),
+    node: rectWith([round(8), round(8), round(8), round(8)], "story-rect-all-round"),
     onCorners: () => {},
   },
 };
 
 export const MixedShapes: Story = {
   args: {
-    node: rectWith([round(16), bevel(16), notch(16), scoop(16)]),
+    node: rectWith([round(16), bevel(16), notch(16), scoop(16)], "story-rect-mixed-shapes"),
     onCorners: () => {},
   },
 };
 
 export const AxisUnlocked: Story = {
   args: {
-    node: rectWith([
-      { type: "round", radii: { x: 30, y: 10 } },
-      { type: "round", radii: { x: 30, y: 10 } },
-      { type: "round", radii: { x: 30, y: 10 } },
-      { type: "round", radii: { x: 30, y: 10 } },
-    ]),
+    node: rectWith(
+      [
+        { type: "round", radii: { x: 30, y: 10 } },
+        { type: "round", radii: { x: 30, y: 10 } },
+        { type: "round", radii: { x: 30, y: 10 } },
+        { type: "round", radii: { x: 30, y: 10 } },
+      ],
+      "story-rect-axis-unlocked",
+    ),
     onCorners: () => {},
   },
 };
@@ -105,7 +110,10 @@ export const SuperellipseSmoothingScale: Story = {
         <div>
           <h4 style={{ "text-align": "center" }}>s = {s}</h4>
           <CornerSection
-            node={rectWith([sup(20, s), sup(20, s), sup(20, s), sup(20, s)])}
+            node={rectWith(
+              [sup(20, s), sup(20, s), sup(20, s), sup(20, s)],
+              `story-rect-smoothing-${s}`,
+            )}
             onCorners={() => {}}
           />
         </div>
