@@ -149,7 +149,25 @@
     "shape": "Forma",
     "mixed": "Mixto",
     "smoothing": "Suavizado",
-    "disabledExplanation": "El radio de las esquinas se aplica solo a rectángulos, marcos e imágenes."
+    "disabledExplanation": "El radio de las esquinas se aplica solo a rectángulos, marcos e imágenes.",
+    "headers": {
+      "topLeftCorner": "Esquina superior izquierda",
+      "topRightCorner": "Esquina superior derecha",
+      "bottomRightCorner": "Esquina inferior derecha",
+      "bottomLeftCorner": "Esquina inferior izquierda",
+      "topCorners": "Esquinas superiores",
+      "rightCorners": "Esquinas derechas",
+      "bottomCorners": "Esquinas inferiores",
+      "leftCorners": "Esquinas izquierdas",
+      "allCorners": "Todas las esquinas"
+    },
+    "shapeOptions": {
+      "round": "Redondeada",
+      "bevel": "Bisel",
+      "notch": "Muesca",
+      "scoop": "Cuchara",
+      "superellipse": "Superelipse"
+    }
   },
   "colorPicker": {
     "outOfGamut": "El color está fuera del gamut sRGB",

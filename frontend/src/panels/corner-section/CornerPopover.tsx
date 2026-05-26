@@ -18,6 +18,7 @@
 import type { Component } from "solid-js";
 import { createMemo, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
+import type { TFunction } from "i18next";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
 import { Slider } from "../../components/slider/Slider";
@@ -29,7 +30,6 @@ import {
   MIN_SUPERELLIPSE_SMOOTHING,
 } from "../../store/corners-input";
 import {
-  CORNER_POSITION_LABEL,
   cornersAtHotspot,
   hotspotHasAsymmetricRadii,
   hotspotShapeIsMixed,
@@ -58,20 +58,6 @@ export interface CornerPopoverProps {
   readonly tokens?: Record<string, Token>;
 }
 
-/** The four shape options offered by corner + edge popovers (Spec 14 §1.5). */
-const CORNER_SHAPE_OPTIONS: readonly SelectOption[] = [
-  { value: "round", label: "Round" },
-  { value: "bevel", label: "Bevel" },
-  { value: "notch", label: "Notch" },
-  { value: "scoop", label: "Scoop" },
-];
-
-/** Center popover adds Superellipse on top of the four corner shapes. */
-const CENTER_SHAPE_OPTIONS: readonly SelectOption[] = [
-  ...CORNER_SHAPE_OPTIONS,
-  { value: "superellipse", label: "Superellipse" },
-];
-
 /** Default smoothing applied when a corner first becomes Superellipse. */
 const DEFAULT_SUPERELLIPSE_SMOOTHING = 0.5;
 
@@ -80,29 +66,38 @@ const DEFAULT_SUPERELLIPSE_SMOOTHING = 0.5;
  * label by position (e.g., "Top-left corner"); multi-corner hotspots use
  * the canonical "Top corners" / "All corners" labels.
  *
+ * RF-008: helper accepts `t` as a parameter and resolves the
+ * `panels:corners.headers.*` keys. Previously this returned hardcoded
+ * English strings — the i18n lint rule did not flag them because the
+ * helper lives at module scope and the rule mode (jsx-only) only
+ * inspects JSX children/attributes.
+ *
  * @internal — exported for unit tests only; not part of the module's
  * public API.
  */
-export function popoverHeaderLabel(target: HotspotId): string {
+export function popoverHeaderLabel(
+  target: HotspotId,
+  t: TFunction<"translation", undefined>,
+): string {
   switch (target) {
     case "tl":
+      return t("panels:corners.headers.topLeftCorner");
     case "tr":
+      return t("panels:corners.headers.topRightCorner");
     case "br":
-    case "bl": {
-      const idx = hotspotTargetIndices(target)[0];
-      const pos = CORNER_POSITION_LABEL[idx];
-      return pos.charAt(0).toUpperCase() + pos.slice(1) + " corner";
-    }
+      return t("panels:corners.headers.bottomRightCorner");
+    case "bl":
+      return t("panels:corners.headers.bottomLeftCorner");
     case "top":
-      return "Top corners";
+      return t("panels:corners.headers.topCorners");
     case "right":
-      return "Right corners";
+      return t("panels:corners.headers.rightCorners");
     case "bottom":
-      return "Bottom corners";
+      return t("panels:corners.headers.bottomCorners");
     case "left":
-      return "Left corners";
+      return t("panels:corners.headers.leftCorners");
     case "center":
-      return "All corners";
+      return t("panels:corners.headers.allCorners");
     default: {
       const _exhaustive: never = target;
       throw new Error(`popoverHeaderLabel: unexpected target ${String(_exhaustive)}`);
@@ -167,6 +162,24 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
   const targeted = createMemo(() => cornersAtHotspot(props.corners, props.target));
   const isMixed = createMemo(() => hotspotShapeIsMixed(props.corners, props.target));
   const isCenter = createMemo(() => props.target === "center");
+
+  // RF-008: Select option arrays now live inside the component body so each
+  // option label resolves through t() against the current locale. Wrapped
+  // in createMemo so the same array identity is preserved across re-renders
+  // under the same `t` reference (Solid's useTransContext returns a stable
+  // accessor, so this memo recomputes only on locale change). The four
+  // common shapes are shared between the corner/edge popover (4 options)
+  // and the center popover (5 options including Superellipse).
+  const cornerShapeOptions = createMemo<readonly SelectOption[]>(() => [
+    { value: "round", label: t("panels:corners.shapeOptions.round") },
+    { value: "bevel", label: t("panels:corners.shapeOptions.bevel") },
+    { value: "notch", label: t("panels:corners.shapeOptions.notch") },
+    { value: "scoop", label: t("panels:corners.shapeOptions.scoop") },
+  ]);
+  const centerShapeOptions = createMemo<readonly SelectOption[]>(() => [
+    ...cornerShapeOptions(),
+    { value: "superellipse", label: t("panels:corners.shapeOptions.superellipse") },
+  ]);
 
   // RF-007 / RF-019: every commit handler must surface validation failures
   // to a user-visible channel per CLAUDE.md §11 "Handlers Must Surface
@@ -579,7 +592,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
   });
 
   return (
-    <div class="sigil-corner-popover" role="group" aria-label={popoverHeaderLabel(props.target)}>
+    <div class="sigil-corner-popover" role="group" aria-label={popoverHeaderLabel(props.target, t)}>
       {/*
        * RF-007 / RF-019: visually-hidden aria-live region. Updated only on
        * discrete commit attempts (not on every keystroke), per a11y-rules.md
@@ -593,7 +606,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
        * RF-010: popover header is h4 — one level below CornerSection's h3.
        * Keeps the document outline coherent (h3 = section, h4 = sub-control).
        */}
-      <h4 class="sigil-corner-popover__header">{popoverHeaderLabel(props.target)}</h4>
+      <h4 class="sigil-corner-popover__header">{popoverHeaderLabel(props.target, t)}</h4>
 
       <div class="sigil-corner-popover__field" data-testid="corner-popover__shape">
         <label id={shapeLabelId} class="sigil-corner-popover__label">
@@ -609,7 +622,7 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
           </span>
         </Show>
         <Select
-          options={isCenter() ? CENTER_SHAPE_OPTIONS : CORNER_SHAPE_OPTIONS}
+          options={isCenter() ? centerShapeOptions() : cornerShapeOptions()}
           value={currentShape()}
           onValueChange={commitShape}
           aria-labelledby={shapeLabelId}

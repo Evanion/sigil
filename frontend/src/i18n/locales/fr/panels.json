@@ -149,7 +149,25 @@
     "shape": "Forme",
     "mixed": "Mixte",
     "smoothing": "Lissage",
-    "disabledExplanation": "Le rayon des coins s'applique uniquement aux rectangles, cadres et images."
+    "disabledExplanation": "Le rayon des coins s'applique uniquement aux rectangles, cadres et images.",
+    "headers": {
+      "topLeftCorner": "Coin supérieur gauche",
+      "topRightCorner": "Coin supérieur droit",
+      "bottomRightCorner": "Coin inférieur droit",
+      "bottomLeftCorner": "Coin inférieur gauche",
+      "topCorners": "Coins supérieurs",
+      "rightCorners": "Coins droits",
+      "bottomCorners": "Coins inférieurs",
+      "leftCorners": "Coins gauches",
+      "allCorners": "Tous les coins"
+    },
+    "shapeOptions": {
+      "round": "Arrondi",
+      "bevel": "Biseau",
+      "notch": "Encoche",
+      "scoop": "Creux",
+      "superellipse": "Superellipse"
+    }
   },
   "colorPicker": {
     "outOfGamut": "La couleur est hors de la gamme sRGB",

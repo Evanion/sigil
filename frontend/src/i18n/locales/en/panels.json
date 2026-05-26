@@ -149,7 +149,25 @@
     "shape": "Shape",
     "mixed": "Mixed",
     "smoothing": "Smoothing",
-    "disabledExplanation": "Corner radius applies to rectangles, frames, and images only."
+    "disabledExplanation": "Corner radius applies to rectangles, frames, and images only.",
+    "headers": {
+      "topLeftCorner": "Top-left corner",
+      "topRightCorner": "Top-right corner",
+      "bottomRightCorner": "Bottom-right corner",
+      "bottomLeftCorner": "Bottom-left corner",
+      "topCorners": "Top corners",
+      "rightCorners": "Right corners",
+      "bottomCorners": "Bottom corners",
+      "leftCorners": "Left corners",
+      "allCorners": "All corners"
+    },
+    "shapeOptions": {
+      "round": "Round",
+      "bevel": "Bevel",
+      "notch": "Notch",
+      "scoop": "Scoop",
+      "superellipse": "Superellipse"
+    }
   },
   "colorPicker": {
     "outOfGamut": "Color is outside the sRGB gamut",
