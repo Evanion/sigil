@@ -57,16 +57,82 @@ export class SvgPathBuilder implements PathBuilder {
   }
 
   ellipse(
-    _cx: number,
-    _cy: number,
-    _rx: number,
-    _ry: number,
-    _rotation: number,
-    _startAngle: number,
-    _endAngle: number,
-    _counterclockwise = false,
+    cx: number,
+    cy: number,
+    rx: number,
+    ry: number,
+    rotation: number,
+    startAngle: number,
+    endAngle: number,
+    counterclockwise = false,
   ): void {
-    throw new Error("SvgPathBuilder.ellipse: implemented in Task 3");
+    // CLAUDE.md §11 Floating-Point Validation — guard at the helper entry.
+    if (
+      !Number.isFinite(cx) ||
+      !Number.isFinite(cy) ||
+      !Number.isFinite(rx) ||
+      !Number.isFinite(ry) ||
+      !Number.isFinite(rotation) ||
+      !Number.isFinite(startAngle) ||
+      !Number.isFinite(endAngle) ||
+      rx <= 0 ||
+      ry <= 0
+    ) {
+      console.warn("SvgPathBuilder.ellipse: rejected non-finite or non-positive input", {
+        cx,
+        cy,
+        rx,
+        ry,
+        rotation,
+        startAngle,
+        endAngle,
+      });
+      return;
+    }
+
+    // 1. Compute endpoints on un-rotated ellipse, then rotate around (cx, cy).
+    const cosR = Math.cos(rotation);
+    const sinR = Math.sin(rotation);
+    function rotate(localX: number, localY: number): [number, number] {
+      return [localX * cosR - localY * sinR, localX * sinR + localY * cosR];
+    }
+    const startLocalX = rx * Math.cos(startAngle);
+    const startLocalY = ry * Math.sin(startAngle);
+    const endLocalX = rx * Math.cos(endAngle);
+    const endLocalY = ry * Math.sin(endAngle);
+    const [srx, sry] = rotate(startLocalX, startLocalY);
+    const [erx, ery] = rotate(endLocalX, endLocalY);
+    const startX = cx + srx;
+    const startY = cy + sry;
+    const endX = cx + erx;
+    const endY = cy + ery;
+
+    // 2. Compute the sweep angle (always non-negative, < 2π).
+    const TWO_PI = 2 * Math.PI;
+    let sweep: number;
+    if (!counterclockwise) {
+      let e = endAngle;
+      while (e < startAngle) e += TWO_PI;
+      sweep = e - startAngle;
+    } else {
+      let e = endAngle;
+      while (e > startAngle) e -= TWO_PI;
+      sweep = startAngle - e;
+    }
+
+    // 3. Convert to SVG flags.
+    const largeArc = sweep > Math.PI ? 1 : 0;
+    const sweepFlag = counterclockwise ? 0 : 1;
+
+    // 4. Convert rotation from radians to degrees for SVG's x-axis-rotation.
+    const rotationDeg = (rotation * 180) / Math.PI;
+
+    // 5. Emit lineTo to arc start (idempotent if pen is already there),
+    //    then the arc command.
+    this.parts.push(`L ${fmt(startX)} ${fmt(startY)}`);
+    this.parts.push(
+      `A ${fmt(rx)} ${fmt(ry)} ${fmt(rotationDeg)} ${largeArc} ${sweepFlag} ${fmt(endX)} ${fmt(endY)}`,
+    );
   }
 
   closePath(): void {
