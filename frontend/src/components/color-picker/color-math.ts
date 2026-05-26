@@ -503,7 +503,7 @@ function oklchToSrgbUnclamped(L: number, C: number, H: number): [number, number,
  * encode output). Output channels are unclamped — values outside [0, 1] signal
  * that the source P3 color is out of sRGB gamut.
  */
-function displayP3ToSrgb(r: number, g: number, b: number): [number, number, number] {
+export function displayP3ToSrgb(r: number, g: number, b: number): [number, number, number] {
   const linearP3: [number, number, number] = [srgbEotf(r), srgbEotf(g), srgbEotf(b)];
   const xyz = multiplyMatrixVec3(DISPLAY_P3_TO_XYZ_D65, linearP3);
   const linearSrgb = multiplyMatrixVec3(XYZ_TO_SRGB_D65, xyz);
@@ -514,7 +514,7 @@ function displayP3ToSrgb(r: number, g: number, b: number): [number, number, numb
  * sRGB → Display-P3 conversion through CIE XYZ (D65). Inverse of
  * displayP3ToSrgb.
  */
-function srgbToDisplayP3(r: number, g: number, b: number): [number, number, number] {
+export function srgbToDisplayP3(r: number, g: number, b: number): [number, number, number] {
   const linearSrgb: [number, number, number] = [srgbEotf(r), srgbEotf(g), srgbEotf(b)];
   const xyz = multiplyMatrixVec3(SRGB_TO_XYZ_D65, linearSrgb);
   const linearP3 = multiplyMatrixVec3(XYZ_TO_DISPLAY_P3_D65, xyz);

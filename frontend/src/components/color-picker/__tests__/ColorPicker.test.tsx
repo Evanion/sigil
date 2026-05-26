@@ -14,6 +14,7 @@ import { cleanup, fireEvent } from "@solidjs/testing-library";
 import type { i18n } from "i18next";
 import { createSignal } from "solid-js";
 import { ColorPicker } from "../ColorPicker";
+import { ColorValueFields } from "../ColorValueFields";
 import type { Color } from "../../../types/document";
 import { createTestI18n, renderWithI18n as renderWithI18nShared } from "../../../test-utils/i18n";
 
@@ -325,5 +326,56 @@ describe("ColorPicker", () => {
 
       expect(onColorCommit).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe("ColorValueFields display_p3 mode (Spec 18)", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders 4 fields with 0-1 float ranges for R/G/B in P3 mode", () => {
+    let lastChange: { r: number; g: number; b: number; alpha: number } | null = null;
+
+    const { container } = renderWithI18n(() => (
+      <ColorValueFields
+        r={0.5}
+        g={0.5}
+        b={0.5}
+        alpha={1}
+        space="display_p3"
+        hslH={undefined}
+        hslS={undefined}
+        onChange={(r, g, b, alpha) => {
+          lastChange = { r, g, b, alpha };
+        }}
+      />
+    ));
+
+    // Should have 4 numeric spinbuttons (R, G, B, Alpha) — Kobalte's
+    // NumberField renders the input with role="spinbutton".
+    const spinButtons = container.querySelectorAll<HTMLElement>('[role="spinbutton"]');
+    expect(spinButtons).toHaveLength(4);
+
+    // Read displayed value. Kobalte's NumberField renders raw value into the
+    // input's value/textContent.
+    const readValue = (el: HTMLElement | undefined): string => {
+      if (!el) return "";
+      if (el instanceof HTMLInputElement) return el.value;
+      return (el.textContent ?? "").trim();
+    };
+
+    // sRGB grey (0.5, 0.5, 0.5) maps to P3 grey close to 0.5 because the
+    // P3↔sRGB matrix preserves the achromatic axis. The R field should NOT
+    // display 128 (that's the sRGB 0-255 mode); it must be a 0-1 float.
+    const [rInput] = Array.from(spinButtons);
+    const rValue = readValue(rInput);
+    expect(rValue).toMatch(/^0\.5/);
+
+    void lastChange;
   });
 });
