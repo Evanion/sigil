@@ -124,3 +124,33 @@ describe("CornerSection — orchestration", () => {
     expect(newCorners[0].type).toBe("bevel");
   });
 });
+
+function makeSuperellipseRectNode(): DocumentNode {
+  const c = { type: "superellipse" as const, radii: { x: 8, y: 8 }, smoothing: 0.5 };
+  return {
+    ...makeRectNode("n-se"),
+    kind: { type: "rectangle", corners: [c, c, c, c] },
+  };
+}
+
+describe("CornerSection — superellipse lock state", () => {
+  it("disables the 8 non-center hotspots when the node is uniform-superellipse", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeSuperellipseRectNode()} onCorners={() => {}} />
+    ));
+    const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
+    const center = container.querySelector("button[data-hotspot='center']") as HTMLButtonElement;
+    expect(tl.getAttribute("aria-disabled")).toBe("true");
+    expect(center.getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("the disabled hotspots carry the locked-state tooltip via the title attribute", () => {
+    const { container } = render(() => (
+      <CornerSection node={makeSuperellipseRectNode()} onCorners={() => {}} />
+    ));
+    const tl = container.querySelector("button[data-hotspot='tl']") as HTMLButtonElement;
+    expect(tl.getAttribute("title")).toBe(
+      "Superellipse applies to all corners. Change the shape to edit corners individually.",
+    );
+  });
+});

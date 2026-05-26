@@ -41,7 +41,7 @@ import type { Corners, DocumentNode } from "../../types/document";
 import { Popover } from "../../components/popover/Popover";
 import { CornerPreviewSvg } from "./CornerPreviewSvg";
 import { CornerPopover } from "./CornerPopover";
-import { type HotspotId } from "./corner-section-state";
+import { isSuperellipseUniform, type HotspotId } from "./corner-section-state";
 import "./CornerSection.css";
 
 interface CornerSectionProps {
@@ -66,6 +66,10 @@ function getCorners(node: DocumentNode): Corners | null {
 
 export const CornerSection: Component<CornerSectionProps> = (props) => {
   const corners = createMemo<Corners | null>(() => getCorners(props.node));
+  const locked = createMemo(() => {
+    const c = corners();
+    return c !== null && isSuperellipseUniform(c);
+  });
   const [activeHotspot, setActiveHotspot] = createSignal<HotspotId | null>(null);
 
   function handleHotspotActivate(id: HotspotId): void {
@@ -85,7 +89,11 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
       {(c) => (
         <section class="sigil-corner-section">
           <h2 class="sigil-corner-section__header">Corners</h2>
-          <CornerPreviewSvg corners={c()} onHotspotActivate={handleHotspotActivate} />
+          <CornerPreviewSvg
+            corners={c()}
+            onHotspotActivate={handleHotspotActivate}
+            nonCenterHotspotsDisabled={locked()}
+          />
           {/*
            * Controlled-mode Popover. The wrapper renders its own
            * <button class="sigil-popover-trigger"> internally — we
