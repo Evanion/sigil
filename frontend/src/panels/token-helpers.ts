@@ -91,19 +91,32 @@ export function isValidTokenValue(v: unknown): v is TokenValue {
 // ── Color conversion ────────────────────────────────────────────────
 
 /**
- * Convert a sRGB Color to an rgba() CSS string.
- * Guards all channels with Number.isFinite() per CLAUDE.md floating-point validation.
+ * Convert a Color to a CSS color string.
+ *  - sRGB → rgba(r255, g255, b255, a)
+ *  - Display-P3 → color(display-p3 r g b / a) with 4-decimal precision
+ *  - Other spaces (OkLCH, OkLab) → fallback gray (their proper CSS output is
+ *    deferred to a follow-up spec).
+ * Guards all channels with Number.isFinite() per CLAUDE.md §11.
  */
 export function colorToCss(color: Color): string {
-  if (color.space !== "srgb") {
-    // Non-sRGB colors fallback to gray
-    return "rgba(128, 128, 128, 1)";
+  if (color.space === "srgb") {
+    const r = Number.isFinite(color.r) ? Math.round(Math.max(0, Math.min(1, color.r)) * 255) : 0;
+    const g = Number.isFinite(color.g) ? Math.round(Math.max(0, Math.min(1, color.g)) * 255) : 0;
+    const b = Number.isFinite(color.b) ? Math.round(Math.max(0, Math.min(1, color.b)) * 255) : 0;
+    const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
   }
-  const r = Number.isFinite(color.r) ? Math.round(Math.max(0, Math.min(1, color.r)) * 255) : 0;
-  const g = Number.isFinite(color.g) ? Math.round(Math.max(0, Math.min(1, color.g)) * 255) : 0;
-  const b = Number.isFinite(color.b) ? Math.round(Math.max(0, Math.min(1, color.b)) * 255) : 0;
-  const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
-  return `rgba(${r}, ${g}, ${b}, ${a})`;
+  if (color.space === "display_p3") {
+    const round4 = (n: number): number => Math.round(n * 10000) / 10000;
+    const r = Number.isFinite(color.r) ? round4(color.r) : 0;
+    const g = Number.isFinite(color.g) ? round4(color.g) : 0;
+    const b = Number.isFinite(color.b) ? round4(color.b) : 0;
+    const a = Number.isFinite(color.a) ? Math.max(0, Math.min(1, color.a)) : 1;
+    return `color(display-p3 ${r} ${g} ${b} / ${a})`;
+  }
+  // OkLCH and OkLab: fallback to gray until proper CSS output is wired (out
+  // of scope for Spec 18).
+  return "rgba(128, 128, 128, 1)";
 }
 
 // ── Token types ──────────────────────────────────────────────────────
