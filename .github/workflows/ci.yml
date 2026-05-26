@@ -264,13 +264,53 @@ jobs:
           echo "Every discriminated union has an exhaustive-switch sentinel:"
           echo "$UNIONS" | sed 's/^/  /'
 
+  i18n-allowlist-rationale:
+    name: i18n Allowlist Rationale
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Verify every i18next/no-literal-string disable has a rationale
+        run: |
+          set -euo pipefail
+          # The rule (Spec 17): every `eslint-disable[-next-line] i18next/no-literal-string`
+          # directive in frontend/src must have a paired `i18n-allow: <rationale>` comment
+          # on the same line OR on the immediately preceding line. Legitimate exceptions
+          # (decorative glyphs, app name, canvas fallback text) are rare and always justified
+          # inline; an unannotated disable fails the build. If the count grows beyond a
+          # handful, the rule's scope should be reconsidered rather than silently
+          # accumulate unannotated disables.
+          matches=$(grep -rEn 'eslint-disable(-next-line)?[^\n]*i18next/no-literal-string' frontend/src --include='*.ts' --include='*.tsx' || true)
+          if [ -z "$matches" ]; then
+            echo "No i18next/no-literal-string disables found — nothing to check."
+            exit 0
+          fi
+          bad=""
+          while IFS= read -r line; do
+            if [ -z "$line" ]; then continue; fi
+            file=$(echo "$line" | cut -d: -f1)
+            lineno=$(echo "$line" | cut -d: -f2)
+            # Look at the line itself and the line above for "i18n-allow:".
+            window=$(sed -n "$((lineno - 1)),${lineno}p" "$file")
+            if ! echo "$window" | grep -q 'i18n-allow:'; then
+              bad="$bad\n$file:$lineno"
+            fi
+          done <<< "$matches"
+          if [ -n "$bad" ]; then
+            echo "::error::eslint-disable for i18next/no-literal-string lacks an // i18n-allow: rationale comment. Add a rationale or restructure to avoid the disable."
+            echo -e "$bad"
+            exit 1
+          fi
+          echo "All i18next/no-literal-string disables have rationale comments."
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels]
+      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels, i18n-allowlist-rationale]
     steps:
       - name: Check results
         env:
@@ -279,13 +319,15 @@ jobs:
           PIN_CHECK_RESULT: ${{ needs.pin-check.result }}
           KOBALTE_CHECK_RESULT: ${{ needs.kobalte-import-discipline.result }}
           SENTINELS_RESULT: ${{ needs.discriminated-union-sentinels.result }}
+          I18N_ALLOWLIST_RESULT: ${{ needs.i18n-allowlist-rationale.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
           echo "Pin Check: $PIN_CHECK_RESULT"
           echo "Kobalte Check: $KOBALTE_CHECK_RESULT"
           echo "Sentinels Check: $SENTINELS_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" ]]; then
+          echo "i18n Allowlist Rationale: $I18N_ALLOWLIST_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" || "$I18N_ALLOWLIST_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
