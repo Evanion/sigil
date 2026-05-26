@@ -329,6 +329,54 @@ describe("ColorPicker", () => {
   });
 });
 
+describe("ColorPicker emit storage tag (Spec 18)", () => {
+  beforeEach(async () => {
+    i18nInstance = await createTestI18n();
+    (globalThis as unknown as { ResizeObserver: typeof MockResizeObserver }).ResizeObserver =
+      MockResizeObserver;
+    mockMatchMedia();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("emits Color::DisplayP3 after the user switches to P3 mode", async () => {
+    const emissions: Color[] = [];
+
+    const { container } = renderWithI18n(() => (
+      <ColorPicker
+        color={{ space: "srgb", r: 1, g: 0, b: 0, a: 1 }}
+        onColorChange={(c) => {
+          emissions.push(c);
+        }}
+      />
+    ));
+
+    // Allow mount guard to elapse (queueMicrotask in ColorPicker flips
+    // `mounted = true`).
+    await Promise.resolve();
+
+    // Find the P3 radio button in the switcher and click it.
+    const radioButtons = container.querySelectorAll<HTMLButtonElement>("[role='radio']");
+    const p3Button = Array.from(radioButtons).find(
+      (b) =>
+        (b.getAttribute("title") ?? "").toLowerCase().includes("p3") ||
+        (b.textContent ?? "").trim() === "P3",
+    );
+    expect(p3Button, "P3 radio button should be present in the switcher").not.toBeUndefined();
+    if (!p3Button) throw new Error("P3 radio button missing");
+    p3Button.click();
+
+    // Wait for the requestAnimationFrame inside flushEmit.
+    await new Promise((r) => requestAnimationFrame(() => r(null)));
+
+    expect(emissions.length).toBeGreaterThan(0);
+    const lastEmit = emissions[emissions.length - 1];
+    expect(lastEmit?.space).toBe("display_p3");
+  });
+});
+
 describe("ColorValueFields display_p3 mode (Spec 18)", () => {
   beforeEach(async () => {
     i18nInstance = await createTestI18n();

@@ -21,6 +21,7 @@ import {
   colorToSrgb,
   colorAlpha,
   srgbToHex,
+  srgbToColor,
   isOutOfSrgbGamut,
   hsvToSrgb,
   srgbToHsv,
@@ -167,17 +168,24 @@ export function ColorPicker(props: ColorPickerProps) {
   function flushEmit() {
     emitPending = false;
     if (pendingColor) {
-      const { r, g, b, alpha } = pendingColor;
+      const { r, g, b, alpha, space } = pendingColor;
       pendingColor = null;
-      // Always emit as sRGB — the display space is for the UI fields only,
-      // not for storage. The canvas renderer and serialization expect sRGB.
-      props.onColorChange({ space: "srgb", r, g, b, a: alpha });
+      // Spec 18: the display mode is the storage tag. P3 mode emits
+      // Color::DisplayP3 (matrix-converted from internal sRGB state via
+      // srgbToColor). All other modes (sRGB, OkLCH, HSL) still emit
+      // Color::Srgb — OkLCH storage is a future spec, HSL is not a
+      // storage space.
+      if (space === "display_p3") {
+        props.onColorChange(srgbToColor(r, g, b, alpha, "display_p3"));
+      } else {
+        props.onColorChange({ space: "srgb", r, g, b, a: alpha });
+      }
     }
   }
 
   function emit(r: number, g: number, b: number, alpha: number) {
     if (!mounted) return;
-    pendingColor = { r, g, b, alpha, space: "srgb" };
+    pendingColor = { r, g, b, alpha, space: state.space };
     if (!emitPending) {
       emitPending = true;
       requestAnimationFrame(flushEmit);
@@ -373,12 +381,16 @@ export function ColorPicker(props: ColorPickerProps) {
   }
 
   // ── ColorDisplayMode change handler ────────────────────────────────────
-  // Only changes the display mode; internal sRGB state is unchanged.
+  // Spec 18: the display mode now also determines the storage tag (P3 mode
+  // emits Color::DisplayP3). Switching mode must trigger a re-emit so the
+  // parent sees the new tag for the same visual color.
   function handleSpaceChange(space: ColorDisplayMode) {
-    // Only update the display space — don't emit a color change.
-    // The color value stays the same (sRGB internally), only the
-    // numeric field labels/ranges change.
     setState({ space });
+    // Re-emit immediately with the new mode so the parent's storage tag
+    // tracks the switcher. Internal sRGB state is unchanged; only the
+    // outbound Color discriminant changes.
+    emit(state.r, state.g, state.b, state.alpha);
+    commitColor();
   }
 
   // ── Alpha CSS color string for AlphaStrip ─────────────────────────────
