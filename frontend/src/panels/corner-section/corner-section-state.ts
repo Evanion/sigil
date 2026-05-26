@@ -140,3 +140,18 @@ export function hotspotShapeIsMixed(corners: Corners, id: HotspotId): boolean {
 export function hotspotHasAsymmetricRadii(corners: Corners, id: HotspotId): boolean {
   return cornersAtHotspot(corners, id).some((c) => c.radii.x !== c.radii.y);
 }
+
+/**
+ * RF-025: Predicate that returns true when a given hotspot should be
+ * rendered in the locked state. The lock applies to every non-center
+ * hotspot whenever `nonCenterDisabled` is true (the four corners share
+ * a uniform Superellipse shape; see Spec 14 §1.5). The center hotspot
+ * remains operable because it owns the Superellipse / smoothing edit.
+ *
+ * Extracted from CornerPreviewSvg.tsx where the predicate was duplicated
+ * three times per rendered hotspot (aria-disabled, title, onClick guard)
+ * per CLAUDE.md "Business Logic Must Not Live in Inline JSX Handlers".
+ */
+export function isHotspotDisabled(id: HotspotId, nonCenterDisabled: boolean): boolean {
+  return nonCenterDisabled && id !== "center";
+}

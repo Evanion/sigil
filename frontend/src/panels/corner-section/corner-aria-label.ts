@@ -12,6 +12,10 @@
  */
 
 import type { Corner, Corners } from "../../types/document";
+// RF-020: import the single source-of-truth array from corner-section-state.
+// Previously this module carried a local duplicate, which is exactly the
+// "inline copies diverge silently" pattern CLAUDE.md §5 forbids.
+import { CORNER_POSITION_LABEL } from "./corner-section-state";
 
 const SHAPE_LABEL: Record<Corner["type"], string> = {
   round: "round",
@@ -20,8 +24,6 @@ const SHAPE_LABEL: Record<Corner["type"], string> = {
   scoop: "scoop",
   superellipse: "superellipse",
 };
-
-const CORNER_POSITION_LABEL = ["top-left", "top-right", "bottom-right", "bottom-left"];
 
 function sameShape(a: Corner, b: Corner): boolean {
   return a.type === b.type;

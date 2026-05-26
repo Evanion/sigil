@@ -203,6 +203,94 @@ describe("CornerPopover — axis-unlock toggle", () => {
     expect(newCorners[0].radii.x).toBe(30);
     expect(newCorners[0].radii.y).toBe(8); // unchanged
   });
+
+  /**
+   * RF-026: the original commitRx/commitRy tests assert that each call
+   * preserves the OTHER axis — but in tests where every targeted corner
+   * starts with the same per-axis value (e.g., y === 8 for all), a
+   * regression that captured ry once outside the factory (instead of
+   * reading each corner's existing ry in turn) would silently pass.
+   *
+   * These fixtures use DISTINCT per-position values on the axis that
+   * commitRx is supposed to preserve. If a future refactor collapses the
+   * "preserve each corner's distinct ry" contract into "preserve the
+   * first corner's ry," the assertions below fail. Mirrors the rule
+   * "Tests for Multi-Axis Inputs Must Cover Non-Degenerate Cases."
+   */
+  it("RF-026: commitRx preserves each targeted corner's distinct ry", () => {
+    const handler = vi.fn();
+    // The "top" hotspot targets indices 0 and 1. Give them distinct ry
+    // values so a regression that read ry once before the loop would be
+    // visible. Start with rx ≠ ry so unlocked is pre-toggled ON via the
+    // initial createSignal — avoids relying on a Toggle click roundtrip
+    // through Kobalte's Switch in jsdom.
+    const startCorners: Corners = [
+      { type: "round", radii: { x: 20, y: 5 } },
+      { type: "round", radii: { x: 20, y: 9 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+    ];
+    const { container } = render(() => (
+      <CornerPopover target="top" corners={startCorners} onCommit={handler} />
+    ));
+
+    const rxField = container.querySelector(
+      '[data-testid="corner-popover__rx"]',
+    ) as HTMLElement | null;
+    expect(rxField).not.toBeNull();
+    if (rxField === null) return;
+    const rxTextbox = rxField.querySelector('[role="textbox"]') as HTMLElement;
+    rxTextbox.textContent = "30";
+    fireEvent.input(rxTextbox);
+    fireEvent.blur(rxTextbox);
+
+    expect(handler).toHaveBeenCalled();
+    const [newCorners] = handler.mock.calls[handler.mock.calls.length - 1] as [Corners];
+    // Both targeted corners got the new rx ...
+    expect(newCorners[0].radii.x).toBe(30);
+    expect(newCorners[1].radii.x).toBe(30);
+    // ... AND each kept its OWN distinct ry — not the first corner's ry.
+    expect(newCorners[0].radii.y).toBe(5);
+    expect(newCorners[1].radii.y).toBe(9);
+    // Un-targeted positions untouched.
+    expect(newCorners[2].radii.y).toBe(8);
+    expect(newCorners[3].radii.y).toBe(8);
+  });
+
+  it("RF-026: commitRy preserves each targeted corner's distinct rx", () => {
+    const handler = vi.fn();
+    // Symmetric to commitRx test — distinct rx values across targets.
+    // Start asymmetric so unlocked is pre-toggled ON.
+    const startCorners: Corners = [
+      { type: "round", radii: { x: 5, y: 20 } },
+      { type: "round", radii: { x: 9, y: 20 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+      { type: "round", radii: { x: 8, y: 8 } },
+    ];
+    const { container } = render(() => (
+      <CornerPopover target="top" corners={startCorners} onCommit={handler} />
+    ));
+
+    const ryField = container.querySelector(
+      '[data-testid="corner-popover__ry"]',
+    ) as HTMLElement | null;
+    expect(ryField).not.toBeNull();
+    if (ryField === null) return;
+    const ryTextbox = ryField.querySelector('[role="textbox"]') as HTMLElement;
+    ryTextbox.textContent = "30";
+    fireEvent.input(ryTextbox);
+    fireEvent.blur(ryTextbox);
+
+    expect(handler).toHaveBeenCalled();
+    const [newCorners] = handler.mock.calls[handler.mock.calls.length - 1] as [Corners];
+    expect(newCorners[0].radii.y).toBe(30);
+    expect(newCorners[1].radii.y).toBe(30);
+    // Each targeted corner kept its own distinct rx — not the first's.
+    expect(newCorners[0].radii.x).toBe(5);
+    expect(newCorners[1].radii.x).toBe(9);
+    expect(newCorners[2].radii.x).toBe(8);
+    expect(newCorners[3].radii.x).toBe(8);
+  });
 });
 
 function superellipseAll(s: number): Corners {
@@ -247,6 +335,64 @@ describe("CornerPopover — center smoothing control", () => {
       <CornerPopover target="center" corners={superellipseAll(0.5)} onCommit={() => {}} />
     ));
     expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).not.toBeNull();
+  });
+
+  it("RF-023: clears in-flight gestureSmoothing when the Show closes (slider unmounts mid-gesture)", () => {
+    // Scenario: user starts dragging the smoothing Slider (gestureSmoothing
+    // captures 0.5), then changes Shape away from Superellipse — the Slider's
+    // parent <Show> closes mid-gesture and onChangeEnd never fires. Without
+    // RF-023's onCleanup, gestureSmoothing stays at the stale 0.5; when the
+    // user later switches Shape back to Superellipse with smoothing=0.7, the
+    // ValueInput would display "0.5" (the leaked gesture value) instead of
+    // "0.7" (the corners' current smoothing). The cleanup resets the signal
+    // so the next mount of the block reflects current state.
+    const [corners, setCorners] = createSignal<Corners>(superellipseAll(0.5));
+    const { container } = render(() => (
+      <CornerPopover target="center" corners={corners()} onCommit={() => {}} />
+    ));
+
+    const sliderWrapper = container.querySelector(
+      '[data-testid="corner-popover__smoothing-slider"]',
+    );
+    expect(sliderWrapper).not.toBeNull();
+    if (sliderWrapper === null) return;
+    const thumb = sliderWrapper.querySelector('span[role="slider"]') as HTMLElement;
+    expect(thumb).not.toBeNull();
+
+    // Start a gesture (pointerdown only — no matching pointerup, simulating
+    // an interrupted drag). The Slider wrapper fires onChangeStart on
+    // pointerdown which sets gestureSmoothing to currentSmoothing() (0.5).
+    fireEvent.pointerDown(thumb, { pointerId: 1, clientX: 50, clientY: 0 });
+
+    // External mutation: flip corners to mixed shapes so showSmoothing()
+    // returns false on the next reactive tick. The <Show> unmounts and
+    // RF-023's onCleanup fires, resetting gestureSmoothing to null.
+    const mixed: Corners = [
+      { type: "round", radii: { x: 8, y: 8 } },
+      ...superellipseAll(0.5).slice(1),
+    ] as unknown as Corners;
+    setCorners(mixed);
+
+    // Smoothing block is gone — confirm the Show closed.
+    expect(container.querySelector('[data-testid="corner-popover__smoothing"]')).toBeNull();
+
+    // Now flip back to all-superellipse with a DIFFERENT smoothing (0.7).
+    // If gestureSmoothing were still 0.5 from the leaked gesture, the
+    // ValueInput would display "0.5" instead of "0.7".
+    setCorners(superellipseAll(0.7));
+
+    const reborn = container.querySelector('[data-testid="corner-popover__smoothing"]');
+    expect(
+      reborn,
+      "smoothing block should re-mount when corners go all-superellipse",
+    ).not.toBeNull();
+    if (reborn === null) return;
+
+    const tb = reborn.querySelector('[role="textbox"]') as HTMLElement | null;
+    expect(tb).not.toBeNull();
+    // The displayed value is the current corners' smoothing (0.7), proving
+    // the stale gestureSmoothing (0.5) was cleared by onCleanup.
+    expect(tb?.textContent ?? "").toContain("0.7");
   });
 
   it("dragging the slider during a gesture batches into a single onCommit at gesture end", () => {

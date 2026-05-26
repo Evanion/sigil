@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
+  isHotspotDisabled,
   isLinked,
   isSuperellipseUniform,
   hotspotTargetIndices,
   cornersAtHotspot,
   hotspotShapeIsMixed,
+  ALL_HOTSPOT_IDS,
   type HotspotId,
 } from "../corner-section-state";
 import type { Corner, Corners } from "../../../types/document";
@@ -123,5 +125,25 @@ describe("HotspotId — type-level enumeration", () => {
   it("includes all 9 hotspot ids", () => {
     const ids: HotspotId[] = ["tl", "tr", "br", "bl", "top", "right", "bottom", "left", "center"];
     expect(ids.length).toBe(9);
+  });
+});
+
+describe("isHotspotDisabled — RF-025", () => {
+  it("returns false for every hotspot when nonCenterDisabled is false", () => {
+    for (const id of ALL_HOTSPOT_IDS) {
+      expect(isHotspotDisabled(id, false)).toBe(false);
+    }
+  });
+
+  it("returns true for every non-center hotspot when nonCenterDisabled is true", () => {
+    const nonCenter: HotspotId[] = ["tl", "tr", "br", "bl", "top", "right", "bottom", "left"];
+    for (const id of nonCenter) {
+      expect(isHotspotDisabled(id, true)).toBe(true);
+    }
+  });
+
+  it("returns false for the center hotspot regardless of nonCenterDisabled", () => {
+    expect(isHotspotDisabled("center", true)).toBe(false);
+    expect(isHotspotDisabled("center", false)).toBe(false);
   });
 });

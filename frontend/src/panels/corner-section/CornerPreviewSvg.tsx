@@ -16,21 +16,30 @@ import type { Corners } from "../../types/document";
 import { appendCornerPath } from "../../canvas/corner-path";
 import { SvgPathBuilder } from "./corner-svg-builder";
 import { summarizeCornersForAria } from "./corner-aria-label";
-import { ALL_HOTSPOT_IDS, type HotspotId } from "./corner-section-state";
+import { ALL_HOTSPOT_IDS, isHotspotDisabled, type HotspotId } from "./corner-section-state";
 import "./CornerPreviewSvg.css";
 
 interface CornerPreviewSvgProps {
   /** Current corner state to render. */
   readonly corners: Corners;
-  /** Optional fill color override for the preview shape. Defaults to
-   *  the panel accent color set via CSS custom properties. */
-  readonly fillColor?: string;
   /** Called when the user activates a hotspot (click, Enter, Space). */
   readonly onHotspotActivate: (id: HotspotId, element: HTMLButtonElement) => void;
   /** When true (uniform superellipse state), non-center hotspots are
    *  rendered disabled per the lock state in Spec 14 §1.5. */
   readonly nonCenterHotspotsDisabled?: boolean;
 }
+
+/*
+ * RF-016: The preview shape is rendered with the panel accent color
+ * (token: --hotspot-accent). The accent fill is a v1 choice — the
+ * preview's purpose is shape indication, NOT a true color preview of
+ * the selected node's fill. Spec 14 §1.6 implies a future iteration
+ * could wire the resolved fill color through (node fills + token
+ * resolution + neutral fallback), but that is out of scope for
+ * Plan 14d. When that work lands, restore an optional `fillColor`
+ * prop on this component and wire DesignPanel to resolve it.
+ * TODO(spec-14 §1.6): wire resolved fill color from the selected node.
+ */
 
 /** Logical preview dimensions. The viewBox uses these directly; the
  *  rendered size in the panel is set via CSS so the SVG scales
@@ -84,7 +93,7 @@ export const CornerPreviewSvg: Component<CornerPreviewSvgProps> = (props) => {
   const ariaLabel = createMemo(() => summarizeCornersForAria(props.corners));
 
   function handleClick(id: HotspotId, e: MouseEvent): void {
-    if (props.nonCenterHotspotsDisabled && id !== "center") return;
+    if (isHotspotDisabled(id, props.nonCenterHotspotsDisabled === true)) return;
     const target = e.currentTarget as HTMLButtonElement;
     props.onHotspotActivate(id, target);
   }
@@ -97,13 +106,13 @@ export const CornerPreviewSvg: Component<CornerPreviewSvgProps> = (props) => {
         role="img"
         aria-label={ariaLabel()}
       >
-        <path d={pathD()} fill={props.fillColor ?? "var(--sigil-accent, #4a9eff)"} />
+        <path d={pathD()} fill="var(--hotspot-accent)" />
       </svg>
       <div class="sigil-corner-preview__hotspots">
         <For each={ALL_HOTSPOT_IDS}>
           {(id) => {
             const isLocked = (): boolean =>
-              props.nonCenterHotspotsDisabled === true && id !== "center";
+              isHotspotDisabled(id, props.nonCenterHotspotsDisabled === true);
             return (
               <button
                 type="button"

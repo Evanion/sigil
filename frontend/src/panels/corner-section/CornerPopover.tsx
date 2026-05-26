@@ -16,7 +16,7 @@
  */
 
 import type { Component } from "solid-js";
-import { createMemo, createSignal, createUniqueId, Show } from "solid-js";
+import { createMemo, createSignal, createUniqueId, onCleanup, Show } from "solid-js";
 import type { Corner, Corners, Token } from "../../types/document";
 import { Select, type SelectOption } from "../../components/select/Select";
 import { Slider } from "../../components/slider/Slider";
@@ -78,6 +78,9 @@ const DEFAULT_SUPERELLIPSE_SMOOTHING = 0.5;
  * Builds the popover header for a given hotspot. Single-corner hotspots
  * label by position (e.g., "Top-left corner"); multi-corner hotspots use
  * the canonical "Top corners" / "All corners" labels.
+ *
+ * @internal — exported for unit tests only; not part of the module's
+ * public API.
  */
 export function headerLabel(target: HotspotId): string {
   switch (target) {
@@ -110,6 +113,9 @@ export function headerLabel(target: HotspotId): string {
  * Returns a Corner of `shape` derived from `prev`, preserving the radii
  * (and smoothing where applicable). Newly-converted superellipse corners
  * get a default smoothing of 0.5 (Spec 14 §1.5).
+ *
+ * @internal — exported for unit tests only; not part of the module's
+ * public API.
  */
 export function makeCornerOfShape(shape: CornerShape, prev: Corner): Corner {
   if (shape === "superellipse") {
@@ -129,6 +135,9 @@ export function makeCornerOfShape(shape: CornerShape, prev: Corner): Corner {
 /**
  * Builds a new Corners tuple by applying `factory` only at positions
  * listed in `targets`. Positions not listed are returned unchanged.
+ *
+ * @internal — exported for unit tests only; not part of the module's
+ * public API.
  */
 export function writeCorners(
   corners: Corners,
@@ -659,43 +668,75 @@ export const CornerPopover: Component<CornerPopoverProps> = (props) => {
        * Entries". `gestureSmoothing` is captured on start and cleared on
        * end so the displayed value reflects in-gesture preview without
        * driving a per-tick commit.
+       *
+       * RF-023: <Show> with a children-as-function gives this block its
+       * own reactive owner. `onCleanup` registered here runs when the
+       * Show closes (showSmoothing flips false). Without this, a Slider
+       * drag in progress when the user changes Shape would unmount the
+       * Slider mid-gesture, onChangeEnd would never fire, and the stale
+       * gestureSmoothing value would leak into the next mount of this
+       * block. The cleanup runs synchronously during setup — not in an
+       * event handler — per frontend-defensive "Never call onCleanup
+       * inside a DOM event handler ..."
        */}
       <Show when={showSmoothing()}>
-        <div class="sigil-corner-popover__field" data-testid="corner-popover__smoothing">
-          <label id={smoothingLabelId} class="sigil-corner-popover__label">
-            Smoothing
-          </label>
-          <div class="sigil-corner-popover__row">
-            <ValueInput
-              value={String(gestureSmoothing() ?? currentSmoothing())}
-              onChange={() => {
-                /* preview-only; commit happens on blur / Enter / token insert */
-              }}
-              onCommit={commitSmoothingFromValueInput}
-              tokens={props.tokens ?? EMPTY_TOKENS}
-              acceptedTypes={["number"]}
-              aria-labelledby={smoothingLabelId}
-              min={MIN_SUPERELLIPSE_SMOOTHING}
-              max={MAX_SUPERELLIPSE_SMOOTHING}
-            />
-            <div data-testid="corner-popover__smoothing-slider">
-              <Slider
-                value={gestureSmoothing() ?? currentSmoothing()}
-                min={MIN_SUPERELLIPSE_SMOOTHING}
-                max={MAX_SUPERELLIPSE_SMOOTHING}
-                step={0.01}
-                onChangeStart={() => setGestureSmoothing(currentSmoothing())}
-                onChange={(v) => setGestureSmoothing(v)}
-                onChangeEnd={(v) => {
-                  commitSmoothing(v);
-                  setGestureSmoothing(null);
-                }}
-                ariaLabelledBy={smoothingLabelId}
-                ariaValueText={smoothingAriaValueText()}
-              />
+        {(_) => {
+          // RF-023: register cleanup once when the Show's reactive owner
+          // is set up. <Show when={...}> with a function-child invokes the
+          // function within a fresh reactive owner only while `when` is
+          // truthy; Solid disposes that owner (firing every onCleanup
+          // registered inside) when the predicate transitions to false.
+          // Calling onCleanup synchronously here (NOT inside an event
+          // handler or async boundary) is the documented pattern per
+          // frontend-defensive "Never call onCleanup inside a DOM event
+          // handler ...". This guarantees that if the user changes Shape
+          // (or otherwise causes showSmoothing() to flip false) mid-drag,
+          // the in-gesture preview value is reset so the next mount of
+          // this block doesn't display stale state.
+          //
+          // We name the argument `_` because the truthy-value passed by
+          // Show is just `true` here — we only use the child-function form
+          // for its reactive-scope semantics.
+          void _;
+          onCleanup(() => setGestureSmoothing(null));
+          return (
+            <div class="sigil-corner-popover__field" data-testid="corner-popover__smoothing">
+              <label id={smoothingLabelId} class="sigil-corner-popover__label">
+                Smoothing
+              </label>
+              <div class="sigil-corner-popover__row">
+                <ValueInput
+                  value={String(gestureSmoothing() ?? currentSmoothing())}
+                  onChange={() => {
+                    /* preview-only; commit happens on blur / Enter / token insert */
+                  }}
+                  onCommit={commitSmoothingFromValueInput}
+                  tokens={props.tokens ?? EMPTY_TOKENS}
+                  acceptedTypes={["number"]}
+                  aria-labelledby={smoothingLabelId}
+                  min={MIN_SUPERELLIPSE_SMOOTHING}
+                  max={MAX_SUPERELLIPSE_SMOOTHING}
+                />
+                <div data-testid="corner-popover__smoothing-slider">
+                  <Slider
+                    value={gestureSmoothing() ?? currentSmoothing()}
+                    min={MIN_SUPERELLIPSE_SMOOTHING}
+                    max={MAX_SUPERELLIPSE_SMOOTHING}
+                    step={0.01}
+                    onChangeStart={() => setGestureSmoothing(currentSmoothing())}
+                    onChange={(v) => setGestureSmoothing(v)}
+                    onChangeEnd={(v) => {
+                      commitSmoothing(v);
+                      setGestureSmoothing(null);
+                    }}
+                    ariaLabelledBy={smoothingLabelId}
+                    ariaValueText={smoothingAriaValueText()}
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          );
+        }}
       </Show>
     </div>
   );

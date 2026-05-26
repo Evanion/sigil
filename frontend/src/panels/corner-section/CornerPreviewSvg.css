@@ -30,8 +30,8 @@
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--hotspot-bg-resting);
+  border: 1px solid var(--hotspot-border-resting);
   cursor: pointer;
   pointer-events: auto;
   opacity: 0.35;
@@ -51,20 +51,20 @@
 .sigil-corner-preview:hover .sigil-corner-preview__hotspot,
 .sigil-corner-preview:focus-within .sigil-corner-preview__hotspot {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--hotspot-bg-resting);
+  border-color: var(--hotspot-border-revealed);
 }
 
 .sigil-corner-preview__hotspot:hover,
 .sigil-corner-preview__hotspot:focus {
-  background: rgba(74, 158, 255, 0.3);
-  border-color: rgba(74, 158, 255, 0.9);
+  background: var(--hotspot-bg-hover);
+  border-color: var(--hotspot-border-hover);
   outline: none;
 }
 
 .sigil-corner-preview__hotspot:focus-visible {
-  outline: 2px solid var(--sigil-focus-ring, #4a9eff);
-  outline-offset: 2px;
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
 }
 
 /*
@@ -90,8 +90,8 @@
 .sigil-corner-preview:hover .sigil-corner-preview__hotspot[aria-disabled="true"],
 .sigil-corner-preview:focus-within .sigil-corner-preview__hotspot[aria-disabled="true"] {
   opacity: 0.25;
-  background: rgba(255, 255, 255, 0.04);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--hotspot-bg-resting);
+  border-color: var(--hotspot-border-resting);
 }
 
 /* Hotspot positions — percentages relative to the wrapper. */
