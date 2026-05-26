@@ -32,8 +32,10 @@ export default tseslint.config(
       ],
     },
   },
-  // i18n rule — start in "warn" while we generate the inventory; flipped to
-  // "error" in Task 11 of Plan 17 after the migration completes.
+  // i18n rule — flipped from "warn" to "error" in Task 11 of Plan 17 after
+  // the Tasks 4-7 migration eliminated every prior warning. Combined with
+  // the i18n-allowlist-rationale CI step, no new hardcoded user-facing
+  // strings can land without either a rationale comment or proper i18n key.
   {
     plugins: { i18next },
     files: ["src/**/*.{ts,tsx}"],
@@ -45,7 +47,7 @@ export default tseslint.config(
     ],
     rules: {
       "i18next/no-literal-string": [
-        "warn",
+        "error",
         {
           mode: "jsx-text-only",
           "jsx-attributes": {

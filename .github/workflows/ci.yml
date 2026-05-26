@@ -304,13 +304,29 @@ jobs:
           fi
           echo "All i18next/no-literal-string disables have rationale comments."
 
+  locale-parity:
+    name: Locale Parity
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version-file: '.node-version'
+
+      - name: Verify en/fr/es key trees match
+        run: node frontend/scripts/check-locale-parity.mjs
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels, i18n-allowlist-rationale]
+      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels, i18n-allowlist-rationale, locale-parity]
     steps:
       - name: Check results
         env:
@@ -320,6 +336,7 @@ jobs:
           KOBALTE_CHECK_RESULT: ${{ needs.kobalte-import-discipline.result }}
           SENTINELS_RESULT: ${{ needs.discriminated-union-sentinels.result }}
           I18N_ALLOWLIST_RESULT: ${{ needs.i18n-allowlist-rationale.result }}
+          LOCALE_PARITY_RESULT: ${{ needs.locale-parity.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
@@ -327,7 +344,8 @@ jobs:
           echo "Kobalte Check: $KOBALTE_CHECK_RESULT"
           echo "Sentinels Check: $SENTINELS_RESULT"
           echo "i18n Allowlist Rationale: $I18N_ALLOWLIST_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" || "$I18N_ALLOWLIST_RESULT" == "failure" ]]; then
+          echo "Locale Parity: $LOCALE_PARITY_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" || "$I18N_ALLOWLIST_RESULT" == "failure" || "$LOCALE_PARITY_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi
