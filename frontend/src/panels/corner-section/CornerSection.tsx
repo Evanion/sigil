@@ -115,10 +115,7 @@ export const CornerSection: Component<CornerSectionProps> = (props) => {
       <Show
         when={state() === "active" ? corners() : null}
         fallback={
-          <div
-            class="sigil-corner-section__disabled"
-            data-testid="corner-section__disabled"
-          >
+          <div class="sigil-corner-section__disabled" data-testid="corner-section__disabled">
             <div class="sigil-corner-section__disabled-preview" aria-hidden="true" />
             <p class="sigil-corner-section__disabled-text">{DISABLED_EXPLANATION}</p>
             <span class="sigil-corner-section__sr-only" role="status">

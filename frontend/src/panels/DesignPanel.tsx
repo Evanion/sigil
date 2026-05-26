@@ -5,6 +5,8 @@ import { AppearancePanel } from "./AppearancePanel";
 import { EffectsPanel } from "./EffectsPanel";
 import { AlignPanel } from "./AlignPanel";
 import { TypographySection } from "./TypographySection";
+import { CornerSection } from "./corner-section/CornerSection";
+import type { DocumentNode } from "../types/document";
 import { useDocument } from "../store/document-context";
 import "./DesignPanel.css";
 
@@ -23,12 +25,16 @@ export const DesignPanel: Component = () => {
   const store = useDocument();
   const [activeTab, setActiveTab] = createSignal<DesignTab>("layout");
 
-  const isTextNodeSelected = createMemo((): boolean => {
+  const selectedNode = createMemo((): DocumentNode | null => {
     const uuid = store.selectedNodeId();
-    if (!uuid) return false;
-    const node = store.state.nodes[uuid];
+    if (!uuid) return null;
+    return (store.state.nodes[uuid] as DocumentNode | undefined) ?? null;
+  });
+
+  const isTextNodeSelected = createMemo((): boolean => {
+    const node = selectedNode();
     if (!node) return false;
-    return (node as { kind: { type: string } }).kind.type === "text";
+    return node.kind.type === "text";
   });
 
   function handleKeyDown(e: KeyboardEvent): void {
@@ -94,6 +100,22 @@ export const DesignPanel: Component = () => {
           {/* RF-018: Typography belongs in the Appearance tab alongside fill/stroke/effects */}
           <Show when={isTextNodeSelected()}>
             <TypographySection />
+          </Show>
+          {/*
+           * Plan 14d Task 16: CornerSection replaces the schema-driven
+           * Corner Radius 4-input grid in design-schema.ts. CornerSection's
+           * `node` prop is non-nullable — gate on selectedNode() so it
+           * only renders when a node is selected. RF-038 handles the
+           * "not a corner-bearing kind" branch inside the component
+           * (disabled placeholder for ellipse/text/group/path).
+           */}
+          <Show when={selectedNode()}>
+            {(node) => (
+              <CornerSection
+                node={node()}
+                onCorners={(corners) => store.setCorners(node().uuid, corners)}
+              />
+            )}
           </Show>
           <AppearancePanel />
         </Show>

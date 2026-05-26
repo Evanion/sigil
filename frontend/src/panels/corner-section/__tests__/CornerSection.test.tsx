@@ -174,9 +174,7 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
     const { container } = render(() => (
       <CornerSection node={makeEllipseNode()} onCorners={() => {}} />
     ));
-    expect(
-      container.querySelector('[data-testid="corner-section__disabled"]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-testid="corner-section__disabled"]')).not.toBeNull();
     expect(container.querySelector("button[data-hotspot]")).toBeNull();
     expect(container.textContent).toContain(
       "Corner radius applies to rectangles, frames, and images only",
@@ -187,9 +185,7 @@ describe("CornerSection — RF-038 disabled state for non-corner-bearing kinds",
     const { container } = render(() => (
       <CornerSection node={makeGroupNode()} onCorners={() => {}} />
     ));
-    expect(
-      container.querySelector('[data-testid="corner-section__disabled"]'),
-    ).not.toBeNull();
+    expect(container.querySelector('[data-testid="corner-section__disabled"]')).not.toBeNull();
   });
 
   it("the disabled state has a sr-only role=status line with the explanation", () => {

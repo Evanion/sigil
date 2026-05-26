@@ -27,9 +27,7 @@ describe("CornerPreviewSvg", () => {
     ));
     const svg = container.querySelector("svg");
     expect(svg?.getAttribute("role")).toBe("img");
-    expect(svg?.getAttribute("aria-label")).toBe(
-      "Rectangle with rounded corners, radius 8",
-    );
+    expect(svg?.getAttribute("aria-label")).toBe("Rectangle with rounded corners, radius 8");
   });
 
   it("renders exactly 9 hotspot buttons, each with a unique aria-label", () => {

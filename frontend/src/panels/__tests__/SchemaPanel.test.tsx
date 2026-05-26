@@ -18,7 +18,10 @@ const testSchema: PropertySchema = {
     {
       name: "Rectangle Only",
       when: "rectangle",
-      fields: [{ key: "kind.corners.0.radii.x", label: "TL", type: "number" }],
+      // Generic test field — exercises the `when` filter only. No
+      // MUTATION_MAP entry is required for this test (it asserts section
+      // visibility, not dispatch).
+      fields: [{ key: "transform.width", label: "W", type: "number" }],
     },
   ],
 };
