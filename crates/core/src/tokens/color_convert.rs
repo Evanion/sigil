@@ -585,4 +585,109 @@ mod tests {
             }
         );
     }
+
+    // ── Cross-language parity (Spec 18) ─────────────────────────────────
+
+    const P3_PARITY_FIXTURE: &str =
+        include_str!("../../../../tests/fixtures/parity/p3-color-conversions.json");
+
+    #[test]
+    fn test_p3_to_srgb_parity_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(P3_PARITY_FIXTURE).expect("parity fixture is valid JSON");
+        let tolerance = fixture
+            .get("tolerance")
+            .and_then(serde_json::Value::as_f64)
+            .expect("fixture has tolerance");
+        let cases = fixture
+            .get("p3_to_srgb")
+            .and_then(|v| v.as_array())
+            .expect("fixture has p3_to_srgb array");
+
+        for case in cases {
+            let name = case
+                .get("name")
+                .and_then(|v| v.as_str())
+                .expect("case has name");
+            let p3 = case
+                .get("p3")
+                .and_then(|v| v.as_array())
+                .expect("case has p3");
+            let srgb = case
+                .get("srgb")
+                .and_then(|v| v.as_array())
+                .expect("case has srgb");
+
+            let r = p3[0].as_f64().expect("p3[0] is number");
+            let g = p3[1].as_f64().expect("p3[1] is number");
+            let b = p3[2].as_f64().expect("p3[2] is number");
+            let exp_r = srgb[0].as_f64().expect("srgb[0] is number");
+            let exp_g = srgb[1].as_f64().expect("srgb[1] is number");
+            let exp_b = srgb[2].as_f64().expect("srgb[2] is number");
+
+            let [actual_r, actual_g, actual_b] = display_p3_to_srgb(r, g, b);
+            assert!(
+                (actual_r - exp_r).abs() < tolerance,
+                "p3_to_srgb {name}: r expected {exp_r}, got {actual_r}"
+            );
+            assert!(
+                (actual_g - exp_g).abs() < tolerance,
+                "p3_to_srgb {name}: g expected {exp_g}, got {actual_g}"
+            );
+            assert!(
+                (actual_b - exp_b).abs() < tolerance,
+                "p3_to_srgb {name}: b expected {exp_b}, got {actual_b}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_srgb_to_p3_parity_fixture() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(P3_PARITY_FIXTURE).expect("parity fixture is valid JSON");
+        let tolerance = fixture
+            .get("tolerance")
+            .and_then(serde_json::Value::as_f64)
+            .expect("fixture has tolerance");
+        let cases = fixture
+            .get("srgb_to_p3")
+            .and_then(|v| v.as_array())
+            .expect("fixture has srgb_to_p3 array");
+
+        for case in cases {
+            let name = case
+                .get("name")
+                .and_then(|v| v.as_str())
+                .expect("case has name");
+            let srgb = case
+                .get("srgb")
+                .and_then(|v| v.as_array())
+                .expect("case has srgb");
+            let p3 = case
+                .get("p3")
+                .and_then(|v| v.as_array())
+                .expect("case has p3");
+
+            let r = srgb[0].as_f64().expect("srgb[0] is number");
+            let g = srgb[1].as_f64().expect("srgb[1] is number");
+            let b = srgb[2].as_f64().expect("srgb[2] is number");
+            let exp_r = p3[0].as_f64().expect("p3[0] is number");
+            let exp_g = p3[1].as_f64().expect("p3[1] is number");
+            let exp_b = p3[2].as_f64().expect("p3[2] is number");
+
+            let [actual_r, actual_g, actual_b] = srgb_to_display_p3(r, g, b);
+            assert!(
+                (actual_r - exp_r).abs() < tolerance,
+                "srgb_to_p3 {name}: r expected {exp_r}, got {actual_r}"
+            );
+            assert!(
+                (actual_g - exp_g).abs() < tolerance,
+                "srgb_to_p3 {name}: g expected {exp_g}, got {actual_g}"
+            );
+            assert!(
+                (actual_b - exp_b).abs() < tolerance,
+                "srgb_to_p3 {name}: b expected {exp_b}, got {actual_b}"
+            );
+        }
+    }
 }
