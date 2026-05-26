@@ -490,12 +490,22 @@ describe("colorToSrgb", () => {
     expect(approx(bOut, 1, 1e-3)).toBe(true);
   });
 
-  it("should treat display_p3 as sRGB approximation and return its channels", () => {
+  it("should convert display_p3 through CIE XYZ to sRGB (spec-18)", () => {
+    // spec-18: P3 channels are matrix-converted through CIE XYZ, not
+    // treated as sRGB passthrough. P3 (0.3, 0.5, 0.7) lies inside the sRGB
+    // gamut and round-trips to itself through srgbToColor(...).
     const color: Color = { space: "display_p3", r: 0.3, g: 0.5, b: 0.7, a: 1 };
     const [r, g, b] = colorToSrgb(color);
-    expect(r).toBe(0.3);
-    expect(g).toBe(0.5);
-    expect(b).toBe(0.7);
+    // Non-passthrough: each channel differs from its raw P3 value.
+    expect(approx(r, 0.3, 1e-3)).toBe(false);
+    expect(approx(g, 0.5, 1e-3)).toBe(false);
+    expect(approx(b, 0.7, 1e-3)).toBe(false);
+    // Round-trip: srgbToColor → colorToSrgb returns the input sRGB values.
+    const roundTrip = srgbToColor(r, g, b, 1, "display_p3");
+    const [r2, g2, b2] = colorToSrgb(roundTrip);
+    expect(approx(r2, r, 1e-6)).toBe(true);
+    expect(approx(g2, g, 1e-6)).toBe(true);
+    expect(approx(b2, b, 1e-6)).toBe(true);
   });
 });
 
@@ -624,5 +634,49 @@ describe("withAlpha", () => {
     const updated = withAlpha(color, 0.4) as ColorOklab;
     expect(updated.alpha).toBe(0.4);
     expect(updated.l).toBe(0.5);
+  });
+});
+
+// ── display_p3 conversion (spec-18) ───────────────────────────────────
+
+describe("display_p3 conversion (spec-18)", () => {
+  it("colorToSrgb on P3 red emits unclamped sRGB outside [0,1]", () => {
+    const c = colorToSrgb({ space: "display_p3", r: 1, g: 0, b: 0, a: 1 });
+    // P3 red → sRGB R ≈ 1.0935, G ≈ -0.2267, B ≈ -0.1501 (W3C published values).
+    expect(c[0]).toBeGreaterThan(1.0);
+    expect(c[1]).toBeLessThan(0);
+    expect(c[2]).toBeLessThan(0);
+  });
+
+  it("srgbToColor with space='display_p3' produces a P3-tagged Color with non-trivial channels", () => {
+    const c = srgbToColor(1, 0, 0, 1, "display_p3");
+    expect(c.space).toBe("display_p3");
+    if (c.space !== "display_p3") throw new Error("type narrowing failed");
+    // sRGB red → P3 ≈ (0.9175, 0.2003, 0.1386). Verify channels differ from raw (1,0,0).
+    expect(c.r).toBeGreaterThan(0.9);
+    expect(c.r).toBeLessThan(1.0);
+    expect(c.g).toBeGreaterThan(0.1);
+    expect(c.b).toBeGreaterThan(0.1);
+  });
+
+  it("colorToSrgb / srgbToColor round-trip for in-gamut P3 gray", () => {
+    const original = srgbToColor(0.5, 0.5, 0.5, 1, "display_p3");
+    const [r, g, b] = colorToSrgb(original);
+    expect(Math.abs(r - 0.5)).toBeLessThan(1e-6);
+    expect(Math.abs(g - 0.5)).toBeLessThan(1e-6);
+    expect(Math.abs(b - 0.5)).toBeLessThan(1e-6);
+  });
+
+  it("isOutOfSrgbGamut returns true for P3 red", () => {
+    expect(isOutOfSrgbGamut({ space: "display_p3", r: 1, g: 0, b: 0, a: 1 })).toBe(true);
+  });
+
+  it("isOutOfSrgbGamut returns false for P3 gray", () => {
+    expect(isOutOfSrgbGamut({ space: "display_p3", r: 0.5, g: 0.5, b: 0.5, a: 1 })).toBe(false);
+  });
+
+  it("isOutOfSrgbGamut returns false for P3 black and white (boundary)", () => {
+    expect(isOutOfSrgbGamut({ space: "display_p3", r: 0, g: 0, b: 0, a: 1 })).toBe(false);
+    expect(isOutOfSrgbGamut({ space: "display_p3", r: 1, g: 1, b: 1, a: 1 })).toBe(false);
   });
 });
