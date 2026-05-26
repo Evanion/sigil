@@ -1,0 +1,42 @@
+/**
+ * Styles for the Corner Editor section (CornerSection.tsx). Mirrors
+ * the appearance of other panel sections (border-top divider, padded
+ * column layout, dim uppercase header label).
+ */
+.sigil-corner-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-3);
+  padding: var(--size-3);
+  border-top: 1px solid var(--border-1);
+}
+
+.sigil-corner-section__header {
+  margin: 0;
+  font-size: var(--font-size-0);
+  font-weight: var(--font-weight-6);
+  text-transform: uppercase;
+  letter-spacing: var(--font-letterspacing-2);
+  color: var(--text-2);
+}
+
+/**
+ * The Popover wrapper renders its own <button class="sigil-popover-trigger">
+ * — we visually hide it because the real triggers are the hotspot buttons
+ * inside CornerPreviewSvg. Keeping the wrapper's trigger in the DOM (zero
+ * size + aria-hidden) preserves the wrapper's anchor-name / popovertarget
+ * wiring while removing it from the visual layout and the focus order.
+ */
+.sigil-corner-section__popover-host {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sigil-corner-section__popover-anchor {
+  display: block;
+  width: 0;
+  height: 0;
+}
