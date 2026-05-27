@@ -154,6 +154,33 @@ impl FieldOperation for DeleteNodes {
                 ))
             })?;
         }
+        // 5. Verify (node, page_id) invariant: if page_id is Some, the node must
+        // actually be a root of that page. Without this check, a malformed wire-
+        // layer call could trigger silent corruption during rollback.
+        for (idx, (node_id, page_id)) in self.targets.iter().enumerate() {
+            let node = doc.arena.get(*node_id)?;
+            let has_parent = node.parent.is_some();
+            match (has_parent, *page_id) {
+                (true, Some(_)) => {
+                    return Err(CoreError::ValidationError(format!(
+                        "DeleteNodes: target at index {idx} ({node_id:?}) has a \
+                         parent but page_id is Some — page_id must be None for non-root nodes"
+                    )));
+                }
+                (false, Some(pid)) => {
+                    let page = doc.page(pid)?;
+                    if !page.root_nodes.contains(node_id) {
+                        return Err(CoreError::ValidationError(format!(
+                            "DeleteNodes: target at index {idx} ({node_id:?}) claims to be \
+                             a root of page {pid:?} but is not in page.root_nodes"
+                        )));
+                    }
+                }
+                // (true, None): node has a parent, no page claimed — valid.
+                // (false, None): orphan — valid but rare.
+                _ => {}
+            }
+        }
         Ok(())
     }
 
@@ -201,14 +228,23 @@ impl FieldOperation for DeleteNodes {
                             "DeleteNodes: node {node_id:?} not found in parent's children"
                         ))
                     })?
+            } else if let Some(pid) = page_id {
+                // validate() guarantees the node IS in this page's root_nodes.
+                // If it isn't, that's a bug or concurrent mutation — surface it.
+                doc.page(*pid)?
+                    .root_nodes
+                    .iter()
+                    .position(|n| *n == *node_id)
+                    .ok_or_else(|| {
+                        CoreError::ValidationError(format!(
+                            "DeleteNodes: node {node_id:?} not found in page {pid:?} root_nodes \
+                             (validate() invariant violated)"
+                        ))
+                    })?
             } else {
-                page_id
-                    .and_then(|pid| {
-                        doc.page(pid)
-                            .ok()
-                            .and_then(|p| p.root_nodes.iter().position(|n| *n == *node_id))
-                    })
-                    .unwrap_or(0)
+                // True orphan: no parent, no page. Index is irrelevant — both rollback
+                // branches will no-op below since parent_id and page_id are both None.
+                0
             };
             let descendants = crate::tree::descendants(&doc.arena, *node_id)?;
             let mut subtree_clone = Vec::with_capacity(descendants.len() + 1);
@@ -1072,5 +1108,147 @@ mod tests {
         assert!(doc.arena.get(p_id).is_err());
         assert!(doc.arena.get(c_id).is_err());
         assert!(doc.arena.get(gc_id).is_err());
+    }
+
+    #[test]
+    fn test_delete_nodes_subtree_rollback_preserves_identity() {
+        // Per CLAUDE.md §11 "Multi-Item Mutations Must Roll Back on Partial Failure"
+        // and "Arena Operations Must Preserve Identity on Undo": this test exercises
+        // the rollback path of DeleteNodes by directly calling the private helpers.
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(20));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+
+        // Parent → child → grandchild
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create");
+        let parent_id = doc.arena.insert(parent).expect("insert");
+        doc.add_root_node_to_page(page_id, parent_id).expect("root");
+
+        let child = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "C".to_string(),
+        )
+        .expect("create");
+        let child_id = doc.arena.insert(child).expect("insert");
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("link c");
+
+        let gc = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Group,
+            "GC".to_string(),
+        )
+        .expect("create");
+        let gc_id = doc.arena.insert(gc).expect("insert");
+        crate::tree::add_child(&mut doc.arena, child_id, gc_id).expect("link gc");
+
+        // Capture initial state for post-rollback comparison
+        let initial_parent_children = doc.arena.get(parent_id).unwrap().children.clone();
+        let initial_page_roots = doc.page(page_id).unwrap().root_nodes.clone();
+
+        // Build a snapshot the same way DeleteNodes::apply does.
+        let descendants = crate::tree::descendants(&doc.arena, parent_id).expect("descendants");
+        let mut subtree_clone = Vec::with_capacity(descendants.len() + 1);
+        for desc_id in &descendants {
+            subtree_clone.push((*desc_id, doc.arena.get(*desc_id).unwrap().clone()));
+        }
+        subtree_clone.push((parent_id, doc.arena.get(parent_id).unwrap().clone()));
+        let snap = super::DeleteNodesSnapshot {
+            node_id: parent_id,
+            page_id: Some(page_id),
+            parent_id: None,
+            original_index: 0,
+            subtree: subtree_clone,
+        };
+
+        // Delete the subtree.
+        super::delete_nodes_subtree(&mut doc, &snap).expect("delete");
+        assert!(doc.arena.get(parent_id).is_err());
+        assert!(doc.arena.get(child_id).is_err());
+        assert!(doc.arena.get(gc_id).is_err());
+        assert!(doc.page(page_id).unwrap().root_nodes.is_empty());
+
+        // Roll back. NodeId identity must be preserved.
+        super::reinsert_nodes_subtree(&mut doc, &snap).expect("reinsert");
+        assert!(
+            doc.arena.get(parent_id).is_ok(),
+            "parent restored with same NodeId"
+        );
+        assert!(
+            doc.arena.get(child_id).is_ok(),
+            "child restored with same NodeId"
+        );
+        assert!(
+            doc.arena.get(gc_id).is_ok(),
+            "grandchild restored with same NodeId"
+        );
+
+        // Structural restoration: page.root_nodes and parent.children must match
+        // pre-deletion state.
+        assert_eq!(
+            doc.page(page_id).unwrap().root_nodes,
+            initial_page_roots,
+            "page.root_nodes restored at original index"
+        );
+        assert_eq!(
+            doc.arena.get(parent_id).unwrap().children,
+            initial_parent_children,
+            "parent.children restored at original index"
+        );
+    }
+
+    #[test]
+    fn test_delete_nodes_validate_rejects_inconsistent_page_id() {
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(10));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create");
+        let parent_id = doc.arena.insert(parent).expect("insert");
+        let child = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "C".to_string(),
+        )
+        .expect("create");
+        let child_id = doc.arena.insert(child).expect("insert");
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("link");
+
+        // Bad input: child has a parent but page_id is Some.
+        let op = DeleteNodes {
+            targets: vec![(child_id, Some(page_id))],
+        };
+        assert!(op.validate(&doc).is_err());
+
+        // Bad input: parent has no parent but isn't actually a page root.
+        let op2 = DeleteNodes {
+            targets: vec![(parent_id, Some(page_id))],
+        };
+        assert!(
+            op2.validate(&doc).is_err(),
+            "parent not added to page roots"
+        );
     }
 }
