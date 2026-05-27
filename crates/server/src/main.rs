@@ -23,7 +23,7 @@ const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 #[derive(Parser, Debug, Default)]
 #[command(name = "sigil-server", version)]
 struct Cli {
-    /// Localhost port to bind. Overrides PORT env var.
+    /// Port to bind. Overrides PORT env var.
     #[arg(long)]
     port: Option<u16>,
 
@@ -56,18 +56,27 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = cli
-        .port
-        .or_else(|| std::env::var("PORT").ok().and_then(|s| s.parse().ok()))
-        .unwrap_or(4680);
 
     let static_dir = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "/usr/local/share/sigil/frontend".to_string());
 
     let workfile_path: Option<std::path::PathBuf> = cli
         .workfile
-        .clone()
         .or_else(|| std::env::var("WORKFILE").ok().map(std::path::PathBuf::from));
+
+    // Resolve port last so we can consume `cli.workfile` without cloning above.
+    // Distinguish "PORT unset" (fall through to default) from "PORT set but
+    // malformed" (surface the error to the user) per CLAUDE.md §11.
+    let port = if let Some(p) = cli.port {
+        p
+    } else {
+        match std::env::var("PORT") {
+            Ok(s) => s
+                .parse::<u16>()
+                .with_context(|| format!("PORT env var '{s}' is not a valid u16"))?,
+            Err(_) => 4680,
+        }
+    };
 
     let mut state = if let Some(ref workfile_path) = workfile_path {
         tracing::info!("loading workfile from {}", workfile_path.display());
