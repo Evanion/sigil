@@ -1,0 +1,32 @@
+{
+  "_comment": "Spec 19 cross-language parity fixture for the delete_nodes wire format. Both Rust (crates/server/tests/parity_delete_nodes.rs) and TypeScript (frontend/src/__tests__/parity-delete-nodes.test.ts) read this file and assert their respective transports emit the same op_type / value shape.",
+  "graphql_delete_nodes_input": {
+    "_description": "GraphQL applyOperations input for a batch delete of two nodes",
+    "encoded": {
+      "deleteNodes": {
+        "nodeUuids": [
+          "00000000-0000-0000-0000-000000000001",
+          "00000000-0000-0000-0000-000000000002"
+        ]
+      }
+    },
+    "wire_op_type": "delete_nodes",
+    "broadcast_value": {
+      "node_uuids": [
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002"
+      ]
+    }
+  },
+  "mcp_delete_nodes_input": {
+    "_description": "MCP delete_nodes tool input for a single-target batch (edge case: N=1)",
+    "tool_name": "delete_nodes",
+    "input": {
+      "node_uuids": ["00000000-0000-0000-0000-000000000001"]
+    },
+    "wire_op_type": "delete_nodes",
+    "broadcast_value": {
+      "node_uuids": ["00000000-0000-0000-0000-000000000001"]
+    }
+  }
+}
