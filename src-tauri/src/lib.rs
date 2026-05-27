@@ -4,6 +4,7 @@
 //! mobile entry points on iOS/Android. Tauri 2.x recommends placing the
 //! Builder in a library so it can be reused across desktop and mobile.
 
+mod file_assoc;
 mod sidecar;
 
 use std::sync::Mutex;
@@ -21,13 +22,28 @@ pub fn run() {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
+    // Parse argv BEFORE constructing the Builder so the captured value can
+    // move into the .setup() closure. The single-instance plugin's callback
+    // handles argv from second launches (focusing the existing window);
+    // Task 8 will route the second-launch workfile into a new window.
+    let initial_workfile = file_assoc::extract_workfile_path(&std::env::args().collect::<Vec<_>>());
+
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            tracing::info!("second-instance argv: {argv:?}");
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.set_focus();
+                let _ = window.unminimize();
+            }
+        }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
-            let sidecar_proc = tauri::async_runtime::block_on(SidecarProcess::spawn(None))
-                .map_err(|e| format!("spawn sidecar: {e}"))?;
+            let workfile = initial_workfile.clone();
+            let sidecar_proc =
+                tauri::async_runtime::block_on(SidecarProcess::spawn(workfile.as_ref()))
+                    .map_err(|e| format!("spawn sidecar: {e}"))?;
             let port = sidecar_proc.port;
             handle.manage(AppState {
                 sidecar: Mutex::new(Some(sidecar_proc)),
