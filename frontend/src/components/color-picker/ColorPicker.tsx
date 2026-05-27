@@ -442,6 +442,8 @@ export function ColorPicker(props: ColorPickerProps) {
         onCommit={commitColor}
         renderBackground={renderAreaBackground()}
         aria-label={t("panels:colorPicker.areaLabel")}
+        xAxisLabel={t("panels:colorPicker.areaSaturationAxis")}
+        yAxisLabel={t("panels:colorPicker.areaBrightnessAxis")}
       />
       <HueStrip
         hue={state.hue}

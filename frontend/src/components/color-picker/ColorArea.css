@@ -7,7 +7,12 @@
   flex-shrink: 0;
 }
 
-.sigil-color-area:focus-visible {
+/* Keyboard focus is on the visually-hidden per-axis sliders (RF-011); the
+ * visible outline lives on the container via :focus-within so sighted
+ * keyboard users see a focus ring even though the focused element itself
+ * is sr-only. */
+.sigil-color-area:focus-visible,
+.sigil-color-area:focus-within {
   outline: var(--focus-ring);
   outline-offset: var(--focus-offset);
 }
@@ -28,6 +33,33 @@
   transition:
     left 60ms linear,
     bottom 60ms linear;
+}
+
+/* Visually-hidden but keyboard-focusable per-axis ARIA sliders (RF-011).
+ *
+ * The visible canvas + cursor remain the user-facing presentation; these
+ * sr-only elements provide the semantic surface for screen readers and
+ * keyboard navigation per `.claude/rules/a11y-rules.md` "2D Canvas Widgets
+ * Must Have Complete ARIA Slider Semantics". Each has its own arrow-key
+ * handler so X and Y can be adjusted independently.
+ *
+ * `pointer-events: none` so pointer drags on the visible area pass through
+ * to the container's pointer handler instead of being captured by the
+ * (zero-size) sr-slider. The elements remain keyboard-focusable because
+ * tab order is independent of pointer-events. */
+.sigil-color-area__sr-slider {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
