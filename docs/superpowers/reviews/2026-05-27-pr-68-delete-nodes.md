@@ -60,7 +60,7 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-005 — Unbounded `node_uuids` parsed before validate()
 - **Source:** Security
-- **Status:** open
+- **Status:** resolved (bd5ec3a)
 - **Severity:** High
 - **Location:** `crates/server/src/graphql/mutation.rs:778-786`, `crates/mcp/src/tools/nodes.rs:301-308`
 - **Description:** Both transports accept `node_uuids: Vec<String>` with no length cap, parse the entire array into `Vec<Uuid>` BEFORE calling `DeleteNodes::validate`. Memory amplification: ~36 bytes per UUID string + 16 bytes per parsed UUID × N concurrent connections. Pre-allocation DoS. The server's existing `MAX_BATCH_SIZE = 256` bounds operation count but not per-op vec lengths.
@@ -120,7 +120,7 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-012 — `inverseType` returns same type for `create_node`/`delete_nodes` instead of throwing
 - **Source:** Architect, FE
-- **Status:** open
+- **Status:** resolved (bd5ec3a)
 - **Severity:** Major
 - **Location:** `frontend/src/operations/operation-helpers.ts:50-63`
 - **Description:** Documented convention says `create_node`/`delete_nodes` go through `inverseOperations`. But `inverseType` falls back to returning the input type. Any future caller bypassing `createInverseTransaction` produces silent no-op inverses.
@@ -172,7 +172,7 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-018 — Inverse-operation size limit not enforced
 - **Source:** Data Scientist, FE
-- **Status:** open
+- **Status:** resolved (bd5ec3a)
 - **Severity:** Medium
 - **Location:** `frontend/src/operations/history-manager.ts:46-55`, `frontend/src/operations/interceptor.ts:345-356`
 - **Description:** `pushTransaction` enforces `MAX_OPERATIONS_PER_TRANSACTION` on forward `operations.length` only, NOT on `inverseOperations.length`. A `delete_nodes` forward op (length 1) with N inverse ops bypasses the limit.
@@ -188,11 +188,12 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-020 — Broadcast `value` forwards raw API input, not post-mutation canonical state
 - **Source:** Security, BE
-- **Status:** open
+- **Status:** partial-resolved (bd5ec3a)
 - **Severity:** Medium
 - **Location:** `crates/server/src/graphql/mutation.rs:787-794`, `crates/mcp/src/tools/nodes.rs:341-351`
 - **Description:** Violates CLAUDE.md §4 broadcast payload contract. Both transports forward raw `node_uuids` input; the dedup pass in `DeleteNodes::apply` may drop UUIDs.
 - **Fix:** Construct broadcast `value` from post-mutation document state (recompute dedup or expose retained list from `apply`).
+- **Resolution:** Both transports now canonicalize UUID strings via `Uuid::to_string()` so the wire form is consistent regardless of input casing/format. The full post-mutation canonicalization (forwarding only the dedup-retained set) is documented as a known limitation: `ParsedOp` builds the broadcast pre-apply, and the frontend's `applyDeleteNodes` walks the local subtree from each broadcast root and is tolerant of "uuid already deleted" — descendants that core's dedup dropped are still removed by the local walk. The canonicalization closes the same-shape contract (RF-036 is fully resolved); the dedup refinement would require restructuring `ParsedOp` and provides no observable user-visible improvement under the current frontend apply path.
 
 #### RF-021 — `DeleteNodes::apply` snapshot memory unbounded by batch limit
 - **Source:** Data Scientist
@@ -204,7 +205,7 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-022 — Wire-layer page lookup is O(N × P × R)
 - **Source:** Data Scientist
-- **Status:** open
+- **Status:** resolved (bd5ec3a)
 - **Severity:** Medium
 - **Location:** `crates/server/src/graphql/mutation.rs:800-814`, `crates/mcp/src/tools/nodes.rs:317-330`
 - **Description:** N=1000 UUIDs × P pages × R roots per page = up to 10⁸ comparisons. Realistic case 10⁵-10⁶.
@@ -278,7 +279,7 @@ All findings written with status `open`. Remediation in severity order.
 | RF-033 | FE | `originalIndex >= 0` accepts fractional positives | Use `Number.isSafeInteger` |
 | RF-034 | BE | Test pollution — `_enforced` duplicates `_rejects_oversized_batch` | Consolidate into single canonical test |
 | RF-035 | DevOps | Workflow paths-filter doesn't include `.github/workflows/scripts/**` | Add scripts/ to detect-changes filter |
-| RF-036 | Security | MCP broadcast UUID strings not canonicalized via `Uuid::to_string()` | Replace `uuid_strs` with `parsed.iter().map(\|u\| u.to_string())` |
+| RF-036 | Security | MCP broadcast UUID strings not canonicalized via `Uuid::to_string()` | Replace `uuid_strs` with `parsed.iter().map(\|u\| u.to_string())` — resolved (bd5ec3a) |
 | RF-037 | FE | Exhaustiveness sentinel doesn't cover `transactionToServerOps`/`operationToServerOp` | Reference functions in test-d or remove default arms |
 
 ---
