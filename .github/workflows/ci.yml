@@ -34,10 +34,12 @@ jobs:
               - 'rust-toolchain.toml'
               - '.cargo/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/**'
             frontend:
               - 'frontend/**'
               - '.node-version'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/**'
 
   rust:
     name: Rust
@@ -392,8 +394,10 @@ jobs:
       - name: Verify no remaining singular delete-node references
         run: |
           set -euo pipefail
-          BANNED='DeleteNode\b|delete_node\b|DeleteNodeInput\b|createDeleteNodeOp\b|store\.deleteNode\('
-          ALLOWED='docs/superpowers/specs/2026-05-27-19-delete-nodes\.md|CLAUDE\.md|\.claude/rules/|\.github/workflows/scripts/test-delete-node-removal-discipline\.sh|\.github/workflows/ci\.yml'
+          # Source the shared BANNED/ALLOWED constants — exact same regexes
+          # the sentinel violation-fires test exercises (RF-029).
+          # shellcheck source=./scripts/delete-node-removal-discipline.env
+          source ./.github/workflows/scripts/delete-node-removal-discipline.env
           HITS=$(grep -rE "$BANNED" \
             --include='*.rs' --include='*.ts' --include='*.tsx' \
             crates/ frontend/ 2>/dev/null \

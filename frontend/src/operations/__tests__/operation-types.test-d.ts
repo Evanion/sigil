@@ -5,10 +5,21 @@
 //   - applyRemoteOperation (apply-remote.ts)
 //   - applyOperationToStore (apply-to-store.ts)
 //   - inverseType / createInverse (operation-helpers.ts)
+//   - operationToServerOp (document-store-solid.tsx — exhaustive switch with no default)
 //
-// The exhaustive switch below produces a `never` sentinel in the default arm.
+// The exhaustive switches below produce a `never` sentinel in the default arm.
 // Adding a new OperationType variant without adding a case here will surface
 // as a compile-time `Type 'string' is not assignable to type 'never'` error.
+//
+// RF-037: This sentinel covers OperationType's direct enumeration. Per the
+// frontend-defensive "Discriminated Unions Must Have a Type-Level
+// Exhaustiveness Sentinel" rule, every set/map/switch that branches on the
+// discriminant should be referenced here. `transactionToServerOps`
+// (document-store-solid.tsx) uses a `default:` arm to collect reparent/reorder
+// into a structuralOther bucket — that's intentional grouping by category, not
+// a missed variant, so it's NOT considered exhaustive in the same way.
+// `operationToServerOp` IS exhaustive (no default) and is covered by tsc on
+// the production code, not duplicated here.
 
 import type { OperationType, Operation } from "../types";
 
@@ -56,3 +67,15 @@ export const _operationTypeExhaustive_ref: typeof _operationTypeExhaustive =
 // future refactor that accidentally removes the variant.
 const _hasDeleteNodes: Extract<OperationType, "delete_nodes"> = "delete_nodes";
 export const _hasDeleteNodes_ref: typeof _hasDeleteNodes = _hasDeleteNodes;
+
+// Compile-time assertion that OperationType does NOT include the removed
+// singular `"delete_node"` literal. If a future refactor mistakenly
+// reintroduces it, `Extract<OperationType, "delete_node">` resolves to
+// `"delete_node"` instead of `never`, and the conditional `[...] extends
+// [never] ? true : false` resolves to `false`, failing the assignment.
+// RF-037: cements migration completeness at the type level.
+type _NoSingularDeleteNode = [Extract<OperationType, "delete_node">] extends [never]
+  ? true
+  : false;
+const _noSingularDeleteNode: _NoSingularDeleteNode = true;
+export const _noSingularDeleteNode_ref: typeof _noSingularDeleteNode = _noSingularDeleteNode;
