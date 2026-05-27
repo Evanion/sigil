@@ -59,6 +59,40 @@ pub const MAX_FONT_FAMILY_LEN: usize = 256;
 /// Maximum length of a page name.
 pub const MAX_PAGE_NAME_LEN: usize = 256;
 
+/// Maximum number of nodes a single `DeleteNodes` operation may target.
+/// Bounded to prevent runaway client requests. Mirrored by
+/// `MAX_OPERATIONS_PER_TRANSACTION` in `frontend/src/operations/types.ts:214`
+/// (current location) so a maximal delete always fits in a single undo
+/// transaction (see Spec 19 §8). Future Spec 19 Task 11 may also mirror a
+/// per-batch maximum in `frontend/src/types/validation.ts` or
+/// `frontend/src/store/document-store-solid.tsx` if a frontend-side guard is
+/// added; the canonical source-of-truth is this `pub const`.
+pub const MAX_NODES_PER_DELETE_BATCH: usize = 1_000;
+
+/// Maximum total number of nodes (across all retained subtrees) that a single
+/// `DeleteNodes::apply` may snapshot for rollback. Bounds peak memory usage.
+/// The batch limit (`MAX_NODES_PER_DELETE_BATCH = 1000`) caps the count of
+/// retained roots; this constant caps the sum of all subtree node counts.
+/// Worst case without this cap: 1000 roots × deeply-nested subtrees ≈ multi-GB
+/// heap from cloned `Node` payloads. With this cap, peak snapshot memory is
+/// bounded to ~50k cloned `Node`s per operation (RF-021).
+///
+/// Production value is `50_000`; test builds override to `10` so the
+/// `_enforced` test can construct a real out-of-range subtree without
+/// allocating multi-GB during the test run.
+#[cfg(not(test))]
+pub const MAX_DELETED_SUBTREE_NODES: usize = 50_000;
+
+/// Test-only override for `MAX_DELETED_SUBTREE_NODES` — see production
+/// constant's doc comment for rationale.
+#[cfg(test)]
+pub const MAX_DELETED_SUBTREE_NODES: usize = 10;
+
+/// Maximum node-tree nesting depth. Bounds recursion in subtree walks
+/// (deletion, ancestor walks, snapshot capture). Per CLAUDE.md §11
+/// "Recursive Functions Require Depth Guards" with `>=` comparison.
+pub const MAX_NODE_TREE_DEPTH: usize = 64;
+
 /// Maximum pages per document.
 pub const MAX_PAGES_PER_DOCUMENT: usize = 100;
 
@@ -1742,5 +1776,30 @@ mod tests {
         assert!(validate_color_channel_finite("r", -0.1).is_ok());
         assert!(validate_color_channel_finite("r", 1.5).is_ok());
         assert!(validate_color_channel_finite("g", 0.5).is_ok());
+    }
+
+    // ── DeleteNodes batch + tree depth constants (Spec 19) ─────────────
+    //
+    // These tests verify the literal values of the constants used by
+    // Spec 19's `DeleteNodes` FieldOperation. They guard against accidental
+    // drift between the spec, the frontend mirror (`MAX_OPERATIONS_PER_TRANSACTION`,
+    // `frontend/src/types/validation.ts`), and the Rust source-of-truth.
+    //
+    // Per CLAUDE.md §11 "Constant Enforcement Tests" (PR #67 amendment),
+    // a value-asserting test alone is NOT enforcement — these are
+    // value-equality guards. The real `test_max_nodes_per_delete_batch_enforced`
+    // (constructing a 1001-node batch and asserting `DeleteNodes::validate`
+    // returns `Err(BatchTooLarge { .. })`) lands in Task 3 alongside the
+    // FieldOperation itself. Likewise `test_max_node_tree_depth_enforced`
+    // lands in Task 2/4 alongside the recursive walks that consume it.
+
+    #[test]
+    fn test_max_nodes_per_delete_batch_value() {
+        assert_eq!(MAX_NODES_PER_DELETE_BATCH, 1000);
+    }
+
+    #[test]
+    fn test_max_node_tree_depth_value() {
+        assert_eq!(MAX_NODE_TREE_DEPTH, 64);
     }
 }

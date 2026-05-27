@@ -2,13 +2,34 @@ import { describe, it, expect } from "vitest";
 import {
   createSetFieldOp,
   createCreateNodeOp,
-  createDeleteNodeOp,
+  createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
   createInverse,
   createInverseTransaction,
 } from "../operation-helpers";
-import type { Transaction } from "../types";
+import type { Operation, Transaction } from "../types";
+
+/** Local test helper that mirrors the internal `makeOp` factory shape. */
+function makeOp(
+  userId: string,
+  nodeUuid: string,
+  type: Operation["type"],
+  path: string,
+  value: unknown,
+  previousValue: unknown,
+): Operation {
+  return {
+    id: crypto.randomUUID(),
+    userId,
+    nodeUuid,
+    type,
+    path,
+    value,
+    previousValue,
+    seq: 0,
+  };
+}
 
 const USER_ID = "user-1";
 
@@ -42,18 +63,6 @@ describe("createCreateNodeOp", () => {
     expect(op.path).toBe("");
     expect(op.value).toEqual(nodeData);
     expect(op.previousValue).toBeNull();
-  });
-});
-
-describe("createDeleteNodeOp", () => {
-  it("creates a delete_node operation with snapshot as previousValue", () => {
-    const snapshot = { uuid: "node-1", kind: { type: "rectangle" }, name: "Rect 1" };
-    const op = createDeleteNodeOp(USER_ID, "node-1", snapshot);
-    expect(op.type).toBe("delete_node");
-    expect(op.nodeUuid).toBe("node-1");
-    expect(op.path).toBe("");
-    expect(op.value).toBeNull();
-    expect(op.previousValue).toEqual(snapshot);
   });
 });
 
@@ -95,34 +104,6 @@ describe("createInverse", () => {
     const op = createSetFieldOp(USER_ID, "node-1", "name", "new", "old");
     const inv = createInverse(op);
     expect(inv.id).not.toBe(op.id);
-  });
-
-  it("flips create_node to delete_node and extracts nodeUuid from value", () => {
-    const nodeData = { uuid: "new-node", kind: { type: "rectangle" } };
-    const op = createCreateNodeOp(USER_ID, nodeData);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("delete_node");
-    expect(inv.value).toBeNull();
-    expect(inv.previousValue).toEqual(nodeData);
-    // RF-002: inverse of create_node should carry the node UUID
-    expect(inv.nodeUuid).toBe("new-node");
-  });
-
-  it("falls back to empty nodeUuid when create_node value has no uuid field", () => {
-    const nodeData = { kind: { type: "rectangle" } };
-    const op = createCreateNodeOp(USER_ID, nodeData);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("delete_node");
-    expect(inv.nodeUuid).toBe("");
-  });
-
-  it("flips delete_node to create_node", () => {
-    const snapshot = { uuid: "node-1", kind: { type: "rectangle" } };
-    const op = createDeleteNodeOp(USER_ID, "node-1", snapshot);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("create_node");
-    expect(inv.value).toEqual(snapshot);
-    expect(inv.previousValue).toBeNull();
   });
 
   it("swaps value and previousValue for reparent", () => {
@@ -208,5 +189,102 @@ describe("createInverseTransaction", () => {
 
     const inv = createInverseTransaction(tx);
     expect(inv.description).toBe("Undo: Move Rectangle 1");
+  });
+});
+
+describe("createDeleteNodesOp (Spec 19)", () => {
+  it("creates a delete_nodes operation with node_uuids in value", () => {
+    const op = createDeleteNodesOp("user-1", ["uuid-a", "uuid-b"]);
+    expect(op.type).toBe("delete_nodes");
+    expect(op.userId).toBe("user-1");
+    expect(op.nodeUuid).toBe("");
+    expect(op.value).toEqual({ node_uuids: ["uuid-a", "uuid-b"] });
+    expect(op.previousValue).toBeNull();
+  });
+
+  it("copies the input array (does not retain reference)", () => {
+    const inputUuids = ["uuid-a", "uuid-b"];
+    const op = createDeleteNodesOp("user-1", inputUuids);
+    inputUuids.push("uuid-c");
+    expect((op.value as { node_uuids: string[] }).node_uuids).toEqual(["uuid-a", "uuid-b"]);
+  });
+});
+
+describe("createInverseTransaction with inverseOperations (Spec 19)", () => {
+  it("uses pre-built inverseOperations when present", () => {
+    const inverse1 = makeOp("user-1", "a", "create_node", "", { uuid: "a" }, null);
+    const inverse2 = makeOp("user-1", "b", "create_node", "", { uuid: "b" }, null);
+    const tx: Transaction = {
+      id: "tx-1",
+      userId: "user-1",
+      operations: [makeOp("user-1", "", "delete_nodes", "", { node_uuids: ["a", "b"] }, null)],
+      inverseOperations: [inverse1, inverse2],
+      description: "Delete 2 nodes",
+      timestamp: 1000,
+      seq: 1,
+    };
+    const result = createInverseTransaction(tx);
+    expect(result.operations.length).toBe(2);
+    expect(result.operations[0].type).toBe("create_node");
+    expect(result.operations[1].type).toBe("create_node");
+    expect(result.description).toBe("Undo: Delete 2 nodes");
+  });
+
+  it("falls back to per-op flip when inverseOperations is absent", () => {
+    // Existing single-op flip path still works.
+    const op = makeOp("user-1", "node-x", "set_field", "name", "new", "old");
+    const tx: Transaction = {
+      id: "tx-1",
+      userId: "user-1",
+      operations: [op],
+      description: "Rename",
+      timestamp: 1000,
+      seq: 1,
+    };
+    const result = createInverseTransaction(tx);
+    expect(result.operations.length).toBe(1);
+    expect(result.operations[0].value).toBe("old");
+    expect(result.operations[0].previousValue).toBe("new");
+  });
+});
+
+describe("createInverse rejects per-op flip for create_node/delete_nodes (RF-012)", () => {
+  it("throws on create_node — must flow via inverseOperations", () => {
+    const op = makeOp("user-1", "node-a", "create_node", "", { uuid: "node-a" }, null);
+    expect(() => createInverse(op)).toThrow(/Transaction\.inverseOperations/);
+  });
+
+  it("throws on delete_nodes — must flow via inverseOperations", () => {
+    const op = makeOp("user-1", "", "delete_nodes", "", { node_uuids: ["a"] }, null);
+    expect(() => createInverse(op)).toThrow(/Transaction\.inverseOperations/);
+  });
+
+  it("preserves create_page → delete_page flip behavior", () => {
+    const op = makeOp(
+      "user-1",
+      "page-1",
+      "create_page",
+      "",
+      { id: "page-1", name: "Page 1", position: 0 },
+      null,
+    );
+    const inv = createInverse(op);
+    expect(inv.type).toBe("delete_page");
+  });
+
+  it("falls back to per-op flip when inverseOperations is absent for set_field-only tx", () => {
+    // Regression guard: the throw must not affect non-node operations.
+    const op = makeOp("user-1", "node-x", "set_field", "name", "new", "old");
+    const tx: Transaction = {
+      id: "tx-1",
+      userId: "user-1",
+      operations: [op],
+      description: "Rename",
+      timestamp: 1000,
+      seq: 1,
+    };
+    const result = createInverseTransaction(tx);
+    expect(result.operations.length).toBe(1);
+    expect(result.operations[0].value).toBe("old");
   });
 });

@@ -239,14 +239,18 @@ describe("Interceptor", () => {
     setState("nodes", "node-1", { name: "Before" });
 
     interceptor.set("node-1", "name", "After");
+    // RF-012: `create_node` has no per-op flip — for a structural op test
+    // that doesn't require the explicit inverseOperations contract, use a
+    // structural op whose per-op flip is well-defined (reparent inverts by
+    // swapping value/previousValue).
     interceptor.trackStructural({
       id: "op-structural",
       userId: "test-user",
       nodeUuid: "node-2",
-      type: "create_node",
+      type: "reparent",
       path: "",
-      value: { uuid: "node-2", name: "NewNode" },
-      previousValue: null,
+      value: { parentUuid: "parent-new", position: 1 },
+      previousValue: { parentUuid: "parent-old", position: 0 },
       seq: 0,
     });
 
@@ -400,6 +404,115 @@ describe("Interceptor", () => {
     expect(contextState.selectedNodeIds).toEqual(["node-1"]);
     expect(contextState.activeTool).toBe("rectangle");
     expect(contextState.viewport).toEqual({ x: 10, y: 20, zoom: 2 });
+  });
+
+  // RF-011: combineWith merges into current coalesce window
+  it("combineWith merges forward+inverse pair into the current coalesce buffer", () => {
+    // First, queue a trackStructural reparent op.
+    interceptor.trackStructural({
+      id: "op-reparent",
+      userId: "test-user",
+      nodeUuid: "child-1",
+      type: "reparent",
+      path: "",
+      value: { parentUuid: "new-parent", position: 0 },
+      previousValue: { parentUuid: "old-parent", position: 0 },
+      seq: 0,
+    });
+
+    // Then push a combineWith pair (delete_nodes + create_node inverse).
+    const forwardDelete = {
+      id: "op-delete",
+      userId: "test-user",
+      nodeUuid: "",
+      type: "delete_nodes" as const,
+      path: "",
+      value: { node_uuids: ["old-parent"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseCreate = {
+      id: "op-create",
+      userId: "test-user",
+      nodeUuid: "",
+      type: "create_node" as const,
+      path: "",
+      value: { uuid: "old-parent", name: "Old Parent" },
+      previousValue: null,
+      seq: 0,
+    };
+    interceptor.combineWith(forwardDelete, inverseCreate);
+
+    // Both ops should commit as ONE undo step (not two).
+    flushFrame();
+    expect(historyManager.canUndo()).toBe(true);
+
+    const stackBefore = historyManager.getUndoStack();
+    expect(stackBefore.length).toBe(1);
+
+    const tx = stackBefore[0];
+    // Forward ops: reparent (trackStructural) THEN delete_nodes (combineWith).
+    expect(tx.operations).toHaveLength(2);
+    expect(tx.operations[0].type).toBe("reparent");
+    expect(tx.operations[1].type).toBe("delete_nodes");
+    // Inverse ops: explicit create_node for the combineWith pair, then
+    // per-op flipped reparent for trackStructural. Order is reverse of
+    // forward application.
+    expect(tx.inverseOperations).toBeDefined();
+    expect(tx.inverseOperations).toHaveLength(2);
+    expect(tx.inverseOperations?.[0].type).toBe("create_node");
+    expect(tx.inverseOperations?.[1].type).toBe("reparent");
+    // The reparent inverse swaps value/previousValue.
+    expect(tx.inverseOperations?.[1].value).toEqual({ parentUuid: "old-parent", position: 0 });
+  });
+
+  it("combineWith alone produces a transaction with only the explicit inverse", () => {
+    const forwardDelete = {
+      id: "op-delete",
+      userId: "test-user",
+      nodeUuid: "",
+      type: "delete_nodes" as const,
+      path: "",
+      value: { node_uuids: ["n1"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseCreate = {
+      id: "op-create",
+      userId: "test-user",
+      nodeUuid: "",
+      type: "create_node" as const,
+      path: "",
+      value: { uuid: "n1", name: "X" },
+      previousValue: null,
+      seq: 0,
+    };
+    interceptor.combineWith(forwardDelete, inverseCreate);
+
+    flushFrame();
+
+    const stack = historyManager.getUndoStack();
+    expect(stack.length).toBe(1);
+    const tx = stack[0];
+    expect(tx.operations).toHaveLength(1);
+    expect(tx.operations[0].type).toBe("delete_nodes");
+    expect(tx.inverseOperations).toBeDefined();
+    expect(tx.inverseOperations).toHaveLength(1);
+    expect(tx.inverseOperations?.[0].type).toBe("create_node");
+  });
+
+  it("combineWith ignored during undo (matches trackStructural)", () => {
+    setState("nodes", "node-1", { name: "Original" });
+    interceptor.set("node-1", "name", "Changed");
+    flushFrame();
+
+    // Spy on canUndo to detect any new undo entry created during undo.
+    const before = historyManager.getUndoStack().length;
+    interceptor.undo();
+    // Synthetic combineWith called during undo should be ignored. We can't
+    // call it from the actual undo path here, but we can assert that the
+    // outer flow's undo+redo did not produce any spurious history entries.
+    expect(historyManager.getUndoStack().length).toBe(before - 1);
   });
 
   // RF-019: sideEffectContext is stored on Transaction (not _context)

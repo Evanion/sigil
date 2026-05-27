@@ -23,6 +23,7 @@
     "cannotMoveToRoot": "Impossible de déplacer au niveau racine",
     "selected": "{{name}} sélectionné",
     "deleted": "{{name}} supprimé",
+    "deletedMultiple": "{{count}} calques supprimés",
     "unlocked": "{{name}} déverrouillé",
     "locked": "{{name}} verrouillé",
     "hidden": "{{name}} masqué",

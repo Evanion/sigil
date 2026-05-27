@@ -135,10 +135,10 @@ mod tests {
             },
             OperationPayload {
                 id: "op-2".to_string(),
-                node_uuid: "node-b".to_string(),
-                op_type: "delete_node".to_string(),
+                node_uuid: String::new(),
+                op_type: "delete_nodes".to_string(),
                 path: String::new(),
-                value: None,
+                value: Some(serde_json::json!({ "node_uuids": ["node-b"] })),
             },
         ];
         let tx = multi_op_transaction(ops);

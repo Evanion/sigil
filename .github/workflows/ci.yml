@@ -34,10 +34,12 @@ jobs:
               - 'rust-toolchain.toml'
               - '.cargo/**'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/**'
             frontend:
               - 'frontend/**'
               - '.node-version'
               - '.github/workflows/ci.yml'
+              - '.github/workflows/scripts/**'
 
   rust:
     name: Rust
@@ -378,13 +380,43 @@ jobs:
       - name: Verify every t() call references an existing locale key
         run: node frontend/scripts/check-locale-usage.mjs --no-orphans
 
+  delete-node-removal-discipline:
+    name: DeleteNode Removal Discipline (Spec 19)
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.rust == 'true' || needs.detect-changes.outputs.frontend == 'true'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Run sentinel violation-fires test
+        run: |
+          set -euo pipefail
+          ./.github/workflows/scripts/test-delete-node-removal-discipline.sh
+      - name: Verify no remaining singular delete-node references
+        run: |
+          set -euo pipefail
+          # Source the shared BANNED/ALLOWED constants — exact same regexes
+          # the sentinel violation-fires test exercises (RF-029).
+          # shellcheck source=./scripts/delete-node-removal-discipline.env
+          source ./.github/workflows/scripts/delete-node-removal-discipline.env
+          HITS=$(grep -rE "$BANNED" \
+            --include='*.rs' --include='*.ts' --include='*.tsx' \
+            crates/ frontend/ 2>/dev/null \
+            | grep -vE "$ALLOWED" \
+            || true)
+          if [ -n "$HITS" ]; then
+            echo "::error::Singular delete-node references remain. Per Spec 19, all must be removed."
+            echo "$HITS"
+            exit 1
+          fi
+          echo "No singular delete-node references remain."
+
   # Gate job — required by branch protection. Passes if all needed checks pass or were skipped.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
     if: always()
     needs:
-      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels, i18n-allowlist-rationale, locale-parity, locale-usage]
+      [rust, frontend, pin-check, kobalte-import-discipline, discriminated-union-sentinels, i18n-allowlist-rationale, locale-parity, locale-usage, delete-node-removal-discipline]
     steps:
       - name: Check results
         env:
@@ -396,6 +428,7 @@ jobs:
           I18N_ALLOWLIST_RESULT: ${{ needs.i18n-allowlist-rationale.result }}
           LOCALE_PARITY_RESULT: ${{ needs.locale-parity.result }}
           LOCALE_USAGE_RESULT: ${{ needs.locale-usage.result }}
+          DELETE_NODE_DISCIPLINE_RESULT: ${{ needs.delete-node-removal-discipline.result }}
         run: |
           echo "Rust: $RUST_RESULT"
           echo "Frontend: $FRONTEND_RESULT"
@@ -405,7 +438,8 @@ jobs:
           echo "i18n Allowlist Rationale: $I18N_ALLOWLIST_RESULT"
           echo "Locale Parity: $LOCALE_PARITY_RESULT"
           echo "Locale Usage: $LOCALE_USAGE_RESULT"
-          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" || "$I18N_ALLOWLIST_RESULT" == "failure" || "$LOCALE_PARITY_RESULT" == "failure" || "$LOCALE_USAGE_RESULT" == "failure" ]]; then
+          echo "DeleteNode Removal Discipline: $DELETE_NODE_DISCIPLINE_RESULT"
+          if [[ "$RUST_RESULT" == "failure" || "$FRONTEND_RESULT" == "failure" || "$PIN_CHECK_RESULT" == "failure" || "$KOBALTE_CHECK_RESULT" == "failure" || "$SENTINELS_RESULT" == "failure" || "$I18N_ALLOWLIST_RESULT" == "failure" || "$LOCALE_PARITY_RESULT" == "failure" || "$LOCALE_USAGE_RESULT" == "failure" || "$DELETE_NODE_DISCIPLINE_RESULT" == "failure" ]]; then
             echo "One or more required checks failed"
             exit 1
           fi

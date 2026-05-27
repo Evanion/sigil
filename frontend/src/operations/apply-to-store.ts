@@ -23,6 +23,7 @@ import type {
   UpdateTokenValue,
   RenameTokenValue,
 } from "./types";
+import { MAX_NODE_TREE_DEPTH } from "../types/validation";
 
 /** Minimal setter interface matching Solid's SetStoreFunction signature. */
 export type StoreStateSetter = (...args: unknown[]) => void;
@@ -53,8 +54,8 @@ export function applyOperationToStore(
     case "create_node":
       applyCreateNode(op, setState, reader);
       break;
-    case "delete_node":
-      applyDeleteNode(op, setState, reader);
+    case "delete_nodes":
+      applyDeleteNodes(op, setState, reader);
       break;
     case "reparent":
       applyReparent(op, setState, reader);
@@ -182,6 +183,25 @@ function applyCreateNode(
     childrenUuids: (nodeData["childrenUuids"] as string[]) ?? [],
   });
 
+  // Spec 19: when the snapshot carries an originalIndex (undo of
+  // delete_nodes), restore the child at its original position instead
+  // of appending. Otherwise (normal create flow), append.
+  //
+  // RF-033: `Number.isSafeInteger` rejects fractional positives,
+  // Infinity, NaN, and non-integer values in one predicate. A non-finite
+  // or fractional index would propagate into Math.min and corrupt the
+  // sibling order on undo. We diagnose malformed values so the silent
+  // append-fallback is observable.
+  const originalIndex = nodeData["originalIndex"];
+  const hasOriginalIndex =
+    typeof originalIndex === "number" && Number.isSafeInteger(originalIndex) && originalIndex >= 0;
+  if (originalIndex !== undefined && !hasOriginalIndex) {
+    console.warn("applyCreateNode: originalIndex not a non-negative safe integer", {
+      uuid,
+      originalIndex,
+    });
+  }
+
   // Wire up parent's childrenUuids if parentUuid is provided
   const parentUuid = nodeData["parentUuid"] as string | undefined;
   if (parentUuid) {
@@ -190,41 +210,155 @@ function applyCreateNode(
       const existingChildren = (parent["childrenUuids"] as string[] | undefined) ?? [];
       // Avoid duplicates in case of re-application
       if (!existingChildren.includes(uuid)) {
-        setState("nodes", parentUuid, "childrenUuids", [...existingChildren, uuid]);
+        const insertAt = hasOriginalIndex
+          ? Math.min(originalIndex as number, existingChildren.length)
+          : existingChildren.length;
+        const updated = [
+          ...existingChildren.slice(0, insertAt),
+          uuid,
+          ...existingChildren.slice(insertAt),
+        ];
+        setState("nodes", parentUuid, "childrenUuids", updated);
       }
     }
   }
+
+  // Spec 19 (RF-002): restore page-root membership when the snapshot
+  // identifies the node as a page root. A page-root node has parentUuid
+  // === null AND a pageId tag in the inverse snapshot. Insert into the
+  // page's rootNodeUuids at the original index so the layer order
+  // survives the undo round-trip.
+  const rawPageId = nodeData["pageId"];
+  const pageId = typeof rawPageId === "string" ? rawPageId : null;
+  if (pageId !== null && !parentUuid) {
+    setState(
+      produce((s: Record<string, unknown>) => {
+        const pages = s["pages"] as Array<Record<string, unknown>> | undefined;
+        if (!pages) return;
+        const page = pages.find((p) => p["id"] === pageId);
+        if (!page) {
+          console.warn("applyCreateNode: pageId provided but page not found in store", {
+            uuid,
+            pageId,
+          });
+          return;
+        }
+        const existingRoots = ((page["rootNodeUuids"] as string[] | undefined) ?? []).slice();
+        if (existingRoots.includes(uuid)) return;
+        const insertAt = hasOriginalIndex
+          ? Math.min(originalIndex as number, existingRoots.length)
+          : existingRoots.length;
+        existingRoots.splice(insertAt, 0, uuid);
+        page["rootNodeUuids"] = existingRoots;
+      }),
+    );
+  }
 }
 
-function applyDeleteNode(
+/**
+ * Spec 19: Apply a multi-node delete to the local store. Used by both
+ * the forward path (local user delete; payload carries only retained
+ * roots) and the redo path (replay of the forward op from history).
+ *
+ * The contract mirrors `apply-remote.ts::applyDeleteNodes`:
+ *   - Walk each root's subtree to collect every descendant.
+ *   - Strip every removed UUID from every page's rootNodeUuids.
+ *   - Validate that every element of node_uuids is a string.
+ *   - Apply the mutation in a single produce() block.
+ *   - Emit a structured warn when a uuid is not in the store.
+ */
+function applyDeleteNodes(
   op: Operation,
   setState: StoreStateSetter,
   reader: StoreStateReader,
 ): void {
-  const { nodeUuid } = op;
-  const node = reader.getNode(nodeUuid);
+  const value = op.value as { node_uuids?: unknown } | null;
+  if (!value || !Array.isArray(value.node_uuids)) {
+    console.warn("applyOperationToStore: delete_nodes payload malformed", { value });
+    return;
+  }
+  const rawUuids = value.node_uuids;
+  // RF-010: defense-in-depth — reject any non-string element.
+  if (!rawUuids.every((u): u is string => typeof u === "string")) {
+    console.warn("applyOperationToStore: delete_nodes node_uuids contains non-string element", {
+      value,
+    });
+    return;
+  }
+  const nodeUuids = rawUuids;
 
-  // Clean up parent's childrenUuids before deleting the node
-  if (node) {
-    const parentUuid = node["parentUuid"] as string | null | undefined;
-    if (parentUuid) {
-      const parent = reader.getNode(parentUuid);
-      if (parent) {
-        const children = (parent["childrenUuids"] as string[] | undefined) ?? [];
-        setState(
-          "nodes",
-          parentUuid,
-          "childrenUuids",
-          children.filter((c) => c !== nodeUuid),
-        );
-      }
+  // Walk each UUID's subtree in the current store and collect every
+  // descendant. Iterative + explicit depth cap satisfies the recursion
+  // depth guard requirement in CLAUDE.md. RF-016: shared constant.
+  const deletedSet = new Set<string>();
+  interface WalkFrame {
+    uuid: string;
+    depth: number;
+  }
+  const walkStack: WalkFrame[] = [];
+  for (const uuid of nodeUuids) {
+    const node = reader.getNode(uuid);
+    if (!node) {
+      // RF-023: structured warn so silent drops are observable.
+      console.warn("applyOperationToStore: delete_nodes uuid not in store, skipping", { uuid });
+      continue;
+    }
+    walkStack.push({ uuid, depth: 0 });
+  }
+  while (walkStack.length > 0) {
+    const frame = walkStack.pop();
+    if (!frame) break;
+    if (frame.depth >= MAX_NODE_TREE_DEPTH) {
+      // RF-015: structured warn so depth-limit hits are observable.
+      console.warn("applyOperationToStore: delete_nodes subtree depth limit reached", {
+        uuid: frame.uuid,
+        depth: frame.depth,
+        maxDepth: MAX_NODE_TREE_DEPTH,
+        site: "applyDeleteNodes",
+      });
+      continue;
+    }
+    if (deletedSet.has(frame.uuid)) continue;
+    const node = reader.getNode(frame.uuid);
+    if (!node) continue;
+    deletedSet.add(frame.uuid);
+    const childrenUuids = (node["childrenUuids"] as string[] | undefined) ?? [];
+    for (const childUuid of childrenUuids) {
+      walkStack.push({ uuid: childUuid, depth: frame.depth + 1 });
     }
   }
+  if (deletedSet.size === 0) {
+    return;
+  }
 
-  // Delete the node from the store
+  // Single produce block — atomic for the reactive graph.
   setState(
-    produce((s: Record<string, Record<string, unknown>>) => {
-      Reflect.deleteProperty(s["nodes"], nodeUuid);
+    produce((s: Record<string, unknown>) => {
+      const nodes = s["nodes"] as Record<string, Record<string, unknown> | undefined>;
+      const pages = s["pages"] as Array<Record<string, unknown>> | undefined;
+      for (const uuid of deletedSet) {
+        const node = nodes[uuid];
+        if (node) {
+          const parentUuid = node["parentUuid"] as string | null | undefined;
+          if (parentUuid) {
+            const parent = nodes[parentUuid];
+            if (parent) {
+              const children = (parent["childrenUuids"] as string[] | undefined) ?? [];
+              parent["childrenUuids"] = children.filter((c) => c !== uuid);
+            }
+          }
+        }
+        // Strip from every page's rootNodeUuids (defensive iteration).
+        if (pages) {
+          for (const page of pages) {
+            const roots = page["rootNodeUuids"] as string[] | undefined;
+            if (roots && roots.includes(uuid)) {
+              page["rootNodeUuids"] = roots.filter((id) => id !== uuid);
+            }
+          }
+        }
+        Reflect.deleteProperty(nodes, uuid);
+      }
     }),
   );
 }

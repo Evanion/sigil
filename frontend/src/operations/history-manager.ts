@@ -44,10 +44,22 @@ export class HistoryManager {
 
   /** Push a pre-built transaction to the undo stack. Clears redo. */
   pushTransaction(tx: Transaction): void {
-    // RF-008: Enforce MAX_OPERATIONS_PER_TRANSACTION
+    // RF-008: Enforce MAX_OPERATIONS_PER_TRANSACTION on forward ops.
     if (tx.operations.length > MAX_OPERATIONS_PER_TRANSACTION) {
       console.error(
-        `pushTransaction: transaction has ${tx.operations.length} operations, exceeding MAX_OPERATIONS_PER_TRANSACTION (${MAX_OPERATIONS_PER_TRANSACTION}).`,
+        `pushTransaction: forward operations ${tx.operations.length} exceeds MAX_OPERATIONS_PER_TRANSACTION (${MAX_OPERATIONS_PER_TRANSACTION})`,
+      );
+    }
+    // RF-018: Also enforce the cap on inverseOperations. A delete_nodes
+    // transaction carries N create_node ops in inverseOperations; without
+    // this guard a 50k-node selection would silently allocate 50k inverse
+    // ops with no diagnostic. The cap is the same constant on both arrays.
+    if (
+      tx.inverseOperations !== undefined &&
+      tx.inverseOperations.length > MAX_OPERATIONS_PER_TRANSACTION
+    ) {
+      console.error(
+        `pushTransaction: inverse operations ${tx.inverseOperations.length} exceeds MAX_OPERATIONS_PER_TRANSACTION (${MAX_OPERATIONS_PER_TRANSACTION})`,
       );
     }
     this.pushUndo(tx);

@@ -48,6 +48,7 @@ import {
   MIN_CORNER_SMOOTHING,
   MAX_CORNER_SMOOTHING,
 } from "../store/corners-input";
+import { MAX_NODE_TREE_DEPTH } from "../types/validation";
 
 /** Valid discriminator strings for the Corner union type. */
 const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
@@ -106,6 +107,13 @@ export interface MutablePage {
   id: string;
   name: string;
   root_nodes: Array<{ index: number; generation: number }>;
+  /**
+   * Root node UUIDs belonging to this page. Mirrors the document store's
+   * MutablePage.rootNodeUuids — required by Spec 19's inverse-of-delete
+   * path so applyCreateNode can restore page-root membership on undo
+   * AND so applyDeleteNodes can strip page roots on remote/redo apply.
+   */
+  rootNodeUuids?: string[];
 }
 
 export interface StoreState {
@@ -181,8 +189,8 @@ function applyRemoteOperation(
     case "create_node":
       applyCreateNode(op.value, setState, getNode);
       break;
-    case "delete_node":
-      applyDeleteNode(op.nodeUuid, setState, getNode);
+    case "delete_nodes":
+      applyDeleteNodes(op.value, setState, getNode);
       break;
     case "reparent":
       applyReparent(op.nodeUuid, op.value, setState, getNode);
@@ -665,39 +673,195 @@ function applyCreateNode(
     }),
   );
 
+  // Spec 19: when the snapshot carries an originalIndex (undo of
+  // delete_nodes), restore the child at its original position instead
+  // of appending. Otherwise (normal create flow), append.
+  //
+  // RF-033: `Number.isSafeInteger` rejects fractional positives,
+  // Infinity, NaN, and non-integer values in one predicate. A non-finite
+  // or fractional index would propagate into Math.min and corrupt the
+  // sibling order on undo. We diagnose malformed values so the silent
+  // append-fallback is observable.
+  const originalIndex = raw["originalIndex"];
+  const hasOriginalIndex =
+    typeof originalIndex === "number" && Number.isSafeInteger(originalIndex) && originalIndex >= 0;
+  if (originalIndex !== undefined && !hasOriginalIndex) {
+    // Defensive: log when the field is present but invalid. `undefined`
+    // is the normal "no originalIndex" case (a fresh create_node, not
+    // an undo replay); any other non-conforming value is malformed
+    // payload data worth surfacing.
+    console.warn("applyCreateNode: originalIndex not a non-negative safe integer", {
+      uuid,
+      originalIndex,
+    });
+  }
+
   // Wire up parent's childrenUuids so the tree stays consistent
   if (parentUuid) {
     const parent = getNode(parentUuid);
     if (parent && !parent.childrenUuids.includes(uuid)) {
-      setState("nodes", parentUuid, "childrenUuids", [...parent.childrenUuids, uuid]);
+      const insertAt = hasOriginalIndex
+        ? Math.min(originalIndex as number, parent.childrenUuids.length)
+        : parent.childrenUuids.length;
+      const updated = [
+        ...parent.childrenUuids.slice(0, insertAt),
+        uuid,
+        ...parent.childrenUuids.slice(insertAt),
+      ];
+      setState("nodes", parentUuid, "childrenUuids", updated);
     }
+  }
+
+  // Spec 19 (RF-002): restore page-root membership when the snapshot
+  // identifies the node as a page root. A page-root node has parentUuid
+  // === null AND a pageId tag in the inverse snapshot. Insert into the
+  // page's rootNodeUuids at the original index so the layer order
+  // survives the undo round-trip even when the broadcast arrives at a
+  // remote client.
+  const rawPageId = raw["pageId"];
+  const pageId = typeof rawPageId === "string" ? rawPageId : null;
+  if (pageId !== null && !parentUuid) {
+    setState(
+      produce((s) => {
+        const page = s.pages.find((p) => p.id === pageId);
+        if (!page) {
+          console.warn("Remote create_node: pageId provided but page not found in store", {
+            uuid,
+            pageId,
+          });
+          return;
+        }
+        const existingRoots = (page.rootNodeUuids ?? []).slice();
+        if (existingRoots.includes(uuid)) return;
+        const insertAt = hasOriginalIndex
+          ? Math.min(originalIndex as number, existingRoots.length)
+          : existingRoots.length;
+        existingRoots.splice(insertAt, 0, uuid);
+        page.rootNodeUuids = existingRoots;
+      }),
+    );
   }
 }
 
-// ── Internal: delete_node ─────────────────────────────────────────────
+// ── Internal: delete_nodes (Spec 19) ──────────────────────────────────
 
-function applyDeleteNode(
-  nodeUuid: string,
+/**
+ * Apply a batch delete broadcast from a remote client (or local redo).
+ *
+ * Spec 19 contract:
+ *   - The payload carries only the *retained roots* (the core engine
+ *     handles descendants transitively on the server). The local handler
+ *     MUST walk each root's subtree in the current store, collecting every
+ *     descendant for removal.
+ *   - For each removed UUID, strip it from every page's `rootNodeUuids`
+ *     array (a top-level node will appear in exactly one page; iterating
+ *     all defensively keeps the loop simple and resilient to corruption).
+ *   - Validate that every element of `node_uuids` is a string — a malformed
+ *     payload (mixed types, nulls) must produce a structured warn and
+ *     no-op without partial application.
+ *   - Wrap the entire mutation in a single `produce()` block so the
+ *     subscription event lands as one reactive update.
+ */
+function applyDeleteNodes(
+  value: unknown,
   setState: SetStoreFunction<StoreState>,
   getNode: (uuid: string) => StoreDocumentNode | undefined,
 ): void {
-  const node = getNode(nodeUuid);
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Array.isArray((value as { node_uuids?: unknown }).node_uuids)
+  ) {
+    console.warn("applyRemoteOperation: delete_nodes payload missing or malformed node_uuids", {
+      value,
+    });
+    return;
+  }
+  const rawUuids = (value as { node_uuids: unknown[] }).node_uuids;
+  // RF-010: defense-in-depth — reject any non-string element. Partial
+  // application of a malformed batch could leave the store in a state
+  // inconsistent with the server.
+  if (!rawUuids.every((u): u is string => typeof u === "string")) {
+    console.warn("applyRemoteOperation: delete_nodes node_uuids contains non-string element", {
+      value,
+    });
+    return;
+  }
+  const nodeUuids = rawUuids;
 
-  // Remove from parent's childrenUuids if the node has a parent
-  if (node?.parentUuid) {
-    const parentUuid = node.parentUuid;
-    const parent = getNode(parentUuid);
-    if (parent) {
-      const newChildren = parent.childrenUuids.filter((id) => id !== nodeUuid);
-      setState("nodes", parentUuid, "childrenUuids", newChildren);
+  // Walk each UUID's subtree in the current store and collect every
+  // descendant. Mirrors the core engine's transitive removal. Use an
+  // iterative stack with an explicit depth cap to satisfy CLAUDE.md
+  // "Recursive Functions Require Depth Guards". RF-016: shared constant.
+  const deletedSet = new Set<string>();
+  interface WalkFrame {
+    uuid: string;
+    depth: number;
+  }
+  const walkStack: WalkFrame[] = [];
+  for (const uuid of nodeUuids) {
+    const node = getNode(uuid);
+    if (!node) {
+      // RF-023: structured warn so silent drops are observable. A remote
+      // delete for a uuid not present locally is benign (the local client
+      // may have already applied a prior delete optimistically) but the
+      // information is useful for diagnostics.
+      console.warn("applyRemoteOperation: delete_nodes uuid not in store, skipping", { uuid });
+      continue;
+    }
+    walkStack.push({ uuid, depth: 0 });
+  }
+  while (walkStack.length > 0) {
+    const frame = walkStack.pop();
+    if (!frame) break;
+    if (frame.depth >= MAX_NODE_TREE_DEPTH) {
+      // RF-015: structured warn so depth-limit hits are observable.
+      console.warn("applyRemoteOperation: delete_nodes subtree depth limit reached", {
+        uuid: frame.uuid,
+        depth: frame.depth,
+        maxDepth: MAX_NODE_TREE_DEPTH,
+        site: "applyDeleteNodes",
+      });
+      continue;
+    }
+    if (deletedSet.has(frame.uuid)) continue;
+    const node = getNode(frame.uuid);
+    if (!node) continue;
+    deletedSet.add(frame.uuid);
+    for (const childUuid of node.childrenUuids ?? []) {
+      walkStack.push({ uuid: childUuid, depth: frame.depth + 1 });
     }
   }
+  if (deletedSet.size === 0) {
+    return;
+  }
 
-  // Remove the node from the store.
-  // Using produce + Reflect.deleteProperty to satisfy no-dynamic-delete lint rule.
+  // RF-019: batched single produce block — one reactive update for the
+  // whole delete instead of 2N independent setState calls.
   setState(
     produce((s) => {
-      Reflect.deleteProperty(s.nodes, nodeUuid);
+      for (const uuid of deletedSet) {
+        const node = s.nodes[uuid];
+        // Detach from parent's childrenUuids (only relevant for the
+        // batch's top-level entries whose parent survives; descendants'
+        // parents are also being deleted so the work is wasted but
+        // harmless).
+        if (node?.parentUuid) {
+          const parent = s.nodes[node.parentUuid];
+          if (parent) {
+            parent.childrenUuids = parent.childrenUuids.filter((id) => id !== uuid);
+          }
+        }
+        // Strip from every page's rootNodeUuids. A top-level node lives
+        // in exactly one page; iterating defensively avoids relying on
+        // the StoreState type having rootNodeUuids populated.
+        for (const page of s.pages) {
+          if (page.rootNodeUuids?.includes(uuid)) {
+            page.rootNodeUuids = page.rootNodeUuids.filter((id) => id !== uuid);
+          }
+        }
+        Reflect.deleteProperty(s.nodes, uuid);
+      }
     }),
   );
 }

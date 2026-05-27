@@ -39,7 +39,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     createNode: () => "",
     setTransform: () => {},
     renameNode: () => {},
-    deleteNode: () => {},
+    deleteNodes: () => {},
     setVisible: () => {},
     setLocked: () => {},
     reparentNode: () => {},

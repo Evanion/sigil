@@ -34,7 +34,7 @@ pub struct OperationPayload {
     pub id: String,
     /// Target node UUID.
     pub node_uuid: String,
-    /// Operation type: `set_field`, `create_node`, `delete_node`, `reparent`, `reorder`.
+    /// Operation type: `set_field`, `create_node`, `delete_nodes`, `reparent`, `reorder`.
     pub op_type: String,
     /// Field path for `set_field` operations (e.g., "transform", "style.fills", "name").
     /// Empty for structural operations.

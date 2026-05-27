@@ -48,13 +48,21 @@ function makeOp(
 
 /** Map from an operation type to its inverse type. */
 function inverseType(type: OperationType): OperationType {
-  if (type === "create_node") return "delete_node";
-  if (type === "delete_node") return "create_node";
+  // RF-012: `create_node` and `delete_nodes` inverses MUST flow via
+  // `Transaction.inverseOperations`, NOT via per-op flip. Throwing here
+  // surfaces any future caller that bypasses the pushTransaction
+  // contract — e.g., adding a delete_nodes op to a transaction without
+  // populating `inverseOperations`. The throw is caught by
+  // HistoryManager.undo()'s try/catch (which restores the popped tx),
+  // so the user sees "undo did nothing" rather than a corrupt state.
+  if (type === "create_node" || type === "delete_nodes") {
+    throw new Error(`inverseType: ${type} has no per-op flip; use Transaction.inverseOperations`);
+  }
   if (type === "create_page") return "delete_page";
   if (type === "delete_page") return "create_page";
   if (type === "create_token") return "delete_token";
   if (type === "delete_token") return "create_token";
-  return type; // set_field, reparent, reorder, rename_page, reorder_page, update_token invert by swapping values
+  return type; // set_field, reparent, reorder, rename_page, reorder_page, update_token, rename_token invert by swapping values
 }
 
 // ── Public factory functions ─────────────────────────────────────────
@@ -81,15 +89,15 @@ export function createCreateNodeOp(userId: string, nodeData: unknown): Operation
 }
 
 /**
- * Create a delete_node operation.
- * `nodeSnapshot` is the full node object being deleted (for undo).
+ * Create a delete_nodes operation (Spec 19, batch delete).
+ *
+ * The forward op carries the UUID list in `value`. The inverse (N
+ * create_node ops) is built by the caller and attached via
+ * `Transaction.inverseOperations`. See `document-store-solid.tsx`
+ * Task 11 for the call site.
  */
-export function createDeleteNodeOp(
-  userId: string,
-  nodeUuid: string,
-  nodeSnapshot: unknown,
-): Operation {
-  return makeOp(userId, nodeUuid, "delete_node", "", null, nodeSnapshot);
+export function createDeleteNodesOp(userId: string, nodeUuids: readonly string[]): Operation {
+  return makeOp(userId, "", "delete_nodes", "", { node_uuids: [...nodeUuids] }, null);
 }
 
 /**
@@ -213,20 +221,18 @@ export function createRenameTokenOp(
 
 /**
  * Create the inverse of an operation by swapping value/previousValue
- * and flipping create_node <-> delete_node.
+ * and flipping create/delete pairs for pages and tokens.
+ *
+ * Note: `create_node` and `delete_nodes` are NOT inverted via per-op flip.
+ * They always live inside a Transaction whose `inverseOperations` is built
+ * explicitly by the store layer (see `document-store-solid.tsx`'s
+ * `deleteNodes`). `createInverseTransaction` prefers that path.
  *
  * The inverse gets a fresh id and seq=0.
  */
 export function createInverse(op: Operation): Operation {
-  // When inverting create_node → delete_node, the original op has nodeUuid=""
-  // because the node didn't exist yet. Extract the UUID from the value payload
-  // so the delete_node inverse knows which node to delete.
-  let nodeUuid = op.nodeUuid;
-  if (op.type === "create_node" && nodeUuid === "") {
-    const val = op.value as Record<string, unknown> | null;
-    nodeUuid = (typeof val?.uuid === "string" ? val.uuid : "") as string;
-  }
   // For create_page, the page ID is in the value payload's `id` field.
+  let nodeUuid = op.nodeUuid;
   if (op.type === "create_page" && nodeUuid === "") {
     const val = op.value as Record<string, unknown> | null;
     nodeUuid = (typeof val?.id === "string" ? val.id : "") as string;
@@ -245,12 +251,27 @@ export function createInverse(op: Operation): Operation {
 }
 
 /**
- * Create the inverse of a transaction: inverse all operations in reverse order.
+ * Create the inverse of a transaction.
+ *
+ * If the transaction carries `inverseOperations` (Spec 19: forward op
+ * is not a single-op flip), those are used directly. Otherwise, falls
+ * back to per-op flip: invert all operations in reverse order.
  *
  * The inverse transaction gets a fresh id, fresh timestamp, seq=0,
  * and a description prefixed with "Undo: ".
  */
 export function createInverseTransaction(tx: Transaction): Transaction {
+  // Spec 19: prefer explicit pre-built inverse ops when present
+  if (tx.inverseOperations && tx.inverseOperations.length > 0) {
+    return {
+      id: crypto.randomUUID(),
+      userId: tx.userId,
+      operations: [...tx.inverseOperations],
+      description: `Undo: ${tx.description}`,
+      timestamp: Date.now(),
+      seq: 0,
+    };
+  }
   return {
     id: crypto.randomUUID(),
     userId: tx.userId,

@@ -362,50 +362,153 @@ describe("applyOperationToStore — create_node", () => {
   });
 });
 
-describe("applyOperationToStore — delete_node", () => {
+describe("applyOperationToStore — delete_nodes single-uuid (Spec 19 Task 16)", () => {
+  // After Spec 19 Task 16, the singular per-uuid arm is gone; a
+  // one-element `node_uuids` payload covers the previous semantics.
+  // Spec 19 RF-019: the handler now applies the whole batch in a single
+  // produce() block, so wire-level call patterns are no longer tested —
+  // tests assert the observable post-state instead.
   it("removes a node from the store and cleans up parent's childrenUuids", () => {
-    const calls: unknown[][] = [];
-    const setter = ((...args: unknown[]) => {
-      calls.push(args);
-    }) as unknown as StoreStateSetter;
-    const nodes: Record<string, unknown> = {
-      "node-1": { uuid: "node-1", parentUuid: "parent-a", name: "Rect" },
-      "parent-a": { uuid: "parent-a", childrenUuids: ["node-1", "node-2"] },
+    const storeData: Record<string, unknown> = {
+      nodes: {
+        "node-1": { uuid: "node-1", parentUuid: "parent-a", name: "Rect", childrenUuids: [] },
+        "parent-a": { uuid: "parent-a", childrenUuids: ["node-1", "node-2"] },
+        "node-2": { uuid: "node-2", parentUuid: "parent-a", childrenUuids: [] },
+      },
+      pages: [],
     };
-    const reader: StoreStateReader = { getNode: (uuid) => nodes[uuid] as never };
+    const setter = ((...args: unknown[]) => {
+      if (args.length === 1 && typeof args[0] === "function") {
+        (args[0] as (s: Record<string, unknown>) => void)(storeData);
+        return;
+      }
+      // Path-based setters preserved for non-delete callers; not used here.
+    }) as unknown as StoreStateSetter;
+    const reader: StoreStateReader = {
+      getNode: (uuid) =>
+        (storeData["nodes"] as Record<string, Record<string, unknown>>)[uuid] as never,
+    };
     const op = makeOp({
-      type: "delete_node",
-      nodeUuid: "node-1",
+      type: "delete_nodes",
+      nodeUuid: "",
       path: "",
-      value: null,
-      previousValue: { uuid: "node-1" },
+      value: { node_uuids: ["node-1"] },
+      previousValue: null,
     });
 
     applyOperationToStore(op, setter, reader);
 
-    // Should remove node-1 from parent's childrenUuids
-    expect(calls).toContainEqual(["nodes", "parent-a", "childrenUuids", ["node-2"]]);
-    // Should call setter at least twice (parent update + node deletion via produce)
-    expect(calls.length).toBeGreaterThanOrEqual(2);
+    const nodes = storeData["nodes"] as Record<string, Record<string, unknown>>;
+    // node-1 removed from store.
+    expect(nodes["node-1"]).toBeUndefined();
+    // Parent's childrenUuids cleaned up.
+    expect(nodes["parent-a"]?.["childrenUuids"]).toEqual(["node-2"]);
   });
 
   it("removes a node with no parent from the store", () => {
-    const setter = vi.fn() as unknown as StoreStateSetter;
+    const storeData: Record<string, unknown> = {
+      nodes: {
+        "node-1": { uuid: "node-1", parentUuid: null, name: "Root", childrenUuids: [] },
+      },
+      pages: [],
+    };
+    const setter = ((...args: unknown[]) => {
+      if (args.length === 1 && typeof args[0] === "function") {
+        (args[0] as (s: Record<string, unknown>) => void)(storeData);
+      }
+    }) as unknown as StoreStateSetter;
     const reader: StoreStateReader = {
-      getNode: () => ({ uuid: "node-1", parentUuid: null, name: "Root" }),
+      getNode: (uuid) =>
+        (storeData["nodes"] as Record<string, Record<string, unknown>>)[uuid] as never,
     };
     const op = makeOp({
-      type: "delete_node",
-      nodeUuid: "node-1",
+      type: "delete_nodes",
+      nodeUuid: "",
       path: "",
-      value: null,
-      previousValue: { uuid: "node-1" },
+      value: { node_uuids: ["node-1"] },
+      previousValue: null,
     });
 
     applyOperationToStore(op, setter, reader);
 
-    // setter is called at least once (the produce delete)
-    expect(setter).toHaveBeenCalled();
+    expect((storeData["nodes"] as Record<string, unknown>)["node-1"]).toBeUndefined();
+  });
+});
+
+describe("applyOperationToStore — delete_nodes (Spec 19)", () => {
+  it("removes every node listed in value.node_uuids", () => {
+    // Spec 19 RF-019: single produce() block applies the whole batch.
+    // Test asserts observable post-state, not call patterns.
+    const storeData: Record<string, unknown> = {
+      nodes: {
+        "node-a": { uuid: "node-a", parentUuid: "parent-a", name: "A", childrenUuids: [] },
+        "node-b": { uuid: "node-b", parentUuid: "parent-a", name: "B", childrenUuids: [] },
+        "parent-a": { uuid: "parent-a", childrenUuids: ["node-a", "node-b"] },
+      },
+      pages: [],
+    };
+    const setter = ((...args: unknown[]) => {
+      if (args.length === 1 && typeof args[0] === "function") {
+        (args[0] as (s: Record<string, unknown>) => void)(storeData);
+      }
+    }) as unknown as StoreStateSetter;
+    const reader: StoreStateReader = {
+      getNode: (uuid) =>
+        (storeData["nodes"] as Record<string, Record<string, unknown>>)[uuid] as never,
+    };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: { node_uuids: ["node-a", "node-b"] },
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    const nodes = storeData["nodes"] as Record<string, Record<string, unknown>>;
+    expect(nodes["node-a"]).toBeUndefined();
+    expect(nodes["node-b"]).toBeUndefined();
+    // Parent's childrenUuids is empty after both children are removed.
+    expect(nodes["parent-a"]?.["childrenUuids"]).toEqual([]);
+  });
+
+  it("warns and no-ops on malformed payload (missing node_uuids)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setter = vi.fn() as unknown as StoreStateSetter;
+    const reader: StoreStateReader = { getNode: () => undefined };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: { wrong_field: ["x"] },
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(setter).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("warns and no-ops when value is null", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setter = vi.fn() as unknown as StoreStateSetter;
+    const reader: StoreStateReader = { getNode: () => undefined };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: null,
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(setter).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 

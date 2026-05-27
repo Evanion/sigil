@@ -16,7 +16,7 @@ import { batch } from "solid-js";
 import type { Operation, Transaction, SideEffectContext } from "./types";
 import { MAX_OPERATIONS_PER_TRANSACTION } from "./types";
 import type { HistoryManager } from "./history-manager";
-import { createSetFieldOp } from "./operation-helpers";
+import { createSetFieldOp, createInverse } from "./operation-helpers";
 import {
   applyOperationToStore,
   type StoreStateSetter,
@@ -53,6 +53,39 @@ export interface Interceptor {
    * Called by the ~4 structural mutations after they modify the store.
    */
   trackStructural(op: Operation): void;
+
+  /**
+   * Push a pre-built transaction directly to the history (Spec 19).
+   *
+   * Used when the forward op is not a single-op flip (e.g., delete_nodes
+   * inverts to N create_node ops, carried in tx.inverseOperations).
+   *
+   * Force-flushes any pending coalesce buffer first so the pre-built
+   * transaction lands atomically as its own undo step.
+   */
+  pushTransaction(tx: Transaction): void;
+
+  /**
+   * Push a pre-built forward+inverse op pair into the CURRENT coalesce
+   * buffer instead of forcing a flush (RF-011, Spec 19).
+   *
+   * Used for operations whose inverse is not a simple per-op flip (e.g.,
+   * `delete_nodes` ↔ `create_node`), but that should still coalesce with
+   * adjacent structural mutations in the same logical user action
+   * (e.g., `ungroupNodes` — reparent children, then delete the group, all
+   * one undo step).
+   *
+   * Distinct from `pushTransaction` which force-flushes first and pushes
+   * its own transaction. Use `combineWith` when the caller wants
+   * ungroup-style coalescing across heterogeneous op types.
+   *
+   * The forward op is appended to the structural buffer; the explicit
+   * inverse op is stashed in a parallel list. At commit time, the
+   * transaction's `inverseOperations` is built to span ALL forward ops:
+   * `createInverse(op)` for ops pushed via `trackStructural`, plus the
+   * stashed explicit inverse for ops pushed via `combineWith`.
+   */
+  combineWith(forwardOp: Operation, inverseOp: Operation): void;
 
   /** Undo the most recent undo step. Returns the inverse Transaction for server sync. */
   undo(): Transaction | null;
@@ -165,8 +198,15 @@ export function createInterceptor(
 ): Interceptor {
   /** Buffer of changes awaiting coalesce commit. */
   const buffer: Map<string, BufferedChange> = new Map(); // key: "nodeUuid::path"
-  /** Structural operations in the current buffer. */
+  /** Structural operations in the current buffer (invertible via per-op flip). */
   const structuralBuffer: Operation[] = [];
+  /**
+   * RF-011: Forward+inverse op pairs pushed via `combineWith`. These ops
+   * cannot be inverted via per-op flip (e.g., `delete_nodes` ↔ `create_node`)
+   * and carry their own pre-built inverses. They merge into the current
+   * coalesce window so callers like `ungroupNodes` produce ONE undo step.
+   */
+  const combinedOps: Array<{ forward: Operation; inverse: Operation }> = [];
   /** setTimeout handle for idle detection. */
   let rafHandle: number | null = null;
   /** Flag to suppress tracking during undo/redo application. */
@@ -227,12 +267,12 @@ export function createInterceptor(
   }
 
   function commitBuffer(): void {
-    if (buffer.size === 0 && structuralBuffer.length === 0) return;
+    if (buffer.size === 0 && structuralBuffer.length === 0 && combinedOps.length === 0) return;
 
     // Build operations from buffered field changes
-    const ops: Operation[] = [];
+    const fieldOps: Operation[] = [];
     for (const change of buffer.values()) {
-      ops.push(
+      fieldOps.push(
         createSetFieldOp(
           userId,
           change.nodeUuid,
@@ -242,8 +282,21 @@ export function createInterceptor(
         ),
       );
     }
-    // Add structural operations
-    ops.push(...structuralBuffer);
+    // RF-011 / RF-012: combineWith ops are positioned by causal role:
+    // - create_node forwards must run BEFORE other ops (the node must
+    //   exist before subsequent reparents target it).
+    // - delete_nodes forwards must run AFTER other ops (e.g., the
+    //   ungroup case where the group is emptied first and only then
+    //   deleted).
+    // Partition by forward op type and place each group accordingly.
+    const createCombined = combinedOps.filter((c) => c.forward.type === "create_node");
+    const deleteCombined = combinedOps.filter((c) => c.forward.type === "delete_nodes");
+    const ops: Operation[] = [
+      ...createCombined.map((c) => c.forward),
+      ...fieldOps,
+      ...structuralBuffer,
+      ...deleteCombined.map((c) => c.forward),
+    ];
 
     if (ops.length === 0) return;
 
@@ -255,6 +308,35 @@ export function createInterceptor(
       ops.length = MAX_OPERATIONS_PER_TRANSACTION;
     }
 
+    // RF-011 / RF-012: If any combineWith pair contributed, build a complete
+    // `inverseOperations` array spanning EVERY forward op. Per-op flip cannot
+    // represent combineWith inverses, so we compose the full inverse here.
+    // Order is reverse of forward (which itself was partitioned above):
+    //   forward = [createCombined.forwards, fieldOps, structuralBuffer, deleteCombined.forwards]
+    //   inverse = [deleteCombined.inverses, structural-reverses, fieldOps-reverses, createCombined.inverses]
+    // For groupNodes (create_node combined): structurals undo BEFORE the
+    // delete_nodes inverse, so reparents move children back before the now-
+    // empty group is removed.
+    // For ungroupNodes (delete_nodes combined): the create_node inverse runs
+    // FIRST so the group exists before reparents reattach the children.
+    let inverseOperations: readonly Operation[] | undefined;
+    if (combinedOps.length > 0) {
+      const inverses: Operation[] = [];
+      for (let i = deleteCombined.length - 1; i >= 0; i--) {
+        inverses.push(deleteCombined[i].inverse);
+      }
+      for (let i = structuralBuffer.length - 1; i >= 0; i--) {
+        inverses.push(createInverse(structuralBuffer[i]));
+      }
+      for (let i = fieldOps.length - 1; i >= 0; i--) {
+        inverses.push(createInverse(fieldOps[i]));
+      }
+      for (let i = createCombined.length - 1; i >= 0; i--) {
+        inverses.push(createCombined[i].inverse);
+      }
+      inverseOperations = inverses;
+    }
+
     // RF-019: Create transaction with type-safe sideEffectContext
     const tx: Transaction = {
       id: crypto.randomUUID(),
@@ -264,6 +346,7 @@ export function createInterceptor(
       timestamp: Date.now(),
       seq: 0,
       sideEffectContext: contextSnapshot ?? undefined,
+      inverseOperations,
     };
 
     historyManager.pushTransaction(tx);
@@ -271,6 +354,7 @@ export function createInterceptor(
     // Clear buffer
     buffer.clear();
     structuralBuffer.length = 0;
+    combinedOps.length = 0;
     contextSnapshot = null;
     bufferStartTime = null;
 
@@ -300,7 +384,7 @@ export function createInterceptor(
 
       if (!existing) {
         // First write to this path — capture before value and context
-        if (buffer.size === 0 && structuralBuffer.length === 0) {
+        if (buffer.size === 0 && structuralBuffer.length === 0 && combinedOps.length === 0) {
           contextSnapshot = captureContext();
           // RF-018: Record when the buffer window started
           bufferStartTime = Date.now();
@@ -322,12 +406,37 @@ export function createInterceptor(
     trackStructural(op: Operation): void {
       if (isUndoing) return;
 
-      if (buffer.size === 0 && structuralBuffer.length === 0) {
+      if (buffer.size === 0 && structuralBuffer.length === 0 && combinedOps.length === 0) {
         contextSnapshot = captureContext();
         // RF-018: Record when the buffer window started
         bufferStartTime = Date.now();
       }
       structuralBuffer.push(op);
+      scheduleFlush();
+    },
+
+    pushTransaction(tx: Transaction): void {
+      if (isUndoing) return;
+      // Force-flush any pending coalesce buffer first so the pre-built
+      // transaction lands as its own atomic undo step.
+      if (buffer.size > 0 || structuralBuffer.length > 0 || combinedOps.length > 0) {
+        forceFlush();
+      }
+      historyManager.pushTransaction(tx);
+      // Notify the store to sync history signals after commit (matches
+      // commitBuffer's contract).
+      if (onCommit) onCommit();
+    },
+
+    combineWith(forwardOp: Operation, inverseOp: Operation): void {
+      if (isUndoing) return;
+
+      if (buffer.size === 0 && structuralBuffer.length === 0 && combinedOps.length === 0) {
+        contextSnapshot = captureContext();
+        // RF-018: Record when the buffer window started
+        bufferStartTime = Date.now();
+      }
+      combinedOps.push({ forward: forwardOp, inverse: inverseOp });
       scheduleFlush();
     },
 
@@ -337,7 +446,7 @@ export function createInterceptor(
 
     undo(): Transaction | null {
       // Force-flush pending buffer first
-      if (buffer.size > 0 || structuralBuffer.length > 0) {
+      if (buffer.size > 0 || structuralBuffer.length > 0 || combinedOps.length > 0) {
         forceFlush();
       }
 

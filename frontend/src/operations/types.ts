@@ -11,7 +11,7 @@
 export type OperationType =
   | "set_field"
   | "create_node"
-  | "delete_node"
+  | "delete_nodes"
   | "reparent"
   | "reorder"
   | "create_page"
@@ -27,8 +27,9 @@ export type OperationType =
  * A single field-level mutation.
  *
  * The inverse of any operation is constructed by swapping `value` and
- * `previousValue`. For `create_node`, the inverse type is `delete_node`
- * and vice versa.
+ * `previousValue`. For batch operations like `delete_nodes` whose inverse
+ * is a different op type with N entries, the inverse is supplied
+ * explicitly via `Transaction.inverseOperations`.
  */
 export interface Operation {
   /** Unique operation ID (UUID). */
@@ -54,7 +55,8 @@ export interface Operation {
    */
   readonly value: unknown;
   /**
-   * Old value (full node snapshot for delete_node).
+   * Old value. For batch deletes (`delete_nodes`), the inverse `create_node`
+   * snapshots live on `Transaction.inverseOperations` instead.
    * TODO (RF-019): Same typing gap as `value` — should be a discriminated union.
    */
   readonly previousValue: unknown;
@@ -89,6 +91,12 @@ export interface Transaction {
   seq: number;
   /** RF-019: Type-safe side-effect context for undo/redo restoration. */
   sideEffectContext?: SideEffectContext;
+  /**
+   * Spec 19: Pre-built inverse operations, used when the forward op is not
+   * a single-op flip (e.g., delete_nodes inverts to N create_node ops).
+   * When present, createInverseTransaction prefers these over per-op flip.
+   */
+  readonly inverseOperations?: readonly Operation[];
 }
 
 /**
@@ -120,6 +128,46 @@ export interface ReorderValue {
  */
 export interface ReorderPreviousValue {
   readonly position: number;
+}
+
+/**
+ * Delete nodes operation value payload (Spec 19).
+ * Stored in Operation.value for type="delete_nodes". The inverse is
+ * carried separately via Transaction.inverseOperations (a list of N
+ * create_node ops).
+ */
+export interface DeleteNodesValue {
+  readonly node_uuids: readonly string[];
+}
+
+/**
+ * Spec 19: Inverse-of-delete restore metadata embedded in a create_node
+ * operation's `value` (which is otherwise a `MutableDocumentNode` snapshot).
+ *
+ * When a `create_node` op is built as the inverse of `delete_nodes`,
+ * the value spreads the node snapshot AND adds these fields:
+ *
+ *   - `originalIndex`: position in `parent.childrenUuids` (or in
+ *     `page.rootNodeUuids` when the node was a page root). Consumed by
+ *     `applyCreateNode` in `apply-to-store.ts` and `apply-remote.ts` so
+ *     undo restores the sibling at its original position instead of
+ *     appending. Without this, a middle-sibling delete + undo cycle
+ *     reorders the parent's children (e.g., [C0, C1, C2] → [C0, C2, C1]).
+ *
+ *   - `pageId`: identifies the page whose `rootNodeUuids` array must be
+ *     updated when restoring a page-root node (i.e. when `parentUuid` is
+ *     null). Without this, undo restores the node to `state.nodes` but
+ *     leaves it absent from every page's `rootNodeUuids` array — the
+ *     restored node has no rendering context.
+ *
+ * Both fields are optional. Forward creates omit them; the inverse-of-delete
+ * path supplies them. Field names are top-level on the snapshot value
+ * (not namespaced) to match how `applyCreateNode` reads `originalIndex`
+ * via `nodeData["originalIndex"]`.
+ */
+export interface CreateNodeRestoreMetadata {
+  readonly originalIndex?: number;
+  readonly pageId?: string | null;
 }
 
 /**

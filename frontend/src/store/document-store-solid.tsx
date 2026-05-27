@@ -28,7 +28,7 @@ import { HistoryManager } from "../operations/history-manager";
 import { createInterceptor, deepClone as sharedDeepClone } from "../operations/interceptor";
 import {
   createCreateNodeOp,
-  createDeleteNodeOp,
+  createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
   createSetFieldOp,
@@ -49,6 +49,7 @@ import { resolveToken as resolveTokenPure } from "./token-store";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
+import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -113,7 +114,17 @@ export interface DocumentStoreAPI {
   createNode(kind: NodeKind, name: string, transform: Transform): string;
   setTransform(uuid: string, transform: Transform): void;
   renameNode(uuid: string, newName: string): void;
-  deleteNode(uuid: string): void;
+  /**
+   * Spec 19: Atomic multi-node delete.
+   *
+   * Deduplicates ancestor/descendant pairs (descendants are removed transitively
+   * via their parent's deletion). Wraps all deletions in a single transaction
+   * with explicit inverse create_node ops (one per retained UUID, sorted by
+   * parent+index ASC) so undo restores siblings in their original order.
+   *
+   * Sends a single deleteNodes GraphQL op to the server.
+   */
+  deleteNodes(uuids: readonly string[]): void;
   setVisible(uuid: string, visible: boolean): void;
   setLocked(uuid: string, locked: boolean): void;
   reparentNode(uuid: string, newParentUuid: string, position: number): void;
@@ -333,10 +344,19 @@ function transactionToServerOps(tx: Transaction): Record<string, unknown>[] {
   // Collect UUIDs of nodes being deleted in this transaction.
   // Field changes on soon-to-be-deleted nodes are pointless and cause
   // "node not found" errors if the delete is processed first.
+  //
+  // Spec 19 Task 16: after the singular delete-path removal, this only
+  // needs to inspect `delete_nodes` payloads (which carry their target
+  // UUIDs under `value.node_uuids`).
   const deletedUuids = new Set<string>();
   for (const op of tx.operations) {
-    if (op.type === "delete_node") {
-      deletedUuids.add(op.nodeUuid);
+    if (op.type === "delete_nodes") {
+      const dv = op.value as { node_uuids?: unknown } | null;
+      if (dv && Array.isArray(dv.node_uuids)) {
+        for (const u of dv.node_uuids as string[]) {
+          deletedUuids.add(u);
+        }
+      }
     }
   }
 
@@ -361,7 +381,7 @@ function transactionToServerOps(tx: Transaction): Record<string, unknown>[] {
       case "create_node":
         creates.push(mapped);
         break;
-      case "delete_node":
+      case "delete_nodes":
         deletes.push(mapped);
         break;
       case "set_field":
@@ -389,22 +409,38 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
       };
     case "create_node": {
       const nodeData = op.value as Record<string, unknown>;
+      // Spec 19 (RF-002): forward pageId from the snapshot when this
+      // create_node is the inverse of a delete_nodes for a page-root node.
+      // The server's CreateNodeInput.page_id ensures the restored node
+      // is re-added to the correct page's root_nodes — without this,
+      // remote clients see a "ghost" node present in state.nodes but
+      // absent from every page's rootNodeUuids.
+      const rawPageId = nodeData["pageId"];
+      const pageId = typeof rawPageId === "string" ? rawPageId : null;
       return {
         createNode: {
           nodeUuid: (nodeData["uuid"] as string) ?? "",
           kind: JSON.stringify(nodeData["kind"]),
           name: (nodeData["name"] as string) ?? "",
           transform: JSON.stringify(nodeData["transform"]),
-          pageId: null,
+          pageId,
         },
       };
     }
-    case "delete_node":
+    case "delete_nodes": {
+      const dv = op.value as { node_uuids?: unknown } | null;
+      if (!dv || !Array.isArray(dv.node_uuids)) {
+        console.warn("operationToServerOp: delete_nodes payload missing node_uuids", {
+          value: op.value,
+        });
+        return null;
+      }
       return {
-        deleteNode: {
-          nodeUuid: op.nodeUuid,
+        deleteNodes: {
+          nodeUuids: [...(dv.node_uuids as string[])],
         },
       };
+    }
     case "reparent": {
       const rv = op.value as ReparentValue;
       return {
@@ -805,8 +841,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
-    // Track structural operation for undo
-    interceptor.trackStructural(createCreateNodeOp(clientSessionId, nodeData));
+    // Track structural operation for undo. Per RF-012, inverseType throws
+    // for create_node — its inverse must be carried explicitly via
+    // combineWith (forward = create_node, inverse = delete_nodes([uuid])).
+    // Without this, HistoryManager.undo() catches the inverseType throw and
+    // silently no-ops, leaving the created node unredoably present after
+    // Ctrl+Z. Same pattern as ungroupNodes' delete (Batch F).
+    interceptor.combineWith(
+      createCreateNodeOp(clientSessionId, nodeData),
+      createDeleteNodesOp(clientSessionId, [optimisticUuid]),
+    );
 
     // Structural ops send immediately — they MUST reach the server before any
     // undo attempt. Field changes (coalesced via pendingServerOps) can be deferred,
@@ -859,31 +903,290 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     });
   }
 
-  function deleteNode(uuid: string): void {
-    const node = state.nodes[uuid];
-    if (!node) return;
+  /**
+   * Spec 19: Atomic multi-node delete.
+   *
+   * Steps:
+   *  1. Dedup ancestor/descendant pairs — descendants are removed transitively
+   *     via their parent's deletion (mirrors DeleteNodes::apply in core).
+   *  2. Snapshot each retained node + its parent/index/page location BEFORE mutation.
+   *  3. Remove the nodes from the store (and every descendant) in a single produce().
+   *  4. Build a Transaction with one delete_nodes forward op and N create_node
+   *     inverse ops sorted by (parentUuid, originalIndex ASC). Push via
+   *     interceptor.pushTransaction so it becomes a single undo step.
+   *  5. Prune the deleted UUIDs (and their descendants) from selectedNodeIds.
+   *  6. Send a single deleteNodes GraphQL op to the server.
+   */
+  function deleteNodes(uuids: readonly string[]): void {
+    if (uuids.length === 0) return;
 
-    const previousNode = deepClone(node);
+    // ── Step 0: client-side batch-size guard (RF-027) ───────────────
+    // Mirror the server's MAX_NODES_PER_DELETE_BATCH so we surface a
+    // structured diagnostic before a doomed round-trip rather than
+    // discovering the rejection asynchronously. Symmetric with the
+    // Rust validator per CLAUDE.md §11 "Validation Must Be Symmetric
+    // Across All Transports".
+    if (uuids.length > MAX_NODES_PER_DELETE_BATCH) {
+      console.warn("store.deleteNodes: batch size exceeds MAX_NODES_PER_DELETE_BATCH", {
+        requested: uuids.length,
+        max: MAX_NODES_PER_DELETE_BATCH,
+      });
+      return;
+    }
 
-    // Remove from store
+    // Preserve the user-requested count BEFORE dedup so the history
+    // description and any downstream caller can reflect the user's
+    // intent (matching what announce() in Canvas/LayersTree reports).
+    // See RF-017.
+    const userRequestedCount = uuids.length;
+
+    // ── Step 1: dedup ancestor/descendant pairs ─────────────────────
+    // For each UUID, walk up its parent chain. If any ancestor is also
+    // in the target set, drop this UUID — its parent will delete it
+    // transitively. Mirrors DeleteNodes::apply in core.
+    //
+    // The walk is bounded by MAX_NODE_TREE_DEPTH (RF-004) — a malformed
+    // store with a parent cycle would otherwise loop forever. If the
+    // cap fires, log a structured `console.error` (cycle = invariant
+    // class) and conservatively return `false` so the caller does NOT
+    // dedup this uuid (the safer side: at worst, the server rejects
+    // ancestor+descendant pair; at best, the structural anomaly is
+    // observable in the console).
+    const targetSet = new Set(uuids);
+    const isDescendantOfOtherTarget = (uuid: string): boolean => {
+      let cursor = state.nodes[uuid]?.parentUuid ?? null;
+      let depth = 0;
+      while (cursor !== null) {
+        if (depth >= MAX_NODE_TREE_DEPTH) {
+          console.error(
+            "store.deleteNodes: ancestor walk exceeded MAX_NODE_TREE_DEPTH (possible cycle)",
+            {
+              uuid,
+              depth,
+              maxDepth: MAX_NODE_TREE_DEPTH,
+            },
+          );
+          return false;
+        }
+        if (targetSet.has(cursor)) return true;
+        cursor = state.nodes[cursor]?.parentUuid ?? null;
+        depth++;
+      }
+      return false;
+    };
+    const retained = uuids.filter((u) => state.nodes[u] && !isDescendantOfOtherTarget(u));
+    if (retained.length === 0) return;
+
+    // ── Step 2: capture snapshots BEFORE mutation ───────────────────
+    //
+    // Spec 19 (RF-001 / RF-002): the snapshot must capture EVERY node
+    // in each retained subtree (root + every descendant), with each
+    // node's parentUuid, originalIndex, and pageId. The inverse
+    // create_node ops use this to restore both `state.nodes` AND
+    // `parent.childrenUuids` AND `page.rootNodeUuids` on undo.
+    interface DeleteSnapshot {
+      uuid: string;
+      parentUuid: string | null;
+      originalIndex: number;
+      // pageId is non-null only when the node is a page root (parentUuid === null
+      // AND the node appears in some page's rootNodeUuids). It identifies the
+      // page whose rootNodeUuids must be restored on undo.
+      pageId: string | null;
+      nodeSnapshot: MutableDocumentNode;
+    }
+
+    // Pre-compute uuid → pageId map for top-level lookup (avoid O(P*N) scan).
+    const uuidToPageId = new Map<string, string>();
+    for (const page of state.pages) {
+      for (const rootUuid of page.rootNodeUuids ?? []) {
+        uuidToPageId.set(rootUuid, page.id);
+      }
+    }
+
+    // Walk each retained root's full subtree and capture per-node snapshots.
+    // Iterative walk via stack avoids the recursion-depth guard parity
+    // problem; we still enforce MAX_NODE_TREE_DEPTH explicitly via the depth
+    // tracked alongside each stack frame. RF-016: shared constant.
+    const snapshots: DeleteSnapshot[] = [];
+    const deletedUuids = new Set<string>();
+    const seenForSnapshot = new Set<string>();
+
+    interface WalkFrame {
+      uuid: string;
+      depth: number;
+    }
+    const walkStack: WalkFrame[] = retained.map((u) => ({ uuid: u, depth: 0 }));
+
+    while (walkStack.length > 0) {
+      const frame = walkStack.pop();
+      if (!frame) break;
+      const { uuid, depth } = frame;
+      if (depth >= MAX_NODE_TREE_DEPTH) {
+        // RF-015: structured warn (not silent return) so depth-limit
+        // hits in the subtree walk are observable in production logs.
+        console.warn("store.deleteNodes: subtree depth limit reached, descendants skipped", {
+          uuid,
+          depth,
+          maxDepth: MAX_NODE_TREE_DEPTH,
+          site: "store.deleteNodes",
+        });
+        continue;
+      }
+      if (seenForSnapshot.has(uuid)) continue;
+      const node = state.nodes[uuid];
+      if (!node) continue;
+      seenForSnapshot.add(uuid);
+      deletedUuids.add(uuid);
+
+      const parentUuid = node.parentUuid ?? null;
+      // Compute originalIndex against the parent's childrenUuids when
+      // there is a parent; against the page's rootNodeUuids when the node
+      // is a page root; default to 0 if neither location is found.
+      let originalIndex = 0;
+      let pageId: string | null = null;
+      if (parentUuid) {
+        const parent = state.nodes[parentUuid];
+        if (parent) {
+          const idx = parent.childrenUuids?.indexOf(uuid) ?? -1;
+          if (idx >= 0) originalIndex = idx;
+        }
+      } else {
+        // Page-root candidate. Look up which page owns it.
+        const owningPage = uuidToPageId.get(uuid);
+        if (owningPage !== undefined) {
+          pageId = owningPage;
+          const page = state.pages.find((p) => p.id === owningPage);
+          const idx = page?.rootNodeUuids?.indexOf(uuid) ?? -1;
+          if (idx >= 0) originalIndex = idx;
+        }
+      }
+
+      // deepClone uses JSON round-trip (Solid proxy not structuredClone-safe).
+      const nodeSnapshot = deepClone(node) as MutableDocumentNode;
+      snapshots.push({ uuid, parentUuid, originalIndex, pageId, nodeSnapshot });
+
+      // Enqueue children for snapshot capture.
+      for (const cuuid of node.childrenUuids ?? []) {
+        walkStack.push({ uuid: cuuid, depth: depth + 1 });
+      }
+    }
+
+    // ── Step 3: local mutation ──────────────────────────────────────
+    //
+    // Only detach the *retained roots* from their parents / page roots —
+    // descendants are removed transitively when we delete them from
+    // `s.nodes`, and their parent (also being deleted) will not survive
+    // to need its childrenUuids trimmed.
+    const retainedSet = new Set(retained);
     setState(
       produce((s) => {
-        Reflect.deleteProperty(s.nodes, uuid);
+        for (const snap of snapshots) {
+          if (!retainedSet.has(snap.uuid)) continue;
+          // Detach from parent (only relevant for retained roots whose
+          // parent survives the deletion).
+          if (snap.parentUuid) {
+            const parent = s.nodes[snap.parentUuid];
+            if (parent) {
+              parent.childrenUuids = parent.childrenUuids.filter((id) => id !== snap.uuid);
+            }
+          }
+          // Detach from page roots.
+          if (snap.pageId) {
+            const page = s.pages.find((p) => p.id === snap.pageId);
+            if (page) {
+              page.rootNodeUuids = page.rootNodeUuids.filter((id) => id !== snap.uuid);
+            }
+          }
+        }
+        // Remove every node (retained roots + every descendant) from the nodes map.
+        for (const duuid of deletedUuids) {
+          Reflect.deleteProperty(s.nodes, duuid);
+        }
       }),
     );
 
-    // Track structural operation for undo
-    interceptor.trackStructural(createDeleteNodeOp(clientSessionId, uuid, previousNode));
+    // ── Step 4: build transaction with explicit inverseOperations ───
+    //
+    // Forward op carries only the retained roots — the server's core
+    // engine removes descendants transitively (mirrors `DeleteNodes::apply`).
+    const forwardOp = createDeleteNodesOp(clientSessionId, retained);
 
-    // Clear selection if the deleted node was selected
-    const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
-    if (filteredIds.length !== selectedNodeIds().length) {
-      setSelectedNodeIds(filteredIds);
+    // Inverse ops must be applied PARENT-BEFORE-CHILD so each child's
+    // parentUuid resolves to an existing node when applyCreateNode wires up
+    // parent.childrenUuids. Within a parent group, children must be sorted
+    // by originalIndex ASC so applyCreateNode's insert-at-originalIndex
+    // (or page.rootNodeUuids insert) replays sibling order correctly.
+    //
+    // Topological sort: build a uuid → snapshot index map, then walk each
+    // snapshot up its parent chain to compute the depth from the
+    // *snapshotted* tree (not the live store, which is now mutated). Sort
+    // by (depth ASC, parentUuid, originalIndex ASC).
+    const snapByUuid = new Map<string, DeleteSnapshot>();
+    for (const snap of snapshots) snapByUuid.set(snap.uuid, snap);
+    const depthCache = new Map<string, number>();
+    const computeDepth = (uuid: string): number => {
+      const cached = depthCache.get(uuid);
+      if (cached !== undefined) return cached;
+      const snap = snapByUuid.get(uuid);
+      // Root of a captured subtree (parent not in snapshot set, or no
+      // parent at all): depth 0. Otherwise: parent depth + 1.
+      let depth = 0;
+      if (snap && snap.parentUuid && snapByUuid.has(snap.parentUuid)) {
+        depth = computeDepth(snap.parentUuid) + 1;
+      }
+      depthCache.set(uuid, depth);
+      return depth;
+    };
+    const sortedForInverse = [...snapshots].sort((a, b) => {
+      const da = computeDepth(a.uuid);
+      const db = computeDepth(b.uuid);
+      if (da !== db) return da - db;
+      const pa = a.parentUuid ?? "";
+      const pb = b.parentUuid ?? "";
+      if (pa !== pb) return pa.localeCompare(pb);
+      return a.originalIndex - b.originalIndex;
+    });
+
+    // Tag each inverse create_node snapshot with its `originalIndex` AND
+    // its `pageId` (null for non-page-roots, the owning page id for page
+    // roots). applyCreateNode in apply-to-store.ts / apply-remote.ts
+    // consumes both to restore parent.childrenUuids (for nested nodes)
+    // and page.rootNodeUuids (for page roots) at their original positions.
+    const inverseOps = sortedForInverse.map((snap) =>
+      createCreateNodeOp(clientSessionId, {
+        ...(snap.nodeSnapshot as Record<string, unknown>),
+        originalIndex: snap.originalIndex,
+        pageId: snap.pageId,
+      }),
+    );
+
+    // RF-017: description uses the user-requested count, not the dedup-
+    // retained count. The user pressed Delete with N selected; their mental
+    // model — and the corresponding screen-reader announcement in
+    // Canvas/LayersTree — sees N. Reporting retained.length when it's
+    // smaller than uuids.length leaks an internal dedup detail and creates
+    // a count mismatch between the announcement and the history label.
+    interceptor.pushTransaction({
+      id: crypto.randomUUID(),
+      userId: clientSessionId,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: `Delete ${userRequestedCount} node${userRequestedCount > 1 ? "s" : ""}`,
+      timestamp: Date.now(),
+      seq: 0,
+    });
+
+    // ── Step 5: prune selection ─────────────────────────────────────
+    const filtered = selectedNodeIds().filter((id) => !deletedUuids.has(id));
+    if (filtered.length !== selectedNodeIds().length) {
+      setSelectedNodeIds(filtered);
     }
 
+    // ── Step 6: send to server ──────────────────────────────────────
     // Structural ops send immediately (not coalesced) — must reach server
-    // before any undo attempt.
-    sendOps([{ deleteNode: { nodeUuid: uuid } }]);
+    // before any undo attempt. Send only the retained roots; the core
+    // engine removes descendants transitively.
+    sendOps([{ deleteNodes: { nodeUuids: [...retained] } }]);
   }
 
   function setVisible(uuid: string, visible: boolean): void {
@@ -1458,8 +1761,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
-    // Track structural: create group + reparent each child + transform adjustments
-    interceptor.trackStructural(createCreateNodeOp(clientSessionId, deepClone(groupNodeData)));
+    // Track structural: create group + reparent each child + transform adjustments.
+    // Per RF-012, create_node has no per-op flip — its inverse rides via
+    // combineWith. Mirrors the createNode store function's pattern.
+    interceptor.combineWith(
+      createCreateNodeOp(clientSessionId, deepClone(groupNodeData)),
+      createDeleteNodesOp(clientSessionId, [groupUuid]),
+    );
     for (const snap of childSnapshots) {
       interceptor.trackStructural(
         createReparentOp(
@@ -1580,7 +1888,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       // Track structural: reparent children (if parent exists), adjust transforms, then delete group
       for (let i = 0; i < children.length; i++) {
         // RF-005: Only track reparent if group has a parent. Root-level children
-        // remain at root (parentUuid = null) — no reparent needed.
+        // remain at root (parentUuid = null) — no reparent needed for the
+        // forward direction.
         if (groupParent) {
           interceptor.trackStructural(
             createReparentOp(clientSessionId, children[i], groupParent, i, groupUuid, i),
@@ -1592,6 +1901,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               position: i,
             },
           });
+        } else {
+          // RF-011: For root-level groups, the child's `parentUuid` still
+          // changes (from groupUuid → null). We must track that as a
+          // `set_field parentUuid` so the inverse can restore the link to
+          // the group on undo. Without this op, the group's create_node
+          // inverse would restore the group with childrenUuids intact, but
+          // each child's parentUuid would remain null — an incoherent
+          // intermediate state where the group "owns" its children but the
+          // children deny their parent.
+          interceptor.trackStructural(
+            createSetFieldOp(clientSessionId, children[i], "parentUuid", null, groupUuid),
+          );
         }
 
         // RF-006: Track transform restoration as a set_field operation for undo
@@ -1616,8 +1937,28 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           });
         }
       }
-      interceptor.trackStructural(createDeleteNodeOp(clientSessionId, groupUuid, groupSnapshot));
-      pendingServerOps.push({ deleteNode: { nodeUuid: groupUuid } });
+      // RF-011: Track the group's removal as a `delete_nodes` op with an
+      // explicit inverse `create_node` that restores the group from its
+      // snapshot. We use `interceptor.combineWith` (NOT `pushTransaction`)
+      // so the delete merges into the SAME coalesce window as the reparent
+      // and transform ops tracked above. The previous `pushTransaction`
+      // call force-flushed the coalesce buffer, producing TWO undo entries
+      // per ungroup: the first restored the empty group (incoherent —
+      // children's parentUuid still pointed at groupParent), and the
+      // second restored parent linkage. With combineWith, both halves
+      // commit as ONE atomic undo step: a single Ctrl+Z restores the
+      // group with its children attached AND restores each child's
+      // parentUuid in the same atomic step.
+      //
+      // groupSnapshot is captured BEFORE the produce() above, so its
+      // `childrenUuids` array is intact (non-empty). The transaction's
+      // `inverseOperations` (built by `commitBuffer`) replays in reverse:
+      // first the create_node restores the group, then the reparent
+      // inverses restore each child's parentUuid pointer.
+      const forwardDeleteOp = createDeleteNodesOp(clientSessionId, [groupUuid]);
+      const inverseCreateOp = createCreateNodeOp(clientSessionId, groupSnapshot);
+      interceptor.combineWith(forwardDeleteOp, inverseCreateOp);
+      pendingServerOps.push({ deleteNodes: { nodeUuids: [groupUuid] } });
 
       allChildUuids.push(...children);
     }
@@ -2371,7 +2712,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     createNode,
     setTransform,
     renameNode,
-    deleteNode,
+    deleteNodes,
     setVisible,
     setLocked,
     reparentNode,

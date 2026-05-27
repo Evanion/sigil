@@ -23,6 +23,7 @@
     "cannotMoveToRoot": "No se puede mover al nivel raíz",
     "selected": "{{name}} seleccionado",
     "deleted": "{{name}} eliminado",
+    "deletedMultiple": "Eliminadas {{count}} capas",
     "unlocked": "{{name}} desbloqueado",
     "locked": "{{name}} bloqueado",
     "hidden": "{{name}} oculto",

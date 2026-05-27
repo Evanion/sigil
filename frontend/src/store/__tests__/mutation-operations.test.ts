@@ -6,12 +6,12 @@
  * without needing a full urql client. The HistoryManager tracks operations
  * and applyOperationToStore applies them to a simulated store.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
 import {
   createSetFieldOp,
   createCreateNodeOp,
-  createDeleteNodeOp,
+  createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
 } from "../../operations/operation-helpers";
@@ -733,99 +733,21 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       expect(op.previousValue).toBeNull();
     });
 
-    it("should track in HistoryManager — undo removes the node", () => {
-      const nodeData = {
-        uuid: "new-uuid",
-        name: "Rect 1",
-        kind: {
-          type: "rectangle",
-          corners: [
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-          ],
-        },
-        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: {
-          fills: [],
-          strokes: [],
-          opacity: { type: "literal", value: 1 },
-          blend_mode: "normal",
-          effects: [],
-        },
-        visible: true,
-        locked: false,
-        parentUuid: null,
-        childrenUuids: [],
-      };
-      const op = createCreateNodeOp(TEST_USER_ID, nodeData);
-      applyAndTrack(
-        op,
-        "Create Rect 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      // Inverse of create_node is delete_node
-      expect(inverseTx.operations).toHaveLength(1);
-      expect(inverseTx.operations[0].type).toBe("delete_node");
-      expect(inverseTx.operations[0].nodeUuid).toBe("new-uuid");
-      expect(historyManager.canUndo()).toBe(false);
-      expect(historyManager.canRedo()).toBe(true);
-    });
+    // Spec 19 Task 16: the create-node ↔ batch-delete per-op inversion was
+    // removed. Coverage of the create→undo→delete round-trip lives in the
+    // store-level integration tests via the explicit `inverseOperations`
+    // pathway (see undo-redo-integration.test.ts and the deleteNodes flow
+    // in document-store-solid.tsx).
   });
 
-  describe("deleteNode — operation tracking", () => {
-    it("should create a delete_node operation with full node snapshot as previousValue", () => {
-      const snapshot = deepClone(nodes["node-1"]);
-      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
+  describe("deleteNodes — operation tracking", () => {
+    it("should create a delete_nodes operation carrying the UUID list in value", () => {
+      const op = createDeleteNodesOp(TEST_USER_ID, ["node-1"]);
 
-      expect(op.type).toBe("delete_node");
-      expect(op.nodeUuid).toBe("node-1");
-      expect(op.previousValue).toEqual(snapshot);
-      expect(op.value).toBeNull();
-    });
-
-    it("should track in HistoryManager — undo restores the node", () => {
-      const snapshot = deepClone(nodes["node-1"]);
-      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
-      applyAndTrack(
-        op,
-        "Delete Rectangle 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      // Inverse of delete_node is create_node
-      expect(inverseTx.operations).toHaveLength(1);
-      expect(inverseTx.operations[0].type).toBe("create_node");
-      expect(inverseTx.operations[0].value).toEqual(snapshot);
-      expect(historyManager.canRedo()).toBe(true);
+      expect(op.type).toBe("delete_nodes");
+      expect(op.nodeUuid).toBe("");
+      expect(op.value).toEqual({ node_uuids: ["node-1"] });
+      expect(op.previousValue).toBeNull();
     });
   });
 
@@ -1025,81 +947,576 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
     });
   });
 
-  describe("groupNodes — operation tracking", () => {
-    it("should create a create_node operation for tracking group creation", () => {
-      const groupData = {
-        uuid: "group-uuid",
-        name: "Group 1",
-        kind: { type: "frame" },
-        transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: {
-          fills: [],
-          strokes: [],
-          opacity: { type: "literal", value: 1 },
-          blend_mode: "normal",
-          effects: [],
-        },
-        visible: true,
-        locked: false,
-        parentUuid: null,
-        childrenUuids: ["node-1", "node-2"],
-      };
+  // Spec 19 Task 16: the `groupNodes`/`ungroupNodes` undo-flip assertions
+  // depended on the removed `create_node ↔ singular-delete` per-op inversion.
+  // The actual `groupNodes`/`ungroupNodes` undo paths now use explicit
+  // `inverseOperations` on their transactions (see document-store-solid.tsx
+  // ungroupNodes for the delete-side cliff and the Spec 19 store integration
+  // suite below for the round-trip coverage). The op-shape-only assertions
+  // above for `groupNodes` (createCreateNodeOp) cover the forward op's
+  // identity; the inverse is exercised in store-level integration tests.
+});
 
-      const op = createCreateNodeOp(TEST_USER_ID, groupData);
-      applyAndTrack(
-        op,
-        "Group Group 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
+// ── Spec 19: store.deleteNodes integration ──────────────────────────────
 
-      expect(historyManager.canUndo()).toBe(true);
+import { createDocumentStoreSolid } from "../document-store-solid";
 
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
+/**
+ * Seed the store directly via createNode for parent/child relationships.
+ *
+ * createNode produces orphan root nodes; we set parent/child relationships
+ * by re-parenting through reparentNode.
+ *
+ * Network calls (urql HTTP mutation, WebSocket subscribe) emitted by the
+ * store will reject asynchronously in the jsdom environment. We silence
+ * console.error/warn during these tests so the unhandled rejections don't
+ * trigger Vitest's `Closing rpc while onUserConsoleLog was pending`
+ * teardown error.
+ */
+describe("deleteNodes — operation tracking (Spec 19)", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
 
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      expect(inverseTx.operations[0].type).toBe("delete_node");
-    });
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
-  describe("ungroupNodes — operation tracking", () => {
-    it("should create a delete_node operation for tracking ungroup", () => {
-      const groupSnapshot = {
-        uuid: "group-uuid",
-        name: "Group 1",
-        kind: { type: "frame" },
-        childrenUuids: ["node-1", "node-2"],
-      };
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
 
-      const op = createDeleteNodeOp(TEST_USER_ID, "group-uuid", groupSnapshot);
-      applyAndTrack(
-        op,
-        "Ungroup Group 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
+  it("wraps N node deletions in a single transaction", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const undoCountBefore = store.canUndo() ? 1 : 0;
+      // Create two sibling root nodes
+      const uuidA = store.createNode(
+        { type: "rectangle", corners: deepClone(makeTestNode()["kind"]) } as never,
+        "A",
+        deepClone(makeTestNode()["transform"]) as never,
+      );
+      const uuidB = store.createNode(
+        { type: "rectangle", corners: deepClone(makeTestNode()["kind"]) } as never,
+        "B",
+        deepClone(makeTestNode()["transform"]) as never,
       );
 
-      expect(historyManager.canUndo()).toBe(true);
+      // Sanity: both nodes exist in the store.
+      expect(store.state.nodes[uuidA]).toBeDefined();
+      expect(store.state.nodes[uuidB]).toBeDefined();
 
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
+      // Capture undo state before deleteNodes — createNode calls before are
+      // queued in the interceptor's structural buffer (not yet committed).
+      // We focus on the count delta from the deleteNodes call.
+      void undoCountBefore;
+
+      store.deleteNodes([uuidA, uuidB]);
+
+      // Both nodes are gone from state.
+      expect(store.state.nodes[uuidA]).toBeUndefined();
+      expect(store.state.nodes[uuidB]).toBeUndefined();
+
+      // canUndo is true (deleteNodes pushed exactly one transaction).
+      expect(store.canUndo()).toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("returns early on empty input", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const canUndoBefore = store.canUndo();
+      store.deleteNodes([]);
+      // No new transaction pushed.
+      expect(store.canUndo()).toBe(canUndoBefore);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("dedups ancestor-descendant: keeps only the ancestor", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      // Create parent and child via createNode, then make P the parent of C.
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const parentUuid = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "P",
+        sampleTransform as never,
+      );
+      const childUuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C",
+        sampleTransform as never,
+      );
+      // reparent child under parent (position 0)
+      store.reparentNode(childUuid, parentUuid, 0);
+      expect(store.state.nodes[parentUuid]).toBeDefined();
+      expect(store.state.nodes[childUuid]).toBeDefined();
+      expect(store.state.nodes[childUuid]?.parentUuid).toBe(parentUuid);
+
+      // Call deleteNodes with both — child should be deduplicated.
+      store.deleteNodes([parentUuid, childUuid]);
+
+      // Both gone (descendant removed transitively).
+      expect(store.state.nodes[parentUuid]).toBeUndefined();
+      expect(store.state.nodes[childUuid]).toBeUndefined();
+
+      // One transaction was pushed for the deleteNodes call.
+      expect(store.canUndo()).toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("filters deleted UUIDs (and descendants) from selectedNodeIds", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const uuidA = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "A",
+        sampleTransform as never,
+      );
+      const uuidB = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "B",
+        sampleTransform as never,
+      );
+      const survivor = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C",
+        sampleTransform as never,
       );
 
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      expect(inverseTx.operations[0].type).toBe("create_node");
-      expect(inverseTx.operations[0].value).toEqual(groupSnapshot);
-    });
+      store.setSelectedNodeIds([uuidA, uuidB, survivor]);
+      expect(store.selectedNodeIds()).toEqual([uuidA, uuidB, survivor]);
+
+      store.deleteNodes([uuidA, uuidB]);
+
+      // Only the survivor remains in the selection.
+      expect(store.selectedNodeIds()).toEqual([survivor]);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  // RF-027: client-side batch-size guard ────────────────────────────────
+  it("rejects batches exceeding MAX_NODES_PER_DELETE_BATCH with a structured warn", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      // Seed one real node so canUndo's pre-call state is well-defined.
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const survivorUuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "Survivor",
+        sampleTransform as never,
+      );
+      const canUndoBefore = store.canUndo();
+
+      // Build an oversized batch (1001 fake uuids). The guard fires before
+      // any mutation work, so nonexistent uuids are fine here — we only
+      // care that the function rejects and warns.
+      const oversize = Array.from({ length: 1001 }, (_, i) => `fake-${String(i)}`);
+      store.deleteNodes(oversize);
+
+      // The structured warn fired with the expected payload shape. We
+      // accept any warn message containing "MAX_NODES_PER_DELETE_BATCH".
+      const calls = warnSpy.mock.calls as unknown[][];
+      const match = calls.find(
+        (args) => typeof args[0] === "string" && args[0].includes("MAX_NODES_PER_DELETE_BATCH"),
+      );
+      expect(match).toBeDefined();
+
+      // Survivor was not deleted; no transaction was pushed (canUndo
+      // unchanged relative to before the rejected call).
+      expect(store.state.nodes[survivorUuid]).toBeDefined();
+      expect(store.canUndo()).toBe(canUndoBefore);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  // RF-017: description uses user-requested count, not dedup-retained count
+  it("transaction description reflects user-requested count (parent+child dedups to 1)", () => {
+    // Spy on HistoryManager#pushTransaction so we can inspect the
+    // description recorded by deleteNodes without exposing the
+    // historyManager in the store's public surface.
+    const pushSpy = vi.spyOn(HistoryManager.prototype, "pushTransaction");
+    try {
+      const store = createDocumentStoreSolid();
+      try {
+        const sampleKind = deepClone(makeTestNode()["kind"]);
+        const sampleTransform = deepClone(makeTestNode()["transform"]);
+        const parentUuid = store.createNode(
+          { type: "frame", layout: null, corners: sampleKind } as never,
+          "P",
+          sampleTransform as never,
+        );
+        const childUuid = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C",
+          sampleTransform as never,
+        );
+        store.reparentNode(childUuid, parentUuid, 0);
+
+        const callCountBefore = pushSpy.mock.calls.length;
+        // User requested two deletions; dedup retains only the parent.
+        store.deleteNodes([parentUuid, childUuid]);
+
+        // Find the delete_nodes transaction (newest pushTransaction call
+        // after our setup work).
+        const newCalls = pushSpy.mock.calls.slice(callCountBefore);
+        const deleteTxArgs = newCalls.find(
+          (args) =>
+            args[0] &&
+            typeof args[0] === "object" &&
+            Array.isArray((args[0] as Transaction).operations) &&
+            (args[0] as Transaction).operations[0]?.type === "delete_nodes",
+        );
+        expect(deleteTxArgs).toBeDefined();
+        if (!deleteTxArgs) throw new Error("delete_nodes transaction not found");
+        const deleteTx = deleteTxArgs[0] as Transaction;
+
+        // The description uses the user-requested count (2), not the
+        // dedup-retained count (1) — matches the Canvas/LayersTree
+        // announcement and user mental model.
+        expect(deleteTx.description).toBe("Delete 2 nodes");
+      } finally {
+        store.destroy();
+      }
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  // RF-004: cycle protection in the ancestor walk ───────────────────────
+  //
+  // We construct a non-target parent cycle in the ancestor chain of a
+  // single target, so the dedup walk has no `targetSet.has(cursor)`
+  // short-circuit and must rely on the depth cap to terminate.
+  //
+  // Topology:
+  //   target Y
+  //     parent → A
+  //   A.parent = B
+  //   B.parent = A  (A ↔ B cycle, neither is in targetSet)
+  //
+  // Without the depth cap, isDescendantOfOtherTarget(Y) loops A→B→A→…
+  // forever. With the cap, it logs a structured console.error and
+  // returns false (conservative — does not dedup Y).
+  it("terminates when the ancestor walk hits a parent cycle", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const a = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "A",
+        sampleTransform as never,
+      );
+      const b = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "B",
+        sampleTransform as never,
+      );
+      const y = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "Y",
+        sampleTransform as never,
+      );
+
+      // Build the hierarchy: Y under A under B; then add the A→B→A cycle.
+      store.reparentNode(y, a, 0); // Y.parent = A
+      store.reparentNode(a, b, 0); // A.parent = B
+      store.reparentNode(b, a, 0); // B.parent = A — cycles A↔B
+
+      // Sanity: A↔B cycle in place; Y is the only target.
+      expect(store.state.nodes[a]?.parentUuid).toBe(b);
+      expect(store.state.nodes[b]?.parentUuid).toBe(a);
+      expect(store.state.nodes[y]?.parentUuid).toBe(a);
+
+      // Call deleteNodes with [Y] — the ancestor walk from Y's parent
+      // (A) loops A→B→A indefinitely without the depth guard. With the
+      // guard, depth >= MAX_NODE_TREE_DEPTH fires after 64 iterations
+      // and the function logs a structured console.error.
+      const start = Date.now();
+      store.deleteNodes([y]);
+      const elapsed = Date.now() - start;
+
+      // Should complete in well under a second; pathological cycle would
+      // hang the test.
+      expect(elapsed).toBeLessThan(1000);
+
+      // The cycle guard fired a structured console.error.
+      const errCalls = errorSpy.mock.calls as unknown[][];
+      const match = errCalls.find(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("ancestor walk exceeded MAX_NODE_TREE_DEPTH"),
+      );
+      expect(match).toBeDefined();
+    } finally {
+      store.destroy();
+    }
+  });
+});
+
+/**
+ * Lower-level transaction shape test — exercises the inverseOperations field
+ * directly via HistoryManager (Spec 19). This complements the higher-level
+ * store tests above and pins the contract that:
+ *  - A delete_nodes transaction carries N create_node inverse ops.
+ *  - createInverseTransaction prefers Transaction.inverseOperations over
+ *    per-op flip when present.
+ */
+// ── Spec 19 RF-011: ungroupNodes single-transaction ─────────────────────
+
+/**
+ * RF-011 regression: `ungroupNodes` used to call `interceptor.pushTransaction`
+ * for the `delete_nodes` half of the operation, which force-flushed the
+ * coalesce buffer and produced TWO undo entries per ungroup. Worse, the
+ * first Ctrl+Z restored the group but the children's `parentUuid` still
+ * pointed at the (now-restored) group's old parent — an incoherent
+ * intermediate state. The fix routes the delete through the new
+ * `interceptor.combineWith` API so the reparent ops AND the delete commit
+ * as ONE undo step.
+ */
+describe("ungroupNodes — single undo step (Spec 19 RF-011)", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("ungroupNodes pushes exactly ONE undo step (not two)", async () => {
+    // Spy on HistoryManager#pushTransaction to count commits caused by
+    // ungroupNodes (not by the earlier setup work).
+    const pushSpy = vi.spyOn(HistoryManager.prototype, "pushTransaction");
+    try {
+      const store = createDocumentStoreSolid();
+      try {
+        const sampleKind = deepClone(makeTestNode()["kind"]);
+        const sampleTransform = deepClone(makeTestNode()["transform"]);
+        const child1 = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C1",
+          sampleTransform as never,
+        );
+        const child2 = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C2",
+          sampleTransform as never,
+        );
+
+        // Group the two children. groupNodes selects the newly-created
+        // group; capture its uuid from the selection.
+        store.groupNodes([child1, child2], "G");
+        // Wait for the coalesce window to commit the groupNodes work.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const selected = store.selectedNodeIds();
+        expect(selected).toHaveLength(1);
+        const groupUuid = selected[0];
+        expect(store.state.nodes[groupUuid]).toBeDefined();
+
+        // Reset spy: we only care about transactions ungroup pushes.
+        const callsBeforeUngroup = pushSpy.mock.calls.length;
+
+        store.ungroupNodes([groupUuid]);
+
+        // Wait for the coalesce window to flush ungroup's combineWith ops.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const ungroupCalls = pushSpy.mock.calls.length - callsBeforeUngroup;
+        // RF-011: should be EXACTLY ONE push, not TWO.
+        expect(ungroupCalls).toBe(1);
+      } finally {
+        store.destroy();
+      }
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  it("createNode is undoable (RF-012 regression — create_node needs explicit inverse)", async () => {
+    // Regression test for the latent bug surfaced after Batch D made
+    // inverseType throw for create_node: any store.createNode call that
+    // used trackStructural produced a transaction whose undo silently
+    // no-op'd via HistoryManager's try/catch. The fix is to route the
+    // create through combineWith with an explicit delete_nodes inverse
+    // (mirrors ungroupNodes' pattern).
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const uuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "R1",
+        sampleTransform as never,
+      );
+      // Wait for the coalesce window to commit.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(store.state.nodes[uuid]).toBeDefined();
+      expect(store.canUndo()).toBe(true);
+
+      // ONE Ctrl+Z must remove the created node. Pre-fix, undo silently
+      // no-op'd because inverseType("create_node") threw and HistoryManager
+      // caught it.
+      store.undo();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(store.state.nodes[uuid]).toBeUndefined();
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("groupNodes is undoable (RF-012 regression — same shape as createNode)", async () => {
+    // The group node's create_node tracked via combineWith — undo restores
+    // pre-group state (no group node).
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const child1 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C1",
+        sampleTransform as never,
+      );
+      const child2 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C2",
+        sampleTransform as never,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      store.groupNodes([child1, child2], "G");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const groupUuid = store.selectedNodeIds()[0];
+      expect(store.state.nodes[groupUuid]).toBeDefined();
+
+      // Undo must remove the group AND reparent children back to their
+      // original parents (null in this case, since they were root-level).
+      store.undo();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(store.state.nodes[groupUuid]).toBeUndefined();
+      // Root-level parent is represented as null OR empty string depending
+      // on whether the reparent op's previousValue path serialized it; both
+      // signal "no parent" to the rendering logic.
+      const c1Parent = store.state.nodes[child1]?.parentUuid;
+      const c2Parent = store.state.nodes[child2]?.parentUuid;
+      expect(c1Parent === null || c1Parent === "").toBe(true);
+      expect(c2Parent === null || c2Parent === "").toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("one undo restores the group with its children attached (coherent state)", async () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const child1 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C1",
+        sampleTransform as never,
+      );
+      const child2 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C2",
+        sampleTransform as never,
+      );
+
+      store.groupNodes([child1, child2], "G");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const groupUuid = store.selectedNodeIds()[0];
+
+      // Pre-ungroup invariants
+      expect(store.state.nodes[child1]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[groupUuid]?.childrenUuids).toEqual([child1, child2]);
+
+      // Ungroup
+      store.ungroupNodes([groupUuid]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // After ungroup: group gone, children detached
+      expect(store.state.nodes[groupUuid]).toBeUndefined();
+      expect(store.state.nodes[child1]?.parentUuid).not.toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).not.toBe(groupUuid);
+
+      // RF-011: ONE Ctrl+Z fully reverses the ungroup. The group must
+      // be restored AND its children's parentUuid must point back at it.
+      store.undo();
+
+      expect(store.state.nodes[groupUuid]).toBeDefined();
+      // Children attached to the restored group (coherent state).
+      expect(store.state.nodes[child1]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).toBe(groupUuid);
+    } finally {
+      store.destroy();
+    }
+  });
+});
+
+describe("deleteNodes — transaction shape (Spec 19)", () => {
+  it("undo replays inverseOperations (N create_node ops)", () => {
+    const historyManager = new HistoryManager(TEST_USER_ID);
+
+    const snapshotA = makeTestNode({ uuid: "node-a" });
+    const snapshotB = makeTestNode({ uuid: "node-b" });
+
+    const forwardOp: import("../../operations/types").Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["node-a", "node-b"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseA = createCreateNodeOp(TEST_USER_ID, snapshotA);
+    const inverseB = createCreateNodeOp(TEST_USER_ID, snapshotB);
+
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: [inverseA, inverseB],
+      description: "Delete 2 nodes",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    historyManager.pushTransaction(tx);
+    expect(historyManager.canUndo()).toBe(true);
+
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) throw new Error("unreachable");
+    // Inverse should be the N create_node ops carried in inverseOperations.
+    expect(inverseTx.operations).toHaveLength(2);
+    expect(inverseTx.operations[0].type).toBe("create_node");
+    expect(inverseTx.operations[1].type).toBe("create_node");
+    expect(inverseTx.operations[0].value).toEqual(snapshotA);
+    expect(inverseTx.operations[1].value).toEqual(snapshotB);
   });
 });

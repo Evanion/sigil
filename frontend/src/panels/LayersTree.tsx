@@ -8,12 +8,14 @@ import { TreeDropIndicator } from "../dnd/TreeDropIndicator";
 import { computeDropTarget, canDropInside, type NodeKindType } from "../dnd/tree-insertion";
 import type { TreeDropTarget, LayerDragData } from "../dnd/types";
 import type { DocumentState } from "../store/document-store-solid";
+import { MAX_NODE_TREE_DEPTH } from "../types/validation";
 
 /**
- * Maximum depth for tree traversal to prevent runaway recursion
- * if the data contains cycles.
+ * Maximum depth for tree traversal — alias of the shared MAX_NODE_TREE_DEPTH
+ * constant (mirrors Rust core's MAX_NODE_TREE_DEPTH = 64). RF-016: single
+ * source of truth so depth caps cannot diverge silently across the frontend.
  */
-const MAX_TREE_DEPTH = 64;
+const MAX_TREE_DEPTH = MAX_NODE_TREE_DEPTH;
 
 /** Height of a single tree row in pixels. */
 const ROW_HEIGHT = 28;
@@ -586,6 +588,17 @@ export const LayersTree: Component = () => {
         if (currentFocused) {
           const node = store.state.nodes[currentFocused];
           if (node) {
+            // RF-028: Delete acts on the full selection when the focused row
+            // is part of it (consistent with Canvas Delete). If the user
+            // moved focus without changing selection (Tab/Arrow without
+            // commit), or selection is empty, fall back to deleting the
+            // focused row alone — preserves the prior single-row behavior.
+            const selectedIds = store.selectedNodeIds();
+            const targets =
+              selectedIds.length > 0 && selectedIds.includes(currentFocused)
+                ? selectedIds
+                : [currentFocused];
+
             // Capture next focus target BEFORE deletion (list may change after delete)
             let nextFocus: string | null = null;
             if (currentIndex !== -1 && list.length > 1) {
@@ -595,8 +608,18 @@ export const LayersTree: Component = () => {
                 nextFocus = nextEntry.uuid;
               }
             }
-            store.deleteNode(currentFocused);
-            announce(t("a11y:layers.deleted", { name: node.name }));
+            store.deleteNodes(targets);
+
+            // Announce: keep the per-row name for the single-target case
+            // (preserves the existing i18n key) and use the count-form
+            // for multi-target deletes via the new i18n key (mirrors
+            // Canvas Delete's behavior, screen-reader output is
+            // consistent across keyboard surfaces).
+            if (targets.length === 1) {
+              announce(t("a11y:layers.deleted", { name: node.name }));
+            } else {
+              announce(t("a11y:layers.deletedMultiple", { count: targets.length }));
+            }
             setFocusedUuid(nextFocus);
           }
         }
