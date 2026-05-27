@@ -94,6 +94,60 @@ impl FieldOperation for DeleteNode {
     }
 }
 
+/// Atomically deletes N nodes (Spec 19). Replaces the singular `DeleteNode`
+/// in Task 16. Until then, both coexist.
+///
+/// `targets` carries each node's `NodeId` paired with the `PageId` of the
+/// page it is a root of (if any). The wire layer (GraphQL/MCP) resolves
+/// UUIDs → `NodeId`s and looks up page roots before constructing this op.
+#[derive(Debug)]
+pub struct DeleteNodes {
+    /// The list of nodes to delete, each paired with the page it is a root of
+    /// (if any). `NodeId` is arena-local — the wire layer resolves UUIDs first.
+    pub targets: Vec<(NodeId, Option<PageId>)>,
+}
+
+impl FieldOperation for DeleteNodes {
+    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
+        // 1. Empty batch
+        if self.targets.is_empty() {
+            return Err(CoreError::ValidationError(
+                "DeleteNodes: empty batch not allowed".to_string(),
+            ));
+        }
+        // 2. Oversized batch
+        if self.targets.len() > crate::validate::MAX_NODES_PER_DELETE_BATCH {
+            return Err(CoreError::ValidationError(format!(
+                "DeleteNodes: batch of {} exceeds MAX_NODES_PER_DELETE_BATCH ({})",
+                self.targets.len(),
+                crate::validate::MAX_NODES_PER_DELETE_BATCH,
+            )));
+        }
+        // 3. Duplicates
+        let mut seen: std::collections::HashSet<NodeId> = std::collections::HashSet::new();
+        for (node_id, _) in &self.targets {
+            if !seen.insert(*node_id) {
+                return Err(CoreError::ValidationError(format!(
+                    "DeleteNodes: duplicate NodeId {node_id:?} in batch"
+                )));
+            }
+        }
+        // 4. Every node must exist
+        for (node_id, _) in &self.targets {
+            doc.arena.get(*node_id)?;
+        }
+        Ok(())
+    }
+
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
+        // Task 4 will implement the real apply with dedup + rollback.
+        let _ = doc;
+        Err(CoreError::ValidationError(
+            "DeleteNodes::apply not yet implemented (Task 4)".to_string(),
+        ))
+    }
+}
+
 /// Renames a node.
 #[derive(Debug)]
 pub struct RenameNode {
@@ -615,5 +669,78 @@ mod tests {
         assert!(doc.arena.get(parent_id).is_err());
         assert!(doc.arena.get(child_id).is_err());
         assert!(doc.arena.get(grandchild_id).is_err());
+    }
+
+    // ── DeleteNodes (Spec 19) ───────────────────────────────────────────
+
+    #[test]
+    fn test_delete_nodes_validate_rejects_empty_batch() {
+        let doc = Document::new("Test".to_string());
+        let op = DeleteNodes { targets: vec![] };
+        let err = op.validate(&doc).expect_err("empty batch must error");
+        assert!(format!("{err:?}").to_lowercase().contains("empty"));
+    }
+
+    #[test]
+    fn test_delete_nodes_validate_rejects_oversized_batch() {
+        let doc = Document::new("Test".to_string());
+        let oversize = crate::validate::MAX_NODES_PER_DELETE_BATCH + 1;
+        let targets: Vec<(NodeId, Option<PageId>)> = (0..oversize)
+            .map(|i| {
+                (
+                    NodeId::new(u32::try_from(i & 0xffff_ffff).unwrap(), 0),
+                    None,
+                )
+            })
+            .collect();
+        let op = DeleteNodes { targets };
+        let err = op.validate(&doc).expect_err("oversized batch must error");
+        assert!(format!("{err:?}").to_lowercase().contains("batch"));
+    }
+
+    #[test]
+    fn test_max_nodes_per_delete_batch_enforced() {
+        // Per CLAUDE.md §11 "Constant Enforcement Tests": this test rejects a real
+        // out-of-range input (not a tautology). Per the PR #67 amendment, this is
+        // the real enforcement test for MAX_NODES_PER_DELETE_BATCH.
+        let doc = Document::new("Test".to_string());
+        let oversize = crate::validate::MAX_NODES_PER_DELETE_BATCH + 1;
+        let targets: Vec<(NodeId, Option<PageId>)> = (0..oversize)
+            .map(|i| {
+                (
+                    NodeId::new(u32::try_from(i & 0xffff_ffff).unwrap(), 0),
+                    None,
+                )
+            })
+            .collect();
+        let op = DeleteNodes { targets };
+        assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_delete_nodes_validate_rejects_duplicate_node_id() {
+        let mut doc = Document::new("Test".to_string());
+        let n = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Group,
+            "G".to_string(),
+        )
+        .expect("create");
+        let id = doc.arena.insert(n).expect("insert");
+        let op = DeleteNodes {
+            targets: vec![(id, None), (id, None)],
+        };
+        let err = op.validate(&doc).expect_err("duplicate must error");
+        assert!(format!("{err:?}").to_lowercase().contains("duplicate"));
+    }
+
+    #[test]
+    fn test_delete_nodes_validate_rejects_missing_node() {
+        let doc = Document::new("Test".to_string());
+        let op = DeleteNodes {
+            targets: vec![(NodeId::new(99, 0), None)],
+        };
+        assert!(op.validate(&doc).is_err());
     }
 }
