@@ -112,11 +112,11 @@ All findings written with status `open`. Remediation in severity order.
 
 #### RF-011 — `ungroupNodes` 2-undo regression (intermediate state incoherent)
 - **Source:** Architect, UX
-- **Status:** open
+- **Status:** resolved
 - **Severity:** Major
-- **Location:** `frontend/src/store/document-store-solid.tsx:1687-1800`
+- **Location:** `frontend/src/store/document-store-solid.tsx::ungroupNodes`, `frontend/src/operations/interceptor.ts`
 - **Description:** Ungrouping produces TWO transactions: (1) reparent + setField (coalesced); (2) delete-group via `pushTransaction`. `pushTransaction` calls `forceFlush()` first. Worse than disclosed in PR: after one Ctrl+Z, group is restored with empty `childrenUuids` (children still parented to `groupParent`) — incoherent intermediate state. Second Ctrl+Z restores parent linkage. User sees an impossible doc state mid-undo.
-- **Fix:** Extend `Interceptor` with `pushIntoCurrentBuffer(ops, inverseOps)` that appends to the current coalesce window. Refactor `ungroupNodes` to snapshot the group BEFORE detaching children, then push a single transaction with combined inverse.
+- **Fix:** Added `Interceptor.combineWith(forwardOp, inverseOp)` that pushes a pre-built forward+inverse op pair into the CURRENT coalesce buffer instead of force-flushing. `commitBuffer` now builds a complete `Transaction.inverseOperations` array (per-op flips for trackStructural ops + explicit inverses for combineWith ops) when any combineWith pair contributed to the buffer. `ungroupNodes` refactored to (a) keep `groupSnapshot` captured BEFORE the produce() (preserves intact `childrenUuids`), (b) track a `set_field parentUuid` op for root-level groups so undo restores child→group linkage symmetrically, and (c) push the `delete_nodes` via `combineWith` instead of `pushTransaction`. Result: ONE undo entry per ungroup; ONE Ctrl+Z fully reverses (group restored AND children's parentUuid restored). Integration tests in `mutation-operations.test.ts` ("ungroupNodes — single undo step (Spec 19 RF-011)") and unit tests in `interceptor.test.ts` (three `combineWith` cases) pin the contract.
 
 #### RF-012 — `inverseType` returns same type for `create_node`/`delete_nodes` instead of throwing
 - **Source:** Architect, FE

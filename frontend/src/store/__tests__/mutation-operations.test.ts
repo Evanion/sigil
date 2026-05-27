@@ -1276,6 +1276,130 @@ describe("deleteNodes — operation tracking (Spec 19)", () => {
  *  - createInverseTransaction prefers Transaction.inverseOperations over
  *    per-op flip when present.
  */
+// ── Spec 19 RF-011: ungroupNodes single-transaction ─────────────────────
+
+/**
+ * RF-011 regression: `ungroupNodes` used to call `interceptor.pushTransaction`
+ * for the `delete_nodes` half of the operation, which force-flushed the
+ * coalesce buffer and produced TWO undo entries per ungroup. Worse, the
+ * first Ctrl+Z restored the group but the children's `parentUuid` still
+ * pointed at the (now-restored) group's old parent — an incoherent
+ * intermediate state. The fix routes the delete through the new
+ * `interceptor.combineWith` API so the reparent ops AND the delete commit
+ * as ONE undo step.
+ */
+describe("ungroupNodes — single undo step (Spec 19 RF-011)", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("ungroupNodes pushes exactly ONE undo step (not two)", async () => {
+    // Spy on HistoryManager#pushTransaction to count commits caused by
+    // ungroupNodes (not by the earlier setup work).
+    const pushSpy = vi.spyOn(HistoryManager.prototype, "pushTransaction");
+    try {
+      const store = createDocumentStoreSolid();
+      try {
+        const sampleKind = deepClone(makeTestNode()["kind"]);
+        const sampleTransform = deepClone(makeTestNode()["transform"]);
+        const child1 = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C1",
+          sampleTransform as never,
+        );
+        const child2 = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C2",
+          sampleTransform as never,
+        );
+
+        // Group the two children. groupNodes selects the newly-created
+        // group; capture its uuid from the selection.
+        store.groupNodes([child1, child2], "G");
+        // Wait for the coalesce window to commit the groupNodes work.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const selected = store.selectedNodeIds();
+        expect(selected).toHaveLength(1);
+        const groupUuid = selected[0];
+        expect(store.state.nodes[groupUuid]).toBeDefined();
+
+        // Reset spy: we only care about transactions ungroup pushes.
+        const callsBeforeUngroup = pushSpy.mock.calls.length;
+
+        store.ungroupNodes([groupUuid]);
+
+        // Wait for the coalesce window to flush ungroup's combineWith ops.
+        await new Promise((resolve) => setTimeout(resolve, 150));
+
+        const ungroupCalls = pushSpy.mock.calls.length - callsBeforeUngroup;
+        // RF-011: should be EXACTLY ONE push, not TWO.
+        expect(ungroupCalls).toBe(1);
+      } finally {
+        store.destroy();
+      }
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  it("one undo restores the group with its children attached (coherent state)", async () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const child1 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C1",
+        sampleTransform as never,
+      );
+      const child2 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C2",
+        sampleTransform as never,
+      );
+
+      store.groupNodes([child1, child2], "G");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const groupUuid = store.selectedNodeIds()[0];
+
+      // Pre-ungroup invariants
+      expect(store.state.nodes[child1]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[groupUuid]?.childrenUuids).toEqual([child1, child2]);
+
+      // Ungroup
+      store.ungroupNodes([groupUuid]);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      // After ungroup: group gone, children detached
+      expect(store.state.nodes[groupUuid]).toBeUndefined();
+      expect(store.state.nodes[child1]?.parentUuid).not.toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).not.toBe(groupUuid);
+
+      // RF-011: ONE Ctrl+Z fully reverses the ungroup. The group must
+      // be restored AND its children's parentUuid must point back at it.
+      store.undo();
+
+      expect(store.state.nodes[groupUuid]).toBeDefined();
+      // Children attached to the restored group (coherent state).
+      expect(store.state.nodes[child1]?.parentUuid).toBe(groupUuid);
+      expect(store.state.nodes[child2]?.parentUuid).toBe(groupUuid);
+    } finally {
+      store.destroy();
+    }
+  });
+});
+
 describe("deleteNodes — transaction shape (Spec 19)", () => {
   it("undo replays inverseOperations (N create_node ops)", () => {
     const historyManager = new HistoryManager(TEST_USER_ID);

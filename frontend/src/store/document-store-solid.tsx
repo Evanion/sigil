@@ -1875,7 +1875,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       // Track structural: reparent children (if parent exists), adjust transforms, then delete group
       for (let i = 0; i < children.length; i++) {
         // RF-005: Only track reparent if group has a parent. Root-level children
-        // remain at root (parentUuid = null) — no reparent needed.
+        // remain at root (parentUuid = null) — no reparent needed for the
+        // forward direction.
         if (groupParent) {
           interceptor.trackStructural(
             createReparentOp(clientSessionId, children[i], groupParent, i, groupUuid, i),
@@ -1887,6 +1888,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
               position: i,
             },
           });
+        } else {
+          // RF-011: For root-level groups, the child's `parentUuid` still
+          // changes (from groupUuid → null). We must track that as a
+          // `set_field parentUuid` so the inverse can restore the link to
+          // the group on undo. Without this op, the group's create_node
+          // inverse would restore the group with childrenUuids intact, but
+          // each child's parentUuid would remain null — an incoherent
+          // intermediate state where the group "owns" its children but the
+          // children deny their parent.
+          interceptor.trackStructural(
+            createSetFieldOp(clientSessionId, children[i], "parentUuid", null, groupUuid),
+          );
         }
 
         // RF-006: Track transform restoration as a set_field operation for undo
@@ -1911,22 +1924,27 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           });
         }
       }
-      // Spec 19 Task 16: track the group's removal as a `delete_nodes` op
-      // with an explicit `inverseOperations` pointing at a single `create_node`
-      // that restores the group from its snapshot. The reparent/set_field ops
-      // tracked above coalesce into a separate transaction (per-op flip), so
-      // we push the delete as its own transaction with an explicit inverse.
+      // RF-011: Track the group's removal as a `delete_nodes` op with an
+      // explicit inverse `create_node` that restores the group from its
+      // snapshot. We use `interceptor.combineWith` (NOT `pushTransaction`)
+      // so the delete merges into the SAME coalesce window as the reparent
+      // and transform ops tracked above. The previous `pushTransaction`
+      // call force-flushed the coalesce buffer, producing TWO undo entries
+      // per ungroup: the first restored the empty group (incoherent —
+      // children's parentUuid still pointed at groupParent), and the
+      // second restored parent linkage. With combineWith, both halves
+      // commit as ONE atomic undo step: a single Ctrl+Z restores the
+      // group with its children attached AND restores each child's
+      // parentUuid in the same atomic step.
+      //
+      // groupSnapshot is captured BEFORE the produce() above, so its
+      // `childrenUuids` array is intact (non-empty). The transaction's
+      // `inverseOperations` (built by `commitBuffer`) replays in reverse:
+      // first the create_node restores the group, then the reparent
+      // inverses restore each child's parentUuid pointer.
       const forwardDeleteOp = createDeleteNodesOp(clientSessionId, [groupUuid]);
       const inverseCreateOp = createCreateNodeOp(clientSessionId, groupSnapshot);
-      interceptor.pushTransaction({
-        id: crypto.randomUUID(),
-        userId: clientSessionId,
-        operations: [forwardDeleteOp],
-        inverseOperations: [inverseCreateOp],
-        description: "Ungroup: delete group",
-        timestamp: Date.now(),
-        seq: 0,
-      });
+      interceptor.combineWith(forwardDeleteOp, inverseCreateOp);
       pendingServerOps.push({ deleteNodes: { nodeUuids: [groupUuid] } });
 
       allChildUuids.push(...children);
