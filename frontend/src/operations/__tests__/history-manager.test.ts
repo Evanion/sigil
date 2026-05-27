@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { HistoryManager } from "../history-manager";
 import { createSetFieldOp } from "../operation-helpers";
-import { MAX_HISTORY_SIZE } from "../types";
-import type { Transaction } from "../types";
+import { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "../types";
+import type { Operation, Transaction } from "../types";
 
 const USER_ID = "test-user";
 
@@ -95,6 +95,92 @@ describe("HistoryManager", () => {
       const inv = assertNonNull(hm.undo());
       expect(inv.operations).toHaveLength(1);
       expect(inv.operations[0].value).toBe("A"); // inverse swaps value/previousValue
+    });
+  });
+
+  // ── max_operations_per_transaction_enforced (RF-018) ───────────────
+
+  describe("max_operations_per_transaction_enforced", () => {
+    let errSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    });
+    afterEach(() => {
+      errSpy.mockRestore();
+    });
+
+    it("logs error when forward operations exceed MAX_OPERATIONS_PER_TRANSACTION", () => {
+      const ops: Operation[] = Array.from(
+        { length: MAX_OPERATIONS_PER_TRANSACTION + 1 },
+        (_, i) => createSetFieldOp(USER_ID, `node-${i}`, "name", "B", "A"),
+      );
+      const tx: Transaction = {
+        id: "tx-big-forward",
+        userId: USER_ID,
+        operations: ops,
+        description: "Oversize forward",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      expect(errSpy).toHaveBeenCalled();
+      const msgs = errSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(msgs.some((m: string) => /forward operations/.test(m))).toBe(true);
+    });
+
+    it("logs error when inverseOperations exceed MAX_OPERATIONS_PER_TRANSACTION", () => {
+      const inv: Operation[] = Array.from(
+        { length: MAX_OPERATIONS_PER_TRANSACTION + 1 },
+        (_, i) => ({
+          id: crypto.randomUUID(),
+          userId: USER_ID,
+          nodeUuid: `n-${i}`,
+          type: "create_node",
+          path: "",
+          value: { uuid: `n-${i}` },
+          previousValue: null,
+          seq: 0,
+        }),
+      );
+      const tx: Transaction = {
+        id: "tx-big-inverse",
+        userId: USER_ID,
+        operations: [
+          {
+            id: crypto.randomUUID(),
+            userId: USER_ID,
+            nodeUuid: "",
+            type: "delete_nodes",
+            path: "",
+            value: { node_uuids: inv.map((o) => o.nodeUuid) },
+            previousValue: null,
+            seq: 0,
+          },
+        ],
+        inverseOperations: inv,
+        description: "Oversize inverse",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      expect(errSpy).toHaveBeenCalled();
+      const msgs = errSpy.mock.calls.map((c: unknown[]) => String(c[0]));
+      expect(msgs.some((m: string) => /inverse operations/.test(m))).toBe(true);
+    });
+
+    it("does not log when both arrays are within the cap", () => {
+      const ops = [createSetFieldOp(USER_ID, "n-1", "name", "B", "A")];
+      const tx: Transaction = {
+        id: "tx-ok",
+        userId: USER_ID,
+        operations: ops,
+        inverseOperations: ops,
+        description: "Within cap",
+        timestamp: Date.now(),
+        seq: 0,
+      };
+      hm.pushTransaction(tx);
+      expect(errSpy).not.toHaveBeenCalled();
     });
   });
 

@@ -298,6 +298,25 @@ pub fn delete_nodes_impl(
     state: &AppState,
     uuid_strs: &[String],
 ) -> Result<MutationResult, McpToolError> {
+    // RF-005: Reject empty/oversize batches BEFORE allocating the
+    // parsed-UUIDs vec. Prevents memory amplification from giant tool
+    // inputs that would otherwise allocate proportional to the input
+    // size before validate() fires. Core's `DeleteNodes::validate` also
+    // enforces these bounds (single source of truth) but the wire layer
+    // must short-circuit first to bound allocation.
+    if uuid_strs.is_empty() {
+        return Err(McpToolError::InvalidInput(
+            "delete_nodes: empty batch".to_string(),
+        ));
+    }
+    if uuid_strs.len() > agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH {
+        return Err(McpToolError::InvalidInput(format!(
+            "delete_nodes: batch of {} exceeds MAX_NODES_PER_DELETE_BATCH ({})",
+            uuid_strs.len(),
+            agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH,
+        )));
+    }
+
     // Pre-parse UUIDs before acquiring the lock. Fail-fast on invalid input.
     let parsed: Vec<Uuid> = uuid_strs
         .iter()
@@ -310,6 +329,18 @@ pub fn delete_nodes_impl(
     {
         let mut doc = acquire_document_lock(state);
 
+        // RF-022: Pre-build a NodeId -> PageId map once, then look up
+        // each target in O(1). Previous code did O(P * R) per target.
+        let mut node_to_page: std::collections::HashMap<
+            agent_designer_core::id::NodeId,
+            agent_designer_core::id::PageId,
+        > = std::collections::HashMap::new();
+        for page in &doc.pages {
+            for nid in &page.root_nodes {
+                node_to_page.insert(*nid, page.id);
+            }
+        }
+
         let mut targets: Vec<(
             agent_designer_core::id::NodeId,
             Option<agent_designer_core::id::PageId>,
@@ -319,13 +350,7 @@ pub fn delete_nodes_impl(
                 .arena
                 .id_by_uuid(uuid)
                 .ok_or_else(|| McpToolError::NodeNotFound(uuid_strs[idx].clone()))?;
-            let page_id = doc.pages.iter().find_map(|p| {
-                if p.root_nodes.contains(&node_id) {
-                    Some(p.id)
-                } else {
-                    None
-                }
-            });
+            let page_id = node_to_page.get(&node_id).copied();
             targets.push((node_id, page_id));
         }
 
@@ -334,7 +359,16 @@ pub fn delete_nodes_impl(
         cmd.apply(&mut doc)?;
     }
 
-    // Broadcast: single delete_nodes op carrying the full UUID list.
+    // RF-020/036: Build broadcast value with canonicalized UUID strings
+    // (lowercase hyphenated form from `Uuid::to_string()`) regardless of
+    // the input style. We forward all originally-requested UUIDs (not the
+    // dedup-retained set produced by core's `apply`) because the frontend
+    // `applyDeleteNodes` walks the local subtree from each broadcast root
+    // and is tolerant of "uuid already deleted" — descendants that core's
+    // dedup dropped are removed by the local walk anyway.
+    let canonicalized_uuids: Vec<String> = parsed.iter().map(Uuid::to_string).collect();
+
+    // Broadcast: single delete_nodes op carrying the canonicalized UUID list.
     // The OperationPayload's node_uuid is empty (batch op has no single
     // target); UUIDs are in the value payload, matching the GraphQL
     // contract (mutation.rs::parse_delete_nodes).
@@ -346,7 +380,7 @@ pub fn delete_nodes_impl(
             "",
             "delete_nodes",
             "",
-            Some(serde_json::json!({ "node_uuids": uuid_strs })),
+            Some(serde_json::json!({ "node_uuids": canonicalized_uuids })),
         ),
     );
 

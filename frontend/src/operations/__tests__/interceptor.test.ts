@@ -239,14 +239,18 @@ describe("Interceptor", () => {
     setState("nodes", "node-1", { name: "Before" });
 
     interceptor.set("node-1", "name", "After");
+    // RF-012: `create_node` has no per-op flip — for a structural op test
+    // that doesn't require the explicit inverseOperations contract, use a
+    // structural op whose per-op flip is well-defined (reparent inverts by
+    // swapping value/previousValue).
     interceptor.trackStructural({
       id: "op-structural",
       userId: "test-user",
       nodeUuid: "node-2",
-      type: "create_node",
+      type: "reparent",
       path: "",
-      value: { uuid: "node-2", name: "NewNode" },
-      previousValue: null,
+      value: { parentUuid: "parent-new", position: 1 },
+      previousValue: { parentUuid: "parent-old", position: 0 },
       seq: 0,
     });
 

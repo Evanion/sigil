@@ -247,3 +247,44 @@ describe("createInverseTransaction with inverseOperations (Spec 19)", () => {
     expect(result.operations[0].previousValue).toBe("new");
   });
 });
+
+describe("createInverse rejects per-op flip for create_node/delete_nodes (RF-012)", () => {
+  it("throws on create_node — must flow via inverseOperations", () => {
+    const op = makeOp("user-1", "node-a", "create_node", "", { uuid: "node-a" }, null);
+    expect(() => createInverse(op)).toThrow(/Transaction\.inverseOperations/);
+  });
+
+  it("throws on delete_nodes — must flow via inverseOperations", () => {
+    const op = makeOp("user-1", "", "delete_nodes", "", { node_uuids: ["a"] }, null);
+    expect(() => createInverse(op)).toThrow(/Transaction\.inverseOperations/);
+  });
+
+  it("preserves create_page → delete_page flip behavior", () => {
+    const op = makeOp(
+      "user-1",
+      "page-1",
+      "create_page",
+      "",
+      { id: "page-1", name: "Page 1", position: 0 },
+      null,
+    );
+    const inv = createInverse(op);
+    expect(inv.type).toBe("delete_page");
+  });
+
+  it("falls back to per-op flip when inverseOperations is absent for set_field-only tx", () => {
+    // Regression guard: the throw must not affect non-node operations.
+    const op = makeOp("user-1", "node-x", "set_field", "name", "new", "old");
+    const tx: Transaction = {
+      id: "tx-1",
+      userId: "user-1",
+      operations: [op],
+      description: "Rename",
+      timestamp: 1000,
+      seq: 1,
+    };
+    const result = createInverseTransaction(tx);
+    expect(result.operations.length).toBe(1);
+    expect(result.operations[0].value).toBe("old");
+  });
+});

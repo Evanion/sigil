@@ -770,11 +770,25 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
 /// and looks up the page-root membership for each node, then produces a
 /// single core [`DeleteNodes`] op that applies atomically across N targets.
 fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
+    // RF-005: Reject empty/oversize batches BEFORE allocating the
+    // parsed-UUIDs vec. This prevents memory amplification from a giant
+    // request body that would otherwise allocate proportional to the input
+    // size before validate() fires. Core's `DeleteNodes::validate` also
+    // enforces these bounds (single source of truth) but the wire layer
+    // must short-circuit first to bound allocation.
+    if dn.node_uuids.is_empty() {
+        return Err(async_graphql::Error::new("delete_nodes: empty batch"));
+    }
+    if dn.node_uuids.len() > agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH {
+        return Err(async_graphql::Error::new(format!(
+            "delete_nodes: batch of {} exceeds MAX_NODES_PER_DELETE_BATCH ({})",
+            dn.node_uuids.len(),
+            agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH,
+        )));
+    }
+
     // Pre-parse every UUID outside the builder closure to fail-fast on
     // invalid input before any document lock is acquired (RF-030 pattern).
-    // Core's `DeleteNodes::validate` enforces emptiness and the
-    // `MAX_NODES_PER_DELETE_BATCH` upper bound; the wire layer relies on
-    // that single source of truth.
     let parsed_uuids: Vec<uuid::Uuid> = dn
         .node_uuids
         .iter()
@@ -784,17 +798,42 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
         })
         .collect::<Result<Vec<_>>>()?;
 
+    // RF-020/036: Build broadcast value with canonicalized UUID strings
+    // (lowercase hyphenated form from `Uuid::to_string()`) regardless of
+    // the input style. We forward all originally-requested UUIDs (not the
+    // dedup-retained set produced by core's `apply`) because the frontend
+    // `applyDeleteNodes` walks the local subtree from each broadcast root
+    // and is tolerant of "uuid already deleted" — descendants that core's
+    // dedup dropped are removed by the local walk anyway. The full
+    // post-mutation canonicalization is documented as a known limitation
+    // of this transport: the `ParsedOp` broadcast is built pre-apply, and
+    // the frontend's tolerant apply path makes the dedup-retained-list
+    // refinement low-value.
+    let canonicalized_uuids: Vec<String> = parsed_uuids.iter().map(uuid::Uuid::to_string).collect();
     let broadcast = OperationPayload {
         id: uuid::Uuid::new_v4().to_string(),
         // Batch op: no single targeted UUID. The full list is in `value`.
         node_uuid: String::new(),
         op_type: "delete_nodes".to_string(),
         path: String::new(),
-        value: Some(serde_json::json!({ "node_uuids": dn.node_uuids })),
+        value: Some(serde_json::json!({ "node_uuids": canonicalized_uuids })),
     };
 
     Ok(ParsedOp {
         builder: Box::new(move |doc| {
+            // RF-022: Pre-build a NodeId -> PageId map once, then look up
+            // each target in O(1). Previous code did O(P * R) per target,
+            // for a total O(N * P * R) batch cost.
+            let mut node_to_page: std::collections::HashMap<
+                agent_designer_core::id::NodeId,
+                PageId,
+            > = std::collections::HashMap::new();
+            for page in &doc.pages {
+                for nid in &page.root_nodes {
+                    node_to_page.insert(*nid, page.id);
+                }
+            }
+
             let mut targets: Vec<(agent_designer_core::id::NodeId, Option<PageId>)> =
                 Vec::with_capacity(parsed_uuids.len());
             for uuid in &parsed_uuids {
@@ -802,14 +841,7 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
                     .arena
                     .id_by_uuid(uuid)
                     .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))?;
-                // Identify whether this node is a page root.
-                let page_id: Option<PageId> = doc.pages.iter().find_map(|p| {
-                    if p.root_nodes.contains(&node_id) {
-                        Some(p.id)
-                    } else {
-                        None
-                    }
-                });
+                let page_id = node_to_page.get(&node_id).copied();
                 targets.push((node_id, page_id));
             }
             Ok(Box::new(DeleteNodes { targets }) as Box<dyn FieldOperation>)

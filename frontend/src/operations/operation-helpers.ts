@@ -48,18 +48,23 @@ function makeOp(
 
 /** Map from an operation type to its inverse type. */
 function inverseType(type: OperationType): OperationType {
+  // RF-012: `create_node` and `delete_nodes` inverses MUST flow via
+  // `Transaction.inverseOperations`, NOT via per-op flip. Throwing here
+  // surfaces any future caller that bypasses the pushTransaction
+  // contract — e.g., adding a delete_nodes op to a transaction without
+  // populating `inverseOperations`. The throw is caught by
+  // HistoryManager.undo()'s try/catch (which restores the popped tx),
+  // so the user sees "undo did nothing" rather than a corrupt state.
+  if (type === "create_node" || type === "delete_nodes") {
+    throw new Error(
+      `inverseType: ${type} has no per-op flip; use Transaction.inverseOperations`,
+    );
+  }
   if (type === "create_page") return "delete_page";
   if (type === "delete_page") return "create_page";
   if (type === "create_token") return "delete_token";
   if (type === "delete_token") return "create_token";
-  // Spec 19: `create_node` and `delete_nodes` are not handled by per-op flip.
-  // - `create_node` is created either from a user "Create" gesture (which uses
-  //   a direct transaction without relying on per-op flip for its inverse) or
-  //   as part of the explicit `inverseOperations` of a `delete_nodes` undo
-  //   (handled in `createInverseTransaction`).
-  // - `delete_nodes` always carries its own `inverseOperations` via the store
-  //   so per-op flip is never exercised for it.
-  return type; // set_field, reparent, reorder, rename_page, reorder_page, update_token invert by swapping values
+  return type; // set_field, reparent, reorder, rename_page, reorder_page, update_token, rename_token invert by swapping values
 }
 
 // ── Public factory functions ─────────────────────────────────────────
