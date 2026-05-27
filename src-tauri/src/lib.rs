@@ -6,6 +6,7 @@
 
 mod file_assoc;
 mod menus;
+mod recent_files;
 mod sidecar;
 
 use std::collections::HashMap;
@@ -59,7 +60,32 @@ async fn open_workfile_window(
         .inner_size(1280.0, 800.0)
         .build()?;
 
+    // Record the path in the recent-workfiles list AFTER window creation
+    // succeeds — recording a path whose window failed to open would leak a
+    // broken entry into the menu. Failures here are non-fatal: a recent-list
+    // write error must not abort window opening (the user successfully
+    // opened the workfile; the menu side effect is best-effort).
+    if let Some(ref wf) = workfile
+        && let Ok(app_data_dir) = app.path().app_data_dir()
+        && let Err(e) = recent_files::add(&app_data_dir, wf)
+    {
+        tracing::warn!("failed to record recent workfile: {e}");
+    }
+
     Ok(())
+}
+
+/// Tauri command: return the pruned recent-workfiles list for the menu.
+/// Falls back to an empty `Vec` on any error (missing app-data dir, parse
+/// failure) — the menu is best-effort and must not crash the app on a
+/// corrupted `recent.json`.
+#[tauri::command]
+fn get_recent_workfiles(app: tauri::AppHandle) -> Vec<recent_files::RecentEntry> {
+    if let Ok(dir) = app.path().app_data_dir() {
+        recent_files::load(&dir).unwrap_or_default()
+    } else {
+        Vec::new()
+    }
 }
 
 /// Tauri command: show the OS "Open Folder" dialog and spawn a new workfile
@@ -162,7 +188,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             open_workfile_dialog,
-            new_workfile_dialog
+            new_workfile_dialog,
+            get_recent_workfiles
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
