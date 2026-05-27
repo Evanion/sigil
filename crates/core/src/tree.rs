@@ -177,9 +177,20 @@ pub fn is_ancestor(arena: &Arena, ancestor_id: NodeId, node_id: NodeId) -> Resul
 
 /// Returns a list of node IDs from root to `node_id` (inclusive).
 ///
+/// `max_depth` bounds the ancestor chain length per CLAUDE.md §11 "Recursive
+/// Functions Require Depth Guards". Use `crate::validate::MAX_NODE_TREE_DEPTH`
+/// at call sites. The guard fires when the walked depth reaches `max_depth`
+/// (per the `>=` semantics, the deepest allowed node is at level `max_depth - 1`).
+///
 /// # Errors
 /// - `CoreError::NodeNotFound` / `CoreError::StaleNodeId` for invalid IDs.
-pub fn ancestors(arena: &Arena, node_id: NodeId) -> Result<Vec<NodeId>, CoreError> {
+/// - `CoreError::CycleDetected` if a parent cycle is detected.
+/// - `CoreError::ValidationError` if the chain exceeds `max_depth`.
+pub fn ancestors(
+    arena: &Arena,
+    node_id: NodeId,
+    max_depth: usize,
+) -> Result<Vec<NodeId>, CoreError> {
     let mut path = vec![node_id];
     let mut current = arena.get(node_id)?.parent;
     let mut steps = 0;
@@ -187,6 +198,11 @@ pub fn ancestors(arena: &Arena, node_id: NodeId) -> Result<Vec<NodeId>, CoreErro
         steps += 1;
         if steps > arena.len() {
             return Err(CoreError::CycleDetected(node_id, node_id));
+        }
+        if steps >= max_depth {
+            return Err(CoreError::ValidationError(format!(
+                "ancestors chain exceeds MAX_NODE_TREE_DEPTH (limit: {max_depth})"
+            )));
         }
         path.push(pid);
         current = arena.get(pid)?.parent;
@@ -518,15 +534,17 @@ mod tests {
 
     #[test]
     fn test_ancestors_root_node() {
+        use crate::validate::MAX_NODE_TREE_DEPTH;
         let mut arena = Arena::new(100);
         let root = insert_group(&mut arena, make_uuid(1), "Root");
 
-        let path = ancestors(&arena, root).expect("ancestors");
+        let path = ancestors(&arena, root, MAX_NODE_TREE_DEPTH).expect("ancestors");
         assert_eq!(path, vec![root]);
     }
 
     #[test]
     fn test_ancestors_nested() {
+        use crate::validate::MAX_NODE_TREE_DEPTH;
         let mut arena = Arena::new(100);
         let a = insert_group(&mut arena, make_uuid(1), "A");
         let b = insert_group(&mut arena, make_uuid(2), "B");
@@ -535,8 +553,98 @@ mod tests {
         add_child(&mut arena, a, b).expect("add_child");
         add_child(&mut arena, b, c).expect("add_child");
 
-        let path = ancestors(&arena, c).expect("ancestors");
+        let path = ancestors(&arena, c, MAX_NODE_TREE_DEPTH).expect("ancestors");
         assert_eq!(path, vec![a, b, c]);
+    }
+
+    #[test]
+    fn test_ancestors_rejects_chain_exceeding_depth_limit() {
+        use crate::validate::MAX_NODE_TREE_DEPTH;
+        let mut doc = crate::document::Document::new("Test".to_string());
+        let mut ids = Vec::new();
+        // Build a chain of MAX_NODE_TREE_DEPTH + 1 nodes (one deeper than allowed).
+        for i in 0..=MAX_NODE_TREE_DEPTH {
+            let n = crate::node::Node::new(
+                crate::id::NodeId::new(0, 0),
+                uuid::Uuid::from_bytes([
+                    u8::try_from(i & 0xff).expect("byte0"),
+                    u8::try_from((i >> 8) & 0xff).expect("byte1"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ]),
+                crate::node::NodeKind::Group,
+                format!("n{i}"),
+            )
+            .expect("create");
+            let id = doc.arena.insert(n).expect("insert");
+            if let Some(parent) = ids.last() {
+                add_child(&mut doc.arena, *parent, id).expect("link");
+            }
+            ids.push(id);
+        }
+        let deepest = *ids.last().expect("deepest id");
+        let result = ancestors(&doc.arena, deepest, MAX_NODE_TREE_DEPTH);
+        assert!(
+            result.is_err(),
+            "expected depth-exceeded error, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_ancestors_succeeds_at_max_depth_boundary() {
+        use crate::validate::MAX_NODE_TREE_DEPTH;
+        let mut doc = crate::document::Document::new("Test".to_string());
+        let mut ids = Vec::new();
+        // Build a chain of exactly MAX_NODE_TREE_DEPTH nodes (deepest at depth MAX-1).
+        for i in 0..MAX_NODE_TREE_DEPTH {
+            let n = crate::node::Node::new(
+                crate::id::NodeId::new(0, 0),
+                uuid::Uuid::from_bytes([
+                    u8::try_from(i & 0xff).expect("byte0"),
+                    u8::try_from((i >> 8) & 0xff).expect("byte1"),
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                ]),
+                crate::node::NodeKind::Group,
+                format!("n{i}"),
+            )
+            .expect("create");
+            let id = doc.arena.insert(n).expect("insert");
+            if let Some(parent) = ids.last() {
+                add_child(&mut doc.arena, *parent, id).expect("link");
+            }
+            ids.push(id);
+        }
+        let deepest = *ids.last().expect("deepest id");
+        let result = ancestors(&doc.arena, deepest, MAX_NODE_TREE_DEPTH);
+        assert!(
+            result.is_ok(),
+            "expected success at max-depth boundary, got {result:?}"
+        );
     }
 
     // ── descendants ────────────────────────────────────────────────────
