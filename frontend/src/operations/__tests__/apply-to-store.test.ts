@@ -409,6 +409,82 @@ describe("applyOperationToStore — delete_node", () => {
   });
 });
 
+describe("applyOperationToStore — delete_nodes (Spec 19)", () => {
+  it("removes every node listed in value.node_uuids", () => {
+    const calls: unknown[][] = [];
+    const setter = ((...args: unknown[]) => {
+      calls.push(args);
+    }) as unknown as StoreStateSetter;
+    const nodes: Record<string, unknown> = {
+      "node-a": { uuid: "node-a", parentUuid: "parent-a", name: "A" },
+      "node-b": { uuid: "node-b", parentUuid: "parent-a", name: "B" },
+      "parent-a": { uuid: "parent-a", childrenUuids: ["node-a", "node-b"] },
+    };
+    const reader: StoreStateReader = { getNode: (uuid) => nodes[uuid] as never };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: { node_uuids: ["node-a", "node-b"] },
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    // Each node's parent linkage should be cleaned up, and each node deleted via produce.
+    // Parent should receive at least one childrenUuids update for each removed child.
+    const parentUpdates = calls.filter(
+      (c) =>
+        c[0] === "nodes" &&
+        c[1] === "parent-a" &&
+        c[2] === "childrenUuids" &&
+        Array.isArray(c[3]),
+    );
+    expect(parentUpdates.length).toBeGreaterThanOrEqual(2);
+    // Two produce-based deletions (one per uuid) should also have been issued.
+    const produceCalls = calls.filter((c) => typeof c[0] === "function");
+    expect(produceCalls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("warns and no-ops on malformed payload (missing node_uuids)", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setter = vi.fn() as unknown as StoreStateSetter;
+    const reader: StoreStateReader = { getNode: () => undefined };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: { wrong_field: ["x"] },
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(setter).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("warns and no-ops when value is null", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const setter = vi.fn() as unknown as StoreStateSetter;
+    const reader: StoreStateReader = { getNode: () => undefined };
+    const op = makeOp({
+      type: "delete_nodes",
+      nodeUuid: "",
+      path: "",
+      value: null,
+      previousValue: null,
+    });
+
+    applyOperationToStore(op, setter, reader);
+
+    expect(warnSpy).toHaveBeenCalled();
+    expect(setter).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+});
+
 describe("applyOperationToStore — reparent", () => {
   it("updates parentUuid and childrenUuids for reparent operations", () => {
     const setter = vi.fn() as unknown as StoreStateSetter;

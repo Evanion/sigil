@@ -56,6 +56,9 @@ export function applyOperationToStore(
     case "delete_node":
       applyDeleteNode(op, setState, reader);
       break;
+    case "delete_nodes":
+      applyDeleteNodes(op, setState, reader);
+      break;
     case "reparent":
       applyReparent(op, setState, reader);
       break;
@@ -227,6 +230,34 @@ function applyDeleteNode(
       Reflect.deleteProperty(s["nodes"], nodeUuid);
     }),
   );
+}
+
+/**
+ * Spec 19: Apply a multi-node delete. Mirrors apply-remote.ts's applyDeleteNodes
+ * — loops per-uuid into the existing single-node delete path. This handler is
+ * invoked when an undo/redo replays a delete_nodes operation against the local
+ * store (see HistoryManager).
+ */
+function applyDeleteNodes(
+  op: Operation,
+  setState: StoreStateSetter,
+  reader: StoreStateReader,
+): void {
+  const value = op.value as { node_uuids?: unknown } | null;
+  if (!value || !Array.isArray(value.node_uuids)) {
+    console.warn("applyOperationToStore: delete_nodes payload malformed", { value });
+    return;
+  }
+  const nodeUuids = value.node_uuids as string[];
+  for (const uuid of nodeUuids) {
+    // Reuse the singular delete_node logic per-uuid. Construct a synthetic
+    // op with the right shape: type=delete_node, nodeUuid=uuid, value=null.
+    applyDeleteNode(
+      { ...op, type: "delete_node", nodeUuid: uuid, value: null },
+      setState,
+      reader,
+    );
+  }
 }
 
 function applyReparent(op: Operation, setState: StoreStateSetter, reader: StoreStateReader): void {
