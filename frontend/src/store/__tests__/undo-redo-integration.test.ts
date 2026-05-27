@@ -411,3 +411,276 @@ describe("undo/redo integration", () => {
     expect(historyManager.canRedo()).toBe(false);
   });
 });
+
+// ── Spec 19: deleteNodes (atomic multi-node delete) ─────────────────────
+//
+// These tests pin the contract added by Spec 19, Tasks 7–11:
+//   - `Transaction.inverseOperations` carries the N-op inverse for a
+//     single forward `delete_nodes` op (Task 7).
+//   - `applyOperationToStore` understands the `delete_nodes` type and
+//     removes each node in the list (Task 9), reusing the per-uuid
+//     delete logic that also strips parent.childrenUuids.
+//   - `HistoryManager.undo()` reads `inverseOperations` via
+//     `createInverseTransaction` and returns it for the caller to apply.
+//
+// The test file uses HistoryManager + applyOperationToStore directly
+// (not the full Solid store), mirroring the existing delete_node test
+// above. The forward op + N inverse `create_node` ops are constructed
+// inline to match what `store.deleteNodes` will create in Task 11/12.
+
+describe("deleteNodes — undo/redo integration (Spec 19)", () => {
+  it("undoing a deleteNodes transaction restores all deleted nodes", () => {
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    // Seed: two sibling nodes with no parent.
+    const nodeA = makeTestNode({ uuid: "a", name: "Node A" });
+    const nodeB = makeTestNode({ uuid: "b", name: "Node B" });
+    store.getNodes()["a"] = deepClone(nodeA);
+    store.getNodes()["b"] = deepClone(nodeB);
+
+    // Build the forward delete_nodes op and the N inverse create_node ops
+    // — matching what store.deleteNodes (Task 11) will produce.
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["a", "b"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "a",
+        type: "create_node",
+        path: "",
+        value: deepClone(nodeA),
+        previousValue: null,
+        seq: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "b",
+        type: "create_node",
+        path: "",
+        value: deepClone(nodeB),
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete 2 nodes",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Apply the forward op (simulating store.deleteNodes' optimistic local mutation).
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    expect(store.getNodes()["a"]).toBeUndefined();
+    expect(store.getNodes()["b"]).toBeUndefined();
+
+    // Track in history.
+    historyManager.pushTransaction(tx);
+    expect(historyManager.canUndo()).toBe(true);
+
+    // Undo: a single undo step must return the inverse transaction carrying
+    // both create_node ops (this exercises Transaction.inverseOperations
+    // routing through createInverseTransaction).
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+    expect(inverseTx.operations).toHaveLength(2);
+    expect(inverseTx.operations[0].type).toBe("create_node");
+    expect(inverseTx.operations[1].type).toBe("create_node");
+
+    // Apply each inverse op to the store.
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+
+    // Both nodes restored.
+    expect(store.getNodes()["a"]).toBeDefined();
+    expect(store.getNodes()["b"]).toBeDefined();
+    expect(store.getNodes()["a"]["name"]).toBe("Node A");
+    expect(store.getNodes()["b"]["name"]).toBe("Node B");
+  });
+
+  it("undoing a deleteNodes restores nodes in original sibling order", () => {
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    // Build parent P with three children [C0, C1, C2] — delete C1 and C2.
+    // The invariant under test: the inverse create_node ops, sorted by
+    // originalIndex ASC, restore parent.childrenUuids to its original
+    // [C0, C1, C2] order. This works because applyCreateNode appends to
+    // parent.childrenUuids in arrival order.
+    const parent = makeTestNode({
+      uuid: "P",
+      name: "Parent",
+      childrenUuids: ["C0", "C1", "C2"],
+    });
+    const c0 = makeTestNode({ uuid: "C0", name: "C0", parentUuid: "P" });
+    const c1 = makeTestNode({ uuid: "C1", name: "C1", parentUuid: "P" });
+    const c2 = makeTestNode({ uuid: "C2", name: "C2", parentUuid: "P" });
+
+    const nodes = store.getNodes();
+    nodes["P"] = deepClone(parent);
+    nodes["C0"] = deepClone(c0);
+    nodes["C1"] = deepClone(c1);
+    nodes["C2"] = deepClone(c2);
+
+    // Forward op deletes C1 and C2.
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["C1", "C2"] },
+      previousValue: null,
+      seq: 0,
+    };
+    // Inverse ops sorted by originalIndex ASC: C1 (index 1) first, C2 (index 2) second.
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "C1",
+        type: "create_node",
+        path: "",
+        value: deepClone(c1),
+        previousValue: null,
+        seq: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "C2",
+        type: "create_node",
+        path: "",
+        value: deepClone(c2),
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete C1, C2",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Apply forward op.
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    expect(store.getNodes()["C1"]).toBeUndefined();
+    expect(store.getNodes()["C2"]).toBeUndefined();
+    // Parent's childrenUuids should now hold only C0.
+    expect(store.getNodes()["P"]["childrenUuids"]).toEqual(["C0"]);
+
+    // Push and undo.
+    historyManager.pushTransaction(tx);
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+
+    // Both deleted children restored.
+    expect(store.getNodes()["C1"]).toBeDefined();
+    expect(store.getNodes()["C2"]).toBeDefined();
+    // The key invariant: parent.childrenUuids is back to [C0, C1, C2].
+    expect(store.getNodes()["P"]["childrenUuids"]).toEqual(["C0", "C1", "C2"]);
+  });
+
+  it("redo replays the delete_nodes forward op", () => {
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    const nodeA = makeTestNode({ uuid: "a", name: "Node A" });
+    const nodeB = makeTestNode({ uuid: "b", name: "Node B" });
+    store.getNodes()["a"] = deepClone(nodeA);
+    store.getNodes()["b"] = deepClone(nodeB);
+
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["a", "b"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "a",
+        type: "create_node",
+        path: "",
+        value: deepClone(nodeA),
+        previousValue: null,
+        seq: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "b",
+        type: "create_node",
+        path: "",
+        value: deepClone(nodeB),
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete 2 nodes",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Forward → both gone.
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    historyManager.pushTransaction(tx);
+
+    // Undo → both restored.
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+    expect(store.getNodes()["a"]).toBeDefined();
+    expect(store.getNodes()["b"]).toBeDefined();
+
+    // Redo → both deleted again.
+    const redoTx = historyManager.redo();
+    expect(redoTx).not.toBeNull();
+    if (redoTx === null) return;
+    expect(redoTx.operations).toHaveLength(1);
+    expect(redoTx.operations[0].type).toBe("delete_nodes");
+    for (const op of redoTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+    expect(store.getNodes()["a"]).toBeUndefined();
+    expect(store.getNodes()["b"]).toBeUndefined();
+  });
+});
