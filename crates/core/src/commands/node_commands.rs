@@ -173,10 +173,14 @@ impl FieldOperation for DeleteNodes {
                 retained.push((*node_id, *page_id));
             }
         }
-        debug_assert!(
-            !retained.is_empty(),
-            "validate() ensures non-empty input; dedup cannot empty it"
-        );
+        // Hard check: dedup must not produce an empty set when validate()
+        // guarantees a non-empty input. A debug_assert! would silently no-op
+        // in release builds (CLAUDE.md §11 "No Silent Error Suppression").
+        if retained.is_empty() {
+            return Err(CoreError::ValidationError(
+                "DeleteNodes: dedup produced empty set (validate invariant violated)".to_string(),
+            ));
+        }
 
         // ── 2. Capture snapshots BEFORE mutation ────────────────────────
         let mut snapshots: Vec<DeleteNodesSnapshot> = Vec::with_capacity(retained.len());
@@ -212,7 +216,11 @@ impl FieldOperation for DeleteNodes {
                 // branches will no-op below since parent_id and page_id are both None.
                 0
             };
-            let descendants = crate::tree::descendants(&doc.arena, *node_id)?;
+            let descendants = crate::tree::descendants(
+                &doc.arena,
+                *node_id,
+                crate::validate::MAX_NODE_TREE_DEPTH,
+            )?;
             let mut subtree_clone = Vec::with_capacity(descendants.len() + 1);
             for desc_id in &descendants {
                 subtree_clone.push((*desc_id, doc.arena.get(*desc_id)?.clone()));
@@ -244,18 +252,25 @@ impl FieldOperation for DeleteNodes {
             match delete_nodes_subtree(doc, snap) {
                 Ok(()) => completed.push(snap),
                 Err(e) => {
-                    // Rollback in reverse order. If rollback itself fails,
-                    // surface a compound error per CLAUDE.md §11 "No Silent
-                    // Error Suppression".
+                    // Rollback in reverse order. Accumulate any rollback
+                    // errors so callers see the full diagnostic trail
+                    // (CLAUDE.md §11 "No Silent Error Suppression"). Continue
+                    // attempting reinsertion of subsequent completed items
+                    // even if one rollback fails — abandoning rollback on
+                    // first failure would leave more items unrolled-back.
+                    let mut rollback_errors: Vec<CoreError> = Vec::new();
                     for done in completed.iter().rev() {
                         if let Err(rb_err) = reinsert_nodes_subtree(doc, done) {
-                            return Err(CoreError::ValidationError(format!(
-                                "DeleteNodes: rollback failed after primary error \
-                                 {e:?}: rollback error {rb_err:?}"
-                            )));
+                            rollback_errors.push(rb_err);
                         }
                     }
-                    return Err(e);
+                    if rollback_errors.is_empty() {
+                        return Err(e);
+                    }
+                    return Err(CoreError::RollbackFailed {
+                        primary: Box::new(e),
+                        rollback_errors,
+                    });
                 }
             }
         }
@@ -267,12 +282,18 @@ impl FieldOperation for DeleteNodes {
 /// Deletion order: page root cleanup → tree detach → descendant removal
 /// → root removal.
 fn delete_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<(), CoreError> {
-    if let Some(page_id) = snap.page_id
-        && let Ok(page) = doc.page_mut(page_id)
-    {
+    // Propagate page_mut errors instead of silently swallowing
+    // (CLAUDE.md §11 "No Silent Error Suppression"). A missing page during
+    // forward deletion is an invariant violation that must surface.
+    if let Some(page_id) = snap.page_id {
+        let page = doc.page_mut(page_id)?;
         page.root_nodes.retain(|nid| *nid != snap.node_id);
     }
-    let descendants = crate::tree::descendants(&doc.arena, snap.node_id)?;
+    let descendants = crate::tree::descendants(
+        &doc.arena,
+        snap.node_id,
+        crate::validate::MAX_NODE_TREE_DEPTH,
+    )?;
     crate::tree::remove_child(&mut doc.arena, snap.node_id)?;
     for desc_id in descendants {
         doc.arena.remove(desc_id)?;
@@ -300,10 +321,11 @@ fn reinsert_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Res
         let pos = snap.original_index.min(parent.children.len());
         parent.children.insert(pos, snap.node_id);
     }
-    // Restore page root entry.
-    if let Some(page_id) = snap.page_id
-        && let Ok(page) = doc.page_mut(page_id)
-    {
+    // Restore page root entry. Propagate page_mut errors instead of silently
+    // swallowing — a missing page during rollback is a critical invariant
+    // violation (CLAUDE.md §11 "No Silent Error Suppression").
+    if let Some(page_id) = snap.page_id {
+        let page = doc.page_mut(page_id)?;
         let pos = snap.original_index.min(page.root_nodes.len());
         page.root_nodes.insert(pos, snap.node_id);
     }
@@ -706,7 +728,10 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_nodes_validate_rejects_oversized_batch() {
+    fn test_max_nodes_per_delete_batch_enforced() {
+        // Per CLAUDE.md §11 "Constant Enforcement Tests": this test rejects a real
+        // out-of-range input (not a tautology). Per the PR #67 amendment, this is
+        // the canonical _enforced test for MAX_NODES_PER_DELETE_BATCH.
         let doc = Document::new("Test".to_string());
         let oversize = crate::validate::MAX_NODES_PER_DELETE_BATCH + 1;
         let targets: Vec<(NodeId, Option<PageId>)> = (0..oversize)
@@ -719,26 +744,10 @@ mod tests {
             .collect();
         let op = DeleteNodes { targets };
         let err = op.validate(&doc).expect_err("oversized batch must error");
-        assert!(format!("{err:?}").to_lowercase().contains("batch"));
-    }
-
-    #[test]
-    fn test_max_nodes_per_delete_batch_enforced() {
-        // Per CLAUDE.md §11 "Constant Enforcement Tests": this test rejects a real
-        // out-of-range input (not a tautology). Per the PR #67 amendment, this is
-        // the real enforcement test for MAX_NODES_PER_DELETE_BATCH.
-        let doc = Document::new("Test".to_string());
-        let oversize = crate::validate::MAX_NODES_PER_DELETE_BATCH + 1;
-        let targets: Vec<(NodeId, Option<PageId>)> = (0..oversize)
-            .map(|i| {
-                (
-                    NodeId::new(u32::try_from(i & 0xffff_ffff).unwrap(), 0),
-                    None,
-                )
-            })
-            .collect();
-        let op = DeleteNodes { targets };
-        assert!(op.validate(&doc).is_err());
+        assert!(
+            format!("{err:?}").to_lowercase().contains("batch"),
+            "expected 'batch' in error: {err:?}"
+        );
     }
 
     #[test]
@@ -988,7 +997,9 @@ mod tests {
         let initial_page_roots = doc.page(page_id).unwrap().root_nodes.clone();
 
         // Build a snapshot the same way DeleteNodes::apply does.
-        let descendants = crate::tree::descendants(&doc.arena, parent_id).expect("descendants");
+        let descendants =
+            crate::tree::descendants(&doc.arena, parent_id, crate::validate::MAX_NODE_TREE_DEPTH)
+                .expect("descendants");
         let mut subtree_clone = Vec::with_capacity(descendants.len() + 1);
         for desc_id in &descendants {
             subtree_clone.push((*desc_id, doc.arena.get(*desc_id).unwrap().clone()));

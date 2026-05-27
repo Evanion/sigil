@@ -57,6 +57,19 @@ pub enum CoreError {
 
     #[error("page not found: {0:?}")]
     PageNotFound(PageId),
+
+    /// Tree-walk depth exceeded the configured limit (Spec 19 §9).
+    #[error("tree depth limit exceeded: limit {limit}, at node {node_id:?}")]
+    TreeDepthExceeded { limit: usize, node_id: NodeId },
+
+    /// A multi-item mutation failed mid-loop AND its rollback also failed.
+    /// Carries the primary failure plus every per-item rollback failure for
+    /// diagnostic completeness. Per CLAUDE.md §11 "No Silent Error Suppression".
+    #[error("rollback failed: primary error: {primary:?}; rollback errors: {rollback_errors:?}")]
+    RollbackFailed {
+        primary: Box<CoreError>,
+        rollback_errors: Vec<CoreError>,
+    },
 }
 
 #[cfg(test)]
@@ -176,6 +189,42 @@ mod tests {
         };
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_tree_depth_exceeded_displays_limit_and_node() {
+        let id = NodeId {
+            index: 7,
+            generation: 1,
+        };
+        let err = CoreError::TreeDepthExceeded {
+            limit: 64,
+            node_id: id,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("tree depth"), "expected prefix: {msg}");
+        assert!(msg.contains("64"), "expected limit in message: {msg}");
+    }
+
+    #[test]
+    fn test_rollback_failed_carries_primary_and_rollback_errors() {
+        let primary = CoreError::ValidationError("primary".to_string());
+        let rb_err = CoreError::ValidationError("rollback".to_string());
+        let compound = CoreError::RollbackFailed {
+            primary: Box::new(primary),
+            rollback_errors: vec![rb_err],
+        };
+        match compound {
+            CoreError::RollbackFailed {
+                primary,
+                rollback_errors,
+            } => {
+                assert!(matches!(*primary, CoreError::ValidationError(_)));
+                assert_eq!(rollback_errors.len(), 1);
+                assert!(matches!(rollback_errors[0], CoreError::ValidationError(_)));
+            }
+            _ => panic!("expected RollbackFailed"),
+        }
     }
 
     #[test]
