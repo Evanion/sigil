@@ -141,6 +141,36 @@ export interface DeleteNodesValue {
 }
 
 /**
+ * Spec 19: Inverse-of-delete restore metadata embedded in a create_node
+ * operation's `value` (which is otherwise a `MutableDocumentNode` snapshot).
+ *
+ * When a `create_node` op is built as the inverse of `delete_nodes`,
+ * the value spreads the node snapshot AND adds these fields:
+ *
+ *   - `originalIndex`: position in `parent.childrenUuids` (or in
+ *     `page.rootNodeUuids` when the node was a page root). Consumed by
+ *     `applyCreateNode` in `apply-to-store.ts` and `apply-remote.ts` so
+ *     undo restores the sibling at its original position instead of
+ *     appending. Without this, a middle-sibling delete + undo cycle
+ *     reorders the parent's children (e.g., [C0, C1, C2] → [C0, C2, C1]).
+ *
+ *   - `pageId`: identifies the page whose `rootNodeUuids` array must be
+ *     updated when restoring a page-root node (i.e. when `parentUuid` is
+ *     null). Without this, undo restores the node to `state.nodes` but
+ *     leaves it absent from every page's `rootNodeUuids` array — the
+ *     restored node has no rendering context.
+ *
+ * Both fields are optional. Forward creates omit them; the inverse-of-delete
+ * path supplies them. Field names are top-level on the snapshot value
+ * (not namespaced) to match how `applyCreateNode` reads `originalIndex`
+ * via `nodeData["originalIndex"]`.
+ */
+export interface CreateNodeRestoreMetadata {
+  readonly originalIndex?: number;
+  readonly pageId?: string | null;
+}
+
+/**
  * Create page operation value payload.
  * Stored in Operation.value for type="create_page".
  */

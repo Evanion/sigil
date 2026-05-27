@@ -1077,5 +1077,185 @@ describe("applyRemoteTransaction", () => {
         dispose();
       });
     });
+
+    // ── Spec 19 Batch A regression tests ────────────────────────────────
+
+    it("removes descendants from store and page roots on remote delete_nodes (RF-003)", () => {
+      // Bug scenario: remote broadcast arrives carrying only the deleted
+      // *root* UUIDs (the server's core engine removed descendants
+      // transitively, so the payload omits them). The remote handler must
+      // walk each root's subtree locally and remove every descendant,
+      // AND strip the deleted UUIDs from the page's rootNodeUuids — without
+      // this, remote clients leak dangling nodes and ghost page-root entries.
+      createRoot((dispose) => {
+        const grandchild = makeNode("GC", { parentUuid: "C", childrenUuids: [] });
+        const child = makeNode("C", { parentUuid: "F", childrenUuids: ["GC"] });
+        const frame = makeNode("F", { parentUuid: null, childrenUuids: ["C"] });
+        const [state, setState] = createStore<StoreState>({
+          nodes: { F: frame, C: child, GC: grandchild },
+          pages: [{ id: "page-1", name: "Page", root_nodes: [], rootNodeUuids: ["F"] }],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        // Payload carries only the root — descendants are implicit.
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: ["F"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // F, C, GC all gone from state.nodes.
+        expect(state.nodes["F"]).toBeUndefined();
+        expect(state.nodes["C"]).toBeUndefined();
+        expect(state.nodes["GC"]).toBeUndefined();
+        // Page no longer references the deleted root.
+        expect(state.pages[0].rootNodeUuids).toEqual([]);
+        dispose();
+      });
+    });
+
+    it("rejects malformed payload with non-string elements (RF-010)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeNode("node-1") },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        // Mixed-type elements: number, null, string — must reject without
+        // partial application of the string element.
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: [42, null, "node-1"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // node-1 must survive — no partial application.
+        expect(state.nodes["node-1"]).toBeDefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("non-string element"),
+          expect.objectContaining({ value: expect.anything() }),
+        );
+        dispose();
+      });
+      warnSpy.mockRestore();
+    });
+
+    it("emits structured warn when a uuid is missing from the store (RF-023)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeNode("node-1") },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: ["node-1", "node-missing"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // node-1 deleted, missing uuid warned.
+        expect(state.nodes["node-1"]).toBeUndefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("not in store"),
+          expect.objectContaining({ uuid: "node-missing" }),
+        );
+        dispose();
+      });
+      warnSpy.mockRestore();
+    });
+
+    it("restores page-root membership on create_node with pageId (RF-002)", () => {
+      // The inverse of a page-root delete is a create_node op whose value
+      // carries pageId + originalIndex. The handler must insert the uuid
+      // back into page.rootNodeUuids at originalIndex.
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [{ id: "page-1", name: "Page", root_nodes: [], rootNodeUuids: ["R0", "R2"] }],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "create_node",
+              nodeUuid: "",
+              path: null,
+              value: {
+                uuid: "R1",
+                name: "R1",
+                kind: {
+                  type: "rectangle",
+                  corners: [
+                    { type: "round", radii: { x: 0, y: 0 } },
+                    { type: "round", radii: { x: 0, y: 0 } },
+                    { type: "round", radii: { x: 0, y: 0 } },
+                    { type: "round", radii: { x: 0, y: 0 } },
+                  ],
+                },
+                transform: {
+                  x: 0,
+                  y: 0,
+                  width: 100,
+                  height: 100,
+                  rotation: 0,
+                  scale_x: 1,
+                  scale_y: 1,
+                },
+                parent: null,
+                parentUuid: null,
+                childrenUuids: [],
+                originalIndex: 1,
+                pageId: "page-1",
+              },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        // Node added to store and inserted at the original page-root index.
+        expect(state.nodes["R1"]).toBeDefined();
+        expect(state.pages[0].rootNodeUuids).toEqual(["R0", "R1", "R2"]);
+        dispose();
+      });
+    });
   });
 });

@@ -408,13 +408,21 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
       };
     case "create_node": {
       const nodeData = op.value as Record<string, unknown>;
+      // Spec 19 (RF-002): forward pageId from the snapshot when this
+      // create_node is the inverse of a delete_nodes for a page-root node.
+      // The server's CreateNodeInput.page_id ensures the restored node
+      // is re-added to the correct page's root_nodes — without this,
+      // remote clients see a "ghost" node present in state.nodes but
+      // absent from every page's rootNodeUuids.
+      const rawPageId = nodeData["pageId"];
+      const pageId = typeof rawPageId === "string" ? rawPageId : null;
       return {
         createNode: {
           nodeUuid: (nodeData["uuid"] as string) ?? "",
           kind: JSON.stringify(nodeData["kind"]),
           name: (nodeData["name"] as string) ?? "",
           transform: JSON.stringify(nodeData["transform"]),
-          pageId: null,
+          pageId,
         },
       };
     }
@@ -920,65 +928,117 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     if (retained.length === 0) return;
 
     // ── Step 2: capture snapshots BEFORE mutation ───────────────────
+    //
+    // Spec 19 (RF-001 / RF-002): the snapshot must capture EVERY node
+    // in each retained subtree (root + every descendant), with each
+    // node's parentUuid, originalIndex, and pageId. The inverse
+    // create_node ops use this to restore both `state.nodes` AND
+    // `parent.childrenUuids` AND `page.rootNodeUuids` on undo.
     interface DeleteSnapshot {
       uuid: string;
       parentUuid: string | null;
       originalIndex: number;
+      // pageId is non-null only when the node is a page root (parentUuid === null
+      // AND the node appears in some page's rootNodeUuids). It identifies the
+      // page whose rootNodeUuids must be restored on undo.
       pageId: string | null;
-      pageIndex: number | null;
       nodeSnapshot: MutableDocumentNode;
     }
 
-    const snapshots: DeleteSnapshot[] = retained.map((uuid) => {
+    // Pre-compute uuid → pageId map for top-level lookup (avoid O(P*N) scan).
+    const uuidToPageId = new Map<string, string>();
+    for (const page of state.pages) {
+      for (const rootUuid of page.rootNodeUuids ?? []) {
+        uuidToPageId.set(rootUuid, page.id);
+      }
+    }
+
+    // Walk each retained root's full subtree and capture per-node snapshots.
+    // Iterative walk via stack avoids the recursion-depth guard parity
+    // problem; we still enforce MAX_SUBTREE_DEPTH explicitly via the depth
+    // tracked alongside each stack frame.
+    const MAX_SUBTREE_DEPTH = 64;
+    const snapshots: DeleteSnapshot[] = [];
+    const deletedUuids = new Set<string>();
+    const seenForSnapshot = new Set<string>();
+
+    interface WalkFrame {
+      uuid: string;
+      depth: number;
+    }
+    const walkStack: WalkFrame[] = retained.map((u) => ({ uuid: u, depth: 0 }));
+
+    while (walkStack.length > 0) {
+      const frame = walkStack.pop();
+      if (!frame) break;
+      const { uuid, depth } = frame;
+      if (depth >= MAX_SUBTREE_DEPTH) {
+        console.warn("store.deleteNodes: subtree depth limit reached, descendants skipped", {
+          uuid,
+          depth,
+          MAX_SUBTREE_DEPTH,
+        });
+        continue;
+      }
+      if (seenForSnapshot.has(uuid)) continue;
       const node = state.nodes[uuid];
-      const parentUuid = node?.parentUuid ?? null;
-      const originalIndex = parentUuid
-        ? (state.nodes[parentUuid]?.childrenUuids?.indexOf(uuid) ?? 0)
-        : 0;
+      if (!node) continue;
+      seenForSnapshot.add(uuid);
+      deletedUuids.add(uuid);
+
+      const parentUuid = node.parentUuid ?? null;
+      // Compute originalIndex against the parent's childrenUuids when
+      // there is a parent; against the page's rootNodeUuids when the node
+      // is a page root; default to 0 if neither location is found.
+      let originalIndex = 0;
       let pageId: string | null = null;
-      let pageIndex: number | null = null;
-      for (const page of state.pages) {
-        const idx = page.rootNodeUuids?.indexOf(uuid) ?? -1;
-        if (idx >= 0) {
-          pageId = page.id;
-          pageIndex = idx;
-          break;
+      if (parentUuid) {
+        const parent = state.nodes[parentUuid];
+        if (parent) {
+          const idx = parent.childrenUuids?.indexOf(uuid) ?? -1;
+          if (idx >= 0) originalIndex = idx;
+        }
+      } else {
+        // Page-root candidate. Look up which page owns it.
+        const owningPage = uuidToPageId.get(uuid);
+        if (owningPage !== undefined) {
+          pageId = owningPage;
+          const page = state.pages.find((p) => p.id === owningPage);
+          const idx = page?.rootNodeUuids?.indexOf(uuid) ?? -1;
+          if (idx >= 0) originalIndex = idx;
         }
       }
+
       // deepClone uses JSON round-trip (Solid proxy not structuredClone-safe).
       const nodeSnapshot = deepClone(node) as MutableDocumentNode;
-      return { uuid, parentUuid, originalIndex, pageId, pageIndex, nodeSnapshot };
-    });
+      snapshots.push({ uuid, parentUuid, originalIndex, pageId, nodeSnapshot });
 
-    // Collect all descendant UUIDs to filter from selection. Walk each
-    // retained node's subtree from the live store before mutation.
-    const deletedUuids = new Set<string>();
-    const MAX_SUBTREE_DEPTH = 64;
-    const collectSubtree = (uuid: string, depth: number): void => {
-      if (depth >= MAX_SUBTREE_DEPTH) return;
-      const n = state.nodes[uuid];
-      if (!n) return;
-      deletedUuids.add(uuid);
-      for (const cuuid of n.childrenUuids ?? []) {
-        collectSubtree(cuuid, depth + 1);
+      // Enqueue children for snapshot capture.
+      for (const cuuid of node.childrenUuids ?? []) {
+        walkStack.push({ uuid: cuuid, depth: depth + 1 });
       }
-    };
-    for (const snap of snapshots) {
-      collectSubtree(snap.uuid, 0);
     }
 
     // ── Step 3: local mutation ──────────────────────────────────────
+    //
+    // Only detach the *retained roots* from their parents / page roots —
+    // descendants are removed transitively when we delete them from
+    // `s.nodes`, and their parent (also being deleted) will not survive
+    // to need its childrenUuids trimmed.
+    const retainedSet = new Set(retained);
     setState(
       produce((s) => {
         for (const snap of snapshots) {
-          // Detach from parent
+          if (!retainedSet.has(snap.uuid)) continue;
+          // Detach from parent (only relevant for retained roots whose
+          // parent survives the deletion).
           if (snap.parentUuid) {
             const parent = s.nodes[snap.parentUuid];
             if (parent) {
               parent.childrenUuids = parent.childrenUuids.filter((id) => id !== snap.uuid);
             }
           }
-          // Detach from page roots
+          // Detach from page roots.
           if (snap.pageId) {
             const page = s.pages.find((p) => p.id === snap.pageId);
             if (page) {
@@ -986,7 +1046,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
             }
           }
         }
-        // Remove every node (retained + descendants) from the nodes map.
+        // Remove every node (retained roots + every descendant) from the nodes map.
         for (const duuid of deletedUuids) {
           Reflect.deleteProperty(s.nodes, duuid);
         }
@@ -994,29 +1054,57 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     );
 
     // ── Step 4: build transaction with explicit inverseOperations ───
-    const forwardOp = createDeleteNodesOp(
-      clientSessionId,
-      snapshots.map((s) => s.uuid),
-    );
+    //
+    // Forward op carries only the retained roots — the server's core
+    // engine removes descendants transitively (mirrors `DeleteNodes::apply`).
+    const forwardOp = createDeleteNodesOp(clientSessionId, retained);
 
-    // Sort by (parentUuid, originalIndex ASC) so inverse create_node ops
-    // restore siblings in original order.
+    // Inverse ops must be applied PARENT-BEFORE-CHILD so each child's
+    // parentUuid resolves to an existing node when applyCreateNode wires up
+    // parent.childrenUuids. Within a parent group, children must be sorted
+    // by originalIndex ASC so applyCreateNode's insert-at-originalIndex
+    // (or page.rootNodeUuids insert) replays sibling order correctly.
+    //
+    // Topological sort: build a uuid → snapshot index map, then walk each
+    // snapshot up its parent chain to compute the depth from the
+    // *snapshotted* tree (not the live store, which is now mutated). Sort
+    // by (depth ASC, parentUuid, originalIndex ASC).
+    const snapByUuid = new Map<string, DeleteSnapshot>();
+    for (const snap of snapshots) snapByUuid.set(snap.uuid, snap);
+    const depthCache = new Map<string, number>();
+    const computeDepth = (uuid: string): number => {
+      const cached = depthCache.get(uuid);
+      if (cached !== undefined) return cached;
+      const snap = snapByUuid.get(uuid);
+      // Root of a captured subtree (parent not in snapshot set, or no
+      // parent at all): depth 0. Otherwise: parent depth + 1.
+      let depth = 0;
+      if (snap && snap.parentUuid && snapByUuid.has(snap.parentUuid)) {
+        depth = computeDepth(snap.parentUuid) + 1;
+      }
+      depthCache.set(uuid, depth);
+      return depth;
+    };
     const sortedForInverse = [...snapshots].sort((a, b) => {
+      const da = computeDepth(a.uuid);
+      const db = computeDepth(b.uuid);
+      if (da !== db) return da - db;
       const pa = a.parentUuid ?? "";
       const pb = b.parentUuid ?? "";
       if (pa !== pb) return pa.localeCompare(pb);
       return a.originalIndex - b.originalIndex;
     });
-    // Spec 19: tag each inverse create_node snapshot with its originalIndex
-    // so applyCreateNode (apply-to-store.ts / apply-remote.ts) inserts at
-    // the original sibling position on undo instead of appending. Without
-    // this tag, undo of a middle-sibling delete reorders the parent's
-    // childrenUuids (e.g., [C0, C1, C2] becomes [C0, C2, C1] after a
-    // delete-C1 + undo cycle).
+
+    // Tag each inverse create_node snapshot with its `originalIndex` AND
+    // its `pageId` (null for non-page-roots, the owning page id for page
+    // roots). applyCreateNode in apply-to-store.ts / apply-remote.ts
+    // consumes both to restore parent.childrenUuids (for nested nodes)
+    // and page.rootNodeUuids (for page roots) at their original positions.
     const inverseOps = sortedForInverse.map((snap) =>
       createCreateNodeOp(clientSessionId, {
         ...(snap.nodeSnapshot as Record<string, unknown>),
         originalIndex: snap.originalIndex,
+        pageId: snap.pageId,
       }),
     );
 
@@ -1025,7 +1113,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       userId: clientSessionId,
       operations: [forwardOp],
       inverseOperations: inverseOps,
-      description: `Delete ${snapshots.length} node${snapshots.length > 1 ? "s" : ""}`,
+      description: `Delete ${retained.length} node${retained.length > 1 ? "s" : ""}`,
       timestamp: Date.now(),
       seq: 0,
     });
@@ -1038,8 +1126,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // ── Step 6: send to server ──────────────────────────────────────
     // Structural ops send immediately (not coalesced) — must reach server
-    // before any undo attempt.
-    sendOps([{ deleteNodes: { nodeUuids: snapshots.map((s) => s.uuid) } }]);
+    // before any undo attempt. Send only the retained roots; the core
+    // engine removes descendants transitively.
+    sendOps([{ deleteNodes: { nodeUuids: [...retained] } }]);
   }
 
   function setVisible(uuid: string, visible: boolean): void {

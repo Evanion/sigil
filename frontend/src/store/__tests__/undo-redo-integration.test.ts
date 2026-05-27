@@ -73,10 +73,14 @@ function makeTestNode(overrides: Record<string, unknown> = {}): Record<string, u
  * the latest state.
  */
 function createTestStore() {
-  const storeData: Record<string, Record<string, unknown>> = { nodes: {} };
+  const storeData: Record<string, unknown> = { nodes: {}, pages: [] };
 
   function getNodes(): Record<string, Record<string, unknown>> {
     return storeData["nodes"] as Record<string, Record<string, unknown>>;
+  }
+
+  function getPages(): Array<Record<string, unknown>> {
+    return storeData["pages"] as Array<Record<string, unknown>>;
   }
 
   const reader: StoreStateReader = {
@@ -118,7 +122,7 @@ function createTestStore() {
     }
   }
 
-  return { storeData, getNodes, reader, setState };
+  return { storeData, getNodes, getPages, reader, setState };
 }
 
 /** Helper: apply op to store and track in HistoryManager. */
@@ -788,5 +792,204 @@ describe("deleteNodes — undo/redo integration (Spec 19)", () => {
     }
     expect(store.getNodes()["a"]).toBeUndefined();
     expect(store.getNodes()["b"]).toBeUndefined();
+  });
+
+  // ── Batch A regression tests (Spec 19 RF-001 / RF-002) ───────────────
+
+  it("restores descendants on undo of a parent delete (RF-001)", () => {
+    // Bug scenario: deleting a parent must capture the full subtree so
+    // that undo restores every descendant — not just the retained root.
+    // Spec 19 RF-001 (precedent): the old inverse contract snapshotted
+    // only retained roots; descendants were permanently lost on undo.
+    //
+    // Build: frame F → child rect C → grandchild rect GC.
+    // Forward: deleteNodes([F]) (mirroring what store.deleteNodes will
+    //   emit: only the retained root in the forward op).
+    // Inverse: three create_node ops, in parent-before-child order, each
+    //   carrying originalIndex so applyCreateNode wires up
+    //   parent.childrenUuids at the original position.
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    const frame = makeTestNode({
+      uuid: "F",
+      name: "Frame",
+      parentUuid: null,
+      childrenUuids: ["C"],
+    });
+    const child = makeTestNode({
+      uuid: "C",
+      name: "Child",
+      parentUuid: "F",
+      childrenUuids: ["GC"],
+    });
+    const grandchild = makeTestNode({
+      uuid: "GC",
+      name: "Grandchild",
+      parentUuid: "C",
+      childrenUuids: [],
+    });
+
+    const nodes = store.getNodes();
+    nodes["F"] = deepClone(frame);
+    nodes["C"] = deepClone(child);
+    nodes["GC"] = deepClone(grandchild);
+
+    // Forward op carries only F (the retained root); the apply path
+    // walks the subtree locally to remove C and GC as well.
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["F"] },
+      previousValue: null,
+      seq: 0,
+    };
+    // Inverse: parent-before-child, each carrying originalIndex and
+    // the snapshotted parentUuid/childrenUuids.
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "F",
+        type: "create_node",
+        path: "",
+        value: { ...deepClone(frame), originalIndex: 0, pageId: null },
+        previousValue: null,
+        seq: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "C",
+        type: "create_node",
+        path: "",
+        value: { ...deepClone(child), originalIndex: 0, pageId: null },
+        previousValue: null,
+        seq: 0,
+      },
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "GC",
+        type: "create_node",
+        path: "",
+        value: { ...deepClone(grandchild), originalIndex: 0, pageId: null },
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete Frame",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Apply forward: F, C, GC all gone (handler walks subtree).
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    expect(store.getNodes()["F"]).toBeUndefined();
+    expect(store.getNodes()["C"]).toBeUndefined();
+    expect(store.getNodes()["GC"]).toBeUndefined();
+
+    historyManager.pushTransaction(tx);
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+    expect(inverseTx.operations).toHaveLength(3);
+
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+
+    // All three nodes restored AND parent.childrenUuids correctly wired.
+    expect(store.getNodes()["F"]).toBeDefined();
+    expect(store.getNodes()["C"]).toBeDefined();
+    expect(store.getNodes()["GC"]).toBeDefined();
+    expect(store.getNodes()["F"]["childrenUuids"]).toEqual(["C"]);
+    expect(store.getNodes()["C"]["childrenUuids"]).toEqual(["GC"]);
+  });
+
+  it("restores page-root membership on undo of a top-level delete (RF-002)", () => {
+    // Bug scenario: deleting a page-root node must capture pageId in the
+    // inverse so that undo restores both state.nodes AND
+    // page.rootNodeUuids. Without pageId, the restored node is a "ghost"
+    // — present in state.nodes but absent from every page's root.
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    const r0 = makeTestNode({ uuid: "R0", name: "R0", parentUuid: null });
+    const r1 = makeTestNode({ uuid: "R1", name: "R1", parentUuid: null });
+    const r2 = makeTestNode({ uuid: "R2", name: "R2", parentUuid: null });
+
+    const nodes = store.getNodes();
+    nodes["R0"] = deepClone(r0);
+    nodes["R1"] = deepClone(r1);
+    nodes["R2"] = deepClone(r2);
+
+    const pages = store.getPages();
+    pages.push({
+      id: "page-1",
+      name: "Page",
+      root_nodes: [],
+      rootNodeUuids: ["R0", "R1", "R2"],
+    });
+
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["R1"] },
+      previousValue: null,
+      seq: 0,
+    };
+    // Inverse op carries pageId + originalIndex so applyCreateNode
+    // restores R1 to page.rootNodeUuids at index 1.
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "R1",
+        type: "create_node",
+        path: "",
+        value: { ...deepClone(r1), originalIndex: 1, pageId: "page-1" },
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete R1",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Apply forward — R1 removed from state.nodes AND from page roots.
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    expect(store.getNodes()["R1"]).toBeUndefined();
+    expect(pages[0]["rootNodeUuids"]).toEqual(["R0", "R2"]);
+
+    historyManager.pushTransaction(tx);
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+
+    // R1 restored AND page.rootNodeUuids back to [R0, R1, R2].
+    expect(store.getNodes()["R1"]).toBeDefined();
+    expect(pages[0]["rootNodeUuids"]).toEqual(["R0", "R1", "R2"]);
   });
 });
