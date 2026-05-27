@@ -841,8 +841,16 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
-    // Track structural operation for undo
-    interceptor.trackStructural(createCreateNodeOp(clientSessionId, nodeData));
+    // Track structural operation for undo. Per RF-012, inverseType throws
+    // for create_node — its inverse must be carried explicitly via
+    // combineWith (forward = create_node, inverse = delete_nodes([uuid])).
+    // Without this, HistoryManager.undo() catches the inverseType throw and
+    // silently no-ops, leaving the created node unredoably present after
+    // Ctrl+Z. Same pattern as ungroupNodes' delete (Batch F).
+    interceptor.combineWith(
+      createCreateNodeOp(clientSessionId, nodeData),
+      createDeleteNodesOp(clientSessionId, [optimisticUuid]),
+    );
 
     // Structural ops send immediately — they MUST reach the server before any
     // undo attempt. Field changes (coalesced via pendingServerOps) can be deferred,
@@ -1753,8 +1761,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
-    // Track structural: create group + reparent each child + transform adjustments
-    interceptor.trackStructural(createCreateNodeOp(clientSessionId, deepClone(groupNodeData)));
+    // Track structural: create group + reparent each child + transform adjustments.
+    // Per RF-012, create_node has no per-op flip — its inverse rides via
+    // combineWith. Mirrors the createNode store function's pattern.
+    interceptor.combineWith(
+      createCreateNodeOp(clientSessionId, deepClone(groupNodeData)),
+      createDeleteNodesOp(clientSessionId, [groupUuid]),
+    );
     for (const snap of childSnapshots) {
       interceptor.trackStructural(
         createReparentOp(

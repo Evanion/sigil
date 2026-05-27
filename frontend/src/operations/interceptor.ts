@@ -282,12 +282,21 @@ export function createInterceptor(
         ),
       );
     }
-    // RF-011: Final forward op order — field ops, then trackStructural ops,
-    // then combineWith forward ops. The combineWith ops typically describe
-    // a "finalize" step (e.g., delete the now-empty group) so they belong
-    // at the tail of the transaction.
-    const combinedForwards = combinedOps.map((c) => c.forward);
-    const ops: Operation[] = [...fieldOps, ...structuralBuffer, ...combinedForwards];
+    // RF-011 / RF-012: combineWith ops are positioned by causal role:
+    // - create_node forwards must run BEFORE other ops (the node must
+    //   exist before subsequent reparents target it).
+    // - delete_nodes forwards must run AFTER other ops (e.g., the
+    //   ungroup case where the group is emptied first and only then
+    //   deleted).
+    // Partition by forward op type and place each group accordingly.
+    const createCombined = combinedOps.filter((c) => c.forward.type === "create_node");
+    const deleteCombined = combinedOps.filter((c) => c.forward.type === "delete_nodes");
+    const ops: Operation[] = [
+      ...createCombined.map((c) => c.forward),
+      ...fieldOps,
+      ...structuralBuffer,
+      ...deleteCombined.map((c) => c.forward),
+    ];
 
     if (ops.length === 0) return;
 
@@ -299,25 +308,31 @@ export function createInterceptor(
       ops.length = MAX_OPERATIONS_PER_TRANSACTION;
     }
 
-    // RF-011: If any combineWith pair contributed to this transaction,
-    // build a complete `inverseOperations` array spanning EVERY forward op.
-    // Per-op flip cannot represent the combineWith inverses (e.g.,
-    // `delete_nodes` ↔ `create_node`), so we must compose the full inverse
-    // ourselves rather than rely on `createInverseTransaction`'s fallback
-    // path. The inverse runs in reverse order of forward application:
-    // undo combineWith ops first (delete→create), then trackStructural ops
-    // (reparent back), then field ops.
+    // RF-011 / RF-012: If any combineWith pair contributed, build a complete
+    // `inverseOperations` array spanning EVERY forward op. Per-op flip cannot
+    // represent combineWith inverses, so we compose the full inverse here.
+    // Order is reverse of forward (which itself was partitioned above):
+    //   forward = [createCombined.forwards, fieldOps, structuralBuffer, deleteCombined.forwards]
+    //   inverse = [deleteCombined.inverses, structural-reverses, fieldOps-reverses, createCombined.inverses]
+    // For groupNodes (create_node combined): structurals undo BEFORE the
+    // delete_nodes inverse, so reparents move children back before the now-
+    // empty group is removed.
+    // For ungroupNodes (delete_nodes combined): the create_node inverse runs
+    // FIRST so the group exists before reparents reattach the children.
     let inverseOperations: readonly Operation[] | undefined;
     if (combinedOps.length > 0) {
       const inverses: Operation[] = [];
-      for (let i = combinedOps.length - 1; i >= 0; i--) {
-        inverses.push(combinedOps[i].inverse);
+      for (let i = deleteCombined.length - 1; i >= 0; i--) {
+        inverses.push(deleteCombined[i].inverse);
       }
       for (let i = structuralBuffer.length - 1; i >= 0; i--) {
         inverses.push(createInverse(structuralBuffer[i]));
       }
       for (let i = fieldOps.length - 1; i >= 0; i--) {
         inverses.push(createInverse(fieldOps[i]));
+      }
+      for (let i = createCombined.length - 1; i >= 0; i--) {
+        inverses.push(createCombined[i].inverse);
       }
       inverseOperations = inverses;
     }

@@ -1352,6 +1352,82 @@ describe("ungroupNodes — single undo step (Spec 19 RF-011)", () => {
     }
   });
 
+  it("createNode is undoable (RF-012 regression — create_node needs explicit inverse)", async () => {
+    // Regression test for the latent bug surfaced after Batch D made
+    // inverseType throw for create_node: any store.createNode call that
+    // used trackStructural produced a transaction whose undo silently
+    // no-op'd via HistoryManager's try/catch. The fix is to route the
+    // create through combineWith with an explicit delete_nodes inverse
+    // (mirrors ungroupNodes' pattern).
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const uuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "R1",
+        sampleTransform as never,
+      );
+      // Wait for the coalesce window to commit.
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      expect(store.state.nodes[uuid]).toBeDefined();
+      expect(store.canUndo()).toBe(true);
+
+      // ONE Ctrl+Z must remove the created node. Pre-fix, undo silently
+      // no-op'd because inverseType("create_node") threw and HistoryManager
+      // caught it.
+      store.undo();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(store.state.nodes[uuid]).toBeUndefined();
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("groupNodes is undoable (RF-012 regression — same shape as createNode)", async () => {
+    // The group node's create_node tracked via combineWith — undo restores
+    // pre-group state (no group node).
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const child1 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C1",
+        sampleTransform as never,
+      );
+      const child2 = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C2",
+        sampleTransform as never,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 150));
+
+      store.groupNodes([child1, child2], "G");
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const groupUuid = store.selectedNodeIds()[0];
+      expect(store.state.nodes[groupUuid]).toBeDefined();
+
+      // Undo must remove the group AND reparent children back to their
+      // original parents (null in this case, since they were root-level).
+      store.undo();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      expect(store.state.nodes[groupUuid]).toBeUndefined();
+      // Root-level parent is represented as null OR empty string depending
+      // on whether the reparent op's previousValue path serialized it; both
+      // signal "no parent" to the rendering logic.
+      const c1Parent = store.state.nodes[child1]?.parentUuid;
+      const c2Parent = store.state.nodes[child2]?.parentUuid;
+      expect(c1Parent === null || c1Parent === "").toBe(true);
+      expect(c2Parent === null || c2Parent === "").toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
   it("one undo restores the group with its children attached (coherent state)", async () => {
     const store = createDocumentStoreSolid();
     try {
