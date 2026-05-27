@@ -100,10 +100,10 @@ No AI tool reads this path today, but this positions Sigil for when the MCP ecos
 
 ### What does NOT change
 
-- `agent-designer-core`: unchanged (pure logic, no I/O)
-- `agent-designer-state`: unchanged (in-memory state, transport-agnostic)
-- `agent-designer-mcp`: unchanged (tool definitions are transport-agnostic)
-- `agent-designer-server`: HTTP routes and GraphQL schema unchanged
+- `sigil-core`: unchanged (pure logic, no I/O)
+- `sigil-state`: unchanged (in-memory state, transport-agnostic)
+- `sigil-mcp`: unchanged (tool definitions are transport-agnostic)
+- `sigil-server`: HTTP routes and GraphQL schema unchanged
 - `frontend/`: SPA code unchanged (runs in webview instead of browser tab)
 - File format: `.sigil/` workfiles unchanged
 - MCP tool interface: unchanged

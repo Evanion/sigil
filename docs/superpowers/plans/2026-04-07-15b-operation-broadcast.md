@@ -212,7 +212,7 @@ impl TransactionAppliedEvent {
     /// Converts a state-crate TransactionPayload into a GraphQL event.
     #[must_use]
     pub fn from_transaction(
-        tx: &agent_designer_state::TransactionPayload,
+        tx: &sigil_state::TransactionPayload,
         kind: DocumentEventType,
         uuid: Option<String>,
     ) -> Self {

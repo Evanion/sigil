@@ -20,7 +20,7 @@ pub enum McpToolError {
     TokenNotFound(String),
 
     #[error("core engine error: {0}")]
-    CoreError(#[from] agent_designer_core::CoreError),
+    CoreError(#[from] sigil_core::CoreError),
 
     #[error("invalid input: {0}")]
     InvalidInput(String),

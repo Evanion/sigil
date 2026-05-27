@@ -8,11 +8,11 @@
 //! and deserialized into `TokenValue` inside the tool. Validation is performed
 //! by `Token::new` (which calls `validate_token_name` and `validate_token_value`).
 
-use agent_designer_core::{
+use sigil_core::{
     FieldOperation, Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, RenameToken, UpdateToken},
 };
-use agent_designer_state::{AppState, MutationEventKind};
+use sigil_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -278,7 +278,7 @@ pub fn rename_token_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_state::AppState;
+    use sigil_state::AppState;
 
     use super::*;
 
@@ -354,7 +354,7 @@ mod tests {
         assert!(
             matches!(
                 err,
-                McpToolError::CoreError(agent_designer_core::CoreError::TokenNotFound(_))
+                McpToolError::CoreError(sigil_core::CoreError::TokenNotFound(_))
             ),
             "expected CoreError(TokenNotFound), got: {err}"
         );

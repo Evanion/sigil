@@ -4,12 +4,10 @@
 //!   lock → construct operation →
 //!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
 
-use agent_designer_core::FieldOperation;
-use agent_designer_core::PageId;
-use agent_designer_core::commands::page_commands::{
-    CreatePage, DeletePage, RenamePage, ReorderPage,
-};
-use agent_designer_state::{AppState, MutationEventKind};
+use sigil_core::FieldOperation;
+use sigil_core::PageId;
+use sigil_core::commands::page_commands::{CreatePage, DeletePage, RenamePage, ReorderPage};
+use sigil_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
 use crate::server::acquire_document_lock;
@@ -141,7 +139,7 @@ pub fn rename_page_impl(
         let page = doc
             .page(page_id)
             .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-        let root_node_ids: Vec<agent_designer_core::NodeId> = page.root_nodes.clone();
+        let root_node_ids: Vec<sigil_core::NodeId> = page.root_nodes.clone();
 
         let cmd = RenamePage {
             page_id,
@@ -196,7 +194,7 @@ pub fn reorder_page_impl(
         let page = doc
             .page(page_id)
             .map_err(|_| McpToolError::PageNotFound(page_uuid_str.to_string()))?;
-        let root_node_ids: Vec<agent_designer_core::NodeId> = page.root_nodes.clone();
+        let root_node_ids: Vec<sigil_core::NodeId> = page.root_nodes.clone();
         let page_name = page.name.clone();
 
         let cmd = ReorderPage {
@@ -235,7 +233,7 @@ pub fn reorder_page_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_state::AppState;
+    use sigil_state::AppState;
 
     use super::*;
 

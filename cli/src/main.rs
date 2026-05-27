@@ -40,7 +40,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse();
     match cli.command {
         None => {
-            println!("sigil-cli v{}", agent_designer_core::version());
+            println!("sigil-cli v{}", sigil_core::version());
             ExitCode::SUCCESS
         }
         Some(Command::Migrate { path, check }) => {

@@ -164,7 +164,7 @@ async fn do_save(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_designer_core::Document;
+    use sigil_core::Document;
 
     #[tokio::test]
     async fn test_save_debounce_ms_is_500() {

@@ -73,7 +73,7 @@ The response shape:
 }
 ```
 
-Use `agent_designer_core::serialize::page_to_serialized` to get `SerializedPage` for each page, then serialize the whole response to JSON.
+Use `sigil_core::serialize::page_to_serialized` to get `SerializedPage` for each page, then serialize the whole response to JSON.
 
 - [ ] 3. Add the route to the router in `lib.rs`: `.route("/api/document/full", get(routes::document::get_document_full))`
 
@@ -301,7 +301,7 @@ The select tool needs access to: the document store (for hit testing nodes, sele
 ## Task 9: Full verification
 
 - [ ] 1. Frontend: `cd frontend && pnpm test && pnpm lint && pnpm build`
-- [ ] 2. Server: `cargo test -p agent-designer-server`
+- [ ] 2. Server: `cargo test -p sigil-server`
 - [ ] 3. Workspace: `cargo test --workspace && cargo clippy --workspace -- -D warnings && cargo fmt --check`
 - [ ] 4. Manual test: start server + open browser, verify:
    - Canvas shows nodes if a workfile is loaded

@@ -43,8 +43,8 @@ crates/server/src/
 use std::sync::Arc;
 use tokio::sync::{RwLock, broadcast};
 
-use agent_designer_core::Document;
-use agent_designer_core::wire::BroadcastCommand;
+use sigil_core::Document;
+use sigil_core::wire::BroadcastCommand;
 
 /// Shared application state.
 ///
@@ -87,7 +87,7 @@ uuid = { workspace = true }
 - [ ] 4. Add `mod state;` to `main.rs` and verify it compiles:
 
 ```bash
-cargo check -p agent-designer-server
+cargo check -p sigil-server
 ```
 
 - [ ] 5. Commit:
@@ -211,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
 - [ ] 6. Verify it compiles and runs:
 
 ```bash
-cargo check -p agent-designer-server
+cargo check -p sigil-server
 ```
 
 - [ ] 7. Commit:
@@ -237,7 +237,7 @@ This is the critical integration layer. Each `SerializableCommand` variant maps 
 ```rust
 // crates/server/src/dispatch.rs
 
-use agent_designer_core::{
+use sigil_core::{
     Command,
     wire::SerializableCommand,
     commands::{
@@ -341,7 +341,7 @@ pub fn dispatch(cmd: SerializableCommand) -> anyhow::Result<Box<dyn Command>> {
 - [ ] 4. Verify it compiles:
 
 ```bash
-cargo check -p agent-designer-server
+cargo check -p sigil-server
 ```
 
 - [ ] 5. Commit:
@@ -373,7 +373,7 @@ use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 
-use agent_designer_core::wire::{BroadcastCommand, SerializableCommand};
+use sigil_core::wire::{BroadcastCommand, SerializableCommand};
 
 use crate::dispatch;
 use crate::state::AppState;
@@ -526,7 +526,7 @@ futures-util = "0.3"
 - [ ] 6. Verify it compiles:
 
 ```bash
-cargo check -p agent-designer-server
+cargo check -p sigil-server
 ```
 
 - [ ] 7. Commit:
@@ -571,7 +571,7 @@ async fn start_server() -> SocketAddr {
     // to expose its state and routes. For now, we build a minimal test app.
 
     let (tx, _) = tokio::sync::broadcast::channel(256);
-    let state = agent_designer_server_test_state(tx);
+    let state = sigil_server_test_state(tx);
 
     // ... test implementation depends on whether server exposes its types
 }
@@ -621,7 +621,7 @@ Update `main.rs` to use `build_app`:
 ```rust
 #![warn(clippy::all, clippy::pedantic)]
 
-use agent_designer_server::{build_app, state::AppState};
+use sigil_server::{build_app, state::AppState};
 use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
@@ -652,7 +652,7 @@ Then the integration test:
 
 ```rust
 use std::net::SocketAddr;
-use agent_designer_server::{build_app, state::AppState};
+use sigil_server::{build_app, state::AppState};
 
 async fn start_test_server() -> SocketAddr {
     let state = AppState::new();
@@ -723,9 +723,9 @@ async fn test_websocket_command_execution() {
 - [ ] 4. Run tests:
 
 ```bash
-cargo test -p agent-designer-server
-cargo clippy -p agent-designer-server -- -D warnings
-cargo fmt -p agent-designer-server
+cargo test -p sigil-server
+cargo clippy -p sigil-server -- -D warnings
+cargo fmt -p sigil-server
 ```
 
 - [ ] 5. Commit:

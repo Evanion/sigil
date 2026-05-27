@@ -9,72 +9,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 
 [[package]]
-name = "agent-designer-core"
-version = "0.1.1"
-dependencies = [
- "assert_matches",
- "i_overlay",
- "serde",
- "serde_json",
- "thiserror",
- "uuid",
-]
-
-[[package]]
-name = "agent-designer-mcp"
-version = "0.1.1"
-dependencies = [
- "agent-designer-core",
- "agent-designer-state",
- "assert_matches",
- "rmcp",
- "schemars",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "agent-designer-server"
-version = "0.1.1"
-dependencies = [
- "agent-designer-core",
- "agent-designer-mcp",
- "agent-designer-state",
- "anyhow",
- "assert_matches",
- "async-graphql",
- "async-graphql-axum",
- "async-stream",
- "axum",
- "futures-util",
- "reqwest",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "agent-designer-state"
-version = "0.1.1"
-dependencies = [
- "agent-designer-core",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2156,12 +2090,78 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 name = "sigil-cli"
 version = "0.1.1"
 dependencies = [
- "agent-designer-core",
  "anyhow",
  "clap",
  "serde",
  "serde_json",
+ "sigil-core",
  "tempfile",
+]
+
+[[package]]
+name = "sigil-core"
+version = "0.1.1"
+dependencies = [
+ "assert_matches",
+ "i_overlay",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "uuid",
+]
+
+[[package]]
+name = "sigil-mcp"
+version = "0.1.1"
+dependencies = [
+ "assert_matches",
+ "rmcp",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sigil-core",
+ "sigil-state",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "sigil-server"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "async-graphql",
+ "async-graphql-axum",
+ "async-stream",
+ "axum",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sigil-core",
+ "sigil-mcp",
+ "sigil-state",
+ "tempfile",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "sigil-state"
+version = "0.1.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sigil-core",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

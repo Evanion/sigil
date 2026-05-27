@@ -206,10 +206,10 @@ Path 1 chosen. Final status:
 - `pnpm test`: 100 files / 2057 tests passing
 - `node frontend/scripts/check-locale-parity.mjs`: ✓
 - `node frontend/scripts/check-locale-usage.mjs --no-orphans`: ✓
-- `cargo test -p agent-designer-core`: 1020 passing (was 993 baseline; +27)
+- `cargo test -p sigil-core`: 1020 passing (was 993 baseline; +27)
 - `cargo clippy --workspace --no-deps -- -D warnings`: clean
 - `cargo fmt --check`: clean
-- `cargo check --target wasm32-unknown-unknown -p agent-designer-core`: clean
+- `cargo check --target wasm32-unknown-unknown -p sigil-core`: clean
 
 ### Batches dispatched
 

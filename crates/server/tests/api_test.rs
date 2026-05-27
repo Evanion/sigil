@@ -2,7 +2,7 @@
 
 use std::net::SocketAddr;
 
-use agent_designer_server::{build_app, state::ServerState};
+use sigil_server::{build_app, state::ServerState};
 
 /// Starts a test server on a random port and returns its address.
 ///

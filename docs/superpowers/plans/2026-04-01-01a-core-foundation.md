@@ -21,7 +21,7 @@ The workspace `uuid` dependency includes `v4` which pulls in `getrandom` — inc
 
 ```toml
 [package]
-name = "agent-designer-core"
+name = "sigil-core"
 version.workspace = true
 edition.workspace = true
 
@@ -38,7 +38,7 @@ assert_matches = { workspace = true }
 - [ ] 2. Verify it compiles:
 
 ```bash
-./dev.sh cargo build -p agent-designer-core
+./dev.sh cargo build -p sigil-core
 ```
 
 Expected: compiles with no errors.
@@ -46,7 +46,7 @@ Expected: compiles with no errors.
 - [ ] 3. Run existing tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: `version_is_set` test passes.
@@ -339,7 +339,7 @@ mod tests {
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -347,7 +347,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -798,7 +798,7 @@ pub mod validate;
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -806,7 +806,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -1091,7 +1091,7 @@ mod tests {
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -1099,7 +1099,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -2229,7 +2229,7 @@ pub use node::{
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -2237,7 +2237,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -2761,7 +2761,7 @@ pub use arena::Arena;
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -2769,7 +2769,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -3323,7 +3323,7 @@ pub mod tree;
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -3331,7 +3331,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -3726,7 +3726,7 @@ pub use document::{
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -3734,7 +3734,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -4283,7 +4283,7 @@ pub use serialize::{
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -4291,7 +4291,7 @@ Expected: all tests pass.
 - [ ] 4. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.
@@ -4386,7 +4386,7 @@ mod tests {
 - [ ] 2. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass.
@@ -4394,7 +4394,7 @@ Expected: all tests pass.
 - [ ] 3. Run clippy:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
+./dev.sh cargo clippy -p sigil-core -- -D warnings
 ```
 
 Expected: no warnings.

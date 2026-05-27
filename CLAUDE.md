@@ -98,7 +98,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Test: `./dev.sh cargo test --workspace`
 - Lint: `./dev.sh cargo clippy --workspace -- -D warnings`
 - Format: `./dev.sh cargo fmt` (check: `./dev.sh cargo fmt --check`)
-- Run server: `./dev.sh cargo run --bin agent-designer-server`
+- Run server: `./dev.sh cargo run --bin sigil-server`
 
 ### Frontend
 
@@ -118,21 +118,21 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 
 ## 4. Crate Responsibilities
 
-### `agent-designer-core`
+### `sigil-core`
 
 - MUST have zero I/O dependencies (no filesystem, no networking).
 - MUST compile to both native and `wasm32-unknown-unknown`.
 - All operations must be deterministic and side-effect-free.
 - This is the foundation — everything else depends on it.
 
-### `agent-designer-state`
+### `sigil-state`
 
 - Owns shared in-memory state: the document store and the broadcast channel that all connected clients subscribe to.
-- Depended upon by both `agent-designer-server` and `agent-designer-mcp` — it is the single source of truth for live session state.
+- Depended upon by both `sigil-server` and `sigil-mcp` — it is the single source of truth for live session state.
 - Contains no HTTP, WebSocket, or MCP protocol code — it is transport-agnostic.
 - Must remain free of I/O; persistence is the server's responsibility.
 
-### `agent-designer-server`
+### `sigil-server`
 
 - Owns HTTP serving, WebSocket, file I/O.
 - All document mutations go through the core engine.
@@ -171,10 +171,10 @@ When the server loads a workfile that requires a schema version upgrade (v1→v2
 
 A CI smoke test MUST exercise each new migration path against a checked-in legacy fixture and assert: (a) `load_workfile` succeeds, (b) the post-load persistence tick produces a v(N) on-disk file, (c) the `.backup-v(N-1)/` directory exists and contains the original fixtures.
 
-### `agent-designer-mcp`
+### `sigil-mcp`
 
 - Owns the MCP tool/resource definitions.
-- Shares in-memory state with the server (same process) via `agent-designer-state`.
+- Shares in-memory state with the server (same process) via `sigil-state`.
 - Keep tool interfaces token-efficient for agent consumption.
 - All state-mutating MCP tool calls MUST trigger both persistence (signal_dirty) AND real-time broadcast to all connected clients. Calling only signal_dirty without broadcasting leaves human clients and other agents desynchronized — they will not see the MCP agent's changes until the next reconnect or poll. The broadcast obligation for MCP is identical to the obligation for server-originated mutations in the Broadcast Semantics section above.
 - When running over stdio transport, all diagnostic output MUST go to stderr, never stdout. Writing tracing or log output to stdout corrupts the protocol framing — the MCP client interprets any stdout bytes as protocol messages. Configure the `tracing` subscriber to write exclusively to stderr when the transport is stdio. The transport mode must be detectable at startup (e.g., via a `--stdio` flag or env var) to apply the correct subscriber configuration.

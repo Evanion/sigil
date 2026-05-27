@@ -57,7 +57,7 @@ fn test_nothing_to_redo_error() {
 - [ ] 2. Run the tests to verify they fail:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core test_nothing_to_undo_error test_nothing_to_redo_error
+./dev.sh cargo test -p sigil-core test_nothing_to_undo_error test_nothing_to_redo_error
 ```
 
 Expected: compilation error — `NothingToUndo` and `NothingToRedo` variants don't exist.
@@ -77,7 +77,7 @@ NothingToRedo,
 - [ ] 4. Run the tests to verify they pass:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core test_nothing_to_undo_error test_nothing_to_redo_error
+./dev.sh cargo test -p sigil-core test_nothing_to_undo_error test_nothing_to_redo_error
 ```
 
 Expected: both tests pass.
@@ -181,7 +181,7 @@ pub use command::{Command, SideEffect};
 - [ ] 3. Run the tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core command
+./dev.sh cargo test -p sigil-core command
 ```
 
 Expected: both tests pass.
@@ -262,7 +262,7 @@ fn test_compound_command_empty_is_noop() {
 - [ ] 2. Run tests to verify they fail:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core test_compound_command
+./dev.sh cargo test -p sigil-core test_compound_command
 ```
 
 Expected: compilation error — `CompoundCommand` doesn't exist.
@@ -337,7 +337,7 @@ pub use command::{Command, CompoundCommand, SideEffect};
 - [ ] 5. These tests depend on `RenameNode` from Task 5, so we can't run them yet. Run the `test_compound_command_description` and `test_compound_command_empty_is_noop` tests only:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core test_compound_command_description test_compound_command_empty_is_noop
+./dev.sh cargo test -p sigil-core test_compound_command_description test_compound_command_empty_is_noop
 ```
 
 Expected: both pass. The `test_compound_command_applies_all_subcommands` test won't compile yet — that's fine, it will be enabled in Task 5.
@@ -533,7 +533,7 @@ fn test_history_eviction_fifo() {
 - [ ] 2. Run tests to verify they fail:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core test_execute_pushes test_undo_reverses test_redo_reapplies test_execute_clears_redo test_undo_empty test_redo_empty test_history_eviction
+./dev.sh cargo test -p sigil-core test_execute_pushes test_undo_reverses test_redo_reapplies test_execute_clears_redo test_undo_empty test_redo_empty test_history_eviction
 ```
 
 Expected: compilation errors — `execute`, `undo`, `redo`, `can_undo`, `can_redo` don't exist.
@@ -659,7 +659,7 @@ pub fn can_redo(&self) -> bool {
 - [ ] 6. These tests depend on `SetVisible` and `RenameNode` commands from Tasks 5 and 6. Comment them out for now with `// TODO: uncomment after Task 5/6`. Run the existing document tests to make sure nothing broke:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core document::tests
+./dev.sh cargo test -p sigil-core document::tests
 ```
 
 Expected: all existing tests pass. The `test_history_custom` and `test_history_default` tests should still pass unchanged.
@@ -1146,7 +1146,7 @@ pub mod commands;
 - [ ] 4. Run the node command tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core commands::node_commands
+./dev.sh cargo test -p sigil-core commands::node_commands
 ```
 
 Expected: all tests pass.
@@ -1173,7 +1173,7 @@ git commit -m "feat(core): add node commands — CreateNode, DeleteNode, RenameN
 - [ ] 3. Run all tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
+./dev.sh cargo test -p sigil-core
 ```
 
 Expected: all tests pass including history tests and compound command test.
@@ -1416,7 +1416,7 @@ mod tests {
 - [ ] 3. Run the tree command tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core commands::tree_commands
+./dev.sh cargo test -p sigil-core commands::tree_commands
 ```
 
 Expected: all tests pass.
@@ -1894,7 +1894,7 @@ mod tests {
 - [ ] 3. Run the style command tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core commands::style_commands
+./dev.sh cargo test -p sigil-core commands::style_commands
 ```
 
 Expected: all tests pass.

@@ -19,23 +19,23 @@
 //! See also: `crates/mcp/tests/integration_set_corners.rs` for the MCP-side
 //! contract that this test parallels.
 
-use agent_designer_core::commands::node_commands::CreateNode;
-use agent_designer_core::commands::page_commands::CreatePage;
-use agent_designer_core::id::PageId;
-use agent_designer_core::node::NodeKind;
-use agent_designer_core::{Document, FieldOperation};
-use agent_designer_server::graphql::mutation::MutationRoot;
-use agent_designer_server::graphql::query::QueryRoot;
-use agent_designer_server::state::ServerState;
-use agent_designer_state::{MUTATION_BROADCAST_CAPACITY, MutationEventKind};
 use async_graphql::{EmptySubscription, Schema};
+use sigil_core::commands::node_commands::CreateNode;
+use sigil_core::commands::page_commands::CreatePage;
+use sigil_core::id::PageId;
+use sigil_core::node::NodeKind;
+use sigil_core::{Document, FieldOperation};
+use sigil_server::graphql::mutation::MutationRoot;
+use sigil_server::graphql::query::QueryRoot;
+use sigil_server::state::ServerState;
+use sigil_state::{MUTATION_BROADCAST_CAPACITY, MutationEventKind};
 use tokio::sync::broadcast;
 
 /// Builds a `ServerState` whose broadcast channel we control, plus a
 /// receiver to assert against. Returns `(state, rx, page_uuid, rect_uuid)`.
 fn make_state_with_rect() -> (
     ServerState,
-    broadcast::Receiver<agent_designer_state::MutationEvent>,
+    broadcast::Receiver<sigil_state::MutationEvent>,
     String,
 ) {
     // Create a state and wire up a fresh broadcast channel that we own a
@@ -64,7 +64,7 @@ fn make_state_with_rect() -> (
         let create_rect = CreateNode {
             uuid: rect_uuid,
             kind: NodeKind::Rectangle {
-                corners: agent_designer_core::node::default_corners(),
+                corners: sigil_core::node::default_corners(),
             },
             name: "Rect".to_string(),
             page_id: None, // defaults to current page

@@ -90,7 +90,7 @@ async fn test_apply_operations_set_field_renames_node() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cargo test --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/server-simplification/Cargo.toml -p agent-designer-server test_apply_operations -- --nocapture`
+Run: `cargo test --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/server-simplification/Cargo.toml -p sigil-server test_apply_operations -- --nocapture`
 Expected: FAIL — `applyOperations` resolver does not exist.
 
 - [ ] **Step 3: Add OneofObject input types to types.rs**
@@ -170,7 +170,7 @@ async fn apply_operations(
     operations: Vec<OperationInput>,
     user_id: String,
 ) -> Result<ApplyOperationsResult> {
-    use agent_designer_core::validate::MAX_BATCH_SIZE;
+    use sigil_core::validate::MAX_BATCH_SIZE;
 
     let state = ctx.data::<ServerState>()?;
 
@@ -239,7 +239,7 @@ The `ParsedOp` helper struct and `parse_operation_input` function handle the var
 ```rust
 /// A parsed operation ready for validate + apply.
 struct ParsedOp {
-    op: Box<dyn agent_designer_core::FieldOperation>,
+    op: Box<dyn sigil_core::FieldOperation>,
     broadcast: OperationPayload,
 }
 
@@ -337,7 +337,7 @@ Implement `parse_set_field`, `parse_create_node`, `parse_delete_node`, `parse_re
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cargo test --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/server-simplification/Cargo.toml -p agent-designer-server test_apply_operations -- --nocapture`
+Run: `cargo test --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/server-simplification/Cargo.toml -p sigil-server test_apply_operations -- --nocapture`
 Expected: PASS
 
 - [ ] **Step 6: Add more tests for applyOperations**

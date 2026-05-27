@@ -142,7 +142,7 @@ impl QueryRoot {
 
         let mut result = Vec::new();
         for page in &doc.pages {
-            let serialized = agent_designer_core::serialize::page_to_serialized(
+            let serialized = sigil_core::serialize::page_to_serialized(
                 page, &doc.arena, &doc.transitions
             ).map_err(|e| format!("serialization error: {e}"))?;
 
@@ -286,9 +286,9 @@ async fn graphiql() -> impl axum::response::IntoResponse {
 - [ ] 8. Run tests and verify:
 
 ```bash
-cargo test -p agent-designer-server
-cargo clippy -p agent-designer-server -- -D warnings
-cargo fmt -p agent-designer-server
+cargo test -p sigil-server
+cargo clippy -p sigil-server -- -D warnings
+cargo fmt -p sigil-server
 ```
 
 Also manually verify: start the server and open `http://localhost:4680/graphql` — the GraphiQL IDE should load. Run a query:

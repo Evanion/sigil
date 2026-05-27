@@ -123,7 +123,7 @@ Note: Check the existing test module for `insert_rect` and `insert_frame` helper
 - [ ] **Step 2: Run test to verify it fails**
 
 ```bash
-cargo test --workspace -p agent-designer-core -- test_set_corner_radii
+cargo test --workspace -p sigil-core -- test_set_corner_radii
 ```
 
 Expected: FAIL — `SetCornerRadii` not found.
@@ -204,7 +204,7 @@ Also add `SetCornerRadii` to the re-export in `crates/core/src/commands/style_co
 - [ ] **Step 4: Run tests to verify they pass**
 
 ```bash
-cargo test --workspace -p agent-designer-core -- test_set_corner_radii
+cargo test --workspace -p sigil-core -- test_set_corner_radii
 ```
 
 Expected: 4 tests PASS.
@@ -509,10 +509,10 @@ async fn set_corner_radii(
 At the top of `mutation.rs`, add the new command and type imports:
 
 ```rust
-use agent_designer_core::commands::style_commands::{
+use sigil_core::commands::style_commands::{
     SetBlendMode, SetCornerRadii, SetEffects, SetFills, SetOpacity, SetStrokes,
 };
-use agent_designer_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue};
+use sigil_core::node::{BlendMode, Effect, Fill, NodeKind, Stroke, StyleValue};
 ```
 
 Check which imports already exist and only add the missing ones.

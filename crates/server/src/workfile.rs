@@ -14,12 +14,12 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use agent_designer_core::serialize::{
-    SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
-};
-use agent_designer_core::{Document, Node, NodeId, Page, PageId};
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
+use sigil_core::serialize::{
+    SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
+};
+use sigil_core::{Document, Node, NodeId, Page, PageId};
 use uuid::Uuid;
 
 /// Maximum manifest file size (1 MiB).
@@ -44,7 +44,7 @@ impl Manifest {
     #[must_use]
     pub fn from_document(doc: &Document) -> Self {
         Self {
-            schema_version: agent_designer_core::CURRENT_SCHEMA_VERSION,
+            schema_version: sigil_core::CURRENT_SCHEMA_VERSION,
             name: doc.metadata.name.clone(),
             page_order: doc.pages.iter().map(|p| p.id.uuid()).collect(),
         }
@@ -56,7 +56,7 @@ impl Manifest {
     ///
     /// Returns an error if:
     /// - `name` exceeds [`MAX_MANIFEST_NAME_LEN`] bytes
-    /// - `page_order` exceeds [`MAX_PAGES_PER_DOCUMENT`](agent_designer_core::MAX_PAGES_PER_DOCUMENT)
+    /// - `page_order` exceeds [`MAX_PAGES_PER_DOCUMENT`](sigil_core::MAX_PAGES_PER_DOCUMENT)
     /// - `page_order` contains duplicate UUIDs
     pub fn validate(&self) -> Result<()> {
         if self.name.len() > MAX_MANIFEST_NAME_LEN {
@@ -66,11 +66,11 @@ impl Manifest {
             );
         }
 
-        if self.page_order.len() > agent_designer_core::MAX_PAGES_PER_DOCUMENT {
+        if self.page_order.len() > sigil_core::MAX_PAGES_PER_DOCUMENT {
             bail!(
                 "manifest page_order exceeds maximum pages ({} > {})",
                 self.page_order.len(),
-                agent_designer_core::MAX_PAGES_PER_DOCUMENT
+                sigil_core::MAX_PAGES_PER_DOCUMENT
             );
         }
 
@@ -379,11 +379,11 @@ async fn read_and_validate_manifest(workfile_path: &Path) -> Result<Manifest> {
 
     manifest.validate()?;
 
-    if manifest.schema_version > agent_designer_core::CURRENT_SCHEMA_VERSION {
+    if manifest.schema_version > sigil_core::CURRENT_SCHEMA_VERSION {
         bail!(
             "workfile schema version {} is newer than supported version {}",
             manifest.schema_version,
-            agent_designer_core::CURRENT_SCHEMA_VERSION
+            sigil_core::CURRENT_SCHEMA_VERSION
         );
     }
 
@@ -453,7 +453,7 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
 
                 // Track the lowest on-disk version so the persistence layer can
                 // detect migration and back up original files before overwriting.
-                if on_disk_version < agent_designer_core::CURRENT_SCHEMA_VERSION {
+                if on_disk_version < sigil_core::CURRENT_SCHEMA_VERSION {
                     min_observed_version = Some(
                         min_observed_version.map_or(on_disk_version, |v| v.min(on_disk_version)),
                     );
@@ -499,7 +499,7 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     if let Some(v) = min_observed_version {
         tracing::info!(
             "workfile contained pages at schema v{v} (current: v{}); document was migrated on load",
-            agent_designer_core::CURRENT_SCHEMA_VERSION
+            sigil_core::CURRENT_SCHEMA_VERSION
         );
     }
 
@@ -581,7 +581,7 @@ fn load_page_into_document(
                     snode.name
                 )
             })?;
-            agent_designer_core::tree::add_child(&mut doc.arena, parent_id, node_id)
+            sigil_core::tree::add_child(&mut doc.arena, parent_id, node_id)
                 .map_err(|e| anyhow::anyhow!("failed to add child '{}': {e}", snode.name))?;
         }
     }
@@ -611,7 +611,7 @@ fn load_page_into_document(
             .target_node
             .and_then(|uuid| uuid_to_id.get(&uuid).copied());
 
-        let transition = agent_designer_core::Transition {
+        let transition = sigil_core::Transition {
             id: st.id,
             source_node: source_id,
             target_page: PageId::new(st.target_page),
@@ -652,7 +652,7 @@ fn reorder_pages(doc: &mut Document, page_order: &[Uuid]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_designer_core::NodeKind;
+    use sigil_core::NodeKind;
 
     #[test]
     fn test_manifest_from_document_captures_name_and_version() {
@@ -660,10 +660,7 @@ mod tests {
         let manifest = Manifest::from_document(&doc);
         assert_eq!(manifest.name, "Test Project");
         assert!(manifest.page_order.is_empty());
-        assert_eq!(
-            manifest.schema_version,
-            agent_designer_core::CURRENT_SCHEMA_VERSION
-        );
+        assert_eq!(manifest.schema_version, sigil_core::CURRENT_SCHEMA_VERSION);
     }
 
     #[test]
@@ -720,7 +717,7 @@ mod tests {
             Uuid::new_v4(),
             NodeKind::Frame {
                 layout: None,
-                corners: agent_designer_core::node::default_corners(),
+                corners: sigil_core::node::default_corners(),
             },
             "Frame 1".to_string(),
         )
@@ -812,7 +809,7 @@ mod tests {
             Uuid::new_v4(),
             NodeKind::Frame {
                 layout: None,
-                corners: agent_designer_core::node::default_corners(),
+                corners: sigil_core::node::default_corners(),
             },
             "Parent".to_string(),
         )
@@ -826,14 +823,13 @@ mod tests {
             NodeId::new(0, 0),
             Uuid::new_v4(),
             NodeKind::Rectangle {
-                corners: agent_designer_core::node::default_corners(),
+                corners: sigil_core::node::default_corners(),
             },
             "Child".to_string(),
         )
         .expect("create child");
         let child_id = doc.arena.insert(child).expect("insert child");
-        agent_designer_core::tree::add_child(&mut doc.arena, parent_id, child_id)
-            .expect("add child");
+        sigil_core::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
 
         save_workfile(&doc, &workfile_path)
             .await
@@ -912,7 +908,7 @@ mod tests {
             .expect("create dirs");
 
         let manifest = Manifest {
-            schema_version: agent_designer_core::CURRENT_SCHEMA_VERSION + 1,
+            schema_version: sigil_core::CURRENT_SCHEMA_VERSION + 1,
             name: "Future Doc".to_string(),
             page_order: vec![],
         };
@@ -999,7 +995,7 @@ mod tests {
         let manifest = Manifest {
             schema_version: 1,
             name: "Test".to_string(),
-            page_order: (0..=agent_designer_core::MAX_PAGES_PER_DOCUMENT)
+            page_order: (0..=sigil_core::MAX_PAGES_PER_DOCUMENT)
                 .map(|_| Uuid::new_v4())
                 .collect(),
         };

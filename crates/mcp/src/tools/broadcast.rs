@@ -5,7 +5,7 @@
 //! tools use these helpers to ensure consistent broadcast + persistence
 //! signaling.
 
-use agent_designer_state::{AppState, MutationEventKind, OperationPayload, TransactionPayload};
+use sigil_state::{AppState, MutationEventKind, OperationPayload, TransactionPayload};
 
 /// User ID used for all MCP-originated transactions.
 pub const MCP_USER_ID: &str = "mcp-agent";
@@ -149,7 +149,7 @@ mod tests {
 
     #[test]
     fn test_broadcast_and_persist_signals_dirty_and_publishes() {
-        use agent_designer_state::MUTATION_BROADCAST_CAPACITY;
+        use sigil_state::MUTATION_BROADCAST_CAPACITY;
         use tokio::sync::broadcast;
 
         let mut state = AppState::new();
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn test_broadcast_token_and_persist_signals_dirty_and_publishes() {
-        use agent_designer_state::MUTATION_BROADCAST_CAPACITY;
+        use sigil_state::MUTATION_BROADCAST_CAPACITY;
         use tokio::sync::broadcast;
 
         let mut state = AppState::new();

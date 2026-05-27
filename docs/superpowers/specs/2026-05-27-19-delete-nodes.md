@@ -355,7 +355,7 @@ Per CLAUDE.md §10 WASM Compatibility Checklist:
 - **New external dependencies:** none. `DeleteNodes` uses only the same primitives `DeleteNode` already uses (`Vec`, `HashMap`, `String`, the existing arena type). All WASM-compatible.
 - **Trait bounds:** `DeleteNodes` implements `FieldOperation` with the same bound surface (`Send + Sync` if the trait requires; otherwise nothing). No new bounds.
 - **Randomness / syscalls:** none. The dedup algorithm is a pure tree walk.
-- **Verdict:** Fully WASM-compatible. `cargo check --target wasm32-unknown-unknown -p agent-designer-core` passes.
+- **Verdict:** Fully WASM-compatible. `cargo check --target wasm32-unknown-unknown -p sigil-core` passes.
 
 ---
 

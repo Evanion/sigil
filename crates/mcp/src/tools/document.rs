@@ -3,8 +3,8 @@
 //! These functions read document state through the shared `AppState` and
 //! return token-efficient summaries for MCP agent consumption.
 
-use agent_designer_core::NodeKind;
-use agent_designer_state::AppState;
+use sigil_core::NodeKind;
+use sigil_state::AppState;
 
 use crate::server::acquire_document_lock;
 use crate::types::{DocumentInfo, DocumentTree, NodeInfo, PageTree, TransformInfo};
@@ -66,10 +66,7 @@ pub fn get_document_tree_impl(state: &AppState) -> DocumentTree {
 /// Recursively collects a node and all its descendants into a flat list.
 ///
 /// Delegates to `collect_node_tree_inner` with an initial depth of 0.
-fn collect_node_tree(
-    doc: &agent_designer_core::Document,
-    node_id: agent_designer_core::NodeId,
-) -> Vec<NodeInfo> {
+fn collect_node_tree(doc: &sigil_core::Document, node_id: sigil_core::NodeId) -> Vec<NodeInfo> {
     let mut result = Vec::new();
     collect_node_tree_inner(doc, node_id, &mut result, 0);
     result
@@ -80,8 +77,8 @@ fn collect_node_tree(
 /// Depth is zero-indexed. When `depth >= MAX_TREE_DEPTH` the traversal stops
 /// and a warning is logged. This prevents stack overflow on pathological inputs.
 fn collect_node_tree_inner(
-    doc: &agent_designer_core::Document,
-    node_id: agent_designer_core::NodeId,
+    doc: &sigil_core::Document,
+    node_id: sigil_core::NodeId,
     out: &mut Vec<NodeInfo>,
     depth: usize,
 ) {
@@ -145,8 +142,8 @@ pub fn node_kind_to_string(kind: &NodeKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_core::{Node, NodeId, NodeKind, Page, PageId};
-    use agent_designer_state::AppState;
+    use sigil_core::{Node, NodeId, NodeKind, Page, PageId};
+    use sigil_state::AppState;
 
     use super::*;
 
@@ -179,7 +176,7 @@ mod tests {
                 uuid::Uuid::new_v4(),
                 NodeKind::Frame {
                     layout: None,
-                    corners: agent_designer_core::node::default_corners(),
+                    corners: sigil_core::node::default_corners(),
                 },
                 "Header".to_string(),
             )
@@ -211,8 +208,8 @@ mod tests {
 
             // Insert MAX_TREE_DEPTH + 5 nodes in a chain.
             let depth_target = MAX_TREE_DEPTH + 5;
-            let mut prev_id: Option<agent_designer_core::NodeId> = None;
-            let mut root_id: Option<agent_designer_core::NodeId> = None;
+            let mut prev_id: Option<sigil_core::NodeId> = None;
+            let mut root_id: Option<sigil_core::NodeId> = None;
 
             for i in 0..depth_target {
                 let node = Node::new(
@@ -220,7 +217,7 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     NodeKind::Frame {
                         layout: None,
-                        corners: agent_designer_core::node::default_corners(),
+                        corners: sigil_core::node::default_corners(),
                     },
                     format!("node-{i}"),
                 )

@@ -14,7 +14,7 @@ impl SubscriptionRoot {
     /// Stream of document change events (legacy).
     ///
     /// Yields a [`DocumentEvent`] every time a mutation modifies the document.
-    /// Subscribes to the [`MutationEvent`](agent_designer_state::MutationEvent)
+    /// Subscribes to the [`MutationEvent`](sigil_state::MutationEvent)
     /// broadcast channel on `AppState` and converts each event to a GraphQL
     /// `DocumentEvent`. This means events published by MCP tools also appear
     /// in the subscription stream.
@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use crate::graphql::types::DocumentEventType;
     use crate::state::{MutationEvent, MutationEventKind};
-    use agent_designer_state::{OperationPayload, TransactionPayload};
+    use sigil_state::{OperationPayload, TransactionPayload};
 
     #[tokio::test]
     async fn test_broadcast_delivers_to_subscriber() {
@@ -220,7 +220,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_from_mutation_event_converts_all_kinds() {
-        use agent_designer_state::MutationEventKind;
+        use sigil_state::MutationEventKind;
 
         let test_cases = [
             (

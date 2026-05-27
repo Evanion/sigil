@@ -139,7 +139,7 @@ fn test_migrate_run_happy_path_writes_v2_and_creates_backup() {
     let manifest: Value = serde_json::from_str(&manifest_text).unwrap();
     assert_eq!(
         manifest["schema_version"].as_u64().unwrap(),
-        u64::from(agent_designer_core::CURRENT_SCHEMA_VERSION)
+        u64::from(sigil_core::CURRENT_SCHEMA_VERSION)
     );
 
     // Page now has `corners`, no `corner_radii`.
@@ -177,11 +177,7 @@ fn test_migrate_run_already_v2_is_noop() {
     let workfile = tmp.path().join("doc.sigil");
     fs::create_dir_all(&workfile).unwrap();
     let page_uuid = "00000000-0000-0000-0000-000000000002";
-    write_manifest(
-        &workfile,
-        agent_designer_core::CURRENT_SCHEMA_VERSION,
-        page_uuid,
-    );
+    write_manifest(&workfile, sigil_core::CURRENT_SCHEMA_VERSION, page_uuid);
     write_v2_rectangle_page(&workfile, page_uuid);
 
     let mut buf = Vec::new();

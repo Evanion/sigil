@@ -4,13 +4,13 @@
 //!   validate input → lock → resolve UUID → construct operation →
 //!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → broadcast
 
-use agent_designer_core::{
+use sigil_core::{
     Color, FieldOperation, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow,
     commands::node_commands::SetTextContent,
     commands::text_style_commands::{SetTextStyleField, TextStyleField},
     validate_style_value_expression, validate_text_content, validate_token_name,
 };
-use agent_designer_state::{AppState, MutationEventKind, OperationPayload};
+use sigil_state::{AppState, MutationEventKind, OperationPayload};
 use uuid::Uuid;
 
 use crate::error::McpToolError;
@@ -351,8 +351,8 @@ fn collect_style_fields(
 ///
 /// Returns the old `TextStyleField` value so it can be re-applied on failure.
 fn capture_old_field(
-    doc: &agent_designer_core::Document,
-    node_id: agent_designer_core::NodeId,
+    doc: &sigil_core::Document,
+    node_id: sigil_core::NodeId,
     field: &TextStyleField,
 ) -> Result<TextStyleField, McpToolError> {
     let node = doc
@@ -821,8 +821,8 @@ mod tests {
     use crate::tools::nodes::create_node_impl;
     use crate::tools::pages::create_page_impl;
 
-    fn make_state_with_text_node() -> (agent_designer_state::AppState, String) {
-        let state = agent_designer_state::AppState::new();
+    fn make_state_with_text_node() -> (sigil_state::AppState, String) {
+        let state = sigil_state::AppState::new();
         let page = create_page_impl(&state, "Page 1").expect("create page");
         let created = create_node_impl(&state, "text", "Test Text", Some(&page.id), None, None)
             .expect("create text node");
@@ -842,7 +842,7 @@ mod tests {
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
         let node = doc.arena.get(node_id).unwrap();
-        if let agent_designer_core::NodeKind::Text { content, .. } = &node.kind {
+        if let sigil_core::NodeKind::Text { content, .. } = &node.kind {
             assert_eq!(content, "Hello, world!");
         } else {
             panic!("expected text node");
@@ -851,7 +851,7 @@ mod tests {
 
     #[test]
     fn test_set_text_content_impl_rejects_invalid_uuid() {
-        let state = agent_designer_state::AppState::new();
+        let state = sigil_state::AppState::new();
         let result = set_text_content_impl(&state, "not-a-uuid", "text");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
@@ -874,7 +874,7 @@ mod tests {
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
         let node = doc.arena.get(node_id).unwrap();
-        if let agent_designer_core::NodeKind::Text { text_style, .. } = &node.kind {
+        if let sigil_core::NodeKind::Text { text_style, .. } = &node.kind {
             assert_eq!(text_style.font_family, "Roboto");
         } else {
             panic!("expected text node");

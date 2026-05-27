@@ -1,6 +1,6 @@
 //! `SigilMcpServer` — the MCP `ServerHandler` implementation for Sigil.
 //!
-//! This module wires together the shared `AppState` (from `agent-designer-state`)
+//! This module wires together the shared `AppState` (from `sigil-state`)
 //! and the rmcp `ToolRouter` so that MCP clients can discover and call Sigil's
 //! tools and resources.
 //!
@@ -27,7 +27,7 @@ use rmcp::{
     tool, tool_router,
 };
 
-use agent_designer_state::{AppState, SendDocument};
+use sigil_state::{AppState, SendDocument};
 
 /// The MCP server for Sigil.
 ///

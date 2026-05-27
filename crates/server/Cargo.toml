@@ -1,12 +1,12 @@
 [package]
-name = "agent-designer-server"
+name = "sigil-server"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../core" }
-agent-designer-state = { path = "../state" }
-agent-designer-mcp = { path = "../mcp" }
+sigil-core = { path = "../core" }
+sigil-state = { path = "../state" }
+sigil-mcp = { path = "../mcp" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
