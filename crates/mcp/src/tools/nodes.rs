@@ -4,7 +4,7 @@
 //!   lock → resolve UUID → construct operation →
 //!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
 
-use agent_designer_core::{
+use sigil_core::{
     BlendMode, Effect, FieldOperation, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
     commands::node_commands::{CreateNode, DeleteNodes, RenameNode, SetLocked, SetVisible},
@@ -14,7 +14,7 @@ use agent_designer_core::{
     commands::tree_commands::{ReorderChildren, ReparentNode},
     validate_floats_in_value,
 };
-use agent_designer_state::{AppState, MutationEventKind};
+use sigil_state::{AppState, MutationEventKind};
 use uuid::Uuid;
 
 use crate::error::McpToolError;
@@ -33,10 +33,10 @@ pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
     match kind {
         "frame" => Ok(NodeKind::Frame {
             layout: None,
-            corners: agent_designer_core::node::default_corners(),
+            corners: sigil_core::node::default_corners(),
         }),
         "rectangle" => Ok(NodeKind::Rectangle {
-            corners: agent_designer_core::node::default_corners(),
+            corners: sigil_core::node::default_corners(),
         }),
         "ellipse" => Ok(NodeKind::Ellipse {
             arc_start: 0.0,
@@ -44,8 +44,8 @@ pub fn parse_node_kind(kind: &str) -> Result<NodeKind, McpToolError> {
         }),
         "text" => Ok(NodeKind::Text {
             content: String::new(),
-            text_style: agent_designer_core::TextStyle::default(),
-            sizing: agent_designer_core::TextSizing::AutoWidth,
+            text_style: sigil_core::TextStyle::default(),
+            sizing: sigil_core::TextSizing::AutoWidth,
         }),
         "group" => Ok(NodeKind::Group),
         // RF-012: Image nodes require an asset_ref which cannot be provided at
@@ -107,7 +107,7 @@ fn transform_input_to_core(t: &TransformInput) -> Transform {
 ///
 /// Returns `McpToolError::NodeNotFound` if the `node_id` is not in the arena.
 pub fn build_node_info(
-    doc: &agent_designer_core::Document,
+    doc: &sigil_core::Document,
     node_id: NodeId,
     uuid: Uuid,
 ) -> Result<NodeInfo, McpToolError> {
@@ -173,7 +173,7 @@ pub fn create_node_impl(
     let page_id = page_id_str
         .map(|s| {
             s.parse::<Uuid>()
-                .map(agent_designer_core::PageId::new)
+                .map(sigil_core::PageId::new)
                 .map_err(|_| McpToolError::InvalidUuid(s.to_string()))
         })
         .transpose()?;
@@ -309,11 +309,11 @@ pub fn delete_nodes_impl(
             "delete_nodes: empty batch".to_string(),
         ));
     }
-    if uuid_strs.len() > agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH {
+    if uuid_strs.len() > sigil_core::validate::MAX_NODES_PER_DELETE_BATCH {
         return Err(McpToolError::InvalidInput(format!(
             "delete_nodes: batch of {} exceeds MAX_NODES_PER_DELETE_BATCH ({})",
             uuid_strs.len(),
-            agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH,
+            sigil_core::validate::MAX_NODES_PER_DELETE_BATCH,
         )));
     }
 
@@ -332,8 +332,8 @@ pub fn delete_nodes_impl(
         // RF-022: Pre-build a NodeId -> PageId map once, then look up
         // each target in O(1). Previous code did O(P * R) per target.
         let mut node_to_page: std::collections::HashMap<
-            agent_designer_core::id::NodeId,
-            agent_designer_core::id::PageId,
+            sigil_core::id::NodeId,
+            sigil_core::id::PageId,
         > = std::collections::HashMap::new();
         for page in &doc.pages {
             for nid in &page.root_nodes {
@@ -341,10 +341,8 @@ pub fn delete_nodes_impl(
             }
         }
 
-        let mut targets: Vec<(
-            agent_designer_core::id::NodeId,
-            Option<agent_designer_core::id::PageId>,
-        )> = Vec::with_capacity(parsed.len());
+        let mut targets: Vec<(sigil_core::id::NodeId, Option<sigil_core::id::PageId>)> =
+            Vec::with_capacity(parsed.len());
         for (idx, uuid) in parsed.iter().enumerate() {
             let node_id = doc
                 .arena
@@ -1026,7 +1024,7 @@ pub fn set_corners_impl(
     uuid_str: &str,
     corners_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
-    let new_corners = agent_designer_core::corners_input::parse_corners_input(corners_value)
+    let new_corners = sigil_core::corners_input::parse_corners_input(corners_value)
         .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
 
     let node_uuid: Uuid = uuid_str
@@ -1071,7 +1069,7 @@ pub fn set_corners_impl(
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_state::AppState;
+    use sigil_state::AppState;
 
     use super::*;
     use crate::tools::pages::create_page_impl;
@@ -1296,7 +1294,7 @@ mod tests {
             .page(
                 page_id
                     .parse::<Uuid>()
-                    .map(agent_designer_core::PageId::new)
+                    .map(sigil_core::PageId::new)
                     .unwrap(),
             )
             .unwrap();
@@ -1410,7 +1408,7 @@ mod tests {
         let node = doc.arena.get(node_id).unwrap();
         assert_eq!(
             node.style.opacity,
-            agent_designer_core::StyleValue::Literal { value: 0.5 }
+            sigil_core::StyleValue::Literal { value: 0.5 }
         );
     }
 
@@ -1460,10 +1458,7 @@ mod tests {
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
             .unwrap();
         let node = doc.arena.get(node_id).unwrap();
-        assert_eq!(
-            node.style.blend_mode,
-            agent_designer_core::BlendMode::Multiply
-        );
+        assert_eq!(node.style.blend_mode, sigil_core::BlendMode::Multiply);
     }
 
     #[test]
@@ -1605,11 +1600,11 @@ mod tests {
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
             .unwrap();
         let node = doc.arena.get(node_id).unwrap();
-        let agent_designer_core::NodeKind::Rectangle { corners } = &node.kind else {
+        let sigil_core::NodeKind::Rectangle { corners } = &node.kind else {
             panic!("expected rectangle");
         };
         for corner in corners {
-            let agent_designer_core::Corner::Round { radii } = corner else {
+            let sigil_core::Corner::Round { radii } = corner else {
                 panic!("expected round corner, got {corner:?}");
             };
             // Exact bit equality: literals pass through serde without lossy ops.
@@ -1638,11 +1633,11 @@ mod tests {
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
             .unwrap();
         let node = doc.arena.get(node_id).unwrap();
-        let agent_designer_core::NodeKind::Rectangle { corners } = &node.kind else {
+        let sigil_core::NodeKind::Rectangle { corners } = &node.kind else {
             panic!("expected rectangle");
         };
         for corner in corners {
-            let agent_designer_core::Corner::Superellipse { radii, smoothing } = corner else {
+            let sigil_core::Corner::Superellipse { radii, smoothing } = corner else {
                 panic!("expected superellipse, got {corner:?}");
             };
             // Exact bit equality: literals pass through serde without lossy ops.

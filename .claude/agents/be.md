@@ -63,7 +63,7 @@ Before pushing ANY commit, verify the following locally. CI failures waste time 
 1. `cargo fmt --check` — no formatting violations
 2. `cargo clippy --workspace -- -D warnings` — no clippy warnings
 3. `cargo test --workspace` — all tests pass
-4. If working on core crate: `cargo check --target wasm32-unknown-unknown -p agent-designer-core`
+4. If working on core crate: `cargo check --target wasm32-unknown-unknown -p sigil-core`
 
 Do not rely on CI to catch formatting or lint issues. Fix them locally first.
 
@@ -129,6 +129,6 @@ This project uses Rust Edition 2024. Be aware of:
 3. Read the implementation plan task you've been assigned
 4. Read the files you will modify — understand existing code before changing it
 5. Run `cargo test --workspace` to verify tests pass before making changes
-6. If working on core crate: verify WASM compat with `cargo check --target wasm32-unknown-unknown -p agent-designer-core`
+6. If working on core crate: verify WASM compat with `cargo check --target wasm32-unknown-unknown -p sigil-core`
 7. Run `cargo fmt` after every code change — CI will reject unformatted code
 8. Run `cargo clippy --workspace -- -D warnings` and fix all warnings before pushing

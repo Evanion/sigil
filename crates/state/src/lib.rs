@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use agent_designer_core::Document;
+use sigil_core::Document;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 

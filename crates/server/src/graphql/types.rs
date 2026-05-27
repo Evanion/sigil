@@ -1,8 +1,8 @@
 use async_graphql::{InputObject, OneofObject, SimpleObject};
 
-use agent_designer_core::tokens::{Token, TokenType, TokenValue};
-use agent_designer_core::{Document, NodeId};
-use agent_designer_state::{MutationEvent, MutationEventKind, TransactionPayload};
+use sigil_core::tokens::{Token, TokenType, TokenValue};
+use sigil_core::{Document, NodeId};
+use sigil_state::{MutationEvent, MutationEventKind, TransactionPayload};
 
 // ── OneofObject input types for applyOperations ──────────────────────
 
@@ -553,7 +553,7 @@ pub fn node_to_gql(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use agent_designer_state::OperationPayload;
+    use sigil_state::OperationPayload;
 
     #[test]
     fn test_from_transaction_maps_all_fields() {

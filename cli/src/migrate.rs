@@ -9,10 +9,10 @@
 //! 1. Validate that `<path>` is an existing directory containing
 //!    `manifest.json`. Return an error otherwise.
 //! 2. Read `manifest.json`. If `schema_version` already matches
-//!    [`agent_designer_core::CURRENT_SCHEMA_VERSION`], print "already at vN"
+//!    [`sigil_core::CURRENT_SCHEMA_VERSION`], print "already at vN"
 //!    and return success without touching disk.
 //! 3. Walk `<path>/pages/*.json`, parse each as `serde_json::Value`, and
-//!    invoke [`agent_designer_core::migrations::migrate_to_v2`].
+//!    invoke [`sigil_core::migrations::migrate_to_v2`].
 //!    - In **default** mode: before any overwrite, copy v1 originals to
 //!      `<path>/.backup-v1/` (skipped if the backup directory already
 //!      exists, mirroring the server's RF-010 one-shot pattern). Migrated
@@ -109,7 +109,7 @@ impl MigrateOutcome {
 /// [`MigrateOutcome`]. Callers detect them via
 /// [`MigrateOutcome::had_failures`].
 pub fn run<W: std::io::Write>(path: &Path, check: bool, mut out: W) -> Result<MigrateOutcome> {
-    let target_version = agent_designer_core::CURRENT_SCHEMA_VERSION;
+    let target_version = sigil_core::CURRENT_SCHEMA_VERSION;
     let LoadedManifest {
         manifest_path,
         mut manifest,
@@ -344,7 +344,7 @@ fn migrate_page_file(page_path: &Path) -> Result<String> {
         .with_context(|| format!("failed to read {}", page_path.display()))?;
     let value: Value = serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}", page_path.display()))?;
-    let migrated = agent_designer_core::migrations::migrate_to_v2(value)
+    let migrated = sigil_core::migrations::migrate_to_v2(value)
         .with_context(|| format!("migration failed for {}", page_path.display()))?;
     let out =
         serde_json::to_string_pretty(&migrated).context("failed to serialize migrated page")?;

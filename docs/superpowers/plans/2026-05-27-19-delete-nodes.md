@@ -91,7 +91,7 @@ fn test_max_node_tree_depth_value() {
 - [ ] **Step 2: Run tests to verify failure**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core --lib validate:: 2>&1 | tail -20
+./dev.sh cargo test -p sigil-core --lib validate:: 2>&1 | tail -20
 ```
 
 Expected: FAIL with "cannot find value `MAX_NODES_PER_DELETE_BATCH`".
@@ -117,8 +117,8 @@ pub const MAX_NODE_TREE_DEPTH: usize = 64;
 - [ ] **Step 4: Run tests to verify pass**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core --lib validate:: 2>&1 | tail -10
-./dev.sh cargo build -p agent-designer-core 2>&1 | tail -10
+./dev.sh cargo test -p sigil-core --lib validate:: 2>&1 | tail -10
+./dev.sh cargo build -p sigil-core 2>&1 | tail -10
 ```
 
 Expected: PASS, build clean.
@@ -172,7 +172,7 @@ fn test_ancestors_rejects_chain_exceeding_depth_limit() {
 - [ ] **Step 2: Run test to verify failure**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core tree::tests::test_ancestors_rejects_chain_exceeding_depth_limit 2>&1 | tail -20
+./dev.sh cargo test -p sigil-core tree::tests::test_ancestors_rejects_chain_exceeding_depth_limit 2>&1 | tail -20
 ```
 
 Expected: FAIL (either compile error "this function takes 2 arguments" or runtime fail).
@@ -215,7 +215,7 @@ For each match, add `crate::validate::MAX_NODE_TREE_DEPTH` (or the appropriate p
 
 ```bash
 ./dev.sh cargo build --workspace 2>&1 | tail -20
-./dev.sh cargo test -p agent-designer-core --lib tree:: 2>&1 | tail -20
+./dev.sh cargo test -p sigil-core --lib tree:: 2>&1 | tail -20
 ```
 
 Expected: build clean, all tree tests pass including the new depth-guard test.
@@ -304,7 +304,7 @@ fn test_delete_nodes_validate_rejects_missing_node() {
 - [ ] **Step 2: Run tests to verify failure**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -30
+./dev.sh cargo test -p sigil-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -30
 ```
 
 Expected: FAIL with "cannot find type `DeleteNodes`".
@@ -364,7 +364,7 @@ impl FieldOperation for DeleteNodes {
 - [ ] **Step 4: Run tests to verify pass**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -30
+./dev.sh cargo test -p sigil-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -30
 ```
 
 Expected: validate tests PASS. Apply tests (added in Task 4) still missing.
@@ -697,8 +697,8 @@ fn reinsert_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<()
 - [ ] **Step 4: Build and run tests**
 
 ```bash
-./dev.sh cargo build -p agent-designer-core 2>&1 | tail -30
-./dev.sh cargo test -p agent-designer-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -40
+./dev.sh cargo build -p sigil-core 2>&1 | tail -30
+./dev.sh cargo test -p sigil-core --lib commands::node_commands::tests::test_delete_nodes 2>&1 | tail -40
 ```
 
 Expected: all DeleteNodes tests pass.
@@ -706,7 +706,7 @@ Expected: all DeleteNodes tests pass.
 - [ ] **Step 5: Run full core test suite**
 
 ```bash
-./dev.sh cargo test -p agent-designer-core 2>&1 | tail -10
+./dev.sh cargo test -p sigil-core 2>&1 | tail -10
 ```
 
 Expected: PASS (singular tests still pass).
@@ -759,7 +759,7 @@ In `crates/server/src/graphql/mutation.rs`, add a new function near `parse_delet
 /// Parses a `DeleteNodes` input (Spec 19). Resolves each UUID to a NodeId
 /// and looks up the page root membership for each.
 fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
-    use agent_designer_core::commands::DeleteNodes;
+    use sigil_core::commands::DeleteNodes;
 
     let parsed_uuids: Vec<uuid::Uuid> = dn
         .node_uuids
@@ -781,8 +781,8 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
     Ok(ParsedOp {
         builder: Box::new(move |doc| {
             let mut targets: Vec<(
-                agent_designer_core::id::NodeId,
-                Option<agent_designer_core::id::PageId>,
+                sigil_core::id::NodeId,
+                Option<sigil_core::id::PageId>,
             )> = Vec::with_capacity(parsed_uuids.len());
             for uuid in &parsed_uuids {
                 let node_id = doc
@@ -823,8 +823,8 @@ Find `test_apply_operations_delete_node` in `mutation.rs` (around line 1647). Ad
 - [ ] **Step 4: Build + test**
 
 ```bash
-./dev.sh cargo build -p agent-designer-server 2>&1 | tail -20
-./dev.sh cargo test -p agent-designer-server 2>&1 | tail -10
+./dev.sh cargo build -p sigil-server 2>&1 | tail -20
+./dev.sh cargo test -p sigil-server 2>&1 | tail -10
 ```
 
 Expected: clean.
@@ -866,7 +866,7 @@ pub struct DeleteNodesInput {
 In `crates/mcp/src/tools/nodes.rs`, add (do NOT remove the singular impl yet):
 
 ```rust
-use agent_designer_core::commands::node_commands::DeleteNodes;
+use sigil_core::commands::node_commands::DeleteNodes;
 
 pub fn delete_nodes_impl(state: &AppState, uuid_strs: &[String]) -> Result<MutationResult, McpToolError> {
     let parsed: Vec<uuid::Uuid> = uuid_strs
@@ -875,7 +875,7 @@ pub fn delete_nodes_impl(state: &AppState, uuid_strs: &[String]) -> Result<Mutat
         .collect::<Result<Vec<_>, _>>()?;
 
     let mut doc = state.document.write();
-    let mut targets: Vec<(agent_designer_core::id::NodeId, Option<agent_designer_core::id::PageId>)> =
+    let mut targets: Vec<(sigil_core::id::NodeId, Option<sigil_core::id::PageId>)> =
         Vec::with_capacity(parsed.len());
     for uuid in &parsed {
         let node_id = doc.arena.id_by_uuid(uuid)
@@ -926,8 +926,8 @@ In `crates/mcp/src/tools/nodes.rs` test module, add a test mirroring `test_delet
 - [ ] **Step 5: Build + test**
 
 ```bash
-./dev.sh cargo build -p agent-designer-mcp 2>&1 | tail -20
-./dev.sh cargo test -p agent-designer-mcp 2>&1 | tail -10
+./dev.sh cargo build -p sigil-mcp 2>&1 | tail -20
+./dev.sh cargo test -p sigil-mcp 2>&1 | tail -10
 ```
 
 Expected: clean.
@@ -1762,7 +1762,7 @@ describe("delete_nodes wire-format parity (Spec 19)", () => {
 - [ ] **Step 4: Run both parity tests**
 
 ```bash
-./dev.sh cargo test -p agent-designer-server --test parity_delete_nodes 2>&1 | tail -10
+./dev.sh cargo test -p sigil-server --test parity_delete_nodes 2>&1 | tail -10
 ./dev.sh pnpm --prefix frontend test --run parity-delete-nodes 2>&1 | tail -10
 ```
 
@@ -1800,11 +1800,11 @@ tmpdir=$(mktemp -d)
 trap 'rm -rf "$tmpdir"' EXIT
 
 cat > "$tmpdir/violation.rs" <<'EOF'
-use agent_designer_core::commands::DeleteNode;
+use sigil_core::commands::DeleteNode;
 EOF
 
 cat > "$tmpdir/clean.rs" <<'EOF'
-use agent_designer_core::commands::DeleteNodes;
+use sigil_core::commands::DeleteNodes;
 EOF
 
 if ! rg -E "$BANNED" "$tmpdir/violation.rs" >/dev/null; then
@@ -1992,7 +1992,7 @@ Expected: no output. Iterate file-by-file until clean.
 ./dev.sh cargo test --workspace 2>&1 | tail -30
 ./dev.sh cargo clippy --workspace --no-deps -- -D warnings 2>&1 | tail -20
 ./dev.sh cargo fmt --check 2>&1 | tail -5
-./dev.sh cargo check --target wasm32-unknown-unknown -p agent-designer-core 2>&1 | tail -10
+./dev.sh cargo check --target wasm32-unknown-unknown -p sigil-core 2>&1 | tail -10
 ./dev.sh pnpm --prefix frontend test --run 2>&1 | tail -30
 ./dev.sh pnpm --prefix frontend lint 2>&1 | tail -10
 ./dev.sh pnpm --prefix frontend exec tsc --noEmit 2>&1 | tail -10
@@ -2050,7 +2050,7 @@ EOF
 - [ ] **Step 1: Start the dev server**
 
 ```bash
-./dev.sh cargo run --bin agent-designer-server &
+./dev.sh cargo run --bin sigil-server &
 ./dev.sh pnpm --prefix frontend dev &
 ```
 
@@ -2084,7 +2084,7 @@ Expected: tab 2 receives a single `delete_nodes` broadcast event (visible in Dev
 ./dev.sh cargo test --workspace 2>&1 | tail -10
 ./dev.sh cargo clippy --workspace --no-deps -- -D warnings 2>&1 | tail -10
 ./dev.sh cargo fmt --check 2>&1 | tail -5
-./dev.sh cargo check --target wasm32-unknown-unknown -p agent-designer-core 2>&1 | tail -5
+./dev.sh cargo check --target wasm32-unknown-unknown -p sigil-core 2>&1 | tail -5
 ./dev.sh pnpm --prefix frontend test --run 2>&1 | tail -10
 ./dev.sh pnpm --prefix frontend lint 2>&1 | tail -5
 ./dev.sh pnpm --prefix frontend exec tsc --noEmit 2>&1 | tail -5
@@ -2123,7 +2123,7 @@ $ rg -nE 'DeleteNode|delete_node|DeleteNodeInput|createDeleteNodeOp|store\.delet
 
 - [x] cargo test --workspace passes
 - [x] cargo clippy --workspace -- -D warnings clean
-- [x] cargo check --target wasm32-unknown-unknown -p agent-designer-core clean
+- [x] cargo check --target wasm32-unknown-unknown -p sigil-core clean
 - [x] pnpm --prefix frontend test --run passes
 - [x] pnpm --prefix frontend lint clean
 - [x] pnpm --prefix frontend exec tsc --noEmit clean
@@ -2149,7 +2149,7 @@ Checking the plan against the spec's §1-§12:
 - **§2 validate + apply** — Tasks 3, 4 cover validate (empty/oversize/dup/missing), apply (dedup + snapshot + sort + rollback), inverse-construction handoff to frontend. ✓
 - **§3 frontend store + apply-remote** — Tasks 8, 9, 11, 12 cover apply-remote handler, apply-to-store handler, store function, call site updates. ✓
 - **§4 migration receipts** — Tasks 15 (sentinel + violation-fires) and 16 (the removal cliff) deliver both required receipts. ✓
-- **§5 WASM** — Task 17 Step 5 includes `cargo check --target wasm32-unknown-unknown -p agent-designer-core`. ✓
+- **§5 WASM** — Task 17 Step 5 includes `cargo check --target wasm32-unknown-unknown -p sigil-core`. ✓
 - **§6 input validation** — Task 3 enforces every limit named in the spec. ✓
 - **§7 PDR traceability** — Covered by spec; plan doesn't need to repeat. ✓
 - **§8 consistency** — Tasks 3, 4 deliver atomic apply with rollback. ✓

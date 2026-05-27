@@ -25,7 +25,7 @@ trap 'rm -rf "$tmpdir"' EXIT
 mkdir -p "$tmpdir/crates" "$tmpdir/frontend/src"
 
 cat > "$tmpdir/crates/violation.rs" <<'EOF'
-use agent_designer_core::commands::DeleteNode;
+use sigil_core::commands::DeleteNode;
 EOF
 
 cat > "$tmpdir/frontend/src/violation.ts" <<'EOF'
@@ -34,7 +34,7 @@ case "delete_node":
 EOF
 
 cat > "$tmpdir/crates/clean.rs" <<'EOF'
-use agent_designer_core::commands::node_commands::DeleteNodes;
+use sigil_core::commands::node_commands::DeleteNodes;
 EOF
 
 cat > "$tmpdir/frontend/src/clean.ts" <<'EOF'

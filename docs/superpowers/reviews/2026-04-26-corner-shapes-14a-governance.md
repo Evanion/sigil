@@ -109,7 +109,7 @@ Target: `.claude/rules/frontend-defensive.md`, new section after "Polymorphic St
 
 **Existing coverage:** None. The "Migrations Must Remove All Superseded Code" rule in CLAUDE.md §11 is about API/library migrations, not schema migrations. CLAUDE.md §4 "File Persistence Safety" covers atomic writes but says nothing about migration semantics.
 
-**Proposal — NEW** rule in CLAUDE.md §4 "File Persistence Safety" (under `agent-designer-server`):
+**Proposal — NEW** rule in CLAUDE.md §4 "File Persistence Safety" (under `sigil-server`):
 
 > #### Schema Migration Persistence Contract
 >

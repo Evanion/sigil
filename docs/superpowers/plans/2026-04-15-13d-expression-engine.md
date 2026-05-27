@@ -114,7 +114,7 @@ pub enum ExprError {
 }
 ```
 
-**Key constraint:** The module refactor must preserve ALL existing public API — `Token`, `TokenValue`, `TokenContext`, `TokenType`, etc. must continue to be importable from `agent_designer_core`. Run `cargo test --workspace` and `cargo clippy --workspace` after the refactor.
+**Key constraint:** The module refactor must preserve ALL existing public API — `Token`, `TokenValue`, `TokenContext`, `TokenType`, etc. must continue to be importable from `sigil_core`. Run `cargo test --workspace` and `cargo clippy --workspace` after the refactor.
 
 - [ ] Step 1: Create `crates/core/src/tokens/` directory
 - [ ] Step 2: Move `token.rs` to `tokens/types.rs`, update `mod.rs` to re-export everything

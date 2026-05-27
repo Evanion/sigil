@@ -48,7 +48,7 @@ fn test_corner_constants_have_expected_values() {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_corner_constants_have_expected_values`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_corner_constants_have_expected_values`
 Expected: FAIL with "cannot find value `MAX_CORNER_RADIUS`".
 
 - [ ] **Step 3: Add the constants**
@@ -69,7 +69,7 @@ pub const MAX_CORNER_SMOOTHING: f64 = 1.0;
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_corner_constants_have_expected_values`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_corner_constants_have_expected_values`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -135,7 +135,7 @@ fn test_corner_deserialize_rejects_smoothing_on_round() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_corner`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_corner`
 Expected: FAIL with "cannot find type `Corner`".
 
 - [ ] **Step 3: Add the types**
@@ -201,7 +201,7 @@ impl Corner {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_corner`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_corner`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
@@ -340,7 +340,7 @@ fn test_validate_corners_rejects_nan_smoothing() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_validate_corners`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_validate_corners`
 Expected: FAIL with "cannot find function `validate_corners`".
 
 - [ ] **Step 3: Implement `validate_corners`**
@@ -437,10 +437,10 @@ Ensure `validate_corners`, `MAX_CORNER_RADIUS`, `MIN_CORNER_SMOOTHING`, `MAX_COR
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_validate_corners`
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_max_corner_radius_enforced`
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_min_corner_smoothing_enforced`
-Run: `./dev.sh cargo test -p agent-designer-core validate::tests::test_max_corner_smoothing_enforced`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_validate_corners`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_max_corner_radius_enforced`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_min_corner_smoothing_enforced`
+Run: `./dev.sh cargo test -p sigil-core validate::tests::test_max_corner_smoothing_enforced`
 Expected: all PASS (13 tests total).
 
 - [ ] **Step 5: Commit**
@@ -508,7 +508,7 @@ fn test_node_kind_image_has_corners_field() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_node_kind_rectangle_has_corners_field`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_node_kind_rectangle_has_corners_field`
 Expected: FAIL — compilation error, `corners` field not recognized.
 
 - [ ] **Step 3: Modify NodeKind variants + add default helper**
@@ -549,7 +549,7 @@ pub enum NodeKind {
 
 - [ ] **Step 4: Fix compilation errors in the core crate**
 
-Run: `./dev.sh cargo build -p agent-designer-core`
+Run: `./dev.sh cargo build -p sigil-core`
 
 For each compile error in `crates/core/`, update the call site:
 - **Every `NodeKind::Rectangle { corner_radii: [...] }`** — replace with `NodeKind::Rectangle { corners: default_corners() }` if the radii were all zero, or `NodeKind::Rectangle { corners: corner_radii_to_corners([r0, r1, r2, r3]) }` otherwise. Introduce `corner_radii_to_corners` as a `#[cfg(test)] pub(crate)` helper (see below).
@@ -573,18 +573,18 @@ pub(crate) fn corner_radii_to_corners(radii: [f64; 4]) -> [Corner; 4] {
 
 This helper exists only to migrate the test fixtures in this commit. The production migration path lives in Task 6 (workfile migration), which uses its own logic — do NOT reuse this helper for production.
 
-Re-run `./dev.sh cargo build -p agent-designer-core` until it succeeds.
+Re-run `./dev.sh cargo build -p sigil-core` until it succeeds.
 
 - [ ] **Step 5: Run tests**
 
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_node_kind_rectangle_has_corners_field`
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_node_kind_frame_has_corners_field`
-Run: `./dev.sh cargo test -p agent-designer-core node::tests::test_node_kind_image_has_corners_field`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_node_kind_rectangle_has_corners_field`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_node_kind_frame_has_corners_field`
+Run: `./dev.sh cargo test -p sigil-core node::tests::test_node_kind_image_has_corners_field`
 Expected: PASS.
 
 Also run the full core test suite. Many tests will fail because `SetCornerRadii` still references the old field — this is expected and will be resolved in Task 5.
 
-Run: `./dev.sh cargo test -p agent-designer-core` — expect failures in `commands::style_commands` tests. Acceptable until Task 5.
+Run: `./dev.sh cargo test -p sigil-core` — expect failures in `commands::style_commands` tests. Acceptable until Task 5.
 
 - [ ] **Step 6: Commit**
 
@@ -782,7 +782,7 @@ fn test_set_corners_rejects_missing_node() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core commands::style_commands::tests::test_set_corners`
+Run: `./dev.sh cargo test -p sigil-core commands::style_commands::tests::test_set_corners`
 Expected: FAIL with "cannot find struct `SetCorners`".
 
 - [ ] **Step 3: Implement `SetCorners` and delete `SetCornerRadii`**
@@ -847,13 +847,13 @@ impl FieldOperation for SetCorners {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-core commands::style_commands::tests::test_set_corners`
+Run: `./dev.sh cargo test -p sigil-core commands::style_commands::tests::test_set_corners`
 Expected: PASS (11 tests).
 
-Run full core: `./dev.sh cargo test -p agent-designer-core`
+Run full core: `./dev.sh cargo test -p sigil-core`
 Expected: PASS. If any test still references `SetCornerRadii` or `corner_radii` field, update it to use the new types.
 
-Run: `./dev.sh cargo clippy -p agent-designer-core -- -D warnings`
+Run: `./dev.sh cargo clippy -p sigil-core -- -D warnings`
 Expected: no warnings.
 
 - [ ] **Step 5: Commit**
@@ -1061,7 +1061,7 @@ pub mod migrations;
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core migrations::tests`
+Run: `./dev.sh cargo test -p sigil-core migrations::tests`
 Expected: FAIL — `migrate_to_v2` not found or empty stub returns unchanged input.
 
 - [ ] **Step 3: Implement the migration**
@@ -1141,7 +1141,7 @@ fn migrate_frame_or_image_kind(kind: &mut Value) {
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-core migrations::tests`
+Run: `./dev.sh cargo test -p sigil-core migrations::tests`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Wire migration into the page loader**
@@ -1207,10 +1207,10 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
 - [ ] **Step 7: Run the full core test suite**
 
-Run: `./dev.sh cargo test -p agent-designer-core`
+Run: `./dev.sh cargo test -p sigil-core`
 Expected: PASS.
 
-Run: `./dev.sh cargo clippy -p agent-designer-core -- -D warnings`
+Run: `./dev.sh cargo clippy -p sigil-core -- -D warnings`
 Expected: no warnings.
 
 - [ ] **Step 8: Commit**
@@ -1380,7 +1380,7 @@ Register in `crates/core/src/lib.rs`: `pub mod corners_input;`
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-core corners_input::tests`
+Run: `./dev.sh cargo test -p sigil-core corners_input::tests`
 Expected: all tests FAIL (`todo!()` panic or similar).
 
 - [ ] **Step 3: Implement `parse_corners_input`**
@@ -1540,7 +1540,7 @@ fn build_non_superellipse_corner(shape: &str, radii: CornerRadii) -> Result<Corn
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-core corners_input::tests`
+Run: `./dev.sh cargo test -p sigil-core corners_input::tests`
 Expected: PASS (11 tests).
 
 - [ ] **Step 5: Commit**
@@ -1595,7 +1595,7 @@ Reuse the existing `set_field` resolver test setup — follow the exact construc
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-server test_set_field_kind_accepts_new_corners_shape`
+Run: `./dev.sh cargo test -p sigil-server test_set_field_kind_accepts_new_corners_shape`
 Expected: FAIL.
 
 - [ ] **Step 3: Replace the old `"kind"` dispatcher with the new one**
@@ -1616,7 +1616,7 @@ Find lines 328-375 in `crates/server/src/graphql/mutation.rs` — the `"kind" =>
                     "{kind_type} kind value must include 'corners' array"
                 ))
             })?;
-            let new_corners = agent_designer_core::corners_input::parse_corners_input(corners_value)
+            let new_corners = sigil_core::corners_input::parse_corners_input(corners_value)
                 .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
             // validate_corners will run again inside SetCorners::validate;
             // no duplicate call needed here.
@@ -1648,13 +1648,13 @@ Update the `use` statements at the top of the file: remove `SetCornerRadii`, add
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-server test_set_field_kind`
+Run: `./dev.sh cargo test -p sigil-server test_set_field_kind`
 Expected: PASS.
 
-Run full server suite: `./dev.sh cargo test -p agent-designer-server`
+Run full server suite: `./dev.sh cargo test -p sigil-server`
 Expected: PASS. If any test still references `corner_radii` on a rectangle kind, update it to pass the new `corners` shape.
 
-Run clippy: `./dev.sh cargo clippy -p agent-designer-server -- -D warnings`
+Run clippy: `./dev.sh cargo clippy -p sigil-server -- -D warnings`
 Expected: no warnings.
 
 - [ ] **Step 5: Commit**
@@ -1664,7 +1664,7 @@ git add crates/server/src/
 git commit -m "feat(server): GraphQL SetField 'kind' path accepts corners array (spec-14a)
 
 The 'kind' dispatcher now delegates shorthand parsing to
-agent_designer_core::corners_input::parse_corners_input and constructs
+sigil_core::corners_input::parse_corners_input and constructs
 SetCorners. Rectangle, Frame, and Image all accepted."
 ```
 
@@ -1801,7 +1801,7 @@ fn test_set_corners_node_not_found() {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `./dev.sh cargo test -p agent-designer-mcp test_set_corners`
+Run: `./dev.sh cargo test -p sigil-mcp test_set_corners`
 Expected: FAIL — `SetCornersInput` and `set_corners_impl` do not exist yet.
 
 - [ ] **Step 3: Replace the input type**
@@ -1887,7 +1887,7 @@ pub fn set_corners_impl(
     corners_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
     // Parse shorthand into [Corner; 4] BEFORE acquiring the lock.
-    let new_corners = agent_designer_core::corners_input::parse_corners_input(corners_value)
+    let new_corners = sigil_core::corners_input::parse_corners_input(corners_value)
         .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
 
     let node_uuid: Uuid = uuid_str
@@ -1933,19 +1933,19 @@ pub fn set_corners_impl(
 ```
 
 Update `use` statements at the top of `crates/mcp/src/tools/nodes.rs`:
-- Remove: `use agent_designer_core::commands::SetCornerRadii;` (if present)
-- Add: `use agent_designer_core::commands::SetCorners;`
-- Ensure `NodeKind` and `Corner` are in scope for the test module (they already should be via `use agent_designer_core::*` or similar — add explicit imports if not).
+- Remove: `use sigil_core::commands::SetCornerRadii;` (if present)
+- Add: `use sigil_core::commands::SetCorners;`
+- Ensure `NodeKind` and `Corner` are in scope for the test module (they already should be via `use sigil_core::*` or similar — add explicit imports if not).
 
 - [ ] **Step 6: Run the MCP tests to verify they pass**
 
-Run: `./dev.sh cargo test -p agent-designer-mcp test_set_corners`
+Run: `./dev.sh cargo test -p sigil-mcp test_set_corners`
 Expected: all five tests PASS.
 
-Run the full MCP suite: `./dev.sh cargo test -p agent-designer-mcp`
+Run the full MCP suite: `./dev.sh cargo test -p sigil-mcp`
 Expected: PASS. Any existing test that references `set_corner_radii_impl` or `SetCornerRadiiInput` must be migrated to `set_corners_impl` / `SetCornersInput` in this step — grep for both identifiers and update call sites.
 
-Run clippy: `./dev.sh cargo clippy -p agent-designer-mcp -- -D warnings`
+Run clippy: `./dev.sh cargo clippy -p sigil-mcp -- -D warnings`
 Expected: no warnings.
 
 - [ ] **Step 7: Verify no dead references remain**
@@ -2732,9 +2732,9 @@ Plan 14c. Schema now applies to rectangle, frame, and image."
 Create `crates/mcp/tests/integration_set_corners.rs`:
 
 ```rust
-use agent_designer_core::{Corner, NodeKind};
-use agent_designer_mcp::tools::nodes::{create_node_impl, set_corners_impl};
-use agent_designer_state::{AppState, MutationEvent, MutationEventKind};
+use sigil_core::{Corner, NodeKind};
+use sigil_mcp::tools::nodes::{create_node_impl, set_corners_impl};
+use sigil_state::{AppState, MutationEvent, MutationEventKind};
 use serde_json::json;
 
 fn recv_one(rx: &mut tokio::sync::broadcast::Receiver<MutationEvent>) -> MutationEvent {
@@ -2801,14 +2801,14 @@ fn seed_rectangle(state: &AppState) -> String {
 
 - [ ] **Step 2: Run to verify fail**
 
-Run: `./dev.sh cargo test -p agent-designer-mcp --test integration_set_corners`
+Run: `./dev.sh cargo test -p sigil-mcp --test integration_set_corners`
 Expected: FAIL — either the helper is stubbed or (if everything compiles) the test asserts a broadcast shape that must be produced end-to-end.
 
 - [ ] **Step 3: Fix the `seed_rectangle` helper and run**
 
 Wire up the helper and run again:
 
-Run: `./dev.sh cargo test -p agent-designer-mcp --test integration_set_corners`
+Run: `./dev.sh cargo test -p sigil-mcp --test integration_set_corners`
 Expected: PASS. If the assertion on `kind["type"]` or the corners array structure fails, the serialization format in Task 2 (Rust `Corner` enum) is wrong — revisit `#[serde(tag = "type", rename_all = "snake_case")]` and the inner `CornerRadii` serialization.
 
 - [ ] **Step 4: Write the failing frontend integration test**

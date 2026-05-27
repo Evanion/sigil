@@ -13,7 +13,7 @@
 use rmcp::ErrorData;
 use rmcp::model::{AnnotateAble as _, RawResource, Resource, ResourceContents};
 
-use agent_designer_state::AppState;
+use sigil_state::AppState;
 
 use crate::types::{ComponentListResult, TokenListResult};
 
@@ -129,7 +129,7 @@ pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents
 
 #[cfg(test)]
 mod tests {
-    use agent_designer_state::AppState;
+    use sigil_state::AppState;
 
     use super::*;
 

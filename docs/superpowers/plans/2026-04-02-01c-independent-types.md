@@ -319,8 +319,8 @@ pub use path::{AnchorPoint, CornerMode, PathSegment, SubPath};
 - [ ] 4. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core path::tests
-./dev.sh cargo test -p agent-designer-core  # all tests still pass
+./dev.sh cargo test -p sigil-core path::tests
+./dev.sh cargo test -p sigil-core  # all tests still pass
 ```
 
 Expected: all path tests pass, no regressions.
@@ -328,8 +328,8 @@ Expected: all path tests pass, no regressions.
 - [ ] 5. Run clippy and format:
 
 ```bash
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:
@@ -655,9 +655,9 @@ Add `MAX_GRID_TRACKS` and `validate_grid_track` to the validate re-exports.
 - [ ] 8. Run tests and clippy:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 9. Commit:
@@ -988,10 +988,10 @@ Add the new validate constants to the validate re-exports.
 - [ ] 5. Run tests and clippy:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core prototype::tests
-./dev.sh cargo test -p agent-designer-core  # all tests
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core prototype::tests
+./dev.sh cargo test -p sigil-core  # all tests
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:
@@ -1096,9 +1096,9 @@ fn test_serialized_page_with_transitions_round_trip() {
 - [ ] 7. Run tests and clippy:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 8. Commit:

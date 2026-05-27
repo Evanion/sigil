@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use anyhow::Context as _;
 
-use agent_designer_server::{build_app, state::ServerState};
+use sigil_server::{build_app, state::ServerState};
 use tracing_subscriber::EnvFilter;
 
 /// Maximum time to wait for the persistence task to complete a final flush
@@ -49,7 +49,7 @@ async fn main() -> anyhow::Result<()> {
         let workfile_path = std::path::PathBuf::from(workfile_str);
         tracing::info!("loading workfile from {}", workfile_path.display());
 
-        let loaded = agent_designer_server::workfile::load_workfile(&workfile_path)
+        let loaded = sigil_server::workfile::load_workfile(&workfile_path)
             .await
             .context("failed to load workfile")?;
 
@@ -74,9 +74,9 @@ async fn main() -> anyhow::Result<()> {
         let state = ServerState::new();
         {
             let mut doc = state.app.document.lock().expect("lock for default page");
-            let page_id = agent_designer_core::PageId::new(uuid::Uuid::new_v4());
-            let page = agent_designer_core::Page::new(page_id, "Page 1".to_string())
-                .expect("create default page");
+            let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
+            let page =
+                sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
             doc.add_page(page).expect("add default page");
         }
         state
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        Some(agent_designer_mcp::server::start_stdio(state.app.clone()))
+        Some(sigil_mcp::server::start_stdio(state.app.clone()))
     } else {
         None
     };

@@ -29,7 +29,7 @@ FROM rust-deps AS rust-builder
 COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
 COPY cli/ cli/
-RUN cargo build --release --bin agent-designer-server
+RUN cargo build --release --bin sigil-server
 
 # Stage 3: Runtime
 FROM debian:bookworm-slim AS runtime
@@ -38,7 +38,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 
 RUN groupadd -g 1001 sigil && useradd -r -u 1001 -g sigil sigil
 
-COPY --from=rust-builder /app/target/release/agent-designer-server /usr/local/bin/
+COPY --from=rust-builder /app/target/release/sigil-server /usr/local/bin/
 COPY --from=frontend-builder /app/frontend/dist /usr/local/share/sigil/frontend
 
 USER sigil
@@ -48,4 +48,4 @@ EXPOSE 4680
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
     CMD curl -f http://localhost:4680/health || exit 1
 
-ENTRYPOINT ["agent-designer-server"]
+ENTRYPOINT ["sigil-server"]

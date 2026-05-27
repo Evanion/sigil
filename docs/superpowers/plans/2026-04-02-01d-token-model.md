@@ -550,10 +550,10 @@ Note: `TokenContext` re-export will be added in Task 2 after it's implemented.
 - [ ] 3. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core token::tests
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core token::tests
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 4. Commit:
@@ -896,10 +896,10 @@ fn test_token_context_serde_round_trip() {
 - [ ] 5. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core token
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core token
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:

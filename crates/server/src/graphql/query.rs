@@ -41,11 +41,7 @@ impl QueryRoot {
             doc.pages
                 .iter()
                 .map(|page| {
-                    agent_designer_core::serialize::page_to_serialized(
-                        page,
-                        &doc.arena,
-                        &doc.transitions,
-                    )
+                    sigil_core::serialize::page_to_serialized(page, &doc.arena, &doc.transitions)
                 })
                 .collect::<std::result::Result<Vec<_>, _>>()
                 .map_err(|e| {

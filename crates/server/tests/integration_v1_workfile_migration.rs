@@ -28,8 +28,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use agent_designer_server::state::ServerState;
-use agent_designer_server::workfile::load_workfile;
+use sigil_server::state::ServerState;
+use sigil_server::workfile::load_workfile;
 use tokio::time::sleep;
 
 /// Lays down a synthetic v1 workfile (manifest + one page) at `workfile_path`.
@@ -79,7 +79,7 @@ async fn write_v1_workfile_fixture(workfile_path: &std::path::Path, page_uuid: u
 ///   and contain the original v1 contents.
 #[tokio::test]
 async fn test_v1_workfile_full_migration_pipeline() {
-    use agent_designer_core::CURRENT_SCHEMA_VERSION;
+    use sigil_core::CURRENT_SCHEMA_VERSION;
     assert_eq!(
         CURRENT_SCHEMA_VERSION, 2,
         "this test pins the migration target at v2; revisit if the schema bumps"

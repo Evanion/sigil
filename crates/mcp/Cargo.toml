@@ -1,11 +1,11 @@
 [package]
-name = "agent-designer-mcp"
+name = "sigil-mcp"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../core" }
-agent-designer-state = { path = "../state" }
+sigil-core = { path = "../core" }
+sigil-state = { path = "../state" }
 rmcp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }

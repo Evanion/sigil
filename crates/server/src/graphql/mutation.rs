@@ -15,34 +15,30 @@
 
 use async_graphql::{Context, Object, Result};
 
-use agent_designer_core::FieldOperation;
-use agent_designer_core::PageId;
-use agent_designer_core::commands::node_commands::{
+use sigil_core::FieldOperation;
+use sigil_core::PageId;
+use sigil_core::commands::node_commands::{
     CreateNode, DeleteNodes, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
-use agent_designer_core::commands::page_commands::{
-    CreatePage, DeletePage, RenamePage, ReorderPage,
-};
-use agent_designer_core::commands::style_commands::validate_transform;
-use agent_designer_core::commands::style_commands::{
+use sigil_core::commands::page_commands::{CreatePage, DeletePage, RenamePage, ReorderPage};
+use sigil_core::commands::style_commands::validate_transform;
+use sigil_core::commands::style_commands::{
     SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
 };
-use agent_designer_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
-use agent_designer_core::commands::token_commands::{
-    AddToken, RemoveToken, RenameToken, UpdateToken,
-};
-use agent_designer_core::commands::tree_commands::{ReorderChildren, ReparentNode};
-use agent_designer_core::id::TokenId;
-use agent_designer_core::node::{
+use sigil_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
+use sigil_core::commands::token_commands::{AddToken, RemoveToken, RenameToken, UpdateToken};
+use sigil_core::commands::tree_commands::{ReorderChildren, ReparentNode};
+use sigil_core::id::TokenId;
+use sigil_core::node::{
     BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
     TextDecoration, TextShadow, Transform,
 };
-use agent_designer_core::tokens::{Token, TokenValue};
-use agent_designer_core::validate::{
+use sigil_core::tokens::{Token, TokenValue};
+use sigil_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
 };
-use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPayload};
+use sigil_state::{MutationEventKind, OperationPayload, TransactionPayload};
 
 use crate::state::ServerState;
 
@@ -108,7 +104,7 @@ fn acquire_document_lock(
 struct ParsedOp {
     /// Builds the `FieldOperation` after UUID→NodeId resolution inside the lock.
     #[allow(clippy::type_complexity)]
-    builder: Box<dyn FnOnce(&agent_designer_core::Document) -> Result<Box<dyn FieldOperation>>>,
+    builder: Box<dyn FnOnce(&sigil_core::Document) -> Result<Box<dyn FieldOperation>>>,
     /// The broadcast payload for this operation. For paths whose input shape
     /// already matches the frontend dispatcher's expected `value` shape, this
     /// is built eagerly from the input JSON. For paths that need a canonical
@@ -120,8 +116,7 @@ struct ParsedOp {
     /// the post-apply document. Required when the user-input shape differs
     /// from the frontend dispatcher's expected wire format.
     #[allow(clippy::type_complexity)]
-    post_apply_value:
-        Option<Box<dyn FnOnce(&agent_designer_core::Document) -> Result<serde_json::Value>>>,
+    post_apply_value: Option<Box<dyn FnOnce(&sigil_core::Document) -> Result<serde_json::Value>>>,
 }
 
 /// Parses all operation inputs into `ParsedOp` structs.
@@ -387,9 +382,8 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                             "{kind_type} kind value must include 'corners' field"
                         ))
                     })?;
-                    let new_corners =
-                        agent_designer_core::corners_input::parse_corners_input(corners_value)
-                            .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
+                    let new_corners = sigil_core::corners_input::parse_corners_input(corners_value)
+                        .map_err(|e| async_graphql::Error::new(format!("{e}")))?;
                     // RF-001 / RF-004: the broadcast `value` for `path = "kind"`
                     // must be the canonical post-apply `NodeKind` JSON (mirroring
                     // `set_corners_impl` in `crates/mcp/src/tools/nodes.rs`).
@@ -446,7 +440,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
         }
         "kind.content" => {
             if let Some(s) = value.as_str()
-                && s.len() > agent_designer_core::validate::MAX_TEXT_CONTENT_LEN
+                && s.len() > sigil_core::validate::MAX_TEXT_CONTENT_LEN
             {
                 return Err(async_graphql::Error::new(
                     "text content exceeds maximum length",
@@ -475,10 +469,10 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
             if font_family.is_empty() {
                 return Err(async_graphql::Error::new("font_family must not be empty"));
             }
-            if font_family.len() > agent_designer_core::validate::MAX_FONT_FAMILY_LEN {
+            if font_family.len() > sigil_core::validate::MAX_FONT_FAMILY_LEN {
                 return Err(async_graphql::Error::new(format!(
                     "font_family exceeds max length of {}",
-                    agent_designer_core::validate::MAX_FONT_FAMILY_LEN
+                    sigil_core::validate::MAX_FONT_FAMILY_LEN
                 )));
             }
             Ok(ParsedOp {
@@ -779,11 +773,11 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
     if dn.node_uuids.is_empty() {
         return Err(async_graphql::Error::new("delete_nodes: empty batch"));
     }
-    if dn.node_uuids.len() > agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH {
+    if dn.node_uuids.len() > sigil_core::validate::MAX_NODES_PER_DELETE_BATCH {
         return Err(async_graphql::Error::new(format!(
             "delete_nodes: batch of {} exceeds MAX_NODES_PER_DELETE_BATCH ({})",
             dn.node_uuids.len(),
-            agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH,
+            sigil_core::validate::MAX_NODES_PER_DELETE_BATCH,
         )));
     }
 
@@ -824,17 +818,15 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
             // RF-022: Pre-build a NodeId -> PageId map once, then look up
             // each target in O(1). Previous code did O(P * R) per target,
             // for a total O(N * P * R) batch cost.
-            let mut node_to_page: std::collections::HashMap<
-                agent_designer_core::id::NodeId,
-                PageId,
-            > = std::collections::HashMap::new();
+            let mut node_to_page: std::collections::HashMap<sigil_core::id::NodeId, PageId> =
+                std::collections::HashMap::new();
             for page in &doc.pages {
                 for nid in &page.root_nodes {
                     node_to_page.insert(*nid, page.id);
                 }
             }
 
-            let mut targets: Vec<(agent_designer_core::id::NodeId, Option<PageId>)> =
+            let mut targets: Vec<(sigil_core::id::NodeId, Option<PageId>)> =
                 Vec::with_capacity(parsed_uuids.len());
             for uuid in &parsed_uuids {
                 let node_id = doc
@@ -1406,15 +1398,15 @@ mod tests {
     /// Uses the core engine directly rather than going through GraphQL,
     /// to avoid escaping complexity in test setup.
     fn create_test_frame_direct(state: &ServerState, name: &str) -> String {
-        use agent_designer_core::commands::node_commands::CreateNode;
-        use agent_designer_core::node::NodeKind;
+        use sigil_core::commands::node_commands::CreateNode;
+        use sigil_core::node::NodeKind;
 
         let node_uuid = uuid::Uuid::new_v4();
         let cmd = CreateNode {
             uuid: node_uuid,
             kind: NodeKind::Frame {
                 layout: None,
-                corners: agent_designer_core::node::default_corners(),
+                corners: sigil_core::node::default_corners(),
             },
             name: name.to_string(),
             page_id: None,
@@ -1785,8 +1777,8 @@ mod tests {
 
     /// Helper: creates a Text node directly via the state and returns its UUID string.
     fn create_test_text_direct(state: &ServerState, content: &str) -> String {
-        use agent_designer_core::commands::node_commands::CreateNode;
-        use agent_designer_core::node::{NodeKind, TextSizing, TextStyle};
+        use sigil_core::commands::node_commands::CreateNode;
+        use sigil_core::node::{NodeKind, TextSizing, TextStyle};
 
         let node_uuid = uuid::Uuid::new_v4();
         let cmd = CreateNode {
@@ -1833,7 +1825,7 @@ mod tests {
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
         match &node.kind {
-            agent_designer_core::node::NodeKind::Text { content, .. } => {
+            sigil_core::node::NodeKind::Text { content, .. } => {
                 assert_eq!(content, "World", "text content should be updated");
             }
             _ => panic!("expected Text node"),
@@ -1891,10 +1883,10 @@ mod tests {
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
         match &node.kind {
-            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+            sigil_core::node::NodeKind::Text { text_style, .. } => {
                 assert_eq!(
                     text_style.font_size,
-                    agent_designer_core::node::StyleValue::Literal { value: 24.0 },
+                    sigil_core::node::StyleValue::Literal { value: 24.0 },
                     "font_size should be updated to 24.0"
                 );
             }
@@ -1955,7 +1947,7 @@ mod tests {
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
         match &node.kind {
-            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+            sigil_core::node::NodeKind::Text { text_style, .. } => {
                 let shadow = text_style
                     .text_shadow
                     .as_ref()
@@ -2018,7 +2010,7 @@ mod tests {
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
         match &node.kind {
-            agent_designer_core::node::NodeKind::Text { text_style, .. } => {
+            sigil_core::node::NodeKind::Text { text_style, .. } => {
                 assert!(
                     text_style.text_shadow.is_none(),
                     "text_shadow should be None after null operation"
@@ -2377,10 +2369,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_token_via_apply_operations() {
-        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
-        use agent_designer_core::id::TokenId;
-        use agent_designer_core::node::Color;
-        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+        use sigil_core::commands::token_commands::AddToken as CoreAddToken;
+        use sigil_core::id::TokenId;
+        use sigil_core::node::Color;
+        use sigil_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
@@ -2430,10 +2422,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_remove_token_via_apply_operations() {
-        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
-        use agent_designer_core::id::TokenId;
-        use agent_designer_core::node::Color;
-        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+        use sigil_core::commands::token_commands::AddToken as CoreAddToken;
+        use sigil_core::id::TokenId;
+        use sigil_core::node::Color;
+        use sigil_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
@@ -2480,10 +2472,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_add_token_duplicate_name_rejected() {
-        use agent_designer_core::commands::token_commands::AddToken as CoreAddToken;
-        use agent_designer_core::id::TokenId;
-        use agent_designer_core::node::Color;
-        use agent_designer_core::tokens::{Token, TokenType, TokenValue};
+        use sigil_core::commands::token_commands::AddToken as CoreAddToken;
+        use sigil_core::id::TokenId;
+        use sigil_core::node::Color;
+        use sigil_core::tokens::{Token, TokenType, TokenValue};
 
         let state = ServerState::new();
         let schema = test_schema(state.clone());
@@ -2698,21 +2690,21 @@ mod tests {
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
         match &node.kind {
-            agent_designer_core::node::NodeKind::Frame { corners, .. } => {
+            sigil_core::node::NodeKind::Frame { corners, .. } => {
                 assert!(
-                    matches!(corners[0], agent_designer_core::node::Corner::Round { .. }),
+                    matches!(corners[0], sigil_core::node::Corner::Round { .. }),
                     "corners[0] should be Round"
                 );
                 assert!(
-                    matches!(corners[1], agent_designer_core::node::Corner::Bevel { .. }),
+                    matches!(corners[1], sigil_core::node::Corner::Bevel { .. }),
                     "corners[1] should be Bevel"
                 );
                 assert!(
-                    matches!(corners[2], agent_designer_core::node::Corner::Notch { .. }),
+                    matches!(corners[2], sigil_core::node::Corner::Notch { .. }),
                     "corners[2] should be Notch"
                 );
                 assert!(
-                    matches!(corners[3], agent_designer_core::node::Corner::Scoop { .. }),
+                    matches!(corners[3], sigil_core::node::Corner::Scoop { .. }),
                     "corners[3] should be Scoop"
                 );
             }

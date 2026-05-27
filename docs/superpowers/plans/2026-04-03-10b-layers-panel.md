@@ -68,7 +68,7 @@ async fn reparent_node(
                 .and_then(|p| p.children.iter().position(|&c| c == node_id))
         });
 
-        let cmd = agent_designer_core::commands::tree_commands::ReparentNode {
+        let cmd = sigil_core::commands::tree_commands::ReparentNode {
             node_id,
             new_parent_id: parent_id,
             new_position: position.max(0) as usize,

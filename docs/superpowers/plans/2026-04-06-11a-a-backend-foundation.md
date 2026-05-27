@@ -259,8 +259,8 @@ pub mod batch_commands;
 - [ ] **Step 4: Run tests**
 
 ```bash
-cargo test --workspace -p agent-designer-core -- test_batch_set_transform
-cargo test --workspace -p agent-designer-core -- test_max_batch_size_enforced
+cargo test --workspace -p sigil-core -- test_batch_set_transform
+cargo test --workspace -p sigil-core -- test_max_batch_size_enforced
 ```
 
 Expected: All 5 tests PASS.
@@ -929,8 +929,8 @@ pub mod group_commands;
 - [ ] **Step 3: Run tests**
 
 ```bash
-cargo test --workspace -p agent-designer-core -- test_group_nodes
-cargo test --workspace -p agent-designer-core -- test_ungroup
+cargo test --workspace -p sigil-core -- test_group_nodes
+cargo test --workspace -p sigil-core -- test_ungroup
 ```
 
 Expected: All 6 tests PASS.
@@ -964,8 +964,8 @@ Read the existing mutation file first. Follow the exact pattern used by `set_tra
 At the top of `crates/server/src/graphql/mutation.rs`, add to the existing import blocks:
 
 ```rust
-use agent_designer_core::commands::batch_commands::BatchSetTransform;
-use agent_designer_core::commands::group_commands::{GroupNodes, UngroupNodes};
+use sigil_core::commands::batch_commands::BatchSetTransform;
+use sigil_core::commands::group_commands::{GroupNodes, UngroupNodes};
 ```
 
 - [ ] **Step 2: Add `batchSetTransform` mutation**

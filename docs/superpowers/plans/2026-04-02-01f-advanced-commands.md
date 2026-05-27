@@ -136,10 +136,10 @@ pub fn remove_transition(&mut self, id: uuid::Uuid) -> Option<crate::prototype::
 - [ ] 4. Run tests and clippy:
 
 ```bash
-cargo test -p agent-designer-core document::tests
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
+cargo test -p sigil-core document::tests
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
 ```
 
 - [ ] 5. Commit:
@@ -381,10 +381,10 @@ mod tests {
 - [ ] 4. Run tests and clippy:
 
 ```bash
-cargo test -p agent-designer-core commands::transition_commands
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
+cargo test -p sigil-core commands::transition_commands
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
 ```
 
 - [ ] 5. Commit:
@@ -620,10 +620,10 @@ mod tests {
 - [ ] 4. Run tests and clippy:
 
 ```bash
-cargo test -p agent-designer-core commands::token_commands
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
+cargo test -p sigil-core commands::token_commands
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
 ```
 
 - [ ] 5. Commit:
@@ -1058,10 +1058,10 @@ mod tests {
 - [ ] 4. Run tests and clippy:
 
 ```bash
-cargo test -p agent-designer-core commands::component_commands
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
+cargo test -p sigil-core commands::component_commands
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
 ```
 
 - [ ] 5. Commit:

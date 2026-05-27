@@ -9,11 +9,11 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use agent_designer_core::Document;
+use sigil_core::Document;
 use tokio::sync::broadcast;
 
 // Re-export the core state types so existing code can use `crate::state::AppState`.
-pub use agent_designer_state::{
+pub use sigil_state::{
     AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
 };
 

@@ -44,13 +44,13 @@ Use `default-features = false` to ensure no optional features (like `allow_multi
 - [ ] 3. Verify it compiles:
 
 ```bash
-cargo check -p agent-designer-core
+cargo check -p sigil-core
 ```
 
 - [ ] 4. Verify WASM compatibility:
 
 ```bash
-cargo check --target wasm32-unknown-unknown -p agent-designer-core
+cargo check --target wasm32-unknown-unknown -p sigil-core
 ```
 
 If the WASM target is not installed, install it first: `rustup target add wasm32-unknown-unknown`
@@ -431,11 +431,11 @@ Add `MAX_BOOLEAN_OP_POINTS` and `BEZIER_APPROXIMATION_SEGMENTS` to the validate 
 - [ ] 5. Run tests and verify WASM compat:
 
 ```bash
-cargo test -p agent-designer-core boolean::tests
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
-cargo check --target wasm32-unknown-unknown -p agent-designer-core
+cargo test -p sigil-core boolean::tests
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
+cargo check --target wasm32-unknown-unknown -p sigil-core
 ```
 
 - [ ] 6. Commit:
@@ -1047,10 +1047,10 @@ pub use wire::{BroadcastCommand, SerializableCommand};
 - [ ] 4. Run tests:
 
 ```bash
-cargo test -p agent-designer-core wire::tests
-cargo test -p agent-designer-core
-cargo clippy -p agent-designer-core -- -D warnings
-cargo fmt -p agent-designer-core
+cargo test -p sigil-core wire::tests
+cargo test -p sigil-core
+cargo clippy -p sigil-core -- -D warnings
+cargo fmt -p sigil-core
 ```
 
 - [ ] 5. Commit:
@@ -1087,7 +1087,7 @@ cargo fmt --check
 - [ ] 4. WASM check:
 
 ```bash
-cargo check --target wasm32-unknown-unknown -p agent-designer-core
+cargo check --target wasm32-unknown-unknown -p sigil-core
 ```
 
 - [ ] 5. If any issues, fix and commit.

@@ -12,10 +12,10 @@
 //! If either side drifts, the MCP Broadcast Payload Shape Contract
 //! (CLAUDE.md §4) is broken.
 
-use agent_designer_mcp::tools::nodes::{create_node_impl, set_corners_impl};
-use agent_designer_mcp::tools::pages::create_page_impl;
-use agent_designer_state::{AppState, MUTATION_BROADCAST_CAPACITY, MutationEventKind};
 use serde_json::json;
+use sigil_mcp::tools::nodes::{create_node_impl, set_corners_impl};
+use sigil_mcp::tools::pages::create_page_impl;
+use sigil_state::{AppState, MUTATION_BROADCAST_CAPACITY, MutationEventKind};
 use tokio::sync::broadcast;
 
 /// Seed state: one page, one rectangle, broadcast channel wired up.
@@ -24,7 +24,7 @@ use tokio::sync::broadcast;
 /// `rx.try_recv()` in the test body receives the event under test.
 fn make_state_with_rect() -> (
     AppState,
-    broadcast::Receiver<agent_designer_state::MutationEvent>,
+    broadcast::Receiver<sigil_state::MutationEvent>,
     String,
 ) {
     let mut state = AppState::new();

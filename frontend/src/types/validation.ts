@@ -13,7 +13,7 @@ export const MAX_COLOR_CHANNEL = 1.0;
 /**
  * Maximum node-tree nesting depth (root through deepest descendant).
  *
- * Mirrors `agent_designer_core::validate::MAX_NODE_TREE_DEPTH = 64`. Used by
+ * Mirrors `sigil_core::validate::MAX_NODE_TREE_DEPTH = 64`. Used by
  * ancestor walks, descendant walks, and recursive subtree operations in the
  * store, remote-operation handlers, and panel components.
  *
@@ -27,7 +27,7 @@ export const MAX_NODE_TREE_DEPTH = 64;
 /**
  * Maximum nodes a single `deleteNodes` operation may target.
  *
- * Mirrors `agent_designer_core::validate::MAX_NODES_PER_DELETE_BATCH = 1_000`.
+ * Mirrors `sigil_core::validate::MAX_NODES_PER_DELETE_BATCH = 1_000`.
  * Enforced both server-side (in the core engine) and client-side (in
  * `document-store-solid.tsx::deleteNodes`) per CLAUDE.md §11
  * "Validation Must Be Symmetric Across All Transports".

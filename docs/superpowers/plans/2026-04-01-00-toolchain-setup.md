@@ -194,7 +194,7 @@ assert_matches = "1"
 
 ```toml
 [package]
-name = "agent-designer-core"
+name = "sigil-core"
 version.workspace = true
 edition.workspace = true
 
@@ -232,12 +232,12 @@ mod tests {
 
 ```toml
 [package]
-name = "agent-designer-server"
+name = "sigil-server"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../core" }
+sigil-core = { path = "../core" }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower = { workspace = true }
@@ -293,12 +293,12 @@ async fn main() -> anyhow::Result<()> {
 
 ```toml
 [package]
-name = "agent-designer-mcp"
+name = "sigil-mcp"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../core" }
+sigil-core = { path = "../core" }
 rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -339,7 +339,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../crates/core" }
+sigil-core = { path = "../crates/core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
@@ -351,7 +351,7 @@ anyhow = { workspace = true }
 #![warn(clippy::all, clippy::pedantic)]
 
 fn main() {
-    println!("sigil-cli v{}", agent_designer_core::version());
+    println!("sigil-cli v{}", sigil_core::version());
 }
 ```
 
@@ -726,14 +726,14 @@ WORKDIR /app
 COPY Cargo.toml rust-toolchain.toml ./
 COPY crates/ crates/
 COPY cli/ cli/
-RUN cargo build --release --bin agent-designer-server
+RUN cargo build --release --bin sigil-server
 
 # Stage 3: Runtime
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=rust-builder /app/target/release/agent-designer-server /usr/local/bin/
+COPY --from=rust-builder /app/target/release/sigil-server /usr/local/bin/
 COPY --from=frontend-builder /app/frontend/dist /usr/local/share/agent-designer/frontend
 
 ENV PORT=4680
@@ -742,7 +742,7 @@ EXPOSE ${PORT}
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
-ENTRYPOINT ["agent-designer-server"]
+ENTRYPOINT ["sigil-server"]
 ```
 
 - [ ] **Step 3: Verify Docker build**
@@ -913,7 +913,7 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Test: `./dev.sh cargo test --workspace`
 - Lint: `./dev.sh cargo clippy --workspace -- -D warnings`
 - Format: `./dev.sh cargo fmt` (check: `./dev.sh cargo fmt --check`)
-- Run server: `./dev.sh cargo run --bin agent-designer-server`
+- Run server: `./dev.sh cargo run --bin sigil-server`
 
 ### Frontend
 - Install: `./dev.sh pnpm --prefix frontend install`
@@ -929,18 +929,18 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 
 ## Crate Responsibilities
 
-### `agent-designer-core`
+### `sigil-core`
 - MUST have zero I/O dependencies (no filesystem, no networking)
 - MUST compile to both native and `wasm32-unknown-unknown`
 - All operations must be deterministic and side-effect-free
 - This is the foundation — everything else depends on it
 
-### `agent-designer-server`
+### `sigil-server`
 - Owns HTTP serving, WebSocket, file I/O
 - All document mutations go through the core engine
 - Never mutate document state directly — always through core operations
 
-### `agent-designer-mcp`
+### `sigil-mcp`
 - Owns the MCP tool/resource definitions
 - Shares in-memory state with the server (same process)
 - Keep tool interfaces token-efficient for agent consumption

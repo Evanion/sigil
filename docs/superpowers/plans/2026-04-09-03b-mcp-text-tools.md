@@ -188,7 +188,7 @@ Add `TextShadow` and `MAX_TEXT_SHADOW_BLUR` to the re-exports in `lib.rs`.
 
 - [ ] **Step 7: Fix compilation errors**
 
-Run `cargo check -p agent-designer-core --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/mcp-text-tools/Cargo.toml` and fix any construction sites missing `text_shadow: None`.
+Run `cargo check -p sigil-core --manifest-path /Volumes/projects/Personal/agent-designer/.worktrees/feature/mcp-text-tools/Cargo.toml` and fix any construction sites missing `text_shadow: None`.
 
 - [ ] **Step 8: Add tests**
 
@@ -446,7 +446,7 @@ This is the largest task — migrating all existing MCP tools from `publish_even
 Create `crates/mcp/src/tools/broadcast.rs`:
 
 ```rust
-use agent_designer_state::{
+use sigil_state::{
     AppState, MutationEventKind, OperationPayload, TransactionPayload,
 };
 
@@ -567,7 +567,7 @@ In `crates/state/src/lib.rs`:
 
 - [ ] **Step 6: Remove MutationEvent import from MCP crate**
 
-Remove `use agent_designer_state::MutationEvent;` from `nodes.rs` and any other MCP files that imported it directly for `publish_event` calls.
+Remove `use sigil_state::MutationEvent;` from `nodes.rs` and any other MCP files that imported it directly for `publish_event` calls.
 
 - [ ] **Step 7: Run full test suite**
 
@@ -662,12 +662,12 @@ Note: Check if `StyleValueInput` and `ColorInput` types already exist in `types.
 Create `crates/mcp/src/tools/text.rs`:
 
 ```rust
-use agent_designer_core::{
+use sigil_core::{
     commands::node_commands::SetTextContent,
     command::FieldOperation,
     validate::MAX_TEXT_CONTENT_LEN,
 };
-use agent_designer_state::{AppState, MutationEventKind};
+use sigil_state::{AppState, MutationEventKind};
 use crate::error::McpToolError;
 use crate::tools::broadcast;
 use crate::tools::nodes::{acquire_document_lock, build_node_info};
@@ -721,13 +721,13 @@ pub fn set_text_content_impl(
 - [ ] **Step 3: Implement set_text_style_impl in text.rs**
 
 ```rust
-use agent_designer_core::{
+use sigil_core::{
     commands::text_style_commands::{SetTextStyleField, TextStyleField},
     command::FieldOperation,
     node::*,
     validate::*,
 };
-use agent_designer_state::OperationPayload;
+use sigil_state::OperationPayload;
 
 pub fn set_text_style_impl(
     state: &AppState,

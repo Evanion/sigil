@@ -1,10 +1,10 @@
 [package]
-name = "agent-designer-state"
+name = "sigil-state"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
-agent-designer-core = { path = "../core" }
+sigil-core = { path = "../core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

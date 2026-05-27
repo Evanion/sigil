@@ -243,10 +243,10 @@ pub use component::{
 - [ ] 5. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core component::tests
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core component::tests
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:
@@ -484,9 +484,9 @@ Remove `OverrideMap` from the node re-exports line (it's now re-exported from co
 - [ ] 6. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 7. Commit:
@@ -792,9 +792,9 @@ Remove `ComponentDef` from the document re-exports line (it's now re-exported fr
 - [ ] 5. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:
@@ -919,9 +919,9 @@ fn test_component_instance_serde_round_trip() {
 - [ ] 5. Run tests:
 
 ```bash
-./dev.sh cargo test -p agent-designer-core
-./dev.sh cargo clippy -p agent-designer-core -- -D warnings
-./dev.sh cargo fmt -p agent-designer-core
+./dev.sh cargo test -p sigil-core
+./dev.sh cargo clippy -p sigil-core -- -D warnings
+./dev.sh cargo fmt -p sigil-core
 ```
 
 - [ ] 6. Commit:
