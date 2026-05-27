@@ -684,9 +684,7 @@ function applyCreateNode(
   // append-fallback is observable.
   const originalIndex = raw["originalIndex"];
   const hasOriginalIndex =
-    typeof originalIndex === "number" &&
-    Number.isSafeInteger(originalIndex) &&
-    originalIndex >= 0;
+    typeof originalIndex === "number" && Number.isSafeInteger(originalIndex) && originalIndex >= 0;
   if (originalIndex !== undefined && !hasOriginalIndex) {
     // Defensive: log when the field is present but invalid. `undefined`
     // is the normal "no originalIndex" case (a fresh create_node, not

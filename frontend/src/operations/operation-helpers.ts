@@ -56,9 +56,7 @@ function inverseType(type: OperationType): OperationType {
   // HistoryManager.undo()'s try/catch (which restores the popped tx),
   // so the user sees "undo did nothing" rather than a corrupt state.
   if (type === "create_node" || type === "delete_nodes") {
-    throw new Error(
-      `inverseType: ${type} has no per-op flip; use Transaction.inverseOperations`,
-    );
+    throw new Error(`inverseType: ${type} has no per-op flip; use Transaction.inverseOperations`);
   }
   if (type === "create_page") return "delete_page";
   if (type === "delete_page") return "create_page";

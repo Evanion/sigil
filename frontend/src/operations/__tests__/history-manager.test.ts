@@ -110,9 +110,8 @@ describe("HistoryManager", () => {
     });
 
     it("logs error when forward operations exceed MAX_OPERATIONS_PER_TRANSACTION", () => {
-      const ops: Operation[] = Array.from(
-        { length: MAX_OPERATIONS_PER_TRANSACTION + 1 },
-        (_, i) => createSetFieldOp(USER_ID, `node-${i}`, "name", "B", "A"),
+      const ops: Operation[] = Array.from({ length: MAX_OPERATIONS_PER_TRANSACTION + 1 }, (_, i) =>
+        createSetFieldOp(USER_ID, `node-${i}`, "name", "B", "A"),
       );
       const tx: Transaction = {
         id: "tx-big-forward",

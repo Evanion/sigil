@@ -74,8 +74,6 @@ export const _hasDeleteNodes_ref: typeof _hasDeleteNodes = _hasDeleteNodes;
 // `"delete_node"` instead of `never`, and the conditional `[...] extends
 // [never] ? true : false` resolves to `false`, failing the assignment.
 // RF-037: cements migration completeness at the type level.
-type _NoSingularDeleteNode = [Extract<OperationType, "delete_node">] extends [never]
-  ? true
-  : false;
+type _NoSingularDeleteNode = [Extract<OperationType, "delete_node">] extends [never] ? true : false;
 const _noSingularDeleteNode: _NoSingularDeleteNode = true;
 export const _noSingularDeleteNode_ref: typeof _noSingularDeleteNode = _noSingularDeleteNode;

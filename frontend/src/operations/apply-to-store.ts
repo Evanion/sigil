@@ -194,9 +194,7 @@ function applyCreateNode(
   // append-fallback is observable.
   const originalIndex = nodeData["originalIndex"];
   const hasOriginalIndex =
-    typeof originalIndex === "number" &&
-    Number.isSafeInteger(originalIndex) &&
-    originalIndex >= 0;
+    typeof originalIndex === "number" && Number.isSafeInteger(originalIndex) && originalIndex >= 0;
   if (originalIndex !== undefined && !hasOriginalIndex) {
     console.warn("applyCreateNode: originalIndex not a non-negative safe integer", {
       uuid,
