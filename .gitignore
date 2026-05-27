@@ -28,3 +28,11 @@ Thumbs.db
 # claude-mem per-directory context files (auto-generated; root CLAUDE.md tracked)
 **/CLAUDE.md
 !/CLAUDE.md
+
+# Tauri build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Tauri requires icon assets — re-include them despite the global *.png rule
+!src-tauri/icons/
+!src-tauri/icons/**
