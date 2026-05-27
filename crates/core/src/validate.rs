@@ -69,6 +69,25 @@ pub const MAX_PAGE_NAME_LEN: usize = 256;
 /// added; the canonical source-of-truth is this `pub const`.
 pub const MAX_NODES_PER_DELETE_BATCH: usize = 1_000;
 
+/// Maximum total number of nodes (across all retained subtrees) that a single
+/// `DeleteNodes::apply` may snapshot for rollback. Bounds peak memory usage.
+/// The batch limit (`MAX_NODES_PER_DELETE_BATCH = 1000`) caps the count of
+/// retained roots; this constant caps the sum of all subtree node counts.
+/// Worst case without this cap: 1000 roots × deeply-nested subtrees ≈ multi-GB
+/// heap from cloned `Node` payloads. With this cap, peak snapshot memory is
+/// bounded to ~50k cloned `Node`s per operation (RF-021).
+///
+/// Production value is `50_000`; test builds override to `10` so the
+/// `_enforced` test can construct a real out-of-range subtree without
+/// allocating multi-GB during the test run.
+#[cfg(not(test))]
+pub const MAX_DELETED_SUBTREE_NODES: usize = 50_000;
+
+/// Test-only override for `MAX_DELETED_SUBTREE_NODES` — see production
+/// constant's doc comment for rationale.
+#[cfg(test)]
+pub const MAX_DELETED_SUBTREE_NODES: usize = 10;
+
 /// Maximum node-tree nesting depth. Bounds recursion in subtree walks
 /// (deletion, ancestor walks, snapshot capture). Per CLAUDE.md §11
 /// "Recursive Functions Require Depth Guards" with `>=` comparison.

@@ -1,6 +1,6 @@
 // crates/core/src/arena.rs
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::error::CoreError;
@@ -13,10 +13,17 @@ use crate::validate::DEFAULT_MAX_NODES;
 /// Nodes are stored in a flat `Vec` indexed by `NodeId.index`. Each slot
 /// has a generation counter; stale references (wrong generation) are rejected.
 /// A free list enables slot reuse without shifting indices.
+///
+/// The free list is a `HashSet<u32>` rather than a `Vec<u32>` so that
+/// `reinsert` (used by undo/rollback) can remove a specific slot in O(1)
+/// instead of O(N). For batch rollback of K previously-completed subtree
+/// deletes, this changes total rollback work from O(K²) to O(K). Free-list
+/// iteration order is not part of the public API — `peek_next_id`/`insert`
+/// pick "any" free slot, which is sufficient for slot reuse semantics.
 #[derive(Debug, Clone)]
 pub struct Arena {
     nodes: Vec<Option<Node>>,
-    free_list: Vec<u32>,
+    free_list: HashSet<u32>,
     uuid_to_id: HashMap<Uuid, NodeId>,
     uuids: Vec<Option<Uuid>>,
     generation: Vec<u64>,
@@ -29,7 +36,7 @@ impl Arena {
     pub fn new(max_nodes: usize) -> Self {
         Self {
             nodes: Vec::new(),
-            free_list: Vec::new(),
+            free_list: HashSet::new(),
             uuid_to_id: HashMap::new(),
             uuids: Vec::new(),
             generation: Vec::new(),
@@ -67,7 +74,7 @@ impl Arena {
         if self.len() >= self.max_nodes {
             return Err(CoreError::CapacityExceeded(self.max_nodes));
         }
-        if let Some(&index) = self.free_list.last() {
+        if let Some(&index) = self.free_list.iter().next() {
             let idx = index as usize;
             Ok(NodeId::new(index, self.generation[idx] + 1))
         } else {
@@ -96,7 +103,11 @@ impl Arena {
 
         let uuid = node.uuid;
 
-        let id = if let Some(index) = self.free_list.pop() {
+        // Take an arbitrary free slot (HashSet iteration order is unspecified
+        // but slot-reuse semantics don't depend on order — any free slot works).
+        let free_slot = self.free_list.iter().next().copied();
+        let id = if let Some(index) = free_slot {
+            self.free_list.remove(&index);
             let idx = index as usize;
             self.generation[idx] += 1;
             let generation = self.generation[idx];
@@ -156,8 +167,10 @@ impl Arena {
             )));
         }
 
-        // Remove this index from the free list
-        self.free_list.retain(|&i| i != id.index());
+        // Remove this index from the free list. O(1) with HashSet — previously
+        // O(N) with Vec, which made batch rollback of K subtree deletes O(K²)
+        // (RF-007).
+        self.free_list.remove(&id.index());
 
         // Stamp the node with the correct NodeId
         node.id = id;
@@ -191,7 +204,7 @@ impl Arena {
         if let Some(uuid) = uuid {
             self.uuid_to_id.remove(&uuid);
         }
-        self.free_list.push(id.index());
+        self.free_list.insert(id.index());
         Ok(node)
     }
 

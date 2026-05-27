@@ -150,6 +150,12 @@ impl FieldOperation for DeleteNodes {
         Ok(())
     }
 
+    // The apply function below is intentionally one atomic transaction: dedup,
+    // snapshot, memory-cap check, sort, delete-with-rollback. Splitting these
+    // phases into helpers would either require passing four large data
+    // structures around or split the rollback semantics across modules. The
+    // intra-phase boundaries are already commented (`── 1.`, `── 2.`, …).
+    #[allow(clippy::too_many_lines)]
     fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
         // Re-run validation. Self-protecting per RF-024.
         self.validate(doc)?;
@@ -233,6 +239,19 @@ impl FieldOperation for DeleteNodes {
                 original_index,
                 subtree: subtree_clone,
             });
+        }
+
+        // ── 2b. Enforce peak-memory cap (RF-021) ────────────────────────
+        // The batch limit caps the count of retained ROOTS; this cap bounds
+        // the total cloned `Node` payload across all subtrees so a single
+        // operation cannot exhaust heap on documents with very deep trees.
+        let total_nodes_in_snapshots: usize = snapshots.iter().map(|s| s.subtree.len()).sum();
+        if total_nodes_in_snapshots > crate::validate::MAX_DELETED_SUBTREE_NODES {
+            return Err(CoreError::ValidationError(format!(
+                "DeleteNodes: snapshot of {total_nodes_in_snapshots} nodes exceeds \
+                 MAX_DELETED_SUBTREE_NODES ({})",
+                crate::validate::MAX_DELETED_SUBTREE_NODES,
+            )));
         }
 
         // ── 3. Sort by (parent_id, original_index DESCENDING) ───────────
@@ -747,6 +766,64 @@ mod tests {
         assert!(
             format!("{err:?}").to_lowercase().contains("batch"),
             "expected 'batch' in error: {err:?}"
+        );
+    }
+
+    #[test]
+    fn test_max_deleted_subtree_nodes_enforced() {
+        // Per CLAUDE.md §11 "Constant Enforcement Tests": this test rejects a
+        // real out-of-range input (not a tautology). The production cap is
+        // 50_000 cloned `Node`s — too large to materialize in a unit test —
+        // so `validate.rs` uses a `cfg(test)` override of 10 so this test can
+        // construct an actual oversized subtree and verify the cap fires.
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(99));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+
+        // Build a parent with (MAX_DELETED_SUBTREE_NODES + 1) children. The
+        // snapshot for deleting the parent will include parent + all children =
+        // total > cap.
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent).expect("insert parent");
+        doc.add_root_node_to_page(page_id, parent_id)
+            .expect("add parent as page root");
+
+        // 11 children → subtree of 12 nodes (parent + 11), cap is 10.
+        let child_count = crate::validate::MAX_DELETED_SUBTREE_NODES + 1;
+        for i in 0..child_count {
+            let uuid = make_uuid(u8::try_from(i + 2).expect("child index fits u8"));
+            let child = Node::new(NodeId::new(0, 0), uuid, NodeKind::Group, format!("C{i}"))
+                .expect("create child");
+            let child_id = doc.arena.insert(child).expect("insert child");
+            crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("link");
+        }
+
+        let op = DeleteNodes {
+            targets: vec![(parent_id, Some(page_id))],
+        };
+
+        // validate() passes — batch size is fine; the cap fires inside apply()
+        // after the snapshot is built.
+        op.validate(&doc)
+            .expect("validate must pass for a 1-target batch");
+
+        let err = op
+            .apply(&mut doc)
+            .expect_err("oversized subtree must error in apply");
+        let msg = format!("{err:?}").to_lowercase();
+        assert!(
+            msg.contains("max_deleted_subtree_nodes") || msg.contains("subtree"),
+            "expected cap error in: {err:?}"
         );
     }
 
