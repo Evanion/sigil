@@ -10,16 +10,7 @@
     "beforeBuildCommand": "pnpm --prefix ../frontend build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "Sigil",
-        "width": 1280,
-        "height": 800,
-        "minWidth": 800,
-        "minHeight": 600,
-        "label": "main"
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": null
     }
