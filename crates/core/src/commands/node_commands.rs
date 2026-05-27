@@ -59,43 +59,9 @@ impl FieldOperation for CreateNode {
     }
 }
 
-/// Deletes a node from the arena.
-#[derive(Debug)]
-pub struct DeleteNode {
-    /// The ID of the node to delete.
-    pub node_id: NodeId,
-    /// The page this node was a root of (if any), for removing from page `root_nodes`.
-    pub page_id: Option<PageId>,
-}
-
-impl FieldOperation for DeleteNode {
-    fn validate(&self, doc: &Document) -> Result<(), CoreError> {
-        doc.arena.get(self.node_id)?;
-        Ok(())
-    }
-
-    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
-        // Remove from page root_nodes if present
-        if let Some(page_id) = self.page_id
-            && let Ok(page) = doc.page_mut(page_id)
-        {
-            page.root_nodes.retain(|nid| *nid != self.node_id);
-        }
-        // Collect all descendants before removal (iterative, depth-guarded by arena size)
-        let descendants = crate::tree::descendants(&doc.arena, self.node_id)?;
-        // Detach from parent
-        crate::tree::remove_child(&mut doc.arena, self.node_id)?;
-        // Remove all descendants from the arena (children first, then the node itself)
-        for desc_id in descendants {
-            doc.arena.remove(desc_id)?;
-        }
-        doc.arena.remove(self.node_id)?;
-        Ok(())
-    }
-}
-
-/// Atomically deletes N nodes (Spec 19). Replaces the singular `DeleteNode`
-/// in Task 16. Until then, both coexist.
+/// Atomically deletes N nodes (Spec 19). The only delete path in the core
+/// crate after the Spec 19 Task 16 migration — single-node delete callers
+/// pass a one-element `targets` vector.
 ///
 /// `targets` carries each node's `NodeId` paired with the `PageId` of the
 /// page it is a root of (if any). The wire layer (GraphQL/MCP) resolves
@@ -297,9 +263,9 @@ impl FieldOperation for DeleteNodes {
     }
 }
 
-/// Deletes a single subtree (helper for `DeleteNodes::apply`). Mirrors
-/// `DeleteNode::apply`'s deletion order: page root cleanup → tree detach
-/// → descendant removal → root removal.
+/// Deletes a single subtree (helper for `DeleteNodes::apply`).
+/// Deletion order: page root cleanup → tree detach → descendant removal
+/// → root removal.
 fn delete_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<(), CoreError> {
     if let Some(page_id) = snap.page_id
         && let Ok(page) = doc.page_mut(page_id)
@@ -506,89 +472,6 @@ mod tests {
         let id = doc.arena.id_by_uuid(&make_uuid(1)).expect("find by uuid");
         assert_eq!(doc.arena.get(id).unwrap().name, "Rect");
         assert!(doc.page(page_id).unwrap().root_nodes.contains(&id));
-    }
-
-    // ── DeleteNode ──────────────────────────────────────────────────
-
-    #[test]
-    fn test_delete_node_validate_and_apply() {
-        let mut doc = Document::new("Test".to_string());
-        let page_id = PageId::new(make_uuid(10));
-        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
-            .expect("add page");
-
-        let node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame {
-                layout: None,
-                corners: crate::node::default_corners(),
-            },
-            "Frame".to_string(),
-        )
-        .expect("create node");
-        let node_id = doc.arena.insert(node).expect("insert");
-        doc.add_root_node_to_page(page_id, node_id)
-            .expect("add root");
-
-        let op = DeleteNode {
-            node_id,
-            page_id: Some(page_id),
-        };
-
-        op.validate(&doc).expect("validate");
-        op.apply(&mut doc).expect("apply");
-        assert!(doc.arena.get(node_id).is_err());
-        assert!(doc.page(page_id).unwrap().root_nodes.is_empty());
-    }
-
-    #[test]
-    fn test_delete_node_validate_rejects_missing_node() {
-        let doc = Document::new("Test".to_string());
-        let op = DeleteNode {
-            node_id: NodeId::new(99, 0),
-            page_id: None,
-        };
-        assert!(op.validate(&doc).is_err());
-    }
-
-    #[test]
-    fn test_delete_node_detaches_from_parent() {
-        let mut doc = Document::new("Test".to_string());
-        let parent_node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame {
-                layout: None,
-                corners: crate::node::default_corners(),
-            },
-            "Parent".to_string(),
-        )
-        .expect("create parent");
-        let parent_id = doc.arena.insert(parent_node).expect("insert parent");
-
-        let child_node = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(2),
-            NodeKind::Rectangle {
-                corners: crate::node::default_corners(),
-            },
-            "Child".to_string(),
-        )
-        .expect("create child");
-        let child_id = doc.arena.insert(child_node).expect("insert child");
-
-        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
-        assert_eq!(doc.arena.get(parent_id).unwrap().children, vec![child_id]);
-
-        let op = DeleteNode {
-            node_id: child_id,
-            page_id: None,
-        };
-        op.validate(&doc).expect("validate");
-        op.apply(&mut doc).expect("apply");
-        assert!(doc.arena.get(child_id).is_err());
-        assert!(doc.arena.get(parent_id).unwrap().children.is_empty());
     }
 
     // ── RenameNode ──────────────────────────────────────────────────
@@ -812,61 +695,6 @@ mod tests {
         assert!(op.apply(&mut doc).is_err());
     }
 
-    // ── RF-013: DeleteNode cleans up children ────────────────────────
-
-    #[test]
-    fn test_delete_node_removes_children_from_arena() {
-        let mut doc = Document::new("Test".to_string());
-        let parent = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(1),
-            NodeKind::Frame {
-                layout: None,
-                corners: crate::node::default_corners(),
-            },
-            "Parent".to_string(),
-        )
-        .expect("create parent");
-        let parent_id = doc.arena.insert(parent).expect("insert parent");
-
-        let child = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(2),
-            NodeKind::Rectangle {
-                corners: crate::node::default_corners(),
-            },
-            "Child".to_string(),
-        )
-        .expect("create child");
-        let child_id = doc.arena.insert(child).expect("insert child");
-
-        let grandchild = Node::new(
-            NodeId::new(0, 0),
-            make_uuid(3),
-            NodeKind::Rectangle {
-                corners: crate::node::default_corners(),
-            },
-            "Grandchild".to_string(),
-        )
-        .expect("create grandchild");
-        let grandchild_id = doc.arena.insert(grandchild).expect("insert grandchild");
-
-        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("add child");
-        crate::tree::add_child(&mut doc.arena, child_id, grandchild_id).expect("add grandchild");
-
-        let op = DeleteNode {
-            node_id: parent_id,
-            page_id: None,
-        };
-        op.validate(&doc).expect("validate");
-        op.apply(&mut doc).expect("apply");
-
-        // All three nodes should be removed from the arena
-        assert!(doc.arena.get(parent_id).is_err());
-        assert!(doc.arena.get(child_id).is_err());
-        assert!(doc.arena.get(grandchild_id).is_err());
-    }
-
     // ── DeleteNodes (Spec 19) ───────────────────────────────────────────
 
     #[test]
@@ -1067,7 +895,8 @@ mod tests {
     #[test]
     fn test_delete_nodes_removes_subtree_children() {
         // A parent with a grandchild — verify all 3 levels are removed when only
-        // the parent is targeted (descendant cleanup mirrors DeleteNode::apply).
+        // the parent is targeted (descendant cleanup is the responsibility of
+        // `DeleteNodes::apply`).
         let mut doc = Document::new("Test".to_string());
         let p = Node::new(
             NodeId::new(0, 0),

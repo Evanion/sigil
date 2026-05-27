@@ -21,7 +21,6 @@ export { MAX_HISTORY_SIZE, MAX_OPERATIONS_PER_TRANSACTION } from "./types";
 export {
   createSetFieldOp,
   createCreateNodeOp,
-  createDeleteNodeOp,
   createDeleteNodesOp,
   createReparentOp,
   createReorderOp,

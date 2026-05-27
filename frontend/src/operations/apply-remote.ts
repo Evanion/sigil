@@ -181,9 +181,6 @@ function applyRemoteOperation(
     case "create_node":
       applyCreateNode(op.value, setState, getNode);
       break;
-    case "delete_node":
-      applyDeleteNode(op.nodeUuid, setState, getNode);
-      break;
     case "delete_nodes":
       applyDeleteNodes(op.value, setState, getNode);
       break;
@@ -677,9 +674,7 @@ function applyCreateNode(
       // of appending. Otherwise (normal create flow), append.
       const originalIndex = raw["originalIndex"];
       const insertAt =
-        typeof originalIndex === "number" &&
-        Number.isFinite(originalIndex) &&
-        originalIndex >= 0
+        typeof originalIndex === "number" && Number.isFinite(originalIndex) && originalIndex >= 0
           ? Math.min(originalIndex, parent.childrenUuids.length)
           : parent.childrenUuids.length;
       const updated = [
@@ -692,36 +687,17 @@ function applyCreateNode(
   }
 }
 
-// ── Internal: delete_node ─────────────────────────────────────────────
-
-function applyDeleteNode(
-  nodeUuid: string,
-  setState: SetStoreFunction<StoreState>,
-  getNode: (uuid: string) => StoreDocumentNode | undefined,
-): void {
-  const node = getNode(nodeUuid);
-
-  // Remove from parent's childrenUuids if the node has a parent
-  if (node?.parentUuid) {
-    const parentUuid = node.parentUuid;
-    const parent = getNode(parentUuid);
-    if (parent) {
-      const newChildren = parent.childrenUuids.filter((id) => id !== nodeUuid);
-      setState("nodes", parentUuid, "childrenUuids", newChildren);
-    }
-  }
-
-  // Remove the node from the store.
-  // Using produce + Reflect.deleteProperty to satisfy no-dynamic-delete lint rule.
-  setState(
-    produce((s) => {
-      Reflect.deleteProperty(s.nodes, nodeUuid);
-    }),
-  );
-}
-
 // ── Internal: delete_nodes (Spec 19) ──────────────────────────────────
 
+/**
+ * Apply a batch delete to the Solid store. Iterates over `value.node_uuids`
+ * and, for each UUID: (a) strips the entry from the parent's childrenUuids
+ * (if any), then (b) deletes the node from the store via `produce` +
+ * `Reflect.deleteProperty` (avoids the no-dynamic-delete lint rule).
+ *
+ * Spec 19 Task 16 inlined this logic from the removed singular per-uuid
+ * helper to leave only the batch path.
+ */
 function applyDeleteNodes(
   value: unknown,
   setState: SetStoreFunction<StoreState>,
@@ -732,15 +708,28 @@ function applyDeleteNodes(
     value === null ||
     !Array.isArray((value as { node_uuids?: unknown }).node_uuids)
   ) {
-    console.warn(
-      "applyRemoteOperation: delete_nodes payload missing or malformed node_uuids",
-      { value },
-    );
+    console.warn("applyRemoteOperation: delete_nodes payload missing or malformed node_uuids", {
+      value,
+    });
     return;
   }
   const nodeUuids = (value as { node_uuids: unknown }).node_uuids as string[];
   for (const uuid of nodeUuids) {
-    applyDeleteNode(uuid, setState, getNode);
+    const node = getNode(uuid);
+    // Detach from parent's childrenUuids before removing the node itself.
+    if (node?.parentUuid) {
+      const parentUuid = node.parentUuid;
+      const parent = getNode(parentUuid);
+      if (parent) {
+        const newChildren = parent.childrenUuids.filter((id) => id !== uuid);
+        setState("nodes", parentUuid, "childrenUuids", newChildren);
+      }
+    }
+    setState(
+      produce((s) => {
+        Reflect.deleteProperty(s.nodes, uuid);
+      }),
+    );
   }
 }
 

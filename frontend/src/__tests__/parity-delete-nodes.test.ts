@@ -17,7 +17,9 @@ describe("delete_nodes wire-format parity (Spec 19)", () => {
 
   it("graphql input encoded form matches the OperationInput::DeleteNodes shape", () => {
     expect(fixture.graphql_delete_nodes_input.encoded.deleteNodes).toBeDefined();
-    expect(Array.isArray(fixture.graphql_delete_nodes_input.encoded.deleteNodes.nodeUuids)).toBe(true);
+    expect(Array.isArray(fixture.graphql_delete_nodes_input.encoded.deleteNodes.nodeUuids)).toBe(
+      true,
+    );
   });
 
   it("mcp wire_op_type is delete_nodes", () => {

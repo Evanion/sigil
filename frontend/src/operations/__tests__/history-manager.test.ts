@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../history-manager";
-import { createSetFieldOp, createCreateNodeOp } from "../operation-helpers";
+import { createSetFieldOp } from "../operation-helpers";
 import { MAX_HISTORY_SIZE } from "../types";
 import type { Transaction } from "../types";
 
@@ -308,27 +308,8 @@ describe("HistoryManager", () => {
     });
   });
 
-  // ── create/delete inverse flipping through undo ──────────────────
-
-  describe("create/delete undo round-trip", () => {
-    it("should produce a delete_node inverse when undoing a create_node", () => {
-      const nodeData = { uuid: "new-1", kind: { type: "rectangle" } };
-      const op = createCreateNodeOp(USER_ID, nodeData);
-      hm.apply(op, "Create rectangle");
-      const inv = assertNonNull(hm.undo());
-      expect(inv.operations[0].type).toBe("delete_node");
-      expect(inv.operations[0].previousValue).toEqual(nodeData);
-      // RF-002: nodeUuid should be extracted from create_node value
-      expect(inv.operations[0].nodeUuid).toBe("new-1");
-    });
-
-    it("should produce create_node again when redoing after undo of create_node", () => {
-      const nodeData = { uuid: "new-1", kind: { type: "rectangle" } };
-      hm.apply(createCreateNodeOp(USER_ID, nodeData), "Create rectangle");
-      hm.undo();
-      const redo = assertNonNull(hm.redo());
-      expect(redo.operations[0].type).toBe("create_node");
-      expect(redo.operations[0].value).toEqual(nodeData);
-    });
-  });
+  // Spec 19 Task 16: the create-node ↔ batch-delete per-op inversion was
+  // removed. The store-level deleteNodes path attaches explicit
+  // inverseOperations on its transaction; coverage of that round-trip
+  // lives in the store integration tests (see undo-redo-integration.test.ts).
 });

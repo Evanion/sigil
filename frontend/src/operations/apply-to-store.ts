@@ -53,9 +53,6 @@ export function applyOperationToStore(
     case "create_node":
       applyCreateNode(op, setState, reader);
       break;
-    case "delete_node":
-      applyDeleteNode(op, setState, reader);
-      break;
     case "delete_nodes":
       applyDeleteNodes(op, setState, reader);
       break;
@@ -198,9 +195,7 @@ function applyCreateNode(
         // of appending. Otherwise (normal create flow), append.
         const originalIndex = nodeData["originalIndex"];
         const insertAt =
-          typeof originalIndex === "number" &&
-          Number.isFinite(originalIndex) &&
-          originalIndex >= 0
+          typeof originalIndex === "number" && Number.isFinite(originalIndex) && originalIndex >= 0
             ? Math.min(originalIndex, existingChildren.length)
             : existingChildren.length;
         const updated = [
@@ -214,44 +209,14 @@ function applyCreateNode(
   }
 }
 
-function applyDeleteNode(
-  op: Operation,
-  setState: StoreStateSetter,
-  reader: StoreStateReader,
-): void {
-  const { nodeUuid } = op;
-  const node = reader.getNode(nodeUuid);
-
-  // Clean up parent's childrenUuids before deleting the node
-  if (node) {
-    const parentUuid = node["parentUuid"] as string | null | undefined;
-    if (parentUuid) {
-      const parent = reader.getNode(parentUuid);
-      if (parent) {
-        const children = (parent["childrenUuids"] as string[] | undefined) ?? [];
-        setState(
-          "nodes",
-          parentUuid,
-          "childrenUuids",
-          children.filter((c) => c !== nodeUuid),
-        );
-      }
-    }
-  }
-
-  // Delete the node from the store
-  setState(
-    produce((s: Record<string, Record<string, unknown>>) => {
-      Reflect.deleteProperty(s["nodes"], nodeUuid);
-    }),
-  );
-}
-
 /**
- * Spec 19: Apply a multi-node delete. Mirrors apply-remote.ts's applyDeleteNodes
- * — loops per-uuid into the existing single-node delete path. This handler is
- * invoked when an undo/redo replays a delete_nodes operation against the local
- * store (see HistoryManager).
+ * Spec 19: Apply a multi-node delete. Iterates the `value.node_uuids`
+ * payload and, for each UUID, strips the entry from the parent's
+ * childrenUuids (if any) and then removes the node from the store via
+ * `produce` + `Reflect.deleteProperty` (no-dynamic-delete lint rule).
+ *
+ * Task 16 inlined this logic from the removed singular per-uuid helper
+ * so the batch path is the only remaining deletion entry point.
  */
 function applyDeleteNodes(
   op: Operation,
@@ -265,12 +230,26 @@ function applyDeleteNodes(
   }
   const nodeUuids = value.node_uuids as string[];
   for (const uuid of nodeUuids) {
-    // Reuse the singular delete_node logic per-uuid. Construct a synthetic
-    // op with the right shape: type=delete_node, nodeUuid=uuid, value=null.
-    applyDeleteNode(
-      { ...op, type: "delete_node", nodeUuid: uuid, value: null },
-      setState,
-      reader,
+    const node = reader.getNode(uuid);
+    if (node) {
+      const parentUuid = node["parentUuid"] as string | null | undefined;
+      if (parentUuid) {
+        const parent = reader.getNode(parentUuid);
+        if (parent) {
+          const children = (parent["childrenUuids"] as string[] | undefined) ?? [];
+          setState(
+            "nodes",
+            parentUuid,
+            "childrenUuids",
+            children.filter((c) => c !== uuid),
+          );
+        }
+      }
+    }
+    setState(
+      produce((s: Record<string, Record<string, unknown>>) => {
+        Reflect.deleteProperty(s["nodes"], uuid);
+      }),
     );
   }
 }

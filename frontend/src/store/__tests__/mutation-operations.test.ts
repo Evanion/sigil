@@ -11,7 +11,7 @@ import { HistoryManager } from "../../operations/history-manager";
 import {
   createSetFieldOp,
   createCreateNodeOp,
-  createDeleteNodeOp,
+  createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
 } from "../../operations/operation-helpers";
@@ -733,99 +733,21 @@ describe("mutation operations — structural mutations (Task 5)", () => {
       expect(op.previousValue).toBeNull();
     });
 
-    it("should track in HistoryManager — undo removes the node", () => {
-      const nodeData = {
-        uuid: "new-uuid",
-        name: "Rect 1",
-        kind: {
-          type: "rectangle",
-          corners: [
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-            { type: "round", radii: { x: 0, y: 0 } },
-          ],
-        },
-        transform: { x: 0, y: 0, width: 100, height: 100, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: {
-          fills: [],
-          strokes: [],
-          opacity: { type: "literal", value: 1 },
-          blend_mode: "normal",
-          effects: [],
-        },
-        visible: true,
-        locked: false,
-        parentUuid: null,
-        childrenUuids: [],
-      };
-      const op = createCreateNodeOp(TEST_USER_ID, nodeData);
-      applyAndTrack(
-        op,
-        "Create Rect 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      // Inverse of create_node is delete_node
-      expect(inverseTx.operations).toHaveLength(1);
-      expect(inverseTx.operations[0].type).toBe("delete_node");
-      expect(inverseTx.operations[0].nodeUuid).toBe("new-uuid");
-      expect(historyManager.canUndo()).toBe(false);
-      expect(historyManager.canRedo()).toBe(true);
-    });
+    // Spec 19 Task 16: the create-node ↔ batch-delete per-op inversion was
+    // removed. Coverage of the create→undo→delete round-trip lives in the
+    // store-level integration tests via the explicit `inverseOperations`
+    // pathway (see undo-redo-integration.test.ts and the deleteNodes flow
+    // in document-store-solid.tsx).
   });
 
-  describe("deleteNode — operation tracking", () => {
-    it("should create a delete_node operation with full node snapshot as previousValue", () => {
-      const snapshot = deepClone(nodes["node-1"]);
-      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
+  describe("deleteNodes — operation tracking", () => {
+    it("should create a delete_nodes operation carrying the UUID list in value", () => {
+      const op = createDeleteNodesOp(TEST_USER_ID, ["node-1"]);
 
-      expect(op.type).toBe("delete_node");
-      expect(op.nodeUuid).toBe("node-1");
-      expect(op.previousValue).toEqual(snapshot);
-      expect(op.value).toBeNull();
-    });
-
-    it("should track in HistoryManager — undo restores the node", () => {
-      const snapshot = deepClone(nodes["node-1"]);
-      const op = createDeleteNodeOp(TEST_USER_ID, "node-1", snapshot);
-      applyAndTrack(
-        op,
-        "Delete Rectangle 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      // Inverse of delete_node is create_node
-      expect(inverseTx.operations).toHaveLength(1);
-      expect(inverseTx.operations[0].type).toBe("create_node");
-      expect(inverseTx.operations[0].value).toEqual(snapshot);
-      expect(historyManager.canRedo()).toBe(true);
+      expect(op.type).toBe("delete_nodes");
+      expect(op.nodeUuid).toBe("");
+      expect(op.value).toEqual({ node_uuids: ["node-1"] });
+      expect(op.previousValue).toBeNull();
     });
   });
 
@@ -1025,83 +947,14 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
     });
   });
 
-  describe("groupNodes — operation tracking", () => {
-    it("should create a create_node operation for tracking group creation", () => {
-      const groupData = {
-        uuid: "group-uuid",
-        name: "Group 1",
-        kind: { type: "frame" },
-        transform: { x: 0, y: 0, width: 200, height: 200, rotation: 0, scale_x: 1, scale_y: 1 },
-        style: {
-          fills: [],
-          strokes: [],
-          opacity: { type: "literal", value: 1 },
-          blend_mode: "normal",
-          effects: [],
-        },
-        visible: true,
-        locked: false,
-        parentUuid: null,
-        childrenUuids: ["node-1", "node-2"],
-      };
-
-      const op = createCreateNodeOp(TEST_USER_ID, groupData);
-      applyAndTrack(
-        op,
-        "Group Group 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      expect(inverseTx.operations[0].type).toBe("delete_node");
-    });
-  });
-
-  describe("ungroupNodes — operation tracking", () => {
-    it("should create a delete_node operation for tracking ungroup", () => {
-      const groupSnapshot = {
-        uuid: "group-uuid",
-        name: "Group 1",
-        kind: { type: "frame" },
-        childrenUuids: ["node-1", "node-2"],
-      };
-
-      const op = createDeleteNodeOp(TEST_USER_ID, "group-uuid", groupSnapshot);
-      applyAndTrack(
-        op,
-        "Ungroup Group 1",
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(historyManager.canUndo()).toBe(true);
-
-      setState.mockClear();
-      const inverseTx = undoAndApply(
-        historyManager,
-        setState as unknown as StoreStateSetter,
-        reader,
-      );
-
-      expect(inverseTx).not.toBeNull();
-      if (inverseTx === null) throw new Error("unreachable");
-      expect(inverseTx.operations[0].type).toBe("create_node");
-      expect(inverseTx.operations[0].value).toEqual(groupSnapshot);
-    });
-  });
+  // Spec 19 Task 16: the `groupNodes`/`ungroupNodes` undo-flip assertions
+  // depended on the removed `create_node ↔ singular-delete` per-op inversion.
+  // The actual `groupNodes`/`ungroupNodes` undo paths now use explicit
+  // `inverseOperations` on their transactions (see document-store-solid.tsx
+  // ungroupNodes for the delete-side cliff and the Spec 19 store integration
+  // suite below for the round-trip coverage). The op-shape-only assertions
+  // above for `groupNodes` (createCreateNodeOp) cover the forward op's
+  // identity; the inverse is exercised in store-level integration tests.
 });
 
 // ── Spec 19: store.deleteNodes integration ──────────────────────────────

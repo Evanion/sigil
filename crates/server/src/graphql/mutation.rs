@@ -18,7 +18,7 @@ use async_graphql::{Context, Object, Result};
 use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
 use agent_designer_core::commands::node_commands::{
-    CreateNode, DeleteNode, DeleteNodes, RenameNode, SetLocked, SetTextContent, SetVisible,
+    CreateNode, DeleteNodes, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
 use agent_designer_core::commands::page_commands::{
     CreatePage, DeletePage, RenamePage, ReorderPage,
@@ -47,10 +47,10 @@ use agent_designer_state::{MutationEventKind, OperationPayload, TransactionPaylo
 use crate::state::ServerState;
 
 use super::types::{
-    AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput,
-    DeleteNodesInput, DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput,
-    RenameTokenInput, ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput,
-    UpdateTokenInput, parse_token_type,
+    AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodesInput,
+    DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, RenameTokenInput,
+    ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput, UpdateTokenInput,
+    parse_token_type,
 };
 
 pub struct MutationRoot;
@@ -132,7 +132,6 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
     match input {
         OperationInput::SetField(sf) => parse_set_field(sf),
         OperationInput::CreateNode(cn) => parse_create_node(cn),
-        OperationInput::DeleteNode(dn) => parse_delete_node(dn),
         OperationInput::DeleteNodes(dn) => parse_delete_nodes(dn),
         OperationInput::Reparent(rp) => parse_reparent(rp),
         OperationInput::Reorder(ro) => parse_reorder(ro),
@@ -767,49 +766,9 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
     })
 }
 
-/// Parses a `DeleteNode` input.
-fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
-    // RF-030: parse UUID once outside the builder closure
-    let parsed_uuid: uuid::Uuid = dn
-        .node_uuid
-        .parse()
-        .map_err(|_| async_graphql::Error::new("invalid node UUID"))?;
-
-    let broadcast = OperationPayload {
-        id: uuid::Uuid::new_v4().to_string(),
-        node_uuid: dn.node_uuid.clone(),
-        op_type: "delete_node".to_string(),
-        path: String::new(),
-        value: None,
-    };
-
-    Ok(ParsedOp {
-        builder: Box::new(move |doc| {
-            let node_id = doc
-                .arena
-                .id_by_uuid(&parsed_uuid)
-                .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-
-            // Find page ID for the node (needed by DeleteNode)
-            let page_id: Option<PageId> = doc.pages.iter().find_map(|page| {
-                if page.root_nodes.contains(&node_id) {
-                    Some(page.id)
-                } else {
-                    None
-                }
-            });
-
-            Ok(Box::new(DeleteNode { node_id, page_id }) as Box<dyn FieldOperation>)
-        }),
-        broadcast,
-        post_apply_value: None,
-    })
-}
-
 /// Parses a `DeleteNodes` input (Spec 19). Resolves each UUID to a `NodeId`
-/// and looks up the page-root membership for each node. Mirrors
-/// [`parse_delete_node`] but produces a single core [`DeleteNodes`] op that
-/// applies atomically across N targets.
+/// and looks up the page-root membership for each node, then produces a
+/// single core [`DeleteNodes`] op that applies atomically across N targets.
 fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
     // Pre-parse every UUID outside the builder closure to fail-fast on
     // invalid input before any document lock is acquired (RF-030 pattern).
@@ -843,7 +802,7 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
                     .arena
                     .id_by_uuid(uuid)
                     .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))?;
-                // Identify whether this node is a page root (mirrors parse_delete_node).
+                // Identify whether this node is a page root.
                 let page_id: Option<PageId> = doc.pages.iter().find_map(|p| {
                     if p.root_nodes.contains(&node_id) {
                         Some(p.id)
@@ -1283,9 +1242,7 @@ impl MutationRoot {
         // RF-007: derive broadcast event kind from the first operation
         let event_kind = match &operations[0] {
             OperationInput::CreateNode(_) => MutationEventKind::NodeCreated,
-            OperationInput::DeleteNode(_) | OperationInput::DeleteNodes(_) => {
-                MutationEventKind::NodeDeleted
-            }
+            OperationInput::DeleteNodes(_) => MutationEventKind::NodeDeleted,
             OperationInput::SetField(_)
             | OperationInput::Reparent(_)
             | OperationInput::Reorder(_) => MutationEventKind::NodeUpdated,
@@ -1698,32 +1655,6 @@ mod tests {
             .as_bool()
             .unwrap();
         assert!(!visible);
-    }
-
-    #[tokio::test]
-    async fn test_apply_operations_delete_node() {
-        let state = ServerState::new();
-        let schema = test_schema(state.clone());
-
-        let uuid = create_test_frame_direct(&state, "ToDelete");
-
-        let query = format!(
-            r#"mutation {{
-                applyOperations(
-                    operations: [{{ deleteNode: {{ nodeUuid: "{uuid}" }} }}],
-                    userId: "test-user"
-                ) {{
-                    seq
-                }}
-            }}"#
-        );
-        let res = schema.execute(&query).await;
-        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
-
-        let node_res = schema
-            .execute(format!(r#"{{ node(uuid: "{uuid}") {{ name }} }}"#).as_str())
-            .await;
-        assert!(node_res.data.into_json().unwrap()["node"].is_null());
     }
 
     #[tokio::test]

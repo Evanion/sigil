@@ -11,7 +11,6 @@
 export type OperationType =
   | "set_field"
   | "create_node"
-  | "delete_node"
   | "delete_nodes"
   | "reparent"
   | "reorder"
@@ -28,8 +27,9 @@ export type OperationType =
  * A single field-level mutation.
  *
  * The inverse of any operation is constructed by swapping `value` and
- * `previousValue`. For `create_node`, the inverse type is `delete_node`
- * and vice versa.
+ * `previousValue`. For batch operations like `delete_nodes` whose inverse
+ * is a different op type with N entries, the inverse is supplied
+ * explicitly via `Transaction.inverseOperations`.
  */
 export interface Operation {
   /** Unique operation ID (UUID). */
@@ -55,7 +55,8 @@ export interface Operation {
    */
   readonly value: unknown;
   /**
-   * Old value (full node snapshot for delete_node).
+   * Old value. For batch deletes (`delete_nodes`), the inverse `create_node`
+   * snapshots live on `Transaction.inverseOperations` instead.
    * TODO (RF-019): Same typing gap as `value` — should be a discriminated union.
    */
   readonly previousValue: unknown;

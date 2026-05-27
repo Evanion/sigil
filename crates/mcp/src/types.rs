@@ -167,13 +167,6 @@ pub struct ReorderPageInput {
     pub new_position: u32,
 }
 
-/// Input for deleting a node.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub struct DeleteNodeInput {
-    /// UUID of the node to delete.
-    pub uuid: String,
-}
-
 /// Input for atomically deleting N nodes (Spec 19).
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct DeleteNodesInput {

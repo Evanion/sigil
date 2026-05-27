@@ -8,7 +8,11 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
-import { createSetFieldOp, createDeleteNodeOp } from "../../operations/operation-helpers";
+import {
+  createSetFieldOp,
+  createCreateNodeOp,
+  createDeleteNodesOp,
+} from "../../operations/operation-helpers";
 import { applyOperationToStore, type StoreStateReader } from "../../operations/apply-to-store";
 import type { Transaction, Operation } from "../../operations/types";
 
@@ -229,15 +233,34 @@ describe("undo/redo integration", () => {
     expect(store.getNodes()["node-1"]["name"]).toBe("New Name");
   });
 
-  it("should restore the node on undo after deleteNode", () => {
+  it("should restore the node on undo after deleteNodes (single-uuid batch)", () => {
+    // Spec 19 Task 16: after the singular per-uuid path removal, deletion
+    // flows through the plural `delete_nodes` path. The store-level
+    // `deleteNodes` builds a transaction with explicit `inverseOperations`
+    // (a list of `create_node` snapshots). Mirror that pattern here so the
+    // undo path exercises the same round-trip without depending on the
+    // removed per-op flip.
     const nodeSnapshot = deepClone(store.getNodes()["node-1"]);
-    const op = createDeleteNodeOp(TEST_USER_ID, "node-1", nodeSnapshot);
-    applyAndTrack(op, "Delete Rectangle 1", historyManager, store.setState, store.reader);
+    const forwardOp = createDeleteNodesOp(TEST_USER_ID, ["node-1"]);
+    const inverseOp = createCreateNodeOp(TEST_USER_ID, nodeSnapshot);
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: [inverseOp],
+      description: "Delete Rectangle 1",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+    // Apply forward op to the store directly, then push the transaction
+    // (mirrors what `store.deleteNodes` does internally via the interceptor).
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    historyManager.pushTransaction(tx);
 
     // Node should be deleted
     expect(store.getNodes()["node-1"]).toBeUndefined();
 
-    // Undo restores the node
+    // Undo restores the node via the explicit inverseOperations
     undoAndApply(historyManager, store.setState, store.reader);
     expect(store.getNodes()["node-1"]).toBeDefined();
     expect(store.getNodes()["node-1"]["name"]).toBe("Rectangle 1");
@@ -424,9 +447,9 @@ describe("undo/redo integration", () => {
 //     `createInverseTransaction` and returns it for the caller to apply.
 //
 // The test file uses HistoryManager + applyOperationToStore directly
-// (not the full Solid store), mirroring the existing delete_node test
+// (not the full Solid store), mirroring the single-uuid delete_nodes test
 // above. The forward op + N inverse `create_node` ops are constructed
-// inline to match what `store.deleteNodes` will create in Task 11/12.
+// inline to match what `store.deleteNodes` creates internally.
 
 describe("deleteNodes — undo/redo integration (Spec 19)", () => {
   it("undoing a deleteNodes transaction restores all deleted nodes", () => {

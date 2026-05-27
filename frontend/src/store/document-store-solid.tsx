@@ -28,7 +28,6 @@ import { HistoryManager } from "../operations/history-manager";
 import { createInterceptor, deepClone as sharedDeepClone } from "../operations/interceptor";
 import {
   createCreateNodeOp,
-  createDeleteNodeOp,
   createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
@@ -114,7 +113,6 @@ export interface DocumentStoreAPI {
   createNode(kind: NodeKind, name: string, transform: Transform): string;
   setTransform(uuid: string, transform: Transform): void;
   renameNode(uuid: string, newName: string): void;
-  deleteNode(uuid: string): void;
   /**
    * Spec 19: Atomic multi-node delete.
    *
@@ -345,10 +343,19 @@ function transactionToServerOps(tx: Transaction): Record<string, unknown>[] {
   // Collect UUIDs of nodes being deleted in this transaction.
   // Field changes on soon-to-be-deleted nodes are pointless and cause
   // "node not found" errors if the delete is processed first.
+  //
+  // Spec 19 Task 16: after the singular delete-path removal, this only
+  // needs to inspect `delete_nodes` payloads (which carry their target
+  // UUIDs under `value.node_uuids`).
   const deletedUuids = new Set<string>();
   for (const op of tx.operations) {
-    if (op.type === "delete_node") {
-      deletedUuids.add(op.nodeUuid);
+    if (op.type === "delete_nodes") {
+      const dv = op.value as { node_uuids?: unknown } | null;
+      if (dv && Array.isArray(dv.node_uuids)) {
+        for (const u of dv.node_uuids as string[]) {
+          deletedUuids.add(u);
+        }
+      }
     }
   }
 
@@ -373,7 +380,7 @@ function transactionToServerOps(tx: Transaction): Record<string, unknown>[] {
       case "create_node":
         creates.push(mapped);
         break;
-      case "delete_node":
+      case "delete_nodes":
         deletes.push(mapped);
         break;
       case "set_field":
@@ -411,12 +418,6 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
         },
       };
     }
-    case "delete_node":
-      return {
-        deleteNode: {
-          nodeUuid: op.nodeUuid,
-        },
-      };
     case "delete_nodes": {
       const dv = op.value as { node_uuids?: unknown } | null;
       if (!dv || !Array.isArray(dv.node_uuids)) {
@@ -883,33 +884,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         value: JSON.stringify(newName),
       },
     });
-  }
-
-  function deleteNode(uuid: string): void {
-    const node = state.nodes[uuid];
-    if (!node) return;
-
-    const previousNode = deepClone(node);
-
-    // Remove from store
-    setState(
-      produce((s) => {
-        Reflect.deleteProperty(s.nodes, uuid);
-      }),
-    );
-
-    // Track structural operation for undo
-    interceptor.trackStructural(createDeleteNodeOp(clientSessionId, uuid, previousNode));
-
-    // Clear selection if the deleted node was selected
-    const filteredIds = selectedNodeIds().filter((id) => id !== uuid);
-    if (filteredIds.length !== selectedNodeIds().length) {
-      setSelectedNodeIds(filteredIds);
-    }
-
-    // Structural ops send immediately (not coalesced) — must reach server
-    // before any undo attempt.
-    sendOps([{ deleteNode: { nodeUuid: uuid } }]);
   }
 
   /**
@@ -1798,8 +1772,23 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
           });
         }
       }
-      interceptor.trackStructural(createDeleteNodeOp(clientSessionId, groupUuid, groupSnapshot));
-      pendingServerOps.push({ deleteNode: { nodeUuid: groupUuid } });
+      // Spec 19 Task 16: track the group's removal as a `delete_nodes` op
+      // with an explicit `inverseOperations` pointing at a single `create_node`
+      // that restores the group from its snapshot. The reparent/set_field ops
+      // tracked above coalesce into a separate transaction (per-op flip), so
+      // we push the delete as its own transaction with an explicit inverse.
+      const forwardDeleteOp = createDeleteNodesOp(clientSessionId, [groupUuid]);
+      const inverseCreateOp = createCreateNodeOp(clientSessionId, groupSnapshot);
+      interceptor.pushTransaction({
+        id: crypto.randomUUID(),
+        userId: clientSessionId,
+        operations: [forwardDeleteOp],
+        inverseOperations: [inverseCreateOp],
+        description: "Ungroup: delete group",
+        timestamp: Date.now(),
+        seq: 0,
+      });
+      pendingServerOps.push({ deleteNodes: { nodeUuids: [groupUuid] } });
 
       allChildUuids.push(...children);
     }
@@ -2553,7 +2542,6 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     createNode,
     setTransform,
     renameNode,
-    deleteNode,
     deleteNodes,
     setVisible,
     setLocked,

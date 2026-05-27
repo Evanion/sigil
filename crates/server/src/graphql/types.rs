@@ -16,8 +16,6 @@ pub enum OperationInput {
     SetField(SetFieldInput),
     /// Create a new node in the document.
     CreateNode(CreateNodeInput),
-    /// Delete a node from the document.
-    DeleteNode(DeleteNodeInput),
     /// Atomically delete N nodes from the document (Spec 19).
     DeleteNodes(DeleteNodesInput),
     /// Reparent a node under a new parent.
@@ -258,13 +256,6 @@ pub struct CreateNodeInput {
     pub page_id: Option<String>,
 }
 
-/// Input for deleting a node.
-#[derive(InputObject)]
-pub struct DeleteNodeInput {
-    /// UUID of the node to delete.
-    pub node_uuid: String,
-}
-
 /// Input for atomically deleting N nodes (Spec 19).
 #[derive(InputObject)]
 pub struct DeleteNodesInput {
@@ -387,7 +378,7 @@ pub struct OperationPayloadGql {
     pub id: String,
     /// Target node UUID.
     pub node_uuid: String,
-    /// Operation type: `set_field`, `create_node`, `delete_node`, `reparent`, `reorder`.
+    /// Operation type: `set_field`, `create_node`, `delete_nodes`, `reparent`, `reorder`.
     #[graphql(name = "type")]
     pub op_type: String,
     /// Field path for `set_field` operations.

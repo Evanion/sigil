@@ -614,7 +614,11 @@ describe("applyRemoteTransaction", () => {
     });
   });
 
-  describe("delete_node", () => {
+  describe("delete_nodes — single-uuid batch (Spec 19 Task 16)", () => {
+    // After Spec 19 Task 16, all deletions flow through the plural
+    // `delete_nodes` path. A one-element `node_uuids` payload covers
+    // the per-uuid semantics previously exercised by the removed
+    // singular-path tests.
     it("should remove a node from the store", () => {
       createRoot((dispose) => {
         const [state, setState] = createStore<StoreState>({
@@ -627,10 +631,10 @@ describe("applyRemoteTransaction", () => {
         applyRemoteTransaction(
           makeTx({}, [
             makeOp({
-              type: "delete_node",
-              nodeUuid: "node-1",
+              type: "delete_nodes",
+              nodeUuid: "",
               path: null,
-              value: null,
+              value: { node_uuids: ["node-1"] },
             }),
           ]),
           LOCAL_USER,
@@ -659,7 +663,12 @@ describe("applyRemoteTransaction", () => {
 
         applyRemoteTransaction(
           makeTx({}, [
-            makeOp({ type: "delete_node", nodeUuid: "node-1", path: null, value: null }),
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: ["node-1"] },
+            }),
           ]),
           LOCAL_USER,
           setState,
@@ -1031,7 +1040,7 @@ describe("applyRemoteTransaction", () => {
       warnSpy.mockRestore();
     });
 
-    it("removes children when targeting a parent (delegates to applyDeleteNode)", () => {
+    it("removes children when targeting a parent (inlined per-uuid deletion)", () => {
       createRoot((dispose) => {
         const parent = makeNode("parent-1", {
           childrenUuids: ["child-1"],
@@ -1044,8 +1053,9 @@ describe("applyRemoteTransaction", () => {
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
-        // delete_nodes batch carrying the parent and child UUIDs; the dispatcher
-        // delegates per-uuid to applyDeleteNode, which preserves the
+        // delete_nodes batch carrying the parent and child UUIDs; the handler
+        // iterates the list and removes each per-uuid in place (Task 16
+        // inlined this loop into applyDeleteNodes), preserving the
         // parent.childrenUuids cleanup semantics.
         applyRemoteTransaction(
           makeTx({}, [

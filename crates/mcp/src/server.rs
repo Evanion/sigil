@@ -176,17 +176,6 @@ impl SigilMcpServer {
         .map_err(|e| e.to_mcp_error())
     }
 
-    /// Deletes a node by UUID.
-    #[tool(name = "delete_node", description = "Delete a node by UUID")]
-    fn delete_node(
-        &self,
-        Parameters(input): Parameters<crate::types::DeleteNodeInput>,
-    ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
-        crate::tools::nodes::delete_node_impl(&self.state, &input.uuid)
-            .map(Json)
-            .map_err(|e| e.to_mcp_error())
-    }
-
     /// Atomically deletes N nodes by UUID (Spec 19). Produces one undo entry.
     #[tool(
         name = "delete_nodes",

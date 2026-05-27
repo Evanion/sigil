@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   createSetFieldOp,
   createCreateNodeOp,
-  createDeleteNodeOp,
   createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
@@ -67,18 +66,6 @@ describe("createCreateNodeOp", () => {
   });
 });
 
-describe("createDeleteNodeOp", () => {
-  it("creates a delete_node operation with snapshot as previousValue", () => {
-    const snapshot = { uuid: "node-1", kind: { type: "rectangle" }, name: "Rect 1" };
-    const op = createDeleteNodeOp(USER_ID, "node-1", snapshot);
-    expect(op.type).toBe("delete_node");
-    expect(op.nodeUuid).toBe("node-1");
-    expect(op.path).toBe("");
-    expect(op.value).toBeNull();
-    expect(op.previousValue).toEqual(snapshot);
-  });
-});
-
 describe("createReparentOp", () => {
   it("creates a reparent operation with new and old parent info", () => {
     const op = createReparentOp(USER_ID, "node-1", "parent-new", 2, "parent-old", 0);
@@ -117,34 +104,6 @@ describe("createInverse", () => {
     const op = createSetFieldOp(USER_ID, "node-1", "name", "new", "old");
     const inv = createInverse(op);
     expect(inv.id).not.toBe(op.id);
-  });
-
-  it("flips create_node to delete_node and extracts nodeUuid from value", () => {
-    const nodeData = { uuid: "new-node", kind: { type: "rectangle" } };
-    const op = createCreateNodeOp(USER_ID, nodeData);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("delete_node");
-    expect(inv.value).toBeNull();
-    expect(inv.previousValue).toEqual(nodeData);
-    // RF-002: inverse of create_node should carry the node UUID
-    expect(inv.nodeUuid).toBe("new-node");
-  });
-
-  it("falls back to empty nodeUuid when create_node value has no uuid field", () => {
-    const nodeData = { kind: { type: "rectangle" } };
-    const op = createCreateNodeOp(USER_ID, nodeData);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("delete_node");
-    expect(inv.nodeUuid).toBe("");
-  });
-
-  it("flips delete_node to create_node", () => {
-    const snapshot = { uuid: "node-1", kind: { type: "rectangle" } };
-    const op = createDeleteNodeOp(USER_ID, "node-1", snapshot);
-    const inv = createInverse(op);
-    expect(inv.type).toBe("create_node");
-    expect(inv.value).toEqual(snapshot);
-    expect(inv.previousValue).toBeNull();
   });
 
   it("swaps value and previousValue for reparent", () => {

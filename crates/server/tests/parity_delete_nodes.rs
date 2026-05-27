@@ -27,7 +27,9 @@ fn parity_graphql_delete_nodes_broadcast_value_shape() {
     let fixture = load_fixture();
     let broadcast = &fixture["graphql_delete_nodes_input"]["broadcast_value"];
     assert!(broadcast["node_uuids"].is_array());
-    let uuids = broadcast["node_uuids"].as_array().expect("node_uuids array");
+    let uuids = broadcast["node_uuids"]
+        .as_array()
+        .expect("node_uuids array");
     assert_eq!(uuids.len(), 2);
 }
 

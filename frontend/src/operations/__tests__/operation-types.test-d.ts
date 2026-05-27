@@ -18,8 +18,6 @@ function _operationTypeExhaustive(op: Operation): string {
       return "set_field";
     case "create_node":
       return "create_node";
-    case "delete_node":
-      return "delete_node";
     case "delete_nodes":
       return "delete_nodes";
     case "reparent":

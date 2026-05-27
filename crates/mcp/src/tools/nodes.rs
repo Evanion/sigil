@@ -7,9 +7,7 @@
 use agent_designer_core::{
     BlendMode, Effect, FieldOperation, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
-    commands::node_commands::{
-        CreateNode, DeleteNode, DeleteNodes, RenameNode, SetLocked, SetVisible,
-    },
+    commands::node_commands::{CreateNode, DeleteNodes, RenameNode, SetLocked, SetVisible},
     commands::style_commands::{
         SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
     },
@@ -240,10 +238,11 @@ pub fn create_node_impl(
                 .and_then(|()| reparent_cmd.apply(&mut doc))
             {
                 // Restore state before propagating error (CLAUDE.md section 11).
-                // Delete the node we just created to roll back.
-                let rollback = DeleteNode {
-                    node_id: actual_id,
-                    page_id,
+                // Delete the node we just created to roll back. Uses the
+                // plural `DeleteNodes` with a one-element batch — the only
+                // delete path in the core crate after Spec 19 Task 16.
+                let rollback = DeleteNodes {
+                    targets: vec![(actual_id, page_id)],
                 };
                 if let Err(rollback_err) = rollback
                     .validate(&doc)
@@ -281,57 +280,6 @@ pub fn create_node_impl(
     Ok(CreateNodeResult {
         uuid: node_uuid.to_string(),
         node: node_info,
-    })
-}
-
-/// Deletes a node identified by UUID.
-///
-/// Resolves the UUID to a `NodeId`, then executes `DeleteNode`.
-///
-/// # Errors
-///
-/// - `McpToolError::InvalidUuid` if `uuid_str` is not a valid UUID.
-/// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
-/// - `McpToolError::CoreError` on engine-level failures.
-pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResult, McpToolError> {
-    let node_uuid: Uuid = uuid_str
-        .parse()
-        .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
-
-    {
-        let mut doc = acquire_document_lock(state);
-
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        // Find if this node is a page root.
-        let page_id = doc.pages.iter().find_map(|page| {
-            if page.root_nodes.contains(&node_id) {
-                Some(page.id)
-            } else {
-                None
-            }
-        });
-
-        let cmd = DeleteNode { node_id, page_id };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeDeleted,
-        &node_uuid.to_string(),
-        "delete_node",
-        "",
-        None,
-    );
-
-    Ok(MutationResult {
-        success: true,
-        message: format!("Node {uuid_str} deleted"),
     })
 }
 
@@ -1146,25 +1094,6 @@ mod tests {
     }
 
     #[test]
-    fn test_delete_node_removes_it() {
-        let (state, page_id) = make_state_with_page();
-        let created =
-            create_node_impl(&state, "frame", "Doomed", Some(&page_id), None, None).unwrap();
-
-        let result = delete_node_impl(&state, &created.uuid);
-        assert!(result.is_ok(), "expected ok, got: {result:?}");
-        assert!(result.unwrap().success);
-
-        // Verify node is gone — deleting again should fail.
-        let result2 = delete_node_impl(&state, &created.uuid);
-        assert!(result2.is_err());
-        assert!(matches!(
-            result2.unwrap_err(),
-            McpToolError::NodeNotFound(_)
-        ));
-    }
-
-    #[test]
     fn test_rename_node_updates_name() {
         let (state, page_id) = make_state_with_page();
         let created =
@@ -1217,15 +1146,6 @@ mod tests {
         let result = create_node_impl(&state, "banana", "Bad Node", Some(&page_id), None, None);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
-    }
-
-    #[test]
-    fn test_delete_nonexistent_node_returns_error() {
-        let state = AppState::new();
-        let fake_uuid = Uuid::new_v4().to_string();
-        let result = delete_node_impl(&state, &fake_uuid);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), McpToolError::NodeNotFound(_)));
     }
 
     // ── RF-010: Float validation tests ────────────────────────────────

@@ -362,7 +362,9 @@ describe("applyOperationToStore — create_node", () => {
   });
 });
 
-describe("applyOperationToStore — delete_node", () => {
+describe("applyOperationToStore — delete_nodes single-uuid (Spec 19 Task 16)", () => {
+  // After Spec 19 Task 16, the singular per-uuid arm is gone; a
+  // one-element `node_uuids` payload covers the previous semantics.
   it("removes a node from the store and cleans up parent's childrenUuids", () => {
     const calls: unknown[][] = [];
     const setter = ((...args: unknown[]) => {
@@ -374,11 +376,11 @@ describe("applyOperationToStore — delete_node", () => {
     };
     const reader: StoreStateReader = { getNode: (uuid) => nodes[uuid] as never };
     const op = makeOp({
-      type: "delete_node",
-      nodeUuid: "node-1",
+      type: "delete_nodes",
+      nodeUuid: "",
       path: "",
-      value: null,
-      previousValue: { uuid: "node-1" },
+      value: { node_uuids: ["node-1"] },
+      previousValue: null,
     });
 
     applyOperationToStore(op, setter, reader);
@@ -395,11 +397,11 @@ describe("applyOperationToStore — delete_node", () => {
       getNode: () => ({ uuid: "node-1", parentUuid: null, name: "Root" }),
     };
     const op = makeOp({
-      type: "delete_node",
-      nodeUuid: "node-1",
+      type: "delete_nodes",
+      nodeUuid: "",
       path: "",
-      value: null,
-      previousValue: { uuid: "node-1" },
+      value: { node_uuids: ["node-1"] },
+      previousValue: null,
     });
 
     applyOperationToStore(op, setter, reader);
@@ -435,10 +437,7 @@ describe("applyOperationToStore — delete_nodes (Spec 19)", () => {
     // Parent should receive at least one childrenUuids update for each removed child.
     const parentUpdates = calls.filter(
       (c) =>
-        c[0] === "nodes" &&
-        c[1] === "parent-a" &&
-        c[2] === "childrenUuids" &&
-        Array.isArray(c[3]),
+        c[0] === "nodes" && c[1] === "parent-a" && c[2] === "childrenUuids" && Array.isArray(c[3]),
     );
     expect(parentUpdates.length).toBeGreaterThanOrEqual(2);
     // Two produce-based deletions (one per uuid) should also have been issued.
