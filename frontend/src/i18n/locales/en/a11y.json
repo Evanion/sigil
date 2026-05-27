@@ -23,6 +23,7 @@
     "cannotMoveToRoot": "Cannot move to root level",
     "selected": "{{name}} selected",
     "deleted": "{{name}} deleted",
+    "deletedMultiple": "Deleted {{count}} layers",
     "unlocked": "{{name}} unlocked",
     "locked": "{{name}} locked",
     "hidden": "{{name}} hidden",

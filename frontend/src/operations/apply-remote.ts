@@ -48,6 +48,7 @@ import {
   MIN_CORNER_SMOOTHING,
   MAX_CORNER_SMOOTHING,
 } from "../store/corners-input";
+import { MAX_NODE_TREE_DEPTH } from "../types/validation";
 
 /** Valid discriminator strings for the Corner union type. */
 const VALID_CORNER_TYPES = new Set(["round", "bevel", "notch", "scoop", "superellipse"]);
@@ -675,9 +676,27 @@ function applyCreateNode(
   // Spec 19: when the snapshot carries an originalIndex (undo of
   // delete_nodes), restore the child at its original position instead
   // of appending. Otherwise (normal create flow), append.
+  //
+  // RF-033: `Number.isSafeInteger` rejects fractional positives,
+  // Infinity, NaN, and non-integer values in one predicate. A non-finite
+  // or fractional index would propagate into Math.min and corrupt the
+  // sibling order on undo. We diagnose malformed values so the silent
+  // append-fallback is observable.
   const originalIndex = raw["originalIndex"];
   const hasOriginalIndex =
-    typeof originalIndex === "number" && Number.isFinite(originalIndex) && originalIndex >= 0;
+    typeof originalIndex === "number" &&
+    Number.isSafeInteger(originalIndex) &&
+    originalIndex >= 0;
+  if (originalIndex !== undefined && !hasOriginalIndex) {
+    // Defensive: log when the field is present but invalid. `undefined`
+    // is the normal "no originalIndex" case (a fresh create_node, not
+    // an undo replay); any other non-conforming value is malformed
+    // payload data worth surfacing.
+    console.warn("applyCreateNode: originalIndex not a non-negative safe integer", {
+      uuid,
+      originalIndex,
+    });
+  }
 
   // Wire up parent's childrenUuids so the tree stays consistent
   if (parentUuid) {
@@ -775,8 +794,7 @@ function applyDeleteNodes(
   // Walk each UUID's subtree in the current store and collect every
   // descendant. Mirrors the core engine's transitive removal. Use an
   // iterative stack with an explicit depth cap to satisfy CLAUDE.md
-  // "Recursive Functions Require Depth Guards".
-  const MAX_SUBTREE_DEPTH = 64;
+  // "Recursive Functions Require Depth Guards". RF-016: shared constant.
   const deletedSet = new Set<string>();
   interface WalkFrame {
     uuid: string;
@@ -798,11 +816,13 @@ function applyDeleteNodes(
   while (walkStack.length > 0) {
     const frame = walkStack.pop();
     if (!frame) break;
-    if (frame.depth >= MAX_SUBTREE_DEPTH) {
+    if (frame.depth >= MAX_NODE_TREE_DEPTH) {
+      // RF-015: structured warn so depth-limit hits are observable.
       console.warn("applyRemoteOperation: delete_nodes subtree depth limit reached", {
         uuid: frame.uuid,
         depth: frame.depth,
-        MAX_SUBTREE_DEPTH,
+        maxDepth: MAX_NODE_TREE_DEPTH,
+        site: "applyDeleteNodes",
       });
       continue;
     }

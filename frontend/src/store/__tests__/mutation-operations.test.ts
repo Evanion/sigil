@@ -1105,6 +1105,167 @@ describe("deleteNodes — operation tracking (Spec 19)", () => {
       store.destroy();
     }
   });
+
+  // RF-027: client-side batch-size guard ────────────────────────────────
+  it("rejects batches exceeding MAX_NODES_PER_DELETE_BATCH with a structured warn", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      // Seed one real node so canUndo's pre-call state is well-defined.
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const survivorUuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "Survivor",
+        sampleTransform as never,
+      );
+      const canUndoBefore = store.canUndo();
+
+      // Build an oversized batch (1001 fake uuids). The guard fires before
+      // any mutation work, so nonexistent uuids are fine here — we only
+      // care that the function rejects and warns.
+      const oversize = Array.from({ length: 1001 }, (_, i) => `fake-${String(i)}`);
+      store.deleteNodes(oversize);
+
+      // The structured warn fired with the expected payload shape. We
+      // accept any warn message containing "MAX_NODES_PER_DELETE_BATCH".
+      const calls = warnSpy.mock.calls as unknown[][];
+      const match = calls.find(
+        (args) => typeof args[0] === "string" && args[0].includes("MAX_NODES_PER_DELETE_BATCH"),
+      );
+      expect(match).toBeDefined();
+
+      // Survivor was not deleted; no transaction was pushed (canUndo
+      // unchanged relative to before the rejected call).
+      expect(store.state.nodes[survivorUuid]).toBeDefined();
+      expect(store.canUndo()).toBe(canUndoBefore);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  // RF-017: description uses user-requested count, not dedup-retained count
+  it("transaction description reflects user-requested count (parent+child dedups to 1)", () => {
+    // Spy on HistoryManager#pushTransaction so we can inspect the
+    // description recorded by deleteNodes without exposing the
+    // historyManager in the store's public surface.
+    const pushSpy = vi.spyOn(HistoryManager.prototype, "pushTransaction");
+    try {
+      const store = createDocumentStoreSolid();
+      try {
+        const sampleKind = deepClone(makeTestNode()["kind"]);
+        const sampleTransform = deepClone(makeTestNode()["transform"]);
+        const parentUuid = store.createNode(
+          { type: "frame", layout: null, corners: sampleKind } as never,
+          "P",
+          sampleTransform as never,
+        );
+        const childUuid = store.createNode(
+          { type: "rectangle", corners: sampleKind } as never,
+          "C",
+          sampleTransform as never,
+        );
+        store.reparentNode(childUuid, parentUuid, 0);
+
+        const callCountBefore = pushSpy.mock.calls.length;
+        // User requested two deletions; dedup retains only the parent.
+        store.deleteNodes([parentUuid, childUuid]);
+
+        // Find the delete_nodes transaction (newest pushTransaction call
+        // after our setup work).
+        const newCalls = pushSpy.mock.calls.slice(callCountBefore);
+        const deleteTxArgs = newCalls.find(
+          (args) =>
+            args[0] &&
+            typeof args[0] === "object" &&
+            Array.isArray((args[0] as Transaction).operations) &&
+            (args[0] as Transaction).operations[0]?.type === "delete_nodes",
+        );
+        expect(deleteTxArgs).toBeDefined();
+        if (!deleteTxArgs) throw new Error("delete_nodes transaction not found");
+        const deleteTx = deleteTxArgs[0] as Transaction;
+
+        // The description uses the user-requested count (2), not the
+        // dedup-retained count (1) — matches the Canvas/LayersTree
+        // announcement and user mental model.
+        expect(deleteTx.description).toBe("Delete 2 nodes");
+      } finally {
+        store.destroy();
+      }
+    } finally {
+      pushSpy.mockRestore();
+    }
+  });
+
+  // RF-004: cycle protection in the ancestor walk ───────────────────────
+  //
+  // We construct a non-target parent cycle in the ancestor chain of a
+  // single target, so the dedup walk has no `targetSet.has(cursor)`
+  // short-circuit and must rely on the depth cap to terminate.
+  //
+  // Topology:
+  //   target Y
+  //     parent → A
+  //   A.parent = B
+  //   B.parent = A  (A ↔ B cycle, neither is in targetSet)
+  //
+  // Without the depth cap, isDescendantOfOtherTarget(Y) loops A→B→A→…
+  // forever. With the cap, it logs a structured console.error and
+  // returns false (conservative — does not dedup Y).
+  it("terminates when the ancestor walk hits a parent cycle", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const a = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "A",
+        sampleTransform as never,
+      );
+      const b = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "B",
+        sampleTransform as never,
+      );
+      const y = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "Y",
+        sampleTransform as never,
+      );
+
+      // Build the hierarchy: Y under A under B; then add the A→B→A cycle.
+      store.reparentNode(y, a, 0); // Y.parent = A
+      store.reparentNode(a, b, 0); // A.parent = B
+      store.reparentNode(b, a, 0); // B.parent = A — cycles A↔B
+
+      // Sanity: A↔B cycle in place; Y is the only target.
+      expect(store.state.nodes[a]?.parentUuid).toBe(b);
+      expect(store.state.nodes[b]?.parentUuid).toBe(a);
+      expect(store.state.nodes[y]?.parentUuid).toBe(a);
+
+      // Call deleteNodes with [Y] — the ancestor walk from Y's parent
+      // (A) loops A→B→A indefinitely without the depth guard. With the
+      // guard, depth >= MAX_NODE_TREE_DEPTH fires after 64 iterations
+      // and the function logs a structured console.error.
+      const start = Date.now();
+      store.deleteNodes([y]);
+      const elapsed = Date.now() - start;
+
+      // Should complete in well under a second; pathological cycle would
+      // hang the test.
+      expect(elapsed).toBeLessThan(1000);
+
+      // The cycle guard fired a structured console.error.
+      const errCalls = errorSpy.mock.calls as unknown[][];
+      const match = errCalls.find(
+        (args) =>
+          typeof args[0] === "string" &&
+          args[0].includes("ancestor walk exceeded MAX_NODE_TREE_DEPTH"),
+      );
+      expect(match).toBeDefined();
+    } finally {
+      store.destroy();
+    }
+  });
 });
 
 /**

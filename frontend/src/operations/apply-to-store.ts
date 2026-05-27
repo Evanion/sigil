@@ -23,6 +23,7 @@ import type {
   UpdateTokenValue,
   RenameTokenValue,
 } from "./types";
+import { MAX_NODE_TREE_DEPTH } from "../types/validation";
 
 /** Minimal setter interface matching Solid's SetStoreFunction signature. */
 export type StoreStateSetter = (...args: unknown[]) => void;
@@ -185,9 +186,23 @@ function applyCreateNode(
   // Spec 19: when the snapshot carries an originalIndex (undo of
   // delete_nodes), restore the child at its original position instead
   // of appending. Otherwise (normal create flow), append.
+  //
+  // RF-033: `Number.isSafeInteger` rejects fractional positives,
+  // Infinity, NaN, and non-integer values in one predicate. A non-finite
+  // or fractional index would propagate into Math.min and corrupt the
+  // sibling order on undo. We diagnose malformed values so the silent
+  // append-fallback is observable.
   const originalIndex = nodeData["originalIndex"];
   const hasOriginalIndex =
-    typeof originalIndex === "number" && Number.isFinite(originalIndex) && originalIndex >= 0;
+    typeof originalIndex === "number" &&
+    Number.isSafeInteger(originalIndex) &&
+    originalIndex >= 0;
+  if (originalIndex !== undefined && !hasOriginalIndex) {
+    console.warn("applyCreateNode: originalIndex not a non-negative safe integer", {
+      uuid,
+      originalIndex,
+    });
+  }
 
   // Wire up parent's childrenUuids if parentUuid is provided
   const parentUuid = nodeData["parentUuid"] as string | undefined;
@@ -276,8 +291,7 @@ function applyDeleteNodes(
 
   // Walk each UUID's subtree in the current store and collect every
   // descendant. Iterative + explicit depth cap satisfies the recursion
-  // depth guard requirement in CLAUDE.md.
-  const MAX_SUBTREE_DEPTH = 64;
+  // depth guard requirement in CLAUDE.md. RF-016: shared constant.
   const deletedSet = new Set<string>();
   interface WalkFrame {
     uuid: string;
@@ -296,11 +310,13 @@ function applyDeleteNodes(
   while (walkStack.length > 0) {
     const frame = walkStack.pop();
     if (!frame) break;
-    if (frame.depth >= MAX_SUBTREE_DEPTH) {
+    if (frame.depth >= MAX_NODE_TREE_DEPTH) {
+      // RF-015: structured warn so depth-limit hits are observable.
       console.warn("applyOperationToStore: delete_nodes subtree depth limit reached", {
         uuid: frame.uuid,
         depth: frame.depth,
-        MAX_SUBTREE_DEPTH,
+        maxDepth: MAX_NODE_TREE_DEPTH,
+        site: "applyDeleteNodes",
       });
       continue;
     }

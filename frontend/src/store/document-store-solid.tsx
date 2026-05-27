@@ -49,6 +49,7 @@ import { resolveToken as resolveTokenPure } from "./token-store";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
+import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -911,16 +912,57 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   function deleteNodes(uuids: readonly string[]): void {
     if (uuids.length === 0) return;
 
+    // ── Step 0: client-side batch-size guard (RF-027) ───────────────
+    // Mirror the server's MAX_NODES_PER_DELETE_BATCH so we surface a
+    // structured diagnostic before a doomed round-trip rather than
+    // discovering the rejection asynchronously. Symmetric with the
+    // Rust validator per CLAUDE.md §11 "Validation Must Be Symmetric
+    // Across All Transports".
+    if (uuids.length > MAX_NODES_PER_DELETE_BATCH) {
+      console.warn("store.deleteNodes: batch size exceeds MAX_NODES_PER_DELETE_BATCH", {
+        requested: uuids.length,
+        max: MAX_NODES_PER_DELETE_BATCH,
+      });
+      return;
+    }
+
+    // Preserve the user-requested count BEFORE dedup so the history
+    // description and any downstream caller can reflect the user's
+    // intent (matching what announce() in Canvas/LayersTree reports).
+    // See RF-017.
+    const userRequestedCount = uuids.length;
+
     // ── Step 1: dedup ancestor/descendant pairs ─────────────────────
     // For each UUID, walk up its parent chain. If any ancestor is also
     // in the target set, drop this UUID — its parent will delete it
     // transitively. Mirrors DeleteNodes::apply in core.
+    //
+    // The walk is bounded by MAX_NODE_TREE_DEPTH (RF-004) — a malformed
+    // store with a parent cycle would otherwise loop forever. If the
+    // cap fires, log a structured `console.error` (cycle = invariant
+    // class) and conservatively return `false` so the caller does NOT
+    // dedup this uuid (the safer side: at worst, the server rejects
+    // ancestor+descendant pair; at best, the structural anomaly is
+    // observable in the console).
     const targetSet = new Set(uuids);
     const isDescendantOfOtherTarget = (uuid: string): boolean => {
       let cursor = state.nodes[uuid]?.parentUuid ?? null;
+      let depth = 0;
       while (cursor !== null) {
+        if (depth >= MAX_NODE_TREE_DEPTH) {
+          console.error(
+            "store.deleteNodes: ancestor walk exceeded MAX_NODE_TREE_DEPTH (possible cycle)",
+            {
+              uuid,
+              depth,
+              maxDepth: MAX_NODE_TREE_DEPTH,
+            },
+          );
+          return false;
+        }
         if (targetSet.has(cursor)) return true;
         cursor = state.nodes[cursor]?.parentUuid ?? null;
+        depth++;
       }
       return false;
     };
@@ -955,9 +997,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
     // Walk each retained root's full subtree and capture per-node snapshots.
     // Iterative walk via stack avoids the recursion-depth guard parity
-    // problem; we still enforce MAX_SUBTREE_DEPTH explicitly via the depth
-    // tracked alongside each stack frame.
-    const MAX_SUBTREE_DEPTH = 64;
+    // problem; we still enforce MAX_NODE_TREE_DEPTH explicitly via the depth
+    // tracked alongside each stack frame. RF-016: shared constant.
     const snapshots: DeleteSnapshot[] = [];
     const deletedUuids = new Set<string>();
     const seenForSnapshot = new Set<string>();
@@ -972,11 +1013,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       const frame = walkStack.pop();
       if (!frame) break;
       const { uuid, depth } = frame;
-      if (depth >= MAX_SUBTREE_DEPTH) {
+      if (depth >= MAX_NODE_TREE_DEPTH) {
+        // RF-015: structured warn (not silent return) so depth-limit
+        // hits in the subtree walk are observable in production logs.
         console.warn("store.deleteNodes: subtree depth limit reached, descendants skipped", {
           uuid,
           depth,
-          MAX_SUBTREE_DEPTH,
+          maxDepth: MAX_NODE_TREE_DEPTH,
+          site: "store.deleteNodes",
         });
         continue;
       }
@@ -1108,12 +1152,18 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       }),
     );
 
+    // RF-017: description uses the user-requested count, not the dedup-
+    // retained count. The user pressed Delete with N selected; their mental
+    // model — and the corresponding screen-reader announcement in
+    // Canvas/LayersTree — sees N. Reporting retained.length when it's
+    // smaller than uuids.length leaks an internal dedup detail and creates
+    // a count mismatch between the announcement and the history label.
     interceptor.pushTransaction({
       id: crypto.randomUUID(),
       userId: clientSessionId,
       operations: [forwardOp],
       inverseOperations: inverseOps,
-      description: `Delete ${retained.length} node${retained.length > 1 ? "s" : ""}`,
+      description: `Delete ${userRequestedCount} node${userRequestedCount > 1 ? "s" : ""}`,
       timestamp: Date.now(),
       seq: 0,
     });
