@@ -60,11 +60,14 @@ pub const MAX_FONT_FAMILY_LEN: usize = 256;
 pub const MAX_PAGE_NAME_LEN: usize = 256;
 
 /// Maximum number of nodes a single `DeleteNodes` operation may target.
-/// Bounded to prevent runaway client requests. The matching frontend value
-/// in `frontend/src/types/validation.ts` MUST stay equal to this. Mirrored
-/// at the same value as `MAX_OPERATIONS_PER_TRANSACTION` so a maximal delete
-/// always fits in a single undo transaction (see Spec 19 §8).
-pub const MAX_NODES_PER_DELETE_BATCH: usize = 1000;
+/// Bounded to prevent runaway client requests. Mirrored by
+/// `MAX_OPERATIONS_PER_TRANSACTION` in `frontend/src/operations/types.ts:214`
+/// (current location) so a maximal delete always fits in a single undo
+/// transaction (see Spec 19 §8). Future Spec 19 Task 11 may also mirror a
+/// per-batch maximum in `frontend/src/types/validation.ts` or
+/// `frontend/src/store/document-store-solid.tsx` if a frontend-side guard is
+/// added; the canonical source-of-truth is this `pub const`.
+pub const MAX_NODES_PER_DELETE_BATCH: usize = 1_000;
 
 /// Maximum node-tree nesting depth. Bounds recursion in subtree walks
 /// (deletion, ancestor walks, snapshot capture). Per CLAUDE.md §11
