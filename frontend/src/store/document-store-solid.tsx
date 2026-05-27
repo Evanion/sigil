@@ -50,6 +50,7 @@ import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../pane
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
+import { getGraphqlHttpUrl, getGraphqlWsUrl } from "../transport/sidecar-url";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -579,9 +580,8 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   const clientSessionId = crypto.randomUUID();
 
   // urql client
-  const httpUrl = `${window.location.origin}/graphql`;
-  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProtocol}//${window.location.host}/graphql/ws`;
+  const httpUrl = getGraphqlHttpUrl();
+  const wsUrl = getGraphqlWsUrl();
 
   // Document state
   const [state, setState] = createStore<DocumentState>({
