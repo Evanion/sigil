@@ -133,18 +133,18 @@ impl FieldOperation for DeleteNodes {
             }
         }
         // 4. Every node must exist
-        for (node_id, _) in &self.targets {
-            doc.arena.get(*node_id)?;
+        for (idx, (node_id, _)) in self.targets.iter().enumerate() {
+            doc.arena.get(*node_id).map_err(|_| {
+                CoreError::ValidationError(format!(
+                    "DeleteNodes: target at index {idx} ({node_id:?}) not found in arena"
+                ))
+            })?;
         }
         Ok(())
     }
 
-    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
-        // Task 4 will implement the real apply with dedup + rollback.
-        let _ = doc;
-        Err(CoreError::ValidationError(
-            "DeleteNodes::apply not yet implemented (Task 4)".to_string(),
-        ))
+    fn apply(&self, _doc: &mut Document) -> Result<(), CoreError> {
+        todo!("DeleteNodes::apply implemented in Task 4 (spec-19)")
     }
 }
 
