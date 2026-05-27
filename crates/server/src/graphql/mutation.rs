@@ -18,7 +18,7 @@ use async_graphql::{Context, Object, Result};
 use agent_designer_core::FieldOperation;
 use agent_designer_core::PageId;
 use agent_designer_core::commands::node_commands::{
-    CreateNode, DeleteNode, RenameNode, SetLocked, SetTextContent, SetVisible,
+    CreateNode, DeleteNode, DeleteNodes, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
 use agent_designer_core::commands::page_commands::{
     CreatePage, DeletePage, RenamePage, ReorderPage,
@@ -48,9 +48,9 @@ use crate::state::ServerState;
 
 use super::types::{
     AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodeInput,
-    DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, RenameTokenInput,
-    ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput, UpdateTokenInput,
-    parse_token_type,
+    DeleteNodesInput, DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput,
+    RenameTokenInput, ReorderInput, ReorderPageInput, ReparentInput, SetFieldInput,
+    UpdateTokenInput, parse_token_type,
 };
 
 pub struct MutationRoot;
@@ -133,6 +133,7 @@ fn parse_operation_input(input: &OperationInput) -> Result<ParsedOp> {
         OperationInput::SetField(sf) => parse_set_field(sf),
         OperationInput::CreateNode(cn) => parse_create_node(cn),
         OperationInput::DeleteNode(dn) => parse_delete_node(dn),
+        OperationInput::DeleteNodes(dn) => parse_delete_nodes(dn),
         OperationInput::Reparent(rp) => parse_reparent(rp),
         OperationInput::Reorder(ro) => parse_reorder(ro),
         OperationInput::CreatePage(cp) => parse_create_page(cp),
@@ -805,6 +806,60 @@ fn parse_delete_node(dn: &DeleteNodeInput) -> Result<ParsedOp> {
     })
 }
 
+/// Parses a `DeleteNodes` input (Spec 19). Resolves each UUID to a `NodeId`
+/// and looks up the page-root membership for each node. Mirrors
+/// [`parse_delete_node`] but produces a single core [`DeleteNodes`] op that
+/// applies atomically across N targets.
+fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
+    // Pre-parse every UUID outside the builder closure to fail-fast on
+    // invalid input before any document lock is acquired (RF-030 pattern).
+    // Core's `DeleteNodes::validate` enforces emptiness and the
+    // `MAX_NODES_PER_DELETE_BATCH` upper bound; the wire layer relies on
+    // that single source of truth.
+    let parsed_uuids: Vec<uuid::Uuid> = dn
+        .node_uuids
+        .iter()
+        .map(|s| {
+            s.parse::<uuid::Uuid>()
+                .map_err(|_| async_graphql::Error::new(format!("invalid node UUID: {s}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let broadcast = OperationPayload {
+        id: uuid::Uuid::new_v4().to_string(),
+        // Batch op: no single targeted UUID. The full list is in `value`.
+        node_uuid: String::new(),
+        op_type: "delete_nodes".to_string(),
+        path: String::new(),
+        value: Some(serde_json::json!({ "node_uuids": dn.node_uuids })),
+    };
+
+    Ok(ParsedOp {
+        builder: Box::new(move |doc| {
+            let mut targets: Vec<(agent_designer_core::id::NodeId, Option<PageId>)> =
+                Vec::with_capacity(parsed_uuids.len());
+            for uuid in &parsed_uuids {
+                let node_id = doc
+                    .arena
+                    .id_by_uuid(uuid)
+                    .ok_or_else(|| async_graphql::Error::new(format!("node not found: {uuid}")))?;
+                // Identify whether this node is a page root (mirrors parse_delete_node).
+                let page_id: Option<PageId> = doc.pages.iter().find_map(|p| {
+                    if p.root_nodes.contains(&node_id) {
+                        Some(p.id)
+                    } else {
+                        None
+                    }
+                });
+                targets.push((node_id, page_id));
+            }
+            Ok(Box::new(DeleteNodes { targets }) as Box<dyn FieldOperation>)
+        }),
+        broadcast,
+        post_apply_value: None,
+    })
+}
+
 /// Parses a `Reparent` input.
 fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
     // RF-030: parse UUIDs once outside the builder closure
@@ -1228,7 +1283,9 @@ impl MutationRoot {
         // RF-007: derive broadcast event kind from the first operation
         let event_kind = match &operations[0] {
             OperationInput::CreateNode(_) => MutationEventKind::NodeCreated,
-            OperationInput::DeleteNode(_) => MutationEventKind::NodeDeleted,
+            OperationInput::DeleteNode(_) | OperationInput::DeleteNodes(_) => {
+                MutationEventKind::NodeDeleted
+            }
             OperationInput::SetField(_)
             | OperationInput::Reparent(_)
             | OperationInput::Reorder(_) => MutationEventKind::NodeUpdated,
@@ -1667,6 +1724,79 @@ mod tests {
             .execute(format!(r#"{{ node(uuid: "{uuid}") {{ name }} }}"#).as_str())
             .await;
         assert!(node_res.data.into_json().unwrap()["node"].is_null());
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_delete_nodes_batch() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Create two sibling page-root frames.
+        let uuid_a = create_test_frame_direct(&state, "ToDeleteA");
+        let uuid_b = create_test_frame_direct(&state, "ToDeleteB");
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ deleteNodes: {{ nodeUuids: ["{uuid_a}", "{uuid_b}"] }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "delete_nodes failed: {:?}",
+            res.errors
+        );
+
+        // Both nodes should be gone.
+        for uuid in [&uuid_a, &uuid_b] {
+            let node_res = schema
+                .execute(format!(r#"{{ node(uuid: "{uuid}") {{ name }} }}"#).as_str())
+                .await;
+            assert!(
+                node_res.data.into_json().unwrap()["node"].is_null(),
+                "node {uuid} should be deleted"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_operations_delete_nodes_missing_uuid_rejects_batch() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // One real node + one non-existent UUID — the entire batch must fail.
+        let uuid_a = create_test_frame_direct(&state, "Real");
+        let bogus = uuid::Uuid::new_v4();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ deleteNodes: {{ nodeUuids: ["{uuid_a}", "{bogus}"] }} }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "batch with missing UUID should be rejected"
+        );
+
+        // The real node must still exist — the batch is atomic.
+        let node_res = schema
+            .execute(format!(r#"{{ node(uuid: "{uuid_a}") {{ name }} }}"#).as_str())
+            .await;
+        assert!(
+            !node_res.data.into_json().unwrap()["node"].is_null(),
+            "atomic batch must not have deleted the real node"
+        );
     }
 
     #[tokio::test]
