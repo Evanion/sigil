@@ -297,10 +297,74 @@ impl FieldOperation for DeleteNodes {
     }
 }
 
+// ── Test-only fault injection for delete_nodes_subtree (GH #69) ─────────
+//
+// `DeleteNodes::apply`'s in-loop rollback path needs an integration test
+// that forces the K-th subtree deletion to fail so the accumulating
+// rollback can be observed. Production code never sees this seam — the
+// `#[cfg(not(test))]` stub below compiles to `Ok(())` inline (zero
+// overhead in shipped builds).
+//
+// The counter is `thread_local!` rather than a process-global atomic so
+// parallel-running tests do not corrupt each other's injection schedules.
+// Cargo's default test harness spawns one test per worker thread; setting
+// the counter from test A is invisible to test B running on a different
+// thread.
+//
+// Usage in a test:
+//   set_fail_delete_nodes_subtree_at(2);   // fail 3rd call (this thread)
+//   let result = op.apply(&mut doc);       // first 2 succeed, 3rd errors
+//   set_fail_delete_nodes_subtree_at(-1);  // reset (good hygiene; tests
+//                                          // on this thread already
+//                                          // consumed the schedule)
+#[cfg(test)]
+use std::cell::Cell;
+
+#[cfg(test)]
+thread_local! {
+    static FAIL_DELETE_NODES_SUBTREE_AT: Cell<i32> = const { Cell::new(-1) };
+}
+
+#[cfg(test)]
+fn set_fail_delete_nodes_subtree_at(n: i32) {
+    FAIL_DELETE_NODES_SUBTREE_AT.with(|c| c.set(n));
+}
+
+#[cfg(test)]
+fn maybe_inject_subtree_failure() -> Result<(), CoreError> {
+    let prev = FAIL_DELETE_NODES_SUBTREE_AT.with(|c| {
+        let v = c.get();
+        c.set(v - 1);
+        v
+    });
+    if prev == 0 {
+        Err(CoreError::ValidationError(
+            "GH-69 test-injected delete_nodes_subtree failure".to_string(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+// Production stub: the function MUST keep its Result signature to match the
+// #[cfg(test)] variant — callers use `maybe_inject_subtree_failure()?`. The
+// `unnecessary_wraps` lint flags the Ok-only return; allow it narrowly here.
+// `inline` (not `inline(always)`) is enough — the optimiser elides the call.
+#[cfg(not(test))]
+#[inline]
+#[allow(clippy::unnecessary_wraps)]
+fn maybe_inject_subtree_failure() -> Result<(), CoreError> {
+    Ok(())
+}
+
 /// Deletes a single subtree (helper for `DeleteNodes::apply`).
 /// Deletion order: page root cleanup → tree detach → descendant removal
 /// → root removal.
 fn delete_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<(), CoreError> {
+    // GH #69: fault-injection point for the in-apply rollback test.
+    // Production builds compile this to Ok(()) — zero overhead.
+    maybe_inject_subtree_failure()?;
+
     // Propagate page_mut errors instead of silently swallowing
     // (CLAUDE.md §11 "No Silent Error Suppression"). A missing page during
     // forward deletion is an invariant violation that must surface.
@@ -1166,6 +1230,193 @@ mod tests {
         assert!(
             op2.validate(&doc).is_err(),
             "parent not added to page roots"
+        );
+    }
+
+    // ── DeleteNodes apply-level rollback (GH #69) ───────────────────────
+    //
+    // The two tests below drive the in-apply rollback path via the test-
+    // only `FAIL_DELETE_NODES_SUBTREE_AT` seam declared above. They cover
+    // the integration gap left by `test_delete_nodes_subtree_rollback_
+    // preserves_identity` (which calls the helpers directly) and the
+    // `CoreError::RollbackFailed` variant-shape test (which exercises the
+    // type, not the path).
+
+    #[test]
+    fn test_delete_nodes_rolls_back_on_subtree_failure() {
+        // GH #69: integration test for the in-apply rollback path.
+        // Build a doc with 3 sibling root-level targets. Inject a failure that
+        // fires on the 2nd subtree deletion. After apply errors, assert:
+        // - All 3 nodes are STILL in the arena (identity preserved).
+        // - All 3 are STILL in the page's root_nodes (positional order preserved).
+        // - apply returned the typed compound error from the rollback path.
+        //
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(10));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+
+        let mut ids = Vec::new();
+        for i in 1..=3u8 {
+            let n = Node::new(
+                NodeId::new(0, 0),
+                make_uuid(i),
+                NodeKind::Rectangle {
+                    corners: crate::node::default_corners(),
+                },
+                format!("R{i}"),
+            )
+            .expect("create");
+            let id = doc.arena.insert(n).expect("insert");
+            doc.add_root_node_to_page(page_id, id).expect("add root");
+            ids.push(id);
+        }
+        let page_roots_before = doc.page(page_id).unwrap().root_nodes.clone();
+        assert_eq!(page_roots_before.len(), 3);
+
+        let op = DeleteNodes {
+            targets: ids.iter().map(|id| (*id, Some(page_id))).collect(),
+        };
+
+        // Sort sequence: all 3 targets share parent_id = None and have
+        // page-root indices 0, 1, 2. The DESC-by-original-index sort puts
+        // the LAST-inserted target (ids[2], index 2) first in the delete
+        // loop. With FAIL=1, the first delete succeeds (ids[2]) and the
+        // second errors (ids[1]); rollback restores ids[2]; ids[0] is
+        // never reached. Net: all 3 nodes remain.
+        super::set_fail_delete_nodes_subtree_at(1);
+        let result = op.apply(&mut doc);
+        // Always reset on this thread, even though the schedule has already
+        // been consumed — hygiene against future tests scheduled on the
+        // same worker thread.
+        super::set_fail_delete_nodes_subtree_at(-1);
+
+        // Apply must return Err. Spec 19 §8 atomicity: all-or-nothing.
+        assert!(result.is_err(), "expected apply to fail, got {result:?}");
+
+        // The error variant should reflect the test-injected failure. With
+        // no further injection, rollback succeeds, so we expect the raw
+        // injected error (ValidationError).
+        match result {
+            Err(CoreError::ValidationError(msg)) => {
+                assert!(
+                    msg.contains("GH-69"),
+                    "expected injected message, got {msg:?}"
+                );
+            }
+            other => panic!("expected ValidationError carrying injected message, got {other:?}"),
+        }
+
+        // All 3 nodes still in arena with original NodeId identity.
+        for id in &ids {
+            assert!(
+                doc.arena.get(*id).is_ok(),
+                "node {id:?} should still exist after rollback"
+            );
+        }
+
+        // Page's root_nodes restored to original (ordering preserved).
+        assert_eq!(
+            doc.page(page_id).unwrap().root_nodes,
+            page_roots_before,
+            "page.root_nodes should match pre-apply state after rollback"
+        );
+    }
+
+    #[test]
+    fn test_delete_nodes_rolls_back_with_descendants() {
+        // GH #69: verify rollback restores a subtree (parent + child) when
+        // the failure happens AFTER the parent+child subtree was completed.
+        // Inject failure on the 2nd call. Sort order (DESC by page-root index)
+        // puts the LATER-inserted page-root first in the delete loop. We
+        // insert R first (index 0) and P second (index 1), so DESC sort
+        // processes P first — P + child C delete successfully — then the
+        // second call (for R) fires the seam, triggering rollback through
+        // reinsert_nodes_subtree which must restore both P and C.
+
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(20));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+
+        // Target 1: parent P with child C (depth-1 subtree). Inserted FIRST
+        // so P gets a LOWER page-root index than R, but in the DESC sort
+        // P is processed SECOND. We want P deleted first to test subtree
+        // restoration, so we'll add R first and P second below.
+
+        // Target 1 (R, index 0): a sibling page-root.
+        let sibling = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Rectangle {
+                corners: crate::node::default_corners(),
+            },
+            "R".to_string(),
+        )
+        .expect("create");
+        let r_id = doc.arena.insert(sibling).expect("insert");
+        doc.add_root_node_to_page(page_id, r_id).expect("root");
+
+        // Target 2 (P, index 1): a frame with a child group. DESC sort puts
+        // P first in the delete loop.
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create");
+        let p_id = doc.arena.insert(parent).expect("insert");
+        doc.add_root_node_to_page(page_id, p_id).expect("root");
+
+        let child = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "C".to_string(),
+        )
+        .expect("create");
+        let c_id = doc.arena.insert(child).expect("insert");
+        crate::tree::add_child(&mut doc.arena, p_id, c_id).expect("link");
+
+        let parent_children_before = doc.arena.get(p_id).unwrap().children.clone();
+        let page_roots_before = doc.page(page_id).unwrap().root_nodes.clone();
+
+        let op = DeleteNodes {
+            targets: vec![(p_id, Some(page_id)), (r_id, Some(page_id))],
+        };
+
+        // FAIL=1: first delete (P, the higher-index page-root) succeeds,
+        // including its child C. Second delete (R) errors. Rollback iterates
+        // `completed` in reverse — the only entry is P's snapshot — and
+        // calls `reinsert_nodes_subtree` to restore both P and C.
+        super::set_fail_delete_nodes_subtree_at(1);
+        let result = op.apply(&mut doc);
+        super::set_fail_delete_nodes_subtree_at(-1);
+
+        assert!(result.is_err(), "expected apply to fail, got {result:?}");
+
+        // P, C, R all back in the arena.
+        assert!(doc.arena.get(p_id).is_ok(), "P restored after rollback");
+        assert!(doc.arena.get(c_id).is_ok(), "C restored as descendant of P");
+        assert!(doc.arena.get(r_id).is_ok(), "R never fully deleted");
+
+        // P's children intact — verifies reinsert_nodes_subtree restored
+        // parent linkage, not just the arena entries.
+        assert_eq!(
+            doc.arena.get(p_id).unwrap().children,
+            parent_children_before,
+            "P.children restored"
+        );
+
+        // Page roots intact.
+        assert_eq!(
+            doc.page(page_id).unwrap().root_nodes,
+            page_roots_before,
+            "page.root_nodes restored to pre-apply state"
         );
     }
 }
