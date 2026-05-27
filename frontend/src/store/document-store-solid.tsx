@@ -29,6 +29,7 @@ import { createInterceptor, deepClone as sharedDeepClone } from "../operations/i
 import {
   createCreateNodeOp,
   createDeleteNodeOp,
+  createDeleteNodesOp,
   createReparentOp,
   createReorderOp,
   createSetFieldOp,
@@ -114,6 +115,17 @@ export interface DocumentStoreAPI {
   setTransform(uuid: string, transform: Transform): void;
   renameNode(uuid: string, newName: string): void;
   deleteNode(uuid: string): void;
+  /**
+   * Spec 19: Atomic multi-node delete.
+   *
+   * Deduplicates ancestor/descendant pairs (descendants are removed transitively
+   * via their parent's deletion). Wraps all deletions in a single transaction
+   * with explicit inverse create_node ops (one per retained UUID, sorted by
+   * parent+index ASC) so undo restores siblings in their original order.
+   *
+   * Sends a single deleteNodes GraphQL op to the server.
+   */
+  deleteNodes(uuids: readonly string[]): void;
   setVisible(uuid: string, visible: boolean): void;
   setLocked(uuid: string, locked: boolean): void;
   reparentNode(uuid: string, newParentUuid: string, position: number): void;
@@ -405,13 +417,20 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
           nodeUuid: op.nodeUuid,
         },
       };
-    case "delete_nodes":
-      // Spec 19 Task 7: type-system stub. Actual wiring to the server's
-      // deleteNodes GraphQL mutation lands in Task 11 (store deleteNodes
-      // function), which builds and dispatches its own transaction.
-      // Returning null here means a delete_nodes op flowing through
-      // serializeTransaction is dropped; this is intentional until Task 11.
-      return null;
+    case "delete_nodes": {
+      const dv = op.value as { node_uuids?: unknown } | null;
+      if (!dv || !Array.isArray(dv.node_uuids)) {
+        console.warn("operationToServerOp: delete_nodes payload missing node_uuids", {
+          value: op.value,
+        });
+        return null;
+      }
+      return {
+        deleteNodes: {
+          nodeUuids: [...(dv.node_uuids as string[])],
+        },
+      };
+    }
     case "reparent": {
       const rv = op.value as ReparentValue;
       return {
@@ -891,6 +910,153 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Structural ops send immediately (not coalesced) — must reach server
     // before any undo attempt.
     sendOps([{ deleteNode: { nodeUuid: uuid } }]);
+  }
+
+  /**
+   * Spec 19: Atomic multi-node delete.
+   *
+   * Steps:
+   *  1. Dedup ancestor/descendant pairs — descendants are removed transitively
+   *     via their parent's deletion (mirrors DeleteNodes::apply in core).
+   *  2. Snapshot each retained node + its parent/index/page location BEFORE mutation.
+   *  3. Remove the nodes from the store (and every descendant) in a single produce().
+   *  4. Build a Transaction with one delete_nodes forward op and N create_node
+   *     inverse ops sorted by (parentUuid, originalIndex ASC). Push via
+   *     interceptor.pushTransaction so it becomes a single undo step.
+   *  5. Prune the deleted UUIDs (and their descendants) from selectedNodeIds.
+   *  6. Send a single deleteNodes GraphQL op to the server.
+   */
+  function deleteNodes(uuids: readonly string[]): void {
+    if (uuids.length === 0) return;
+
+    // ── Step 1: dedup ancestor/descendant pairs ─────────────────────
+    // For each UUID, walk up its parent chain. If any ancestor is also
+    // in the target set, drop this UUID — its parent will delete it
+    // transitively. Mirrors DeleteNodes::apply in core.
+    const targetSet = new Set(uuids);
+    const isDescendantOfOtherTarget = (uuid: string): boolean => {
+      let cursor = state.nodes[uuid]?.parentUuid ?? null;
+      while (cursor !== null) {
+        if (targetSet.has(cursor)) return true;
+        cursor = state.nodes[cursor]?.parentUuid ?? null;
+      }
+      return false;
+    };
+    const retained = uuids.filter((u) => state.nodes[u] && !isDescendantOfOtherTarget(u));
+    if (retained.length === 0) return;
+
+    // ── Step 2: capture snapshots BEFORE mutation ───────────────────
+    interface DeleteSnapshot {
+      uuid: string;
+      parentUuid: string | null;
+      originalIndex: number;
+      pageId: string | null;
+      pageIndex: number | null;
+      nodeSnapshot: MutableDocumentNode;
+    }
+
+    const snapshots: DeleteSnapshot[] = retained.map((uuid) => {
+      const node = state.nodes[uuid];
+      const parentUuid = node?.parentUuid ?? null;
+      const originalIndex = parentUuid
+        ? (state.nodes[parentUuid]?.childrenUuids?.indexOf(uuid) ?? 0)
+        : 0;
+      let pageId: string | null = null;
+      let pageIndex: number | null = null;
+      for (const page of state.pages) {
+        const idx = page.rootNodeUuids?.indexOf(uuid) ?? -1;
+        if (idx >= 0) {
+          pageId = page.id;
+          pageIndex = idx;
+          break;
+        }
+      }
+      // deepClone uses JSON round-trip (Solid proxy not structuredClone-safe).
+      const nodeSnapshot = deepClone(node) as MutableDocumentNode;
+      return { uuid, parentUuid, originalIndex, pageId, pageIndex, nodeSnapshot };
+    });
+
+    // Collect all descendant UUIDs to filter from selection. Walk each
+    // retained node's subtree from the live store before mutation.
+    const deletedUuids = new Set<string>();
+    const MAX_SUBTREE_DEPTH = 64;
+    const collectSubtree = (uuid: string, depth: number): void => {
+      if (depth >= MAX_SUBTREE_DEPTH) return;
+      const n = state.nodes[uuid];
+      if (!n) return;
+      deletedUuids.add(uuid);
+      for (const cuuid of n.childrenUuids ?? []) {
+        collectSubtree(cuuid, depth + 1);
+      }
+    };
+    for (const snap of snapshots) {
+      collectSubtree(snap.uuid, 0);
+    }
+
+    // ── Step 3: local mutation ──────────────────────────────────────
+    setState(
+      produce((s) => {
+        for (const snap of snapshots) {
+          // Detach from parent
+          if (snap.parentUuid) {
+            const parent = s.nodes[snap.parentUuid];
+            if (parent) {
+              parent.childrenUuids = parent.childrenUuids.filter((id) => id !== snap.uuid);
+            }
+          }
+          // Detach from page roots
+          if (snap.pageId) {
+            const page = s.pages.find((p) => p.id === snap.pageId);
+            if (page) {
+              page.rootNodeUuids = page.rootNodeUuids.filter((id) => id !== snap.uuid);
+            }
+          }
+        }
+        // Remove every node (retained + descendants) from the nodes map.
+        for (const duuid of deletedUuids) {
+          Reflect.deleteProperty(s.nodes, duuid);
+        }
+      }),
+    );
+
+    // ── Step 4: build transaction with explicit inverseOperations ───
+    const forwardOp = createDeleteNodesOp(
+      clientSessionId,
+      snapshots.map((s) => s.uuid),
+    );
+
+    // Sort by (parentUuid, originalIndex ASC) so inverse create_node ops
+    // restore siblings in original order.
+    const sortedForInverse = [...snapshots].sort((a, b) => {
+      const pa = a.parentUuid ?? "";
+      const pb = b.parentUuid ?? "";
+      if (pa !== pb) return pa.localeCompare(pb);
+      return a.originalIndex - b.originalIndex;
+    });
+    const inverseOps = sortedForInverse.map((snap) =>
+      createCreateNodeOp(clientSessionId, snap.nodeSnapshot),
+    );
+
+    interceptor.pushTransaction({
+      id: crypto.randomUUID(),
+      userId: clientSessionId,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: `Delete ${snapshots.length} node${snapshots.length > 1 ? "s" : ""}`,
+      timestamp: Date.now(),
+      seq: 0,
+    });
+
+    // ── Step 5: prune selection ─────────────────────────────────────
+    const filtered = selectedNodeIds().filter((id) => !deletedUuids.has(id));
+    if (filtered.length !== selectedNodeIds().length) {
+      setSelectedNodeIds(filtered);
+    }
+
+    // ── Step 6: send to server ──────────────────────────────────────
+    // Structural ops send immediately (not coalesced) — must reach server
+    // before any undo attempt.
+    sendOps([{ deleteNodes: { nodeUuids: snapshots.map((s) => s.uuid) } }]);
   }
 
   function setVisible(uuid: string, visible: boolean): void {
@@ -2379,6 +2545,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     setTransform,
     renameNode,
     deleteNode,
+    deleteNodes,
     setVisible,
     setLocked,
     reparentNode,

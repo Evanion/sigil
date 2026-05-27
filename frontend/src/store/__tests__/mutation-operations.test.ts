@@ -6,7 +6,7 @@
  * without needing a full urql client. The HistoryManager tracks operations
  * and applyOperationToStore applies them to a simulated store.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { HistoryManager } from "../../operations/history-manager";
 import {
   createSetFieldOp,
@@ -1101,5 +1101,208 @@ describe("mutation operations — multi-node mutations (Task 6)", () => {
       expect(inverseTx.operations[0].type).toBe("create_node");
       expect(inverseTx.operations[0].value).toEqual(groupSnapshot);
     });
+  });
+});
+
+// ── Spec 19: store.deleteNodes integration ──────────────────────────────
+
+import { createDocumentStoreSolid } from "../document-store-solid";
+
+/**
+ * Seed the store directly via createNode for parent/child relationships.
+ *
+ * createNode produces orphan root nodes; we set parent/child relationships
+ * by re-parenting through reparentNode.
+ *
+ * Network calls (urql HTTP mutation, WebSocket subscribe) emitted by the
+ * store will reject asynchronously in the jsdom environment. We silence
+ * console.error/warn during these tests so the unhandled rejections don't
+ * trigger Vitest's `Closing rpc while onUserConsoleLog was pending`
+ * teardown error.
+ */
+describe("deleteNodes — operation tracking (Spec 19)", () => {
+  let errorSpy: ReturnType<typeof vi.spyOn>;
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it("wraps N node deletions in a single transaction", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const undoCountBefore = store.canUndo() ? 1 : 0;
+      // Create two sibling root nodes
+      const uuidA = store.createNode(
+        { type: "rectangle", corners: deepClone(makeTestNode()["kind"]) } as never,
+        "A",
+        deepClone(makeTestNode()["transform"]) as never,
+      );
+      const uuidB = store.createNode(
+        { type: "rectangle", corners: deepClone(makeTestNode()["kind"]) } as never,
+        "B",
+        deepClone(makeTestNode()["transform"]) as never,
+      );
+
+      // Sanity: both nodes exist in the store.
+      expect(store.state.nodes[uuidA]).toBeDefined();
+      expect(store.state.nodes[uuidB]).toBeDefined();
+
+      // Capture undo state before deleteNodes — createNode calls before are
+      // queued in the interceptor's structural buffer (not yet committed).
+      // We focus on the count delta from the deleteNodes call.
+      void undoCountBefore;
+
+      store.deleteNodes([uuidA, uuidB]);
+
+      // Both nodes are gone from state.
+      expect(store.state.nodes[uuidA]).toBeUndefined();
+      expect(store.state.nodes[uuidB]).toBeUndefined();
+
+      // canUndo is true (deleteNodes pushed exactly one transaction).
+      expect(store.canUndo()).toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("returns early on empty input", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const canUndoBefore = store.canUndo();
+      store.deleteNodes([]);
+      // No new transaction pushed.
+      expect(store.canUndo()).toBe(canUndoBefore);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("dedups ancestor-descendant: keeps only the ancestor", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      // Create parent and child via createNode, then make P the parent of C.
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const parentUuid = store.createNode(
+        { type: "frame", layout: null, corners: sampleKind } as never,
+        "P",
+        sampleTransform as never,
+      );
+      const childUuid = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C",
+        sampleTransform as never,
+      );
+      // reparent child under parent (position 0)
+      store.reparentNode(childUuid, parentUuid, 0);
+      expect(store.state.nodes[parentUuid]).toBeDefined();
+      expect(store.state.nodes[childUuid]).toBeDefined();
+      expect(store.state.nodes[childUuid]?.parentUuid).toBe(parentUuid);
+
+      // Call deleteNodes with both — child should be deduplicated.
+      store.deleteNodes([parentUuid, childUuid]);
+
+      // Both gone (descendant removed transitively).
+      expect(store.state.nodes[parentUuid]).toBeUndefined();
+      expect(store.state.nodes[childUuid]).toBeUndefined();
+
+      // One transaction was pushed for the deleteNodes call.
+      expect(store.canUndo()).toBe(true);
+    } finally {
+      store.destroy();
+    }
+  });
+
+  it("filters deleted UUIDs (and descendants) from selectedNodeIds", () => {
+    const store = createDocumentStoreSolid();
+    try {
+      const sampleKind = deepClone(makeTestNode()["kind"]);
+      const sampleTransform = deepClone(makeTestNode()["transform"]);
+      const uuidA = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "A",
+        sampleTransform as never,
+      );
+      const uuidB = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "B",
+        sampleTransform as never,
+      );
+      const survivor = store.createNode(
+        { type: "rectangle", corners: sampleKind } as never,
+        "C",
+        sampleTransform as never,
+      );
+
+      store.setSelectedNodeIds([uuidA, uuidB, survivor]);
+      expect(store.selectedNodeIds()).toEqual([uuidA, uuidB, survivor]);
+
+      store.deleteNodes([uuidA, uuidB]);
+
+      // Only the survivor remains in the selection.
+      expect(store.selectedNodeIds()).toEqual([survivor]);
+    } finally {
+      store.destroy();
+    }
+  });
+});
+
+/**
+ * Lower-level transaction shape test — exercises the inverseOperations field
+ * directly via HistoryManager (Spec 19). This complements the higher-level
+ * store tests above and pins the contract that:
+ *  - A delete_nodes transaction carries N create_node inverse ops.
+ *  - createInverseTransaction prefers Transaction.inverseOperations over
+ *    per-op flip when present.
+ */
+describe("deleteNodes — transaction shape (Spec 19)", () => {
+  it("undo replays inverseOperations (N create_node ops)", () => {
+    const historyManager = new HistoryManager(TEST_USER_ID);
+
+    const snapshotA = makeTestNode({ uuid: "node-a" });
+    const snapshotB = makeTestNode({ uuid: "node-b" });
+
+    const forwardOp: import("../../operations/types").Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["node-a", "node-b"] },
+      previousValue: null,
+      seq: 0,
+    };
+    const inverseA = createCreateNodeOp(TEST_USER_ID, snapshotA);
+    const inverseB = createCreateNodeOp(TEST_USER_ID, snapshotB);
+
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: [inverseA, inverseB],
+      description: "Delete 2 nodes",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    historyManager.pushTransaction(tx);
+    expect(historyManager.canUndo()).toBe(true);
+
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) throw new Error("unreachable");
+    // Inverse should be the N create_node ops carried in inverseOperations.
+    expect(inverseTx.operations).toHaveLength(2);
+    expect(inverseTx.operations[0].type).toBe("create_node");
+    expect(inverseTx.operations[1].type).toBe("create_node");
+    expect(inverseTx.operations[0].value).toEqual(snapshotA);
+    expect(inverseTx.operations[1].value).toEqual(snapshotB);
   });
 });

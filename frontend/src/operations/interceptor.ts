@@ -54,6 +54,17 @@ export interface Interceptor {
    */
   trackStructural(op: Operation): void;
 
+  /**
+   * Push a pre-built transaction directly to the history (Spec 19).
+   *
+   * Used when the forward op is not a single-op flip (e.g., delete_nodes
+   * inverts to N create_node ops, carried in tx.inverseOperations).
+   *
+   * Force-flushes any pending coalesce buffer first so the pre-built
+   * transaction lands atomically as its own undo step.
+   */
+  pushTransaction(tx: Transaction): void;
+
   /** Undo the most recent undo step. Returns the inverse Transaction for server sync. */
   undo(): Transaction | null;
 
@@ -329,6 +340,19 @@ export function createInterceptor(
       }
       structuralBuffer.push(op);
       scheduleFlush();
+    },
+
+    pushTransaction(tx: Transaction): void {
+      if (isUndoing) return;
+      // Force-flush any pending coalesce buffer first so the pre-built
+      // transaction lands as its own atomic undo step.
+      if (buffer.size > 0 || structuralBuffer.length > 0) {
+        forceFlush();
+      }
+      historyManager.pushTransaction(tx);
+      // Notify the store to sync history signals after commit (matches
+      // commitBuffer's contract).
+      if (onCommit) onCommit();
     },
 
     flush(): void {

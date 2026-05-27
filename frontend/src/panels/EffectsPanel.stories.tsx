@@ -44,6 +44,7 @@ function createMockStore(
     setTransform: () => {},
     renameNode: () => {},
     deleteNode: () => {},
+    deleteNodes: () => {},
     setVisible: () => {},
     setLocked: () => {},
     reparentNode: () => {},

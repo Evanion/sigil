@@ -48,6 +48,7 @@ function createMockStore(
     setTransform: vi.fn(),
     renameNode: vi.fn(),
     deleteNode: vi.fn(),
+    deleteNodes: vi.fn(),
     setVisible: vi.fn(),
     setLocked: vi.fn(),
     reparentNode: vi.fn(),
