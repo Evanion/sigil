@@ -21,6 +21,7 @@ futures-util = { workspace = true }
 async-graphql = { workspace = true }
 async-graphql-axum = { workspace = true }
 async-stream = { workspace = true }
+clap = { workspace = true }
 
 
 [dev-dependencies]

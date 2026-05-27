@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use anyhow::Context as _;
+use clap::Parser;
 
 use sigil_server::{build_app, state::ServerState};
 use tracing_subscriber::EnvFilter;
@@ -13,6 +14,23 @@ const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum time to wait for the MCP stdio task to drain on shutdown.
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Sigil server. Runs the axum HTTP+WebSocket+MCP stack.
+///
+/// CLI args take precedence over environment variables; env vars take
+/// precedence over defaults. Env vars (`PORT`, `WORKFILE`, `HOST`) remain
+/// supported for docker compatibility.
+#[derive(Parser, Debug, Default)]
+#[command(name = "sigil-server", version)]
+struct Cli {
+    /// Localhost port to bind. Overrides PORT env var.
+    #[arg(long)]
+    port: Option<u16>,
+
+    /// Workfile directory to load. Overrides WORKFILE env var.
+    #[arg(long, value_name = "PATH")]
+    workfile: Option<std::path::PathBuf>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -35,28 +53,33 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let cli = Cli::parse();
+
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = std::env::var("PORT")
-        .unwrap_or_else(|_| "4680".to_string())
-        .parse::<u16>()?;
+    let port = cli
+        .port
+        .or_else(|| std::env::var("PORT").ok().and_then(|s| s.parse().ok()))
+        .unwrap_or(4680);
 
     let static_dir = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "/usr/local/share/sigil/frontend".to_string());
 
-    let workfile_env = std::env::var("WORKFILE").ok();
+    let workfile_path: Option<std::path::PathBuf> = cli
+        .workfile
+        .clone()
+        .or_else(|| std::env::var("WORKFILE").ok().map(std::path::PathBuf::from));
 
-    let mut state = if let Some(ref workfile_str) = workfile_env {
-        let workfile_path = std::path::PathBuf::from(workfile_str);
+    let mut state = if let Some(ref workfile_path) = workfile_path {
         tracing::info!("loading workfile from {}", workfile_path.display());
 
-        let loaded = sigil_server::workfile::load_workfile(&workfile_path)
+        let loaded = sigil_server::workfile::load_workfile(workfile_path)
             .await
             .context("failed to load workfile")?;
 
         let migrated_from = loaded.migrated_from;
         let state = ServerState::new_with_document_and_workfile_migrated(
             loaded.document,
-            workfile_path,
+            workfile_path.clone(),
             migrated_from,
         );
 
@@ -156,4 +179,38 @@ async fn shutdown_signal() {
             .expect("install ctrl+c handler");
     }
     tracing::info!("shutdown signal received");
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_parses_port() {
+        let cli = Cli::try_parse_from(["sigil-server", "--port", "5000"]).unwrap();
+        assert_eq!(cli.port, Some(5000));
+    }
+
+    #[test]
+    fn test_cli_parses_workfile() {
+        let cli = Cli::try_parse_from(["sigil-server", "--workfile", "/tmp/foo.sigil"]).unwrap();
+        assert_eq!(
+            cli.workfile.as_deref().unwrap().to_str(),
+            Some("/tmp/foo.sigil")
+        );
+    }
+
+    #[test]
+    fn test_cli_no_args_is_valid() {
+        let cli = Cli::try_parse_from(["sigil-server"]).unwrap();
+        assert_eq!(cli.port, None);
+        assert!(cli.workfile.is_none());
+    }
+
+    #[test]
+    fn test_cli_rejects_invalid_port() {
+        let result = Cli::try_parse_from(["sigil-server", "--port", "abc"]);
+        assert!(result.is_err());
+    }
 }
