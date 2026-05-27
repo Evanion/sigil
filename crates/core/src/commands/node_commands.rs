@@ -107,6 +107,20 @@ pub struct DeleteNodes {
     pub targets: Vec<(NodeId, Option<PageId>)>,
 }
 
+/// Per-target rollback snapshot for `DeleteNodes::apply`. Module-private.
+///
+/// `subtree` stores the cloned `Node` values in deletion order (descendants
+/// first, root last). On rollback, the order is reversed so each subtree is
+/// reinserted with its descendants present.
+#[derive(Debug)]
+struct DeleteNodesSnapshot {
+    node_id: NodeId,
+    page_id: Option<PageId>,
+    parent_id: Option<NodeId>,
+    original_index: usize,
+    subtree: Vec<(NodeId, Node)>,
+}
+
 impl FieldOperation for DeleteNodes {
     fn validate(&self, doc: &Document) -> Result<(), CoreError> {
         // 1. Empty batch
@@ -143,9 +157,155 @@ impl FieldOperation for DeleteNodes {
         Ok(())
     }
 
-    fn apply(&self, _doc: &mut Document) -> Result<(), CoreError> {
-        todo!("DeleteNodes::apply implemented in Task 4 (spec-19)")
+    fn apply(&self, doc: &mut Document) -> Result<(), CoreError> {
+        // Re-run validation. Self-protecting per RF-024.
+        self.validate(doc)?;
+
+        // ── 1. Dedup ancestor/descendant pairs ──────────────────────────
+        // For each target, walk its ancestors. If any ancestor is also a
+        // target, drop this entry — its parent will delete it transitively.
+        let target_set: std::collections::HashSet<NodeId> =
+            self.targets.iter().map(|(id, _)| *id).collect();
+        let mut retained: Vec<(NodeId, Option<PageId>)> = Vec::with_capacity(self.targets.len());
+        for (node_id, page_id) in &self.targets {
+            let chain =
+                crate::tree::ancestors(&doc.arena, *node_id, crate::validate::MAX_NODE_TREE_DEPTH)?;
+            // `ancestors` returns [root, ..., node_id]. Drop the trailing
+            // self entry to leave only true ancestors.
+            let is_descendant_of_other = chain
+                .iter()
+                .filter(|a| *a != node_id)
+                .any(|a| target_set.contains(a));
+            if !is_descendant_of_other {
+                retained.push((*node_id, *page_id));
+            }
+        }
+        debug_assert!(
+            !retained.is_empty(),
+            "validate() ensures non-empty input; dedup cannot empty it"
+        );
+
+        // ── 2. Capture snapshots BEFORE mutation ────────────────────────
+        let mut snapshots: Vec<DeleteNodesSnapshot> = Vec::with_capacity(retained.len());
+        for (node_id, page_id) in &retained {
+            let node = doc.arena.get(*node_id)?;
+            let parent_id = node.parent;
+            let original_index = if let Some(pid) = parent_id {
+                doc.arena
+                    .get(pid)?
+                    .children
+                    .iter()
+                    .position(|c| *c == *node_id)
+                    .ok_or_else(|| {
+                        CoreError::ValidationError(format!(
+                            "DeleteNodes: node {node_id:?} not found in parent's children"
+                        ))
+                    })?
+            } else {
+                page_id
+                    .and_then(|pid| {
+                        doc.page(pid)
+                            .ok()
+                            .and_then(|p| p.root_nodes.iter().position(|n| *n == *node_id))
+                    })
+                    .unwrap_or(0)
+            };
+            let descendants = crate::tree::descendants(&doc.arena, *node_id)?;
+            let mut subtree_clone = Vec::with_capacity(descendants.len() + 1);
+            for desc_id in &descendants {
+                subtree_clone.push((*desc_id, doc.arena.get(*desc_id)?.clone()));
+            }
+            subtree_clone.push((*node_id, doc.arena.get(*node_id)?.clone()));
+            snapshots.push(DeleteNodesSnapshot {
+                node_id: *node_id,
+                page_id: *page_id,
+                parent_id,
+                original_index,
+                subtree: subtree_clone,
+            });
+        }
+
+        // ── 3. Sort by (parent_id, original_index DESCENDING) ───────────
+        // `NodeId` does not derive `Ord`; project it to (index, generation)
+        // for a stable total order over parents.
+        let parent_key = |p: Option<NodeId>| p.map(|id| (id.index(), id.generation()));
+        snapshots.sort_by(
+            |a, b| match parent_key(a.parent_id).cmp(&parent_key(b.parent_id)) {
+                std::cmp::Ordering::Equal => b.original_index.cmp(&a.original_index),
+                other => other,
+            },
+        );
+
+        // ── 4. Delete loop with rollback tracking ───────────────────────
+        let mut completed: Vec<&DeleteNodesSnapshot> = Vec::with_capacity(snapshots.len());
+        for snap in &snapshots {
+            match delete_nodes_subtree(doc, snap) {
+                Ok(()) => completed.push(snap),
+                Err(e) => {
+                    // Rollback in reverse order. If rollback itself fails,
+                    // surface a compound error per CLAUDE.md §11 "No Silent
+                    // Error Suppression".
+                    for done in completed.iter().rev() {
+                        if let Err(rb_err) = reinsert_nodes_subtree(doc, done) {
+                            return Err(CoreError::ValidationError(format!(
+                                "DeleteNodes: rollback failed after primary error \
+                                 {e:?}: rollback error {rb_err:?}"
+                            )));
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+        }
+        Ok(())
     }
+}
+
+/// Deletes a single subtree (helper for `DeleteNodes::apply`). Mirrors
+/// `DeleteNode::apply`'s deletion order: page root cleanup → tree detach
+/// → descendant removal → root removal.
+fn delete_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<(), CoreError> {
+    if let Some(page_id) = snap.page_id
+        && let Ok(page) = doc.page_mut(page_id)
+    {
+        page.root_nodes.retain(|nid| *nid != snap.node_id);
+    }
+    let descendants = crate::tree::descendants(&doc.arena, snap.node_id)?;
+    crate::tree::remove_child(&mut doc.arena, snap.node_id)?;
+    for desc_id in descendants {
+        doc.arena.remove(desc_id)?;
+    }
+    doc.arena.remove(snap.node_id)?;
+    Ok(())
+}
+
+/// Reinserts a previously-deleted subtree at its captured position.
+/// Preserves `NodeId` identity via `Arena::reinsert`.
+fn reinsert_nodes_subtree(doc: &mut Document, snap: &DeleteNodesSnapshot) -> Result<(), CoreError> {
+    // Reinsert arena entries in REVERSE of deletion order so the root
+    // exists before descendants reattach. The snapshot's `subtree` is
+    // stored in deletion order [descendants..., root], so iterate in
+    // reverse to insert [root, ...descendants].
+    for (id, node) in snap.subtree.iter().rev() {
+        doc.arena.reinsert(*id, node.clone())?;
+    }
+    // Restore parent linkage at the original index.
+    if let Some(parent_id) = snap.parent_id {
+        let parent = doc.arena.get_mut(parent_id)?;
+        // Clamp the index defensively in case the parent's children
+        // vector has changed (shouldn't happen under the lock, but
+        // bound the insert position).
+        let pos = snap.original_index.min(parent.children.len());
+        parent.children.insert(pos, snap.node_id);
+    }
+    // Restore page root entry.
+    if let Some(page_id) = snap.page_id
+        && let Ok(page) = doc.page_mut(page_id)
+    {
+        let pos = snap.original_index.min(page.root_nodes.len());
+        page.root_nodes.insert(pos, snap.node_id);
+    }
+    Ok(())
 }
 
 /// Renames a node.
@@ -742,5 +902,175 @@ mod tests {
             targets: vec![(NodeId::new(99, 0), None)],
         };
         assert!(op.validate(&doc).is_err());
+    }
+
+    #[test]
+    fn test_delete_nodes_validate_and_apply() {
+        // Per CLAUDE.md §1: every FieldOperation needs a test exercising validate → apply.
+        let mut doc = Document::new("Test".to_string());
+        let page_id = PageId::new(make_uuid(10));
+        doc.add_page(Page::new(page_id, "Home".to_string()).expect("create page"))
+            .expect("add page");
+
+        let mut ids = Vec::new();
+        for i in 1..=3u8 {
+            let n = Node::new(
+                NodeId::new(0, 0),
+                make_uuid(i),
+                NodeKind::Rectangle {
+                    corners: crate::node::default_corners(),
+                },
+                format!("R{i}"),
+            )
+            .expect("create");
+            let id = doc.arena.insert(n).expect("insert");
+            doc.add_root_node_to_page(page_id, id).expect("add root");
+            ids.push(id);
+        }
+        assert_eq!(doc.page(page_id).unwrap().root_nodes.len(), 3);
+
+        let op = DeleteNodes {
+            targets: ids.iter().map(|id| (*id, Some(page_id))).collect(),
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        for id in &ids {
+            assert!(doc.arena.get(*id).is_err(), "expected node {id:?} removed");
+        }
+        assert!(doc.page(page_id).unwrap().root_nodes.is_empty());
+    }
+
+    #[test]
+    fn test_delete_nodes_deduplicates_ancestor_descendant() {
+        let mut doc = Document::new("Test".to_string());
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create parent");
+        let parent_id = doc.arena.insert(parent).expect("insert parent");
+        let child = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Rectangle {
+                corners: crate::node::default_corners(),
+            },
+            "C".to_string(),
+        )
+        .expect("create child");
+        let child_id = doc.arena.insert(child).expect("insert child");
+        crate::tree::add_child(&mut doc.arena, parent_id, child_id).expect("link");
+
+        // Target both parent and child. Dedup must retain only parent (descendant
+        // is removed transitively).
+        let op = DeleteNodes {
+            targets: vec![(parent_id, None), (child_id, None)],
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        assert!(doc.arena.get(parent_id).is_err());
+        assert!(doc.arena.get(child_id).is_err());
+    }
+
+    #[test]
+    fn test_delete_nodes_descending_sibling_index_order() {
+        // Two children at parent indices 0 and 1. Provide ASCENDING input;
+        // apply must internally sort DESCENDING so the higher-index removal
+        // happens first (leaving lower-index intact for the second removal).
+        let mut doc = Document::new("Test".to_string());
+        let parent = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create");
+        let parent_id = doc.arena.insert(parent).expect("insert parent");
+
+        let c0 = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "C0".to_string(),
+        )
+        .expect("create");
+        let c0_id = doc.arena.insert(c0).expect("insert");
+        let c1 = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Group,
+            "C1".to_string(),
+        )
+        .expect("create");
+        let c1_id = doc.arena.insert(c1).expect("insert");
+
+        crate::tree::add_child(&mut doc.arena, parent_id, c0_id).expect("link c0");
+        crate::tree::add_child(&mut doc.arena, parent_id, c1_id).expect("link c1");
+
+        let op = DeleteNodes {
+            targets: vec![(c0_id, None), (c1_id, None)],
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        assert!(doc.arena.get(c0_id).is_err());
+        assert!(doc.arena.get(c1_id).is_err());
+        assert!(doc.arena.get(parent_id).unwrap().children.is_empty());
+    }
+
+    #[test]
+    fn test_delete_nodes_removes_subtree_children() {
+        // A parent with a grandchild — verify all 3 levels are removed when only
+        // the parent is targeted (descendant cleanup mirrors DeleteNode::apply).
+        let mut doc = Document::new("Test".to_string());
+        let p = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(1),
+            NodeKind::Frame {
+                layout: None,
+                corners: crate::node::default_corners(),
+            },
+            "P".to_string(),
+        )
+        .expect("create");
+        let p_id = doc.arena.insert(p).expect("insert");
+        let c = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(2),
+            NodeKind::Group,
+            "C".to_string(),
+        )
+        .expect("create");
+        let c_id = doc.arena.insert(c).expect("insert");
+        let gc = Node::new(
+            NodeId::new(0, 0),
+            make_uuid(3),
+            NodeKind::Group,
+            "GC".to_string(),
+        )
+        .expect("create");
+        let gc_id = doc.arena.insert(gc).expect("insert");
+        crate::tree::add_child(&mut doc.arena, p_id, c_id).expect("link c");
+        crate::tree::add_child(&mut doc.arena, c_id, gc_id).expect("link gc");
+
+        let op = DeleteNodes {
+            targets: vec![(p_id, None)],
+        };
+        op.validate(&doc).expect("validate");
+        op.apply(&mut doc).expect("apply");
+
+        assert!(doc.arena.get(p_id).is_err());
+        assert!(doc.arena.get(c_id).is_err());
+        assert!(doc.arena.get(gc_id).is_err());
     }
 }
