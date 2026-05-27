@@ -30,6 +30,7 @@ interface LocaleCase {
   readonly expectedCancel: string;
   readonly expectedFillAdd: string;
   readonly expectedFillItem: string;
+  readonly expectedP3Title: string;
 }
 
 const cases: readonly LocaleCase[] = [
@@ -39,6 +40,7 @@ const cases: readonly LocaleCase[] = [
     expectedCancel: commonEn.cancel,
     expectedFillAdd: panelsEn.fill.add,
     expectedFillItem: a11yEn.fills.itemLabel.replace("{{index}}", "1"),
+    expectedP3Title: panelsEn.colorPicker.p3Title,
   },
   {
     lng: "fr",
@@ -46,6 +48,7 @@ const cases: readonly LocaleCase[] = [
     expectedCancel: commonFr.cancel,
     expectedFillAdd: panelsFr.fill.add,
     expectedFillItem: a11yFr.fills.itemLabel.replace("{{index}}", "1"),
+    expectedP3Title: panelsFr.colorPicker.p3Title,
   },
   {
     lng: "es",
@@ -53,6 +56,7 @@ const cases: readonly LocaleCase[] = [
     expectedCancel: commonEs.cancel,
     expectedFillAdd: panelsEs.fill.add,
     expectedFillItem: a11yEs.fills.itemLabel.replace("{{index}}", "1"),
+    expectedP3Title: panelsEs.colorPicker.p3Title,
   },
 ];
 
@@ -69,6 +73,11 @@ function TestFillAddButton() {
 function TestFillItemButton() {
   const [t] = useTransContext();
   return <button data-testid="fill-item">{t("a11y:fills.itemLabel", { index: 1 })}</button>;
+}
+
+function TestP3TitleButton() {
+  const [t] = useTransContext();
+  return <button data-testid="p3-title">{t("panels:colorPicker.p3Title")}</button>;
 }
 
 describe("per-locale rendering smoke test (Spec 17, RF-028)", () => {
@@ -134,6 +143,27 @@ describe("per-locale rendering smoke test (Spec 17, RF-028)", () => {
 
       const btn = container.querySelector("[data-testid='fill-item']");
       expect(btn?.textContent).toBe(c.expectedFillItem);
+    });
+
+    it(`renders panels:colorPicker.p3Title = "${c.expectedP3Title}" under locale ${c.lng}`, async () => {
+      const instance = i18next.createInstance();
+      await instance.init({
+        lng: c.lng,
+        fallbackLng: "en",
+        ns: ["common", "panels", "a11y"],
+        defaultNS: "common",
+        resources: c.resources,
+        interpolation: { escapeValue: false },
+      });
+
+      const { container } = render(() => (
+        <TransProvider instance={instance} lng={c.lng}>
+          <TestP3TitleButton />
+        </TransProvider>
+      ));
+
+      const btn = container.querySelector("[data-testid='p3-title']");
+      expect(btn?.textContent).toBe(c.expectedP3Title);
     });
   }
 });

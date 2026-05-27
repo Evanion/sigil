@@ -11,6 +11,7 @@
  * to size the canvas backing store to match the rendered width.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
+import { acquireWideGamut2D } from "../../canvas/canvas-context";
 import "./Strip.css";
 
 /** Default width before ResizeObserver fires. */
@@ -78,7 +79,7 @@ export function HueStrip(props: HueStripProps) {
       canvas.height = pixelHeight;
     }
 
-    const ctx = canvas.getContext("2d");
+    const ctx = acquireWideGamut2D(canvas);
     if (!ctx) return;
 
     ctx.setTransform(currentDpr, 0, 0, currentDpr, 0, 0);

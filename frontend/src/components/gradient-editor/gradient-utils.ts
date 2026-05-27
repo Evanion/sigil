@@ -15,6 +15,7 @@ import type {
   Token,
 } from "../../types/document";
 import { resolveStyleValueColor } from "../../store/token-store";
+import { colorToCss } from "../../canvas/color-fill";
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -159,10 +160,11 @@ export function interpolateStopColor(stops: readonly GradientStop[], position: n
 // ── CSS String Generation ───────────────────────────────────────────
 
 /**
- * Convert a StyleValue<Color> to a CSS rgba() string.
+ * Convert a StyleValue<Color> to a CSS color string.
  *
- * For literal sRGB colors, uses the channel values.
- * For token refs or non-sRGB color spaces, returns a fallback rgba() string.
+ * RF-001 (PR #67): routes via the shared `colorToCss` helper so Display-P3
+ * gradient stops emit `color(display-p3 …)` instead of falling back to
+ * opaque black. sRGB stops continue to emit `rgba(…)`.
  *
  * All numeric values are guarded with Number.isFinite() before CSS interpolation
  * per CLAUDE.md "Floating-Point Validation".
@@ -171,21 +173,10 @@ export function resolveStopColorCSS(
   color: StyleValue<Color>,
   tokens: Record<string, Token> = {},
 ): string {
-  // Resolve token refs via the token store, falling back to opaque black
+  // Resolve token refs via the token store, falling back to opaque black.
   const defaultColor: Color = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
   const resolved = resolveStyleValueColor(color, tokens, defaultColor);
-
-  if (resolved.space === "srgb") {
-    const c = resolved;
-    // Guard all channels individually
-    const r = Number.isFinite(c.r) ? Math.round(c.r * 255) : 0;
-    const g = Number.isFinite(c.g) ? Math.round(c.g * 255) : 0;
-    const b = Number.isFinite(c.b) ? Math.round(c.b * 255) : 0;
-    const a = Number.isFinite(c.a) ? c.a : 1;
-    return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(a)})`;
-  }
-  // Fallback for non-sRGB spaces
-  return "rgba(0, 0, 0, 1)";
+  return colorToCss(resolved);
 }
 
 /**

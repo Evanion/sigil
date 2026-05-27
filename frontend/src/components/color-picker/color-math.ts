@@ -22,6 +22,15 @@ import type {
   ColorOklch,
   ColorOklab,
 } from "../../types/document";
+import {
+  SRGB_TO_XYZ_D65,
+  XYZ_TO_SRGB_D65,
+  DISPLAY_P3_TO_XYZ_D65,
+  XYZ_TO_DISPLAY_P3_D65,
+  srgbEotf,
+  srgbOetf,
+  multiplyMatrixVec3,
+} from "./color-matrices";
 
 // ── Utility ───────────────────────────────────────────────────────────
 
@@ -334,8 +343,9 @@ export function hslToSrgb(h: number, s: number, l: number): [number, number, num
 /**
  * Convert any Color variant to sRGB [r, g, b] channels.
  *
- * For display_p3: treated as sRGB approximation (channels returned as-is).
- * This is an intentional simplification — full gamut mapping is deferred.
+ * For display_p3: matrix-converted through CIE XYZ (D65). Output channels
+ * may fall outside [0, 1] when the P3 source is out of sRGB gamut — callers
+ * that need clamped values must clamp explicitly.
  */
 export function colorToSrgb(color: Color): [number, number, number] {
   switch (color.space) {
@@ -343,9 +353,7 @@ export function colorToSrgb(color: Color): [number, number, number] {
       return [color.r, color.g, color.b];
 
     case "display_p3":
-      // Approximation: treat P3 channels as if they were sRGB.
-      // Full P3 -> sRGB gamut mapping is deferred (Plan 09b note).
-      return [color.r, color.g, color.b];
+      return displayP3ToSrgb(color.r, color.g, color.b);
 
     case "oklch":
       return oklchToSrgb(color.l, color.c, color.h);
@@ -360,7 +368,8 @@ export function colorToSrgb(color: Color): [number, number, number] {
 /**
  * Convert sRGB [r, g, b] + alpha to a Color of the target color space.
  *
- * For display_p3: channels stored as sRGB approximation (same as colorToSrgb).
+ * For display_p3: matrix-converted through CIE XYZ (D65); inverse of the
+ * display_p3 arm in colorToSrgb.
  */
 export function srgbToColor(
   r: number,
@@ -376,8 +385,8 @@ export function srgbToColor(
     }
 
     case "display_p3": {
-      // Approximation: store channels as-is (same as colorToSrgb treatment).
-      const color: ColorDisplayP3 = { space: "display_p3", r, g, b, a: alpha };
+      const [pr, pg, pb] = srgbToDisplayP3(r, g, b);
+      const color: ColorDisplayP3 = { space: "display_p3", r: pr, g: pg, b: pb, a: alpha };
       return color;
     }
 
@@ -413,8 +422,16 @@ export function colorToHex(color: Color): string {
 export function isOutOfSrgbGamut(color: Color): boolean {
   switch (color.space) {
     case "srgb":
-    case "display_p3":
       return color.r < 0 || color.r > 1 || color.g < 0 || color.g > 1 || color.b < 0 || color.b > 1;
+
+    case "display_p3": {
+      const [r, g, b] = displayP3ToSrgb(color.r, color.g, color.b);
+      // Tight epsilon absorbs the floating-point round-trip residue at the
+      // sRGB ↔ P3 ↔ XYZ boundary so that P3 white/black (which lie on the
+      // sRGB gamut surface) do not report as out-of-gamut.
+      const eps = 1e-7;
+      return r < -eps || r > 1 + eps || g < -eps || g > 1 + eps || b < -eps || b > 1 + eps;
+    }
 
     case "oklch": {
       const [r, g, b] = oklchToSrgbUnclamped(color.l, color.c, color.h);
@@ -476,4 +493,30 @@ function oklchToSrgbUnclamped(L: number, C: number, H: number): [number, number,
   const a = C * Math.cos(hRad);
   const b = C * Math.sin(hRad);
   return oklabToSrgbUnclamped(L, a, b);
+}
+
+// ── Display-P3 ↔ sRGB (via CIE XYZ, D65) ─────────────────────────────
+
+/**
+ * Display-P3 → sRGB conversion through CIE XYZ (D65). Both legs use the sRGB
+ * transfer function pair (linearize input, matrix-convert through XYZ, gamma-
+ * encode output). Output channels are unclamped — values outside [0, 1] signal
+ * that the source P3 color is out of sRGB gamut.
+ */
+export function displayP3ToSrgb(r: number, g: number, b: number): [number, number, number] {
+  const linearP3: [number, number, number] = [srgbEotf(r), srgbEotf(g), srgbEotf(b)];
+  const xyz = multiplyMatrixVec3(DISPLAY_P3_TO_XYZ_D65, linearP3);
+  const linearSrgb = multiplyMatrixVec3(XYZ_TO_SRGB_D65, xyz);
+  return [srgbOetf(linearSrgb[0]), srgbOetf(linearSrgb[1]), srgbOetf(linearSrgb[2])];
+}
+
+/**
+ * sRGB → Display-P3 conversion through CIE XYZ (D65). Inverse of
+ * displayP3ToSrgb.
+ */
+export function srgbToDisplayP3(r: number, g: number, b: number): [number, number, number] {
+  const linearSrgb: [number, number, number] = [srgbEotf(r), srgbEotf(g), srgbEotf(b)];
+  const xyz = multiplyMatrixVec3(SRGB_TO_XYZ_D65, linearSrgb);
+  const linearP3 = multiplyMatrixVec3(XYZ_TO_DISPLAY_P3_D65, xyz);
+  return [srgbOetf(linearP3[0]), srgbOetf(linearP3[1]), srgbOetf(linearP3[2])];
 }

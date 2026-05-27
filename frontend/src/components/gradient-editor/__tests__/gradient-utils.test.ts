@@ -179,13 +179,25 @@ describe("resolveStopColorCSS", () => {
     expect(result).toBe("rgba(0, 0, 0, 1)");
   });
 
-  it("should handle non-sRGB color space with fallback", () => {
+  it("should handle OkLCH color space with gray fallback (proper CSS output deferred)", () => {
+    // RF-001 (PR #67): non-sRGB color spaces that don't have wired CSS output
+    // (OkLCH, OkLab) fall back to gray via the shared `colorToCss` helper.
+    // P3 emits `color(display-p3 …)`; OkLCH/OkLab emit gray until follow-up.
     const color: StyleValue<Color> = {
       type: "literal",
       value: { space: "oklch", l: 0.5, c: 0.2, h: 120, a: 1 },
     };
     const result = resolveStopColorCSS(color);
-    expect(result).toBe("rgba(0, 0, 0, 1)");
+    expect(result).toBe("rgba(128, 128, 128, 1)");
+  });
+
+  it("should emit color(display-p3 ...) for P3 color stops (RF-001)", () => {
+    const color: StyleValue<Color> = {
+      type: "literal",
+      value: { space: "display_p3", r: 1, g: 0, b: 0, a: 1 },
+    };
+    const result = resolveStopColorCSS(color);
+    expect(result).toBe("color(display-p3 1 0 0 / 1)");
   });
 
   it("should guard NaN channel values", () => {

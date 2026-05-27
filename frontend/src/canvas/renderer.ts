@@ -11,7 +11,6 @@
 
 import type {
   BlendMode,
-  ColorSrgb,
   ConicGradientDef,
   DocumentNode,
   Fill,
@@ -30,6 +29,7 @@ import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
 import { buildCornerPath } from "./corner-path";
 import { type RenderOrderNode } from "./render-order";
+import { colorToCss } from "./color-fill";
 
 /** Default fill color for nodes without explicit fills. */
 const DEFAULT_FILL = "#e0e0e0";
@@ -78,30 +78,6 @@ const PREVIEW_COLOR = "#0d99ff";
 
 /** Preview rect dash pattern in screen pixels. */
 const PREVIEW_DASH = [4, 4];
-
-/**
- * Convert an sRGB color to a CSS rgba() string.
- *
- * All channel values are guarded with Number.isFinite() per CLAUDE.md
- * "Floating-Point Validation" — NaN or Infinity in CSS rgba() produces a
- * malformed style string that the browser silently ignores.
- *
- * Returns null when any channel is non-finite so callers can fall back.
- */
-function srgbColorToRgba(c: ColorSrgb): string | null {
-  if (
-    !Number.isFinite(c.r) ||
-    !Number.isFinite(c.g) ||
-    !Number.isFinite(c.b) ||
-    !Number.isFinite(c.a)
-  ) {
-    return null;
-  }
-  const r = Math.round(c.r * 255);
-  const g = Math.round(c.g * 255);
-  const b = Math.round(c.b * 255);
-  return `rgba(${String(r)}, ${String(g)}, ${String(b)}, ${String(c.a)})`;
-}
 
 /**
  * Add color stops from a GradientDef to a CanvasGradient.
@@ -232,13 +208,12 @@ function resolveFillStyle(
 ): string | CanvasGradient | null {
   switch (fill.type) {
     case "solid": {
-      // Resolve token refs via the token store, falling back to DEFAULT_FILL
+      // Resolve token refs via the token store, falling back to DEFAULT_FILL.
+      // RF-001 (PR #67): route via colorToCss so Display-P3 fills emit
+      // color(display-p3 …) instead of falling back to gray.
       const defaultColor = { space: "srgb" as const, r: 0.878, g: 0.878, b: 0.878, a: 1 };
       const resolved = resolveStyleValueColor(fill.color, tokens, defaultColor);
-      if (resolved.space === "srgb") {
-        return srgbColorToRgba(resolved) ?? DEFAULT_FILL;
-      }
-      return DEFAULT_FILL;
+      return colorToCss(resolved);
     }
     case "linear_gradient":
       return createLinearGradientFill(ctx, fill.gradient, x, y, width, height, tokens);
@@ -271,8 +246,8 @@ function getEffectiveTransform(
  * RF-001: `Stroke` has no `type` discriminant — every entry is a solid stroke.
  * RF-007: Stroke alignment (inside/outside/center) is not yet supported —
  *         all strokes render as centered (canvas default). Deferred to WebGL.
- * RF-008: Uses the shared `srgbColorToRgba` helper for channel validation and
- *         CSS construction, avoiding duplication with fill resolution.
+ * RF-001 (PR #67): route via colorToCss so Display-P3 strokes emit
+ *         color(display-p3 …) instead of being skipped.
  */
 function resolveStroke(node: DocumentNode): {
   color: string;
@@ -281,13 +256,9 @@ function resolveStroke(node: DocumentNode): {
   for (const stroke of node.style.strokes) {
     const colorValue = stroke.color;
     if (colorValue.type !== "literal") continue;
-    const resolved = colorValue.value;
-    if (resolved.space !== "srgb") continue;
-    const rgba = srgbColorToRgba(resolved);
-    if (rgba === null) continue;
     const w = stroke.width.type === "literal" ? stroke.width.value : 1;
     if (!Number.isFinite(w) || w <= 0) continue;
-    return { color: rgba, width: w };
+    return { color: colorToCss(colorValue.value), width: w };
   }
   return null;
 }
@@ -443,12 +414,11 @@ function drawNode(
       ctx.font = fontStr;
 
       // Text color: resolve token refs, falling back to opaque black.
+      // RF-001 (PR #67): route via colorToCss so Display-P3 text emits
+      // color(display-p3 …) instead of falling back to #000000.
       const defaultTextColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 1 };
       const resolvedTextColor = resolveStyleValueColor(ts.text_color, tokens, defaultTextColor);
-      let textColor = "#000000";
-      if (resolvedTextColor.space === "srgb") {
-        textColor = srgbColorToRgba(resolvedTextColor) ?? "#000000";
-      }
+      const textColor = colorToCss(resolvedTextColor);
       ctx.fillStyle = textColor;
       ctx.textBaseline = "alphabetic";
 
@@ -469,16 +439,15 @@ function drawNode(
 
       // Apply text shadow if present
       if (ts.text_shadow) {
+        // RF-001 (PR #67): route via colorToCss so Display-P3 text shadows emit
+        // color(display-p3 …) instead of falling back to rgba(0,0,0,0.3).
         const defaultShadowColor = { space: "srgb" as const, r: 0, g: 0, b: 0, a: 0.3 };
         const resolvedShadowColor = resolveStyleValueColor(
           ts.text_shadow.color,
           tokens,
           defaultShadowColor,
         );
-        const shadowColor =
-          resolvedShadowColor.space === "srgb"
-            ? (srgbColorToRgba(resolvedShadowColor) ?? "rgba(0,0,0,0.3)")
-            : "rgba(0,0,0,0.3)";
+        const shadowColor = colorToCss(resolvedShadowColor);
         if (
           Number.isFinite(ts.text_shadow.offset_x) &&
           Number.isFinite(ts.text_shadow.offset_y) &&

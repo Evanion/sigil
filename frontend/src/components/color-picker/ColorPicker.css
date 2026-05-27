@@ -114,6 +114,26 @@
 .sigil-hex-input__gamut-warning {
   font-size: 12px;
   color: var(--warning);
+  /* RF-015: badge/warning must not shrink when the popover is narrower
+     than the input's natural width. Without flex-shrink:0 the badge
+     collapses to a sliver and the glyph clips. */
+  flex-shrink: 0;
+}
+
+.sigil-hex-input__p3-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--brand-bg);
+  border-radius: 3px;
+  cursor: help;
+  user-select: none;
+  /* RF-015: same justification as .sigil-hex-input__gamut-warning above. */
+  flex-shrink: 0;
 }
 
 /* ── ColorPicker popover ────────────────────────────────────────────── */

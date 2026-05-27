@@ -21,6 +21,7 @@ import {
   colorToSrgb,
   colorAlpha,
   srgbToHex,
+  srgbToColor,
   isOutOfSrgbGamut,
   hsvToSrgb,
   srgbToHsv,
@@ -94,6 +95,14 @@ export function ColorPicker(props: ColorPickerProps) {
   const initAlpha = Number.isFinite(rawInitAlpha) ? rawInitAlpha : 1;
   const [initHue] = srgbToHsv(initR, initG, initB);
   const [initHslH, initHslS] = srgbToHsl(initR, initG, initB);
+  // RF-002: initialise the display mode from the incoming color's storage
+  // tag. Hardcoding "srgb" silently downgrades a Color::DisplayP3 prop to
+  // sRGB on the next outbound emit — the picker re-emits with the storage
+  // tag derived from `state.space`, so a wrong initial tag corrupts the
+  // round-trip on the first drag. Mirror only the storage-tag flavours that
+  // map directly to a display mode; OkLCH/HSL colors are not yet stored
+  // first-class, so fall back to "srgb" for them.
+  const initSpace: ColorDisplayMode = props.color.space === "display_p3" ? "display_p3" : "srgb";
   const [state, setState] = createStore<InternalState>({
     r: initR,
     g: initG,
@@ -105,7 +114,7 @@ export function ColorPicker(props: ColorPickerProps) {
     hue: Number.isFinite(initHue) ? initHue : 0,
     hslH: Number.isFinite(initHslH) ? initHslH : 0,
     hslS: Number.isFinite(initHslS) ? initHslS : 0,
-    space: "srgb",
+    space: initSpace,
   });
 
   // ── Sync from props.color ──────────────────────────────────────────────
@@ -167,17 +176,24 @@ export function ColorPicker(props: ColorPickerProps) {
   function flushEmit() {
     emitPending = false;
     if (pendingColor) {
-      const { r, g, b, alpha } = pendingColor;
+      const { r, g, b, alpha, space } = pendingColor;
       pendingColor = null;
-      // Always emit as sRGB — the display space is for the UI fields only,
-      // not for storage. The canvas renderer and serialization expect sRGB.
-      props.onColorChange({ space: "srgb", r, g, b, a: alpha });
+      // Spec 18: the display mode is the storage tag. P3 mode emits
+      // Color::DisplayP3 (matrix-converted from internal sRGB state via
+      // srgbToColor). All other modes (sRGB, OkLCH, HSL) still emit
+      // Color::Srgb — OkLCH storage is a future spec, HSL is not a
+      // storage space.
+      if (space === "display_p3") {
+        props.onColorChange(srgbToColor(r, g, b, alpha, "display_p3"));
+      } else {
+        props.onColorChange({ space: "srgb", r, g, b, a: alpha });
+      }
     }
   }
 
   function emit(r: number, g: number, b: number, alpha: number) {
     if (!mounted) return;
-    pendingColor = { r, g, b, alpha, space: "srgb" };
+    pendingColor = { r, g, b, alpha, space: state.space };
     if (!emitPending) {
       emitPending = true;
       requestAnimationFrame(flushEmit);
@@ -373,19 +389,49 @@ export function ColorPicker(props: ColorPickerProps) {
   }
 
   // ── ColorDisplayMode change handler ────────────────────────────────────
-  // Only changes the display mode; internal sRGB state is unchanged.
+  // Spec 18: the display mode now also determines the storage tag (P3 mode
+  // emits Color::DisplayP3). Switching mode must trigger a re-emit so the
+  // parent sees the new tag for the same visual color.
   function handleSpaceChange(space: ColorDisplayMode) {
-    // Only update the display space — don't emit a color change.
-    // The color value stays the same (sRGB internally), only the
-    // numeric field labels/ranges change.
+    // RF-003: skip no-op transitions (clicking the already-active radio).
+    // Without this gate, ColorSpaceSwitcher's keyboard handler and click
+    // handler would each produce a ghost undo entry for the same selection.
+    if (space === state.space) return;
     setState({ space });
+    if (mounted) {
+      // RF-003: bypass the rAF deferral so the outbound emit completes
+      // BEFORE commitColor() fires. The default `emit` path schedules a
+      // flush via requestAnimationFrame, which means commitColor()
+      // (synchronous, fires `props.onColorCommit`) runs while the parent's
+      // store still holds the pre-switch tag — the history snapshot
+      // captures the wrong state. Setting pendingColor and flushing
+      // synchronously here keeps emit→commit ordered the way the parent
+      // expects. Gated on `mounted` so the initial sync-effect path can't
+      // emit during construction.
+      pendingColor = {
+        r: state.r,
+        g: state.g,
+        b: state.b,
+        alpha: state.alpha,
+        space,
+      };
+      flushEmit();
+      commitColor();
+    }
   }
 
   // ── Alpha CSS color string for AlphaStrip ─────────────────────────────
   const alphaCss = createMemo(() => srgbToHex(state.r, state.g, state.b));
 
   // ── Out-of-gamut detection ─────────────────────────────────────────────
-  const outOfGamut = createMemo(() => isOutOfSrgbGamut(props.color));
+  // RF-016: in P3 mode, OOG-of-sRGB is the intended UX (the user picked
+  // wide-gamut). Showing the warning would read as a defect rather than a
+  // feature. Suppress the warning while the picker is in P3 mode; the P3
+  // badge already signals "wide-gamut active."
+  const outOfGamut = createMemo(() => {
+    if (state.space === "display_p3") return false;
+    return isOutOfSrgbGamut(props.color);
+  });
 
   return (
     <div class="sigil-color-picker" aria-label={t("panels:colorPicker.title")}>
@@ -415,6 +461,7 @@ export function ColorPicker(props: ColorPickerProps) {
         g={state.g}
         b={state.b}
         isOutOfGamut={outOfGamut()}
+        isP3Mode={state.space === "display_p3"}
         onChange={handleHexChange}
       />
       <ColorSpaceSwitcher value={state.space} onChange={handleSpaceChange} />

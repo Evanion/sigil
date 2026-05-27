@@ -945,6 +945,126 @@ describe("renderer", () => {
     });
   });
 
+  // ── PR #67 RF-001: Display-P3 fill is dispatched to ctx.fillStyle ────
+
+  describe("drawNode — Display-P3 fill rendering (RF-001)", () => {
+    it("renders Color::DisplayP3 solid fill as color(display-p3 ...) on fillStyle", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "solid",
+              color: {
+                type: "literal",
+                value: { space: "display_p3", r: 1, g: 0, b: 0, a: 1 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      // The fillStyle string set for the node's solid P3 fill must be the
+      // P3 CSS form — not the gray DEFAULT_FILL fallback that the previous
+      // implementation produced.
+      const fillStyleStrings = calls
+        .filter((c) => c.method === "set:fillStyle" && typeof c.args[0] === "string")
+        .map((c) => c.args[0] as string);
+      const p3FillStyle = fillStyleStrings.find((s) => s.startsWith("color(display-p3"));
+      expect(p3FillStyle).toBeDefined();
+      expect(p3FillStyle).toBe("color(display-p3 1 0 0 / 1)");
+      // And the gray fallback must NOT appear for this node.
+      expect(fillStyleStrings).not.toContain("#e0e0e0");
+    });
+
+    it("renders Color::DisplayP3 stroke as color(display-p3 ...) on strokeStyle", () => {
+      const node = createTestNode({
+        style: {
+          fills: [],
+          strokes: [
+            {
+              color: {
+                type: "literal",
+                value: { space: "display_p3", r: 0, g: 1, b: 0, a: 1 },
+              },
+              width: { type: "literal", value: 2 },
+              alignment: "center",
+              cap: "butt",
+              join: "miter",
+            },
+          ],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const strokeStyleStrings = calls
+        .filter((c) => c.method === "set:strokeStyle" && typeof c.args[0] === "string")
+        .map((c) => c.args[0] as string);
+      const p3StrokeStyle = strokeStyleStrings.find((s) => s.startsWith("color(display-p3"));
+      expect(p3StrokeStyle).toBeDefined();
+      expect(p3StrokeStyle).toBe("color(display-p3 0 1 0 / 1)");
+    });
+
+    it("renders Color::DisplayP3 gradient stops as color(display-p3 ...) via addColorStop", () => {
+      const node = createTestNode({
+        style: {
+          fills: [
+            {
+              type: "linear_gradient",
+              gradient: {
+                stops: [
+                  {
+                    position: 0,
+                    color: {
+                      type: "literal",
+                      value: { space: "display_p3", r: 1, g: 0, b: 0, a: 1 },
+                    },
+                  },
+                  {
+                    position: 1,
+                    color: {
+                      type: "literal",
+                      value: { space: "display_p3", r: 0, g: 0, b: 1, a: 1 },
+                    },
+                  },
+                ],
+                start: { x: 0, y: 0 },
+                end: { x: 1, y: 0 },
+              },
+            },
+          ],
+          strokes: [],
+          opacity: { type: "literal", value: 1 },
+          blend_mode: "normal",
+          effects: [],
+        },
+      });
+
+      render(ctx, viewport, [node], depthsFor([node]), new Set<string>(), 1);
+
+      const calls = getCalls(ctx);
+      const fillStyleSet = calls.find(
+        (c) => c.method === "set:fillStyle" && typeof c.args[0] === "object" && c.args[0] !== null,
+      );
+      expect(fillStyleSet).toBeDefined();
+      const gradient = fillStyleSet?.args[0] as MockGradient;
+      expect(gradient.__stops).toHaveLength(2);
+      expect(gradient.__stops[0].color).toBe("color(display-p3 1 0 0 / 1)");
+      expect(gradient.__stops[1].color).toBe("color(display-p3 0 0 1 / 1)");
+    });
+  });
+
   // ── Plan 14c Task 13: corner-bearing nodes use buildCornerPath for FILL ──
 
   describe("drawNode — corner-bearing nodes use buildCornerPath (fill)", () => {

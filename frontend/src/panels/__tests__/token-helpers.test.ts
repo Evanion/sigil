@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeTokenName, validateTokenName } from "../token-helpers";
+import { colorToCss, sanitizeTokenName, validateTokenName } from "../token-helpers";
 
 describe("sanitizeTokenName", () => {
   it("replaces spaces with dots", () => {
@@ -33,5 +33,28 @@ describe("sanitizeTokenName", () => {
   it("result passes validateTokenName when non-empty and starts with letter", () => {
     const sanitized = sanitizeTokenName("Button Background Color");
     expect(validateTokenName(sanitized)).toBeNull();
+  });
+});
+
+describe("colorToCss display_p3 (Spec 18)", () => {
+  it("emits color(display-p3 r g b / a) for a P3-tagged color", () => {
+    const css = colorToCss({ space: "display_p3", r: 1, g: 0, b: 0, a: 1 });
+    expect(css).toBe("color(display-p3 1 0 0 / 1)");
+  });
+
+  it("rounds channels to 4 decimals", () => {
+    const css = colorToCss({
+      space: "display_p3",
+      r: 0.123456789,
+      g: 0.5,
+      b: 0.987654321,
+      a: 0.75,
+    });
+    expect(css).toBe("color(display-p3 0.1235 0.5 0.9877 / 0.75)");
+  });
+
+  it("guards non-finite channels and emits zeros", () => {
+    const css = colorToCss({ space: "display_p3", r: NaN, g: Infinity, b: -Infinity, a: 1 });
+    expect(css).toBe("color(display-p3 0 0 0 / 1)");
   });
 });

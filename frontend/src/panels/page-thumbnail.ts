@@ -6,6 +6,7 @@
  */
 
 import type { DocumentNode, Transform } from "../types/document";
+import { acquireWideGamut2D } from "../canvas/canvas-context";
 
 /** Thumbnail logical width in CSS pixels. */
 export const THUMBNAIL_WIDTH = 64;
@@ -70,7 +71,10 @@ export function renderPageThumbnail(
   canvas.style.width = `${THUMBNAIL_WIDTH}px`;
   canvas.style.height = `${THUMBNAIL_HEIGHT}px`;
 
-  const ctx = canvas.getContext("2d");
+  // RF-006 (PR #67): use the wide-gamut canvas context so Display-P3 fills
+  // in thumbnails render with their full chroma on P3-capable displays,
+  // matching the main editor canvas and picker canvases.
+  const ctx = acquireWideGamut2D(canvas);
   if (!ctx) return canvas;
 
   // Collect visible root nodes and their transforms.

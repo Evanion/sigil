@@ -1,0 +1,64 @@
+{
+  "description": "Cross-language parity vectors for Display-P3 ↔ sRGB conversion (Spec 18). Values are computed directly from W3C css-color-4 §10 matrices (https://www.w3.org/TR/css-color-4/#color-conversion-code) via the script at frontend/scripts/generate-p3-parity.mjs. Both Rust and TypeScript implementations are asserted to match these computed values within tolerance, providing independent ground truth (RF-010). Re-run the generator after any matrix change. See CLAUDE.md 'Parallel Implementations Must Have Parity Tests'.",
+  "tolerance": 1e-6,
+  "p3_to_srgb": [
+    { "name": "black", "p3": [0.0, 0.0, 0.0], "srgb": [0.0, 0.0, 0.0] },
+    { "name": "white", "p3": [1.0, 1.0, 1.0], "srgb": [1.0, 1.0, 1.0] },
+    { "name": "gray_50", "p3": [0.5, 0.5, 0.5], "srgb": [0.5, 0.5, 0.5] },
+    {
+      "name": "p3_red_oog",
+      "p3": [1.0, 0.0, 0.0],
+      "srgb": [1.09306636, -0.22674197, -0.15013458]
+    },
+    {
+      "name": "p3_green_oog",
+      "p3": [0.0, 1.0, 0.0],
+      "srgb": [-0.51160498, 1.01826566, -0.31067462]
+    },
+    {
+      "name": "p3_blue_oog",
+      "p3": [0.0, 0.0, 1.0],
+      "srgb": [0.0, 0.0, 1.04202162]
+    },
+    {
+      "name": "asymmetric_a",
+      "p3": [0.25, 0.75, 0.5],
+      "srgb": [-0.26058228, 0.76259487, 0.47656503]
+    },
+    {
+      "name": "asymmetric_b",
+      "p3": [0.75, 0.25, 0.5],
+      "srgb": [0.81445216, 0.19324881, 0.50725096]
+    }
+  ],
+  "srgb_to_p3": [
+    { "name": "black", "srgb": [0.0, 0.0, 0.0], "p3": [0.0, 0.0, 0.0] },
+    { "name": "white", "srgb": [1.0, 1.0, 1.0], "p3": [1.0, 1.0, 1.0] },
+    { "name": "gray_50", "srgb": [0.5, 0.5, 0.5], "p3": [0.5, 0.5, 0.5] },
+    {
+      "name": "srgb_red",
+      "srgb": [1.0, 0.0, 0.0],
+      "p3": [0.91748756, 0.20028681, 0.13856059]
+    },
+    {
+      "name": "srgb_green",
+      "srgb": [0.0, 1.0, 0.0],
+      "p3": [0.45840159, 0.98526458, 0.29829471]
+    },
+    {
+      "name": "srgb_blue",
+      "srgb": [0.0, 0.0, 1.0],
+      "p3": [0.0, 0.0, 0.95958803]
+    },
+    {
+      "name": "asymmetric_a",
+      "srgb": [0.25, 0.75, 0.5],
+      "p3": [0.40247723, 0.73986094, 0.52058055]
+    },
+    {
+      "name": "asymmetric_b",
+      "srgb": [0.75, 0.25, 0.5],
+      "p3": [0.69349919, 0.2860739, 0.4928668]
+    }
+  ]
+}

@@ -12,7 +12,14 @@
 import { createMemo, Index } from "solid-js";
 import { useTransContext } from "@mbarzda/solid-i18next";
 import { NumberInput } from "../number-input/NumberInput";
-import { srgbToOklch, oklchToSrgb, srgbToHsl, hslToSrgb } from "./color-math";
+import {
+  srgbToOklch,
+  oklchToSrgb,
+  srgbToHsl,
+  hslToSrgb,
+  srgbToDisplayP3,
+  displayP3ToSrgb,
+} from "./color-math";
 import type { ColorDisplayMode } from "./types";
 import "./ColorPicker.css";
 
@@ -116,6 +123,40 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
           alphaField,
         ];
 
+      case "display_p3": {
+        // P3 mode: R/G/B as 0-1 floats with 4-decimal precision (matches CSS
+        // color(display-p3 r g b) syntax and Figma's P3 panel). The picker's
+        // internal sRGB state is matrix-converted to P3 for display.
+        const [pr, pg, pb] = srgbToDisplayP3(r, g, b);
+        return [
+          {
+            id: "r",
+            label: "R",
+            value: Math.round(pr * 10000) / 10000,
+            min: 0,
+            max: 1,
+            step: 0.01,
+          },
+          {
+            id: "g",
+            label: "G",
+            value: Math.round(pg * 10000) / 10000,
+            min: 0,
+            max: 1,
+            step: 0.01,
+          },
+          {
+            id: "b",
+            label: "B",
+            value: Math.round(pb * 10000) / 10000,
+            min: 0,
+            max: 1,
+            step: 0.01,
+          },
+          alphaField,
+        ];
+      }
+
       case "oklch": {
         const [l, c, h] = srgbToOklch(r, g, b);
         return [
@@ -202,6 +243,20 @@ export function ColorValueFields(props: ColorValueFieldsProps) {
         else if (field.id === "g") channels[1] = raw;
         else if (field.id === "b") channels[2] = raw;
         props.onChange(channels[0] / 255, channels[1] / 255, channels[2] / 255, alpha);
+        break;
+      }
+
+      case "display_p3": {
+        // Edit a P3 channel: convert current sRGB to P3, replace the edited
+        // axis, convert back to sRGB. Keeps internal state in sRGB but lets
+        // the user enter values in P3 coordinates.
+        const [currentPr, currentPg, currentPb] = srgbToDisplayP3(r, g, b);
+        const p3: [number, number, number] = [currentPr, currentPg, currentPb];
+        if (field.id === "r") p3[0] = raw;
+        else if (field.id === "g") p3[1] = raw;
+        else if (field.id === "b") p3[2] = raw;
+        const [nr, ng, nb] = displayP3ToSrgb(p3[0], p3[1], p3[2]);
+        props.onChange(nr, ng, nb, alpha);
         break;
       }
 
