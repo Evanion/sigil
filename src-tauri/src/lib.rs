@@ -14,6 +14,7 @@ use std::sync::Mutex;
 
 use sidecar::SidecarProcess;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 
 struct AppState {
     /// Map from window label to its sidecar. Mutated when windows open or
@@ -61,6 +62,67 @@ async fn open_workfile_window(
     Ok(())
 }
 
+/// Tauri command: show the OS "Open Folder" dialog and spawn a new workfile
+/// window for the picked `.sigil/` directory. Returns silently on cancel.
+///
+/// `.sigil` workfiles are directories (per CLAUDE.md §8), so we use
+/// `blocking_pick_folder` rather than `blocking_pick_file`. The `add_filter`
+/// is advisory on platforms whose folder pickers support extension hints
+/// (macOS) and harmlessly ignored elsewhere.
+///
+/// `blocking_pick_folder` blocks the calling OS thread; this is acceptable
+/// because `#[tauri::command] async fn` is dispatched on `tauri::async_runtime`'s
+/// thread pool, not the UI thread.
+#[tauri::command]
+async fn open_workfile_dialog(app: tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .dialog()
+        .file()
+        .set_title("Open Sigil Workfile")
+        .add_filter("Sigil Workfile", &["sigil"])
+        .blocking_pick_folder();
+
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let path_buf = path.into_path().map_err(|e| format!("path: {e}"))?;
+
+    open_workfile_window(app, Some(path_buf))
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Tauri command: show the OS "Save As" dialog to pick a NEW workfile
+/// location, then spawn a workfile window bound to that path. Auto-appends
+/// the `.sigil` extension if the user typed a bare name (matches Figma /
+/// Penpot "Save As" behavior). Returns silently on cancel.
+///
+/// `blocking_save_file` is the canonical Tauri 2.x API for save dialogs —
+/// see the `dialog:allow-save` capability in `capabilities/default.json`.
+/// Like `blocking_pick_folder` above, it blocks the calling OS thread but
+/// is dispatched on the async runtime's thread pool.
+#[tauri::command]
+async fn new_workfile_dialog(app: tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .dialog()
+        .file()
+        .set_title("New Sigil Workfile")
+        .set_can_create_directories(true)
+        .add_filter("Sigil Workfile", &["sigil"])
+        .blocking_save_file();
+
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let mut path_buf = path.into_path().map_err(|e| format!("path: {e}"))?;
+    if path_buf.extension().is_none() {
+        path_buf.set_extension("sigil");
+    }
+    open_workfile_window(app, Some(path_buf))
+        .await
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -98,6 +160,10 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            open_workfile_dialog,
+            new_workfile_dialog
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
 

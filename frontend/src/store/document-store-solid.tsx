@@ -52,6 +52,7 @@ import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
 import { getGraphqlHttpUrl, getGraphqlWsUrl } from "../transport/sidecar-url";
 import { installMenuListener } from "../transport/menu-events";
+import { invoke } from "@tauri-apps/api/core";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -2696,7 +2697,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     void wsClient.dispose();
   }
 
-  // ── Tauri native menubar wiring (spec-20 Task 7) ────────────────────
+  // ── Tauri native menubar wiring (spec-20 Tasks 7 + 9) ───────────────
   //
   // `installMenuListener` is a no-op in non-Tauri contexts (it short-circuits
   // when `__TAURI_INTERNALS__` is absent on window), so this is safe to call
@@ -2704,12 +2705,43 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // event API only fires inside the Tauri WebView, so the module is not
   // pulled into browser/dev bundles.
   //
-  // file.* and view.* handlers will be wired in Task 9 (File Open/New
-  // dialogs) and a follow-up viewport-zoom integration. Only undo/redo are
-  // wired here because they already exist as local functions in scope.
+  // File → New / Open dispatch into Rust-side `#[tauri::command]` handlers
+  // (`new_workfile_dialog`, `open_workfile_dialog` in `src-tauri/src/lib.rs`),
+  // which show the native OS dialog and then spawn a fresh workfile window
+  // via `open_workfile_window`. Each invoke is wrapped in `.catch` so that
+  // dialog/spawn errors surface in DevTools rather than being silently
+  // dropped (per CLAUDE.md §11 "No Fire-and-Forget Mutations").
+  //
+  // `onCloseWindow` is intentionally a no-op: Tauri's predefined Close
+  // Window menu item already handles Cmd/Ctrl+W natively, and adding a
+  // custom handler here would double-fire.
+  //
+  // `onZoomIn` / `onZoomOut` / `onZoomReset` are deferred to a follow-up
+  // viewport-zoom integration; the menu items remain wired so they appear
+  // and respond to shortcuts, but their handlers currently no-op.
   installMenuListener({
+    onNewWorkfile: () =>
+      invoke("new_workfile_dialog").catch((e) => {
+        console.error("new_workfile_dialog failed:", e);
+      }),
+    onOpenWorkfile: () =>
+      invoke("open_workfile_dialog").catch((e) => {
+        console.error("open_workfile_dialog failed:", e);
+      }),
+    onCloseWindow: () => {
+      /* Native Cmd+W handled by Tauri's predefined Close Window item */
+    },
     onUndo: () => undo(),
     onRedo: () => redo(),
+    onZoomIn: () => {
+      /* TODO: viewport wiring (deferred to follow-up) */
+    },
+    onZoomOut: () => {
+      /* TODO: viewport wiring (deferred to follow-up) */
+    },
+    onZoomReset: () => {
+      /* TODO: viewport wiring (deferred to follow-up) */
+    },
   }).catch((err) => {
     console.error("installMenuListener failed:", err);
   });
