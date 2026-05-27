@@ -606,6 +606,89 @@ describe("deleteNodes — undo/redo integration (Spec 19)", () => {
     expect(store.getNodes()["P"]["childrenUuids"]).toEqual(["C0", "C1", "C2"]);
   });
 
+  it("restores middle child at original index on undo (Spec 19 sibling-order fix)", () => {
+    // Bug scenario from Spec 19 Task 13: deleting a non-tail sibling and
+    // undoing must restore parent.childrenUuids to its original order.
+    //
+    // Parent P has children [C0, C1, C2]. Delete C1 only.
+    //   Forward: parent.childrenUuids becomes ["C0", "C2"].
+    //   Undo: inverse create_node for C1 carries originalIndex=1 in its
+    //         node-data snapshot. applyCreateNode must INSERT at index 1,
+    //         not append — otherwise parent.childrenUuids would land at
+    //         ["C0", "C2", "C1"], destroying user-visible order.
+    //   Expected: parent.childrenUuids = ["C0", "C1", "C2"].
+    const historyManager = new HistoryManager(TEST_USER_ID);
+    const store = createTestStore();
+
+    const parent = makeTestNode({
+      uuid: "P",
+      name: "Parent",
+      childrenUuids: ["C0", "C1", "C2"],
+    });
+    const c0 = makeTestNode({ uuid: "C0", name: "C0", parentUuid: "P" });
+    const c1 = makeTestNode({ uuid: "C1", name: "C1", parentUuid: "P" });
+    const c2 = makeTestNode({ uuid: "C2", name: "C2", parentUuid: "P" });
+
+    const nodes = store.getNodes();
+    nodes["P"] = deepClone(parent);
+    nodes["C0"] = deepClone(c0);
+    nodes["C1"] = deepClone(c1);
+    nodes["C2"] = deepClone(c2);
+
+    const forwardOp: Operation = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      nodeUuid: "",
+      type: "delete_nodes",
+      path: "",
+      value: { node_uuids: ["C1"] },
+      previousValue: null,
+      seq: 0,
+    };
+    // Spec 19 sibling-order fix: inverse op carries originalIndex=1 so
+    // applyCreateNode inserts at the original position rather than appending.
+    const inverseOps: Operation[] = [
+      {
+        id: crypto.randomUUID(),
+        userId: TEST_USER_ID,
+        nodeUuid: "C1",
+        type: "create_node",
+        path: "",
+        value: { ...deepClone(c1), originalIndex: 1 },
+        previousValue: null,
+        seq: 0,
+      },
+    ];
+    const tx: Transaction = {
+      id: crypto.randomUUID(),
+      userId: TEST_USER_ID,
+      operations: [forwardOp],
+      inverseOperations: inverseOps,
+      description: "Delete C1",
+      timestamp: Date.now(),
+      seq: 0,
+    };
+
+    // Apply forward op — C1 removed, parent has [C0, C2].
+    applyOperationToStore(forwardOp, store.setState, store.reader);
+    expect(store.getNodes()["C1"]).toBeUndefined();
+    expect(store.getNodes()["P"]["childrenUuids"]).toEqual(["C0", "C2"]);
+
+    // Push and undo.
+    historyManager.pushTransaction(tx);
+    const inverseTx = historyManager.undo();
+    expect(inverseTx).not.toBeNull();
+    if (inverseTx === null) return;
+
+    for (const op of inverseTx.operations) {
+      applyOperationToStore(op, store.setState, store.reader);
+    }
+
+    // C1 restored, AND parent.childrenUuids back to original [C0, C1, C2].
+    expect(store.getNodes()["C1"]).toBeDefined();
+    expect(store.getNodes()["P"]["childrenUuids"]).toEqual(["C0", "C1", "C2"]);
+  });
+
   it("redo replays the delete_nodes forward op", () => {
     const historyManager = new HistoryManager(TEST_USER_ID);
     const store = createTestStore();

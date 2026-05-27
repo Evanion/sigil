@@ -672,7 +672,22 @@ function applyCreateNode(
   if (parentUuid) {
     const parent = getNode(parentUuid);
     if (parent && !parent.childrenUuids.includes(uuid)) {
-      setState("nodes", parentUuid, "childrenUuids", [...parent.childrenUuids, uuid]);
+      // Spec 19: when the snapshot carries an originalIndex (undo of
+      // delete_nodes), restore the child at its original position instead
+      // of appending. Otherwise (normal create flow), append.
+      const originalIndex = raw["originalIndex"];
+      const insertAt =
+        typeof originalIndex === "number" &&
+        Number.isFinite(originalIndex) &&
+        originalIndex >= 0
+          ? Math.min(originalIndex, parent.childrenUuids.length)
+          : parent.childrenUuids.length;
+      const updated = [
+        ...parent.childrenUuids.slice(0, insertAt),
+        uuid,
+        ...parent.childrenUuids.slice(insertAt),
+      ];
+      setState("nodes", parentUuid, "childrenUuids", updated);
     }
   }
 }

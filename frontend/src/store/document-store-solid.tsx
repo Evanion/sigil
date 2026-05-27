@@ -1033,8 +1033,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       if (pa !== pb) return pa.localeCompare(pb);
       return a.originalIndex - b.originalIndex;
     });
+    // Spec 19: tag each inverse create_node snapshot with its originalIndex
+    // so applyCreateNode (apply-to-store.ts / apply-remote.ts) inserts at
+    // the original sibling position on undo instead of appending. Without
+    // this tag, undo of a middle-sibling delete reorders the parent's
+    // childrenUuids (e.g., [C0, C1, C2] becomes [C0, C2, C1] after a
+    // delete-C1 + undo cycle).
     const inverseOps = sortedForInverse.map((snap) =>
-      createCreateNodeOp(clientSessionId, snap.nodeSnapshot),
+      createCreateNodeOp(clientSessionId, {
+        ...(snap.nodeSnapshot as Record<string, unknown>),
+        originalIndex: snap.originalIndex,
+      }),
     );
 
     interceptor.pushTransaction({
