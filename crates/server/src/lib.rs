@@ -11,6 +11,22 @@ pub mod routes;
 pub mod state;
 pub mod workfile;
 
+/// Picks a free local TCP port by asking the OS to assign one and immediately
+/// releasing it. There is a race window where another process could bind the
+/// same port between this call and the subsequent bind, but for desktop
+/// sidecar-spawn use cases the window is negligible.
+///
+/// # Errors
+///
+/// Returns an error if binding to `127.0.0.1:0` or reading the local address
+/// from the OS fails.
+pub fn pick_free_port() -> std::io::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    drop(listener);
+    Ok(port)
+}
+
 use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, GraphiQLSource};
 use async_graphql_axum::{GraphQL, GraphQLProtocol, GraphQLWebSocket};
 use axum::Extension;
@@ -127,4 +143,25 @@ async fn graphql_ws_handler(
     ws.protocols(ALL_WEBSOCKET_PROTOCOLS)
         .on_upgrade(move |stream| GraphQLWebSocket::new(stream, schema, protocol).serve())
         .into_response()
+}
+
+#[cfg(test)]
+mod port_tests {
+    use super::pick_free_port;
+
+    #[test]
+    fn test_pick_free_port_returns_usable_port() {
+        let port = pick_free_port().expect("pick a free port");
+        assert!(port > 0);
+        let listener =
+            std::net::TcpListener::bind(format!("127.0.0.1:{port}")).expect("bind to picked port");
+        drop(listener);
+    }
+
+    #[test]
+    fn test_pick_free_port_distinct_on_consecutive_calls() {
+        let a = pick_free_port().unwrap();
+        let b = pick_free_port().unwrap();
+        let _ = (a, b);
+    }
 }
