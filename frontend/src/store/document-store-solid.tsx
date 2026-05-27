@@ -405,6 +405,13 @@ function operationToServerOp(op: Operation): Record<string, unknown> | null {
           nodeUuid: op.nodeUuid,
         },
       };
+    case "delete_nodes":
+      // Spec 19 Task 7: type-system stub. Actual wiring to the server's
+      // deleteNodes GraphQL mutation lands in Task 11 (store deleteNodes
+      // function), which builds and dispatches its own transaction.
+      // Returning null here means a delete_nodes op flowing through
+      // serializeTransaction is dropped; this is intentional until Task 11.
+      return null;
     case "reparent": {
       const rv = op.value as ReparentValue;
       return {

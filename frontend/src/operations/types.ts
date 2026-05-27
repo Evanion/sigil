@@ -12,6 +12,7 @@ export type OperationType =
   | "set_field"
   | "create_node"
   | "delete_node"
+  | "delete_nodes"
   | "reparent"
   | "reorder"
   | "create_page"
@@ -89,6 +90,12 @@ export interface Transaction {
   seq: number;
   /** RF-019: Type-safe side-effect context for undo/redo restoration. */
   sideEffectContext?: SideEffectContext;
+  /**
+   * Spec 19: Pre-built inverse operations, used when the forward op is not
+   * a single-op flip (e.g., delete_nodes inverts to N create_node ops).
+   * When present, createInverseTransaction prefers these over per-op flip.
+   */
+  readonly inverseOperations?: readonly Operation[];
 }
 
 /**
@@ -120,6 +127,16 @@ export interface ReorderValue {
  */
 export interface ReorderPreviousValue {
   readonly position: number;
+}
+
+/**
+ * Delete nodes operation value payload (Spec 19).
+ * Stored in Operation.value for type="delete_nodes". The inverse is
+ * carried separately via Transaction.inverseOperations (a list of N
+ * create_node ops).
+ */
+export interface DeleteNodesValue {
+  readonly node_uuids: readonly string[];
 }
 
 /**

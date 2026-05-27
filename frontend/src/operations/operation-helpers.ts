@@ -93,6 +93,21 @@ export function createDeleteNodeOp(
 }
 
 /**
+ * Create a delete_nodes operation (Spec 19, batch delete).
+ *
+ * The forward op carries the UUID list in `value`. The inverse (N
+ * create_node ops) is built by the caller and attached via
+ * `Transaction.inverseOperations`. See `document-store-solid.tsx`
+ * Task 11 for the call site.
+ */
+export function createDeleteNodesOp(
+  userId: string,
+  nodeUuids: readonly string[],
+): Operation {
+  return makeOp(userId, "", "delete_nodes", "", { node_uuids: [...nodeUuids] }, null);
+}
+
+/**
  * Create a reparent operation.
  */
 export function createReparentOp(
@@ -245,12 +260,27 @@ export function createInverse(op: Operation): Operation {
 }
 
 /**
- * Create the inverse of a transaction: inverse all operations in reverse order.
+ * Create the inverse of a transaction.
+ *
+ * If the transaction carries `inverseOperations` (Spec 19: forward op
+ * is not a single-op flip), those are used directly. Otherwise, falls
+ * back to per-op flip: invert all operations in reverse order.
  *
  * The inverse transaction gets a fresh id, fresh timestamp, seq=0,
  * and a description prefixed with "Undo: ".
  */
 export function createInverseTransaction(tx: Transaction): Transaction {
+  // Spec 19: prefer explicit pre-built inverse ops when present
+  if (tx.inverseOperations && tx.inverseOperations.length > 0) {
+    return {
+      id: crypto.randomUUID(),
+      userId: tx.userId,
+      operations: [...tx.inverseOperations],
+      description: `Undo: ${tx.description}`,
+      timestamp: Date.now(),
+      seq: 0,
+    };
+  }
   return {
     id: crypto.randomUUID(),
     userId: tx.userId,
