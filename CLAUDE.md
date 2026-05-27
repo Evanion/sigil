@@ -281,6 +281,20 @@ When dispatching subagents for this project, use these specialized roles:
 - **Architect** — system design, cross-cutting concerns
 - **Governance** — reviews findings, proposes updates to rules/conventions
 
+### Parallel Execution Hygiene
+
+When two or more implementation subagents work in the same git worktree concurrently (the `/dispatching-parallel-agents` pattern), commit and staging operations race. The standard `git add <broad-pattern>` or `git add -A` will sweep up any file the *other* subagent has modified-but-not-committed, producing a commit with mis-attributed scope (e.g., a `refactor(frontend):` commit containing Rust files staged by a concurrent BE subagent).
+
+Rules for parallel subagent execution:
+
+1. **Stage by explicit file path, not by pattern.** Each subagent MUST `git add <exact-file-path>` for every file in its batch — never `git add .`, `git add -A`, `git add frontend/`, or any glob that could match files staged or modified by a concurrent subagent. The parent agent's dispatch instructions MUST include the explicit file list for each batch.
+
+2. **Verify staging before commit.** Before `git commit`, each subagent MUST run `git diff --cached --stat` (or `git status --short` and inspect only the green `A`/`M` lines) and confirm every staged file belongs to its batch. A staged file not in the batch is a race — abort the commit, reset the staging area, and re-stage explicitly.
+
+3. **Prefer worktree-per-batch when batches share a path prefix.** When two batches both touch the same top-level directory (e.g., both Batch A and Batch C touch `crates/core/`), the parent agent SHOULD allocate a separate worktree per batch using `/using-git-worktrees`. Worktree separation eliminates the race at the filesystem level. For batches touching disjoint paths (e.g., one frontend-only, one Rust-only), a shared worktree with explicit-file-path staging is acceptable.
+
+Precedent: PR #67 remediation — Batch A (Canvas wiring) and Batch C (Rust validation) ran concurrently. Batch A's `git add` swept up Batch C's staged-but-uncommitted Rust changes into a `refactor(frontend):` commit. The implementer caught and reset before push. Had the commit been pushed, the `feat(core):` commit Batch C planned would have come up empty, and the type-semantic rule "refactor MUST NOT introduce new types" would have been silently violated. The mis-attribution was a process race, not a coding error — explicit-file-path staging is the only mitigation that scales across future parallel-execution PRs.
+
 ---
 
 ## 10. Spec Authoring Requirements
@@ -349,6 +363,16 @@ Any spec that extends a shared wire-format type (a type that crosses the Rust↔
 - Every in-code consumer that pattern-matches on the type's discriminant (every `match` in Rust, every `switch` or `if/else` ladder in TypeScript).
 
 For each entry, the spec must state whether this PR updates it, or document why no update is needed. A spec that extends a shared type without this inventory is incomplete — the implementer has no checklist to verify end-to-end parity.
+
+**Completion claims for the inventory require machine-verifiable receipts.** When the spec marks any entry "No code change", the PR description (or the spec itself) MUST include one of the following receipts proving the no-change claim:
+
+1. **Sentinel guard.** An exhaustiveness sentinel (Rust `match` without `_`, TypeScript `.test-d.ts` `_exhaustive: never`) that would fail to compile if a dispatch site is missing the new variant. The receipt is the sentinel test passing.
+2. **Reproducible enumeration.** The PR description quotes the exact `rg` / `grep` / `cargo clippy` command used to enumerate every dispatch site for the affected discriminant, and the command's output is reproducible (every match is either updated in the PR or appears in the inventory with rationale). Example: `rg 'space === "srgb"' frontend/src/` for the P3 case would have enumerated all 8 sites.
+3. **End-to-end smoke test asserting the new variant.** A test that exercises the producer-to-consumer path for the new variant and would fail if any dispatch site shortcuts to the old variant's behavior. For canvas-rendered outputs, asserting `ctx.fillStyle === "color(display-p3 …)"` is sufficient.
+
+Mirrors the §11 "Migrations Must Remove All Superseded Code → Completion claims require machine-verifiable receipts" rule, extended from migrations to feature extensions. Both failure modes are the same shape: a spec-time claim of completeness that wasn't machine-verified.
+
+Precedent: PR #67 (Spec 18 P3 color space) — §11 inventory marked "Canvas renderer fill style — No code change", but 7 dispatch sites silently shortcut on `space === "srgb"` and returned gray for P3 colors. The central manual smoke-test criterion failed. A 30-second `rg` would have surfaced every site.
 
 ### Staged Feature Delivery Contract
 
@@ -444,6 +468,15 @@ When a boolean or enum flag is set to temporarily change system behavior (suppre
 
 Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that verifies enforcement. Use the naming convention `test_<constant_name_lowercase>_enforced`. This makes enforcement machine-checkable — a CI grep can verify that every limit constant has a corresponding enforcement test. This applies equally to lower bounds — a `MIN_PAGES_PER_DOCUMENT` constant without a test that attempts to delete below the minimum is an unenforced limit. In TypeScript, "expects an error" includes asserting that a guard function returns `false`, that a validation helper returns an error object, or that a store function rejects the input. A test that only reads the constant's value (e.g., `expect(MAX_STOPS).toBe(32)`) does not prove enforcement and does not satisfy this requirement.
 
+**CI enforcement.** A CI grep step MUST flag any test whose name ends in `_enforced` (Rust: `test_*_enforced`; TypeScript: `*_enforced` or `enforced` in a `describe` block) whose body does NOT contain one of:
+
+- A call to a fallible validator that returns `Result`, `Option`, or throws — e.g., `Color::new_srgb(…)` returning `Err(…)`, `validate_color_channel(…)`, `parseValueInput(…)` returning `null`, an `expect(() => …).toThrow(…)` block.
+- An assertion that a constructor or deserialization path rejects an out-of-range value with a typed error.
+
+Specifically reject tests that ONLY contain assertions of the form `assert!(CONST <= literal)`, `assert!(CONST >= literal)`, `expect(CONST).toBe(…)`, or `assert_eq!(CONST, …)` — these are tautologies that read the constant's value but do not exercise enforcement. The check must ship with a violation-fires test per the "CI Guards Must Ship With a Violation-Fires Test" rule below.
+
+Precedent: PR #67 (Spec 18) — `test_min_color_channel_enforced` asserted `MIN_COLOR_CHANNEL <= 0.0` (tautology). The `_enforced` suffix made the constant pass any `_enforced`-grep audit despite zero actual enforcement in production. The prose-only obligation above was not sufficient — the implementer named the test correctly per the convention but skipped the enforcement-asserting body. Four reviewers (Architect, BE, Compliance, Data Scientist) independently flagged this. CI enforcement is the only fix that prevents recurrence.
+
 ### CI Guards Must Ship With a Violation-Fires Test
 
 Any PR that adds or modifies a CI check whose purpose is to reject a class of source-code violation (lint rules, grep guards, custom AST checks, file-presence assertions, workflow `if` conditions, etc.) MUST include a programmatic test that runs the check against a representative violation and asserts the check fires (non-zero exit, lint error, failed assertion). A claim of enforcement without a sentinel test is a bug — the guard's configuration may silently bypass the violation it was designed to catch.
@@ -512,7 +545,7 @@ When migrating from one protocol, library, or API to another (e.g., WebSocket to
 5. Dead dependencies in package.json/Cargo.toml that were only used by the old code.
 A migration that adds the new path without removing the old path is incomplete. Use `grep` for old endpoint paths, old type names, and old import paths to verify full removal.
 
-**Completion claims require machine-verifiable receipts.** A migration PR's description MUST NOT claim completeness unless one of the following is true:
+**Completion claims require machine-verifiable receipts.** A PR that claims completeness for any cross-cutting change — migration, deprecation removal, OR lighting up a new variant of a discriminated union end-to-end — MUST NOT make that claim unless one of the following is true:
 1. **Sentinel guard + violation test.** The PR introduces a CI guard that rejects the old pattern (lint rule, grep, type check, exhaustiveness sentinel), AND a programmatic test that proves the guard fires on a representative remnant (see "CI Guards Must Ship With a Violation-Fires Test"). Lint passing without a sentinel that fails-on-remnant is not a receipt — the guard may be misconfigured.
 2. **End-to-end search + zero-result assertion.** The PR description quotes the exact `rg` / `grep` command used to enumerate remnants, and the command output is empty. The command must be reproducible by a reviewer.
 3. **Explicit staged-delivery inventory.** If the migration is deliberately partial, the PR description includes a "Migration remnants — deferred" inventory naming every remaining call site, the owner of the follow-up, and the reason the staged delivery is safe (matches the §10 "Staged Feature Delivery Contract").
@@ -520,6 +553,8 @@ A migration that adds the new path without removing the old path is incomplete. 
 A PR description that says "all X migrated" without one of the three is incomplete. Reviewers MUST treat such a claim as unverified.
 
 Precedent: PR #66 (i18n migration) — the description claimed "no new hardcoded user-facing strings"; lint and tests passed; but the central guard's `mode: "jsx-text-only"` silently bypassed every JSX attribute, leaving 83+ remnants in tree. Six reviewers independently caught this only by running the guard with a corrected mode.
+
+Precedent: PR #67 (Spec 18 Display-P3, feature extension not migration) — the spec's §11 Transport Boundary Inventory marked "Canvas renderer fill style — No code change", but 7 dispatch sites silently shortcut on `space === "srgb"` and returned gray for P3 colors. The "migration" framing of the original rule did not trigger the implementer's attention because they were extending a discriminated union, not removing a path. The rule's scope clarification (above) extends the receipt obligation to that case — the failure mode is the same shape regardless of whether the change is a removal or an extension.
 
 ### Do Not Use Positional Index as Item Identity in Dynamic Lists
 
