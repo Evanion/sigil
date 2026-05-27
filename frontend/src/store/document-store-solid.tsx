@@ -51,6 +51,7 @@ import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
 import { getGraphqlHttpUrl, getGraphqlWsUrl } from "../transport/sidecar-url";
+import { installMenuListener } from "../transport/menu-events";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -2694,6 +2695,24 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     subscriptionHandle.unsubscribe();
     void wsClient.dispose();
   }
+
+  // ── Tauri native menubar wiring (spec-20 Task 7) ────────────────────
+  //
+  // `installMenuListener` is a no-op in non-Tauri contexts (it short-circuits
+  // when `__TAURI_INTERNALS__` is absent on window), so this is safe to call
+  // unconditionally from the store factory. The dynamic import of the Tauri
+  // event API only fires inside the Tauri WebView, so the module is not
+  // pulled into browser/dev bundles.
+  //
+  // file.* and view.* handlers will be wired in Task 9 (File Open/New
+  // dialogs) and a follow-up viewport-zoom integration. Only undo/redo are
+  // wired here because they already exist as local functions in scope.
+  installMenuListener({
+    onUndo: () => undo(),
+    onRedo: () => redo(),
+  }).catch((err) => {
+    console.error("installMenuListener failed:", err);
+  });
 
   return {
     state,

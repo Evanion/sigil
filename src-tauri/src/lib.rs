@@ -5,6 +5,7 @@
 //! Builder in a library so it can be reused across desktop and mobile.
 
 mod file_assoc;
+mod menus;
 mod sidecar;
 
 use std::sync::Mutex;
@@ -40,6 +41,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            // Install the native menubar before any sidecar work — menu
+            // construction should not depend on the sidecar's readiness, and
+            // failing fast on a menu build error is more diagnosable than
+            // failing after spawning a child process.
+            let menu = menus::build_menu(&handle).map_err(|e| format!("build menu: {e}"))?;
+            handle
+                .set_menu(menu)
+                .map_err(|e| format!("set menu: {e}"))?;
+            menus::install_menu_handler(&handle);
+
             let workfile = initial_workfile.clone();
             let sidecar_proc =
                 tauri::async_runtime::block_on(SidecarProcess::spawn(workfile.as_ref()))
