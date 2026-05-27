@@ -184,6 +184,9 @@ function applyRemoteOperation(
     case "delete_node":
       applyDeleteNode(op.nodeUuid, setState, getNode);
       break;
+    case "delete_nodes":
+      applyDeleteNodes(op.value, setState, getNode);
+      break;
     case "reparent":
       applyReparent(op.nodeUuid, op.value, setState, getNode);
       break;
@@ -700,6 +703,30 @@ function applyDeleteNode(
       Reflect.deleteProperty(s.nodes, nodeUuid);
     }),
   );
+}
+
+// ── Internal: delete_nodes (Spec 19) ──────────────────────────────────
+
+function applyDeleteNodes(
+  value: unknown,
+  setState: SetStoreFunction<StoreState>,
+  getNode: (uuid: string) => StoreDocumentNode | undefined,
+): void {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !Array.isArray((value as { node_uuids?: unknown }).node_uuids)
+  ) {
+    console.warn(
+      "applyRemoteOperation: delete_nodes payload missing or malformed node_uuids",
+      { value },
+    );
+    return;
+  }
+  const nodeUuids = (value as { node_uuids: unknown }).node_uuids as string[];
+  for (const uuid of nodeUuids) {
+    applyDeleteNode(uuid, setState, getNode);
+  }
 }
 
 // ── Internal: reparent ────────────────────────────────────────────────

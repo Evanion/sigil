@@ -921,4 +921,151 @@ describe("applyRemoteTransaction", () => {
       });
     });
   });
+
+  describe("delete_nodes (Spec 19)", () => {
+    it("removes every node in node_uuids from the store atomically", () => {
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: {
+            "node-1": makeNode("node-1"),
+            "node-2": makeNode("node-2"),
+            "node-3": makeNode("node-3"),
+          },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: ["node-1", "node-2"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["node-1"]).toBeUndefined();
+        expect(state.nodes["node-2"]).toBeUndefined();
+        // Untargeted nodes survive.
+        expect(state.nodes["node-3"]).toBeDefined();
+        dispose();
+      });
+    });
+
+    it("warns and no-ops on malformed payload (missing node_uuids)", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeNode("node-1") },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { wrong_field: ["node-1"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["node-1"]).toBeDefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("delete_nodes"),
+          expect.objectContaining({ value: expect.anything() }),
+        );
+        dispose();
+      });
+      warnSpy.mockRestore();
+    });
+
+    it("warns and no-ops when value is null", () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      createRoot((dispose) => {
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "node-1": makeNode("node-1") },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        expect(() =>
+          applyRemoteTransaction(
+            makeTx({}, [
+              makeOp({
+                type: "delete_nodes",
+                nodeUuid: "",
+                path: null,
+                value: null,
+              }),
+            ]),
+            LOCAL_USER,
+            setState,
+            (uuid: string) => state.nodes[uuid],
+            fetchPages,
+          ),
+        ).not.toThrow();
+
+        expect(state.nodes["node-1"]).toBeDefined();
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("delete_nodes"),
+          expect.objectContaining({ value: null }),
+        );
+        dispose();
+      });
+      warnSpy.mockRestore();
+    });
+
+    it("removes children when targeting a parent (delegates to applyDeleteNode)", () => {
+      createRoot((dispose) => {
+        const parent = makeNode("parent-1", {
+          childrenUuids: ["child-1"],
+        });
+        const child = makeNode("child-1", { parentUuid: "parent-1" });
+        const [state, setState] = createStore<StoreState>({
+          nodes: { "parent-1": parent, "child-1": child },
+          pages: [],
+          tokens: {},
+        });
+        const fetchPages = vi.fn().mockResolvedValue(undefined);
+
+        // delete_nodes batch carrying the parent and child UUIDs; the dispatcher
+        // delegates per-uuid to applyDeleteNode, which preserves the
+        // parent.childrenUuids cleanup semantics.
+        applyRemoteTransaction(
+          makeTx({}, [
+            makeOp({
+              type: "delete_nodes",
+              nodeUuid: "",
+              path: null,
+              value: { node_uuids: ["parent-1", "child-1"] },
+            }),
+          ]),
+          LOCAL_USER,
+          setState,
+          (uuid: string) => state.nodes[uuid],
+          fetchPages,
+        );
+
+        expect(state.nodes["parent-1"]).toBeUndefined();
+        expect(state.nodes["child-1"]).toBeUndefined();
+        dispose();
+      });
+    });
+  });
 });
