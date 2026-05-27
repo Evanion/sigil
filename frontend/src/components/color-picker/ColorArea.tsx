@@ -8,9 +8,16 @@
  * The DPR is composed into setTransform rather than a standalone scale() call,
  * per the Canvas DPR Handling conventions in CLAUDE.md.
  *
- * TODO(RF-011): CLAUDE.md section 11 requires two ARIA widgets for 2D controls.
- * Currently exposes a single role="slider" for saturation; brightness axis
- * is only in aria-valuetext. Defer to a dedicated a11y follow-up PR.
+ * Accessibility (RF-011): The widget exposes TWO complementary ARIA sliders
+ * (one per axis) inside a `role="group"` wrapper, per
+ * `.claude/rules/a11y-rules.md` "2D Canvas Widgets Must Have Complete ARIA
+ * Slider Semantics". Each slider carries the full ARIA slider attribute set
+ * (label, valuenow, valuemin, valuemax, valuetext) and its own keyboard
+ * handler — ArrowLeft/Right (and Home/End) drives X, ArrowUp/Down (and
+ * Home/End) drives Y. The slider elements are visually hidden via CSS
+ * (sr-only positioning) but remain keyboard-focusable; the visible canvas
+ * + cursor provide the sighted-user presentation, and pointer/drag handling
+ * stays on the outer container.
  */
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
 import { acquireWideGamut2D } from "../../canvas/canvas-context";
@@ -20,6 +27,17 @@ import "./ColorArea.css";
 const DEFAULT_AREA_WIDTH = 240;
 /** Aspect ratio: height = width * AREA_ASPECT */
 const AREA_ASPECT = 2 / 3;
+
+/**
+ * Default axis labels used when the caller does not supply translated
+ * strings via `xAxisLabel` / `yAxisLabel`. These are intentionally generic
+ * fallbacks — consumers wired to the i18n layer (e.g., the HSV-driven
+ * ColorPicker) MUST pass domain-specific labels (e.g., "Saturation",
+ * "Brightness"). The fallbacks exist for standalone embedders that do not
+ * have an i18n context (Storybook demos, unit tests).
+ */
+const DEFAULT_X_AXIS_LABEL = "Horizontal";
+const DEFAULT_Y_AXIS_LABEL = "Vertical";
 
 export interface ColorAreaProps {
   /** Normalized x position in [0, 1]. */
@@ -37,8 +55,22 @@ export interface ColorAreaProps {
    * in logical pixel coordinates.
    */
   renderBackground: (ctx: CanvasRenderingContext2D, width: number, height: number) => void;
-  /** Accessible label for the canvas widget (required by CLAUDE.md §5). */
+  /**
+   * Accessible label for the whole 2D color-picker group (e.g.,
+   * "Color saturation and lightness"). Becomes the `aria-label` on the
+   * outer `role="group"` element.
+   */
   "aria-label": string;
+  /**
+   * Accessible label for the X-axis slider (e.g., "Saturation"). Defaults
+   * to a generic "Horizontal" when not provided.
+   */
+  xAxisLabel?: string;
+  /**
+   * Accessible label for the Y-axis slider (e.g., "Brightness"). Defaults
+   * to a generic "Vertical" when not provided.
+   */
+  yAxisLabel?: string;
 }
 
 export function ColorArea(props: ColorAreaProps) {
@@ -148,57 +180,74 @@ export function ColorArea(props: ColorAreaProps) {
     props.onCommit?.();
   }
 
-  // ── Keyboard events ───────────────────────────────────────────────────
-  function handleKeyDown(e: KeyboardEvent) {
+  // ── Keyboard events — one handler per axis ────────────────────────────
+  // Splitting the handlers is required by `.claude/rules/a11y-rules.md`
+  // "2D Canvas Widgets Must Have Complete ARIA Slider Semantics": each
+  // axis slider must respond only to keys on its own axis.
+  function handleXKeyDown(e: KeyboardEvent) {
     const step = e.shiftKey ? 0.1 : 0.01;
-    let { xValue, yValue } = props;
-    let handled = false;
-
+    let next = props.xValue;
     switch (e.key) {
       case "ArrowRight":
-        xValue = Math.max(0, Math.min(1, xValue + step));
-        handled = true;
+        next = Math.max(0, Math.min(1, next + step));
         break;
       case "ArrowLeft":
-        xValue = Math.max(0, Math.min(1, xValue - step));
-        handled = true;
+        next = Math.max(0, Math.min(1, next - step));
         break;
-      case "ArrowUp":
-        yValue = Math.max(0, Math.min(1, yValue + step));
-        handled = true;
+      case "Home":
+        next = 0;
         break;
-      case "ArrowDown":
-        yValue = Math.max(0, Math.min(1, yValue - step));
-        handled = true;
+      case "End":
+        next = 1;
         break;
+      default:
+        return;
     }
-
-    if (handled) {
-      e.preventDefault();
-      props.onChange(xValue, yValue);
-    }
+    e.preventDefault();
+    props.onChange(next, props.yValue);
   }
 
-  // ── Aria value text ───────────────────────────────────────────────────
-  const ariaValueText = () =>
-    `x: ${Math.round(props.xValue * 100)}%, y: ${Math.round(props.yValue * 100)}%`;
+  function handleYKeyDown(e: KeyboardEvent) {
+    const step = e.shiftKey ? 0.1 : 0.01;
+    let next = props.yValue;
+    switch (e.key) {
+      case "ArrowUp":
+        next = Math.max(0, Math.min(1, next + step));
+        break;
+      case "ArrowDown":
+        next = Math.max(0, Math.min(1, next - step));
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = 1;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    props.onChange(props.xValue, next);
+  }
+
+  // ── Per-axis aria-valuetext ───────────────────────────────────────────
+  const xLabel = () => props.xAxisLabel ?? DEFAULT_X_AXIS_LABEL;
+  const yLabel = () => props.yAxisLabel ?? DEFAULT_Y_AXIS_LABEL;
+  const xPercent = () => Math.round(props.xValue * 100);
+  const yPercent = () => Math.round(props.yValue * 100);
+  const xValueText = () => `${xLabel()}: ${xPercent()}%`;
+  const yValueText = () => `${yLabel()}: ${yPercent()}%`;
 
   return (
     <div
       ref={containerRef}
       class="sigil-color-area"
-      role="slider"
-      tabindex="0"
+      role="group"
       aria-label={props["aria-label"]}
-      aria-valuenow={Math.round(props.xValue * 100)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuetext={ariaValueText()}
       style={{ width: "100%", height: `${areaHeight()}px` }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
-      onKeyDown={handleKeyDown}
     >
       <canvas
         ref={canvasRef}
@@ -216,6 +265,29 @@ export function ColorArea(props: ColorAreaProps) {
           bottom: `${props.yValue * 100}%`,
         }}
         aria-hidden="true"
+      />
+      {/* Visually-hidden but keyboard-focusable per-axis ARIA sliders. */}
+      <div
+        class="sigil-color-area__sr-slider"
+        role="slider"
+        tabindex="0"
+        aria-label={xLabel()}
+        aria-valuenow={xPercent()}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={xValueText()}
+        onKeyDown={handleXKeyDown}
+      />
+      <div
+        class="sigil-color-area__sr-slider"
+        role="slider"
+        tabindex="0"
+        aria-label={yLabel()}
+        aria-valuenow={yPercent()}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuetext={yValueText()}
+        onKeyDown={handleYKeyDown}
       />
     </div>
   );
