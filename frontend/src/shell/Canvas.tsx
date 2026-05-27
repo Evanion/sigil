@@ -214,7 +214,7 @@ export const Canvas: Component = () => {
       try {
         const content = overlay.getContent();
         if (!content.trim()) {
-          store.deleteNode(uuid);
+          store.deleteNodes([uuid]);
         } else {
           store.setTextContent(uuid, content);
         }
@@ -609,18 +609,15 @@ export const Canvas: Component = () => {
       },
 
       // -- Delete selected --
-      // RF-007: Multi-delete issues N individual deleteNode calls. Each is a
-      // separate undo step. TODO: implement batchDeleteNodes for atomic undo.
+      // Spec 19: store.deleteNodes is atomic — one undo entry per keypress
+      // regardless of how many nodes are selected.
       Delete: (e: KeyboardEvent) => {
         if (isTyping()) return;
         e.preventDefault();
         const ids = store.selectedNodeIds();
         if (ids.length === 0) return;
         const count = ids.length;
-        for (const uuid of ids) {
-          store.deleteNode(uuid);
-        }
-        store.setSelectedNodeIds([]);
+        store.deleteNodes(ids);
         announce(`Deleted ${String(count)} node${count > 1 ? "s" : ""}`);
       },
       Backspace: (e: KeyboardEvent) => {
@@ -629,10 +626,7 @@ export const Canvas: Component = () => {
         const ids = store.selectedNodeIds();
         if (ids.length === 0) return;
         const count = ids.length;
-        for (const uuid of ids) {
-          store.deleteNode(uuid);
-        }
-        store.setSelectedNodeIds([]);
+        store.deleteNodes(ids);
         announce(`Deleted ${String(count)} node${count > 1 ? "s" : ""}`);
       },
 

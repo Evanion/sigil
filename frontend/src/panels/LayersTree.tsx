@@ -595,7 +595,7 @@ export const LayersTree: Component = () => {
                 nextFocus = nextEntry.uuid;
               }
             }
-            store.deleteNode(currentFocused);
+            store.deleteNodes([currentFocused]);
             announce(t("a11y:layers.deleted", { name: node.name }));
             setFocusedUuid(nextFocus);
           }
