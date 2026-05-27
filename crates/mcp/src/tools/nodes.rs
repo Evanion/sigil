@@ -7,7 +7,9 @@
 use agent_designer_core::{
     BlendMode, Effect, FieldOperation, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, NodeId, NodeKind, Stroke, StyleValue, Transform,
-    commands::node_commands::{CreateNode, DeleteNode, RenameNode, SetLocked, SetVisible},
+    commands::node_commands::{
+        CreateNode, DeleteNode, DeleteNodes, RenameNode, SetLocked, SetVisible,
+    },
     commands::style_commands::{
         SetBlendMode, SetCorners, SetEffects, SetFills, SetOpacity, SetStrokes, SetTransform,
     },
@@ -330,6 +332,79 @@ pub fn delete_node_impl(state: &AppState, uuid_str: &str) -> Result<MutationResu
     Ok(MutationResult {
         success: true,
         message: format!("Node {uuid_str} deleted"),
+    })
+}
+
+/// Atomically deletes N nodes by UUID (Spec 19).
+///
+/// Resolves each UUID to a `NodeId`, looks up its page-root membership,
+/// then executes `DeleteNodes`. Broadcasts a single `delete_nodes` event
+/// containing the full UUID list.
+///
+/// # Errors
+///
+/// - `McpToolError::InvalidUuid` if any UUID in the input is malformed.
+/// - `McpToolError::NodeNotFound` if any UUID does not resolve.
+/// - `McpToolError::CoreError` on engine-level failures (validate or apply).
+pub fn delete_nodes_impl(
+    state: &AppState,
+    uuid_strs: &[String],
+) -> Result<MutationResult, McpToolError> {
+    // Pre-parse UUIDs before acquiring the lock. Fail-fast on invalid input.
+    let parsed: Vec<Uuid> = uuid_strs
+        .iter()
+        .map(|s| {
+            s.parse::<Uuid>()
+                .map_err(|_| McpToolError::InvalidUuid(s.clone()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    {
+        let mut doc = acquire_document_lock(state);
+
+        let mut targets: Vec<(
+            agent_designer_core::id::NodeId,
+            Option<agent_designer_core::id::PageId>,
+        )> = Vec::with_capacity(parsed.len());
+        for (idx, uuid) in parsed.iter().enumerate() {
+            let node_id = doc
+                .arena
+                .id_by_uuid(uuid)
+                .ok_or_else(|| McpToolError::NodeNotFound(uuid_strs[idx].clone()))?;
+            let page_id = doc.pages.iter().find_map(|p| {
+                if p.root_nodes.contains(&node_id) {
+                    Some(p.id)
+                } else {
+                    None
+                }
+            });
+            targets.push((node_id, page_id));
+        }
+
+        let cmd = DeleteNodes { targets };
+        cmd.validate(&doc)?;
+        cmd.apply(&mut doc)?;
+    }
+
+    // Broadcast: single delete_nodes op carrying the full UUID list.
+    // The OperationPayload's node_uuid is empty (batch op has no single
+    // target); UUIDs are in the value payload, matching the GraphQL
+    // contract (mutation.rs::parse_delete_nodes).
+    state.signal_dirty();
+    state.publish_transaction(
+        MutationEventKind::NodeDeleted,
+        None,
+        super::broadcast::single_op_transaction(
+            "",
+            "delete_nodes",
+            "",
+            Some(serde_json::json!({ "node_uuids": uuid_strs })),
+        ),
+    );
+
+    Ok(MutationResult {
+        success: true,
+        message: format!("Deleted {} node(s)", uuid_strs.len()),
     })
 }
 
@@ -1662,5 +1737,33 @@ mod tests {
         let corners_json = serde_json::json!({ "shape": "round", "radius": 4.0 });
         let err = set_corners_impl(&state, &missing, &corners_json).unwrap_err();
         assert!(matches!(err, McpToolError::NodeNotFound(_)));
+    }
+
+    #[test]
+    fn test_delete_nodes_removes_multiple() {
+        let (state, page_id) = make_state_with_page();
+        let first = create_node_impl(&state, "frame", "First", Some(&page_id), None, None).unwrap();
+        let second =
+            create_node_impl(&state, "rectangle", "Second", Some(&page_id), None, None).unwrap();
+
+        let uuids = vec![first.uuid.clone(), second.uuid.clone()];
+        let result = delete_nodes_impl(&state, &uuids);
+        assert!(
+            result.is_ok(),
+            "expected delete_nodes to succeed: {result:?}"
+        );
+        assert!(result.unwrap().success);
+
+        // Re-deletion now fails because both are gone.
+        let again = delete_nodes_impl(&state, &uuids);
+        assert!(again.is_err(), "expected re-delete to error");
+        assert!(matches!(again.unwrap_err(), McpToolError::NodeNotFound(_)));
+    }
+
+    #[test]
+    fn test_delete_nodes_rejects_invalid_uuid() {
+        let state = AppState::new();
+        let result = delete_nodes_impl(&state, &["not-a-uuid".to_string()]);
+        assert!(matches!(result, Err(McpToolError::InvalidUuid(_))));
     }
 }

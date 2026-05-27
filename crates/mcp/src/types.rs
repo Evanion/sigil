@@ -174,6 +174,13 @@ pub struct DeleteNodeInput {
     pub uuid: String,
 }
 
+/// Input for atomically deleting N nodes (Spec 19).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct DeleteNodesInput {
+    /// UUIDs of nodes to delete. Length [1, 1000]; duplicates rejected.
+    pub node_uuids: Vec<String>,
+}
+
 /// Input for renaming a node.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct RenameNodeInput {
