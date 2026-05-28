@@ -4,12 +4,6 @@
 //! spawns it on a known port and shuts it down gracefully (SIGTERM + 5s
 //! drain + SIGKILL fallback).
 
-// Plan-20 staged delivery: this module is introduced in Task 12 but not wired
-// into `run()` until Task 15 (window-create + AppState). The allow keeps the
-// crate compiling with `-D warnings` until Task 15 lands; remove this attribute
-// when the spawn call is added in lib.rs.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -17,10 +11,16 @@ use std::time::Duration;
 use anyhow::{Context as _, Result};
 use tokio::process::{Child, Command};
 
+// Plan-20 staged delivery: SHUTDOWN_TIMEOUT, the `child` field, and the
+// `shutdown_gracefully` / `is_alive` methods are consumed by Task 16
+// (window-close + crash recovery). Held here to keep the spawn path
+// self-contained.
+#[allow(dead_code)]
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct SidecarProcess {
     pub port: u16,
+    #[allow(dead_code)]
     child: Option<Child>,
 }
 
@@ -50,6 +50,7 @@ impl SidecarProcess {
     }
 
     /// SIGTERM, wait up to `SHUTDOWN_TIMEOUT`, SIGKILL fallback.
+    #[allow(dead_code)] // Wired in Task 16 (window-close).
     pub async fn shutdown_gracefully(mut self) {
         let Some(mut child) = self.child.take() else {
             return;
@@ -85,6 +86,7 @@ impl SidecarProcess {
     }
 
     /// Check if the sidecar process is still alive (non-blocking).
+    #[allow(dead_code)] // Wired in Task 16 (crash recovery).
     pub fn is_alive(&mut self) -> bool {
         if let Some(child) = self.child.as_mut() {
             child.try_wait().map(|s| s.is_none()).unwrap_or(false)

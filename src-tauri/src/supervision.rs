@@ -5,12 +5,6 @@
 //! (the Tauri shell) listens on this channel and triggers crash recovery
 //! UI + sidecar relaunch.
 
-// Plan-20 staged delivery: this module is introduced in Task 13 but not wired
-// into `run()` until Task 15 (AppState + window-create flow). The allow keeps
-// the crate compiling with `-D warnings` until that task lands; remove this
-// attribute when `Supervisor::run` is spawned from setup.
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 use tokio::sync::mpsc;
