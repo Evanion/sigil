@@ -2160,6 +2160,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sigil-core",
+ "tempfile",
+ "thiserror",
  "tokio",
  "tracing",
  "uuid",
