@@ -11,6 +11,33 @@ fn fresh_window_label() -> String {
     format!("window-{}", uuid::Uuid::new_v4().simple())
 }
 
+/// Persist the current set of open-workfile paths to `sessions.json` so
+/// Task 18's welcome window can offer "restore previous session" on the
+/// next launch. The persisted list is the *deduplicated* union of every
+/// `WindowBinding`'s workfile path — two windows viewing the same file
+/// contribute one entry. Logs and swallows persistence errors: failing to
+/// write `sessions.json` should not block the window-lifecycle flow that
+/// triggered it.
+pub(crate) fn persist_open_sessions(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let unique: std::collections::BTreeSet<_> = state
+        .windows
+        .lock()
+        .expect("windows lock")
+        .values()
+        .map(|b| b.workfile_path.clone())
+        .collect();
+    let workfiles: Vec<_> = unique.into_iter().collect();
+    if let Ok(app_data_dir) = app.path().app_data_dir()
+        && let Err(e) = crate::sessions_persist::save(
+            &app_data_dir,
+            &crate::sessions_persist::PersistedSessions { workfiles },
+        )
+    {
+        tracing::warn!("persist sessions.json: {e}");
+    }
+}
+
 /// Open a workfile in a window. Idempotent: opening a path that's already
 /// open in a window focuses the existing window instead of creating a new one.
 pub async fn open_workfile_window(app: AppHandle, workfile: PathBuf) -> Result<()> {
@@ -49,6 +76,13 @@ pub async fn open_workfile_window(app: AppHandle, workfile: PathBuf) -> Result<(
         },
     );
 
+    if let Ok(app_data_dir) = app.path().app_data_dir()
+        && let Err(e) = crate::recent_files::add(&app_data_dir, &canonical)
+    {
+        tracing::warn!("record recent: {e}");
+    }
+    persist_open_sessions(&app);
+
     let _window = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
         .title("Sigil")
         .initialization_script(&init_script)
@@ -85,6 +119,12 @@ pub fn handle_window_close(window: &tauri::Window) {
             .any(|b| b.workfile_path == binding.workfile_path);
         (binding, still_open)
     };
+
+    // Persist regardless of `still_open`: when the closing window was the
+    // last viewer of a path, that path drops out of sessions.json; when
+    // another viewer remains, the path stays. Either way the on-disk set
+    // must match the in-memory window registry after every close.
+    persist_open_sessions(&app);
 
     if still_open {
         // Another window is still viewing the same workfile — keep the

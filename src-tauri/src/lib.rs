@@ -1,10 +1,13 @@
 //! Sigil desktop shell entry point.
 
 mod app_state;
+mod dialogs;
 mod file_assoc;
 mod graphql_client;
 mod lockfile;
 mod menus;
+mod recent_files;
+mod sessions_persist;
 mod sidecar;
 mod supervision;
 mod windows;
@@ -48,6 +51,11 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            dialogs::open_workfile_dialog,
+            dialogs::new_workfile_dialog,
+            dialogs::get_recent_workfiles,
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
 
