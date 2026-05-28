@@ -13,7 +13,7 @@
 //! 5. Drops the lock
 //! 6. Signals dirty for persistence and broadcasts the transaction
 
-use async_graphql::{Context, Object, Result};
+use async_graphql::{Context, ID, Object, Result};
 
 use sigil_core::FieldOperation;
 use sigil_core::PageId;
@@ -44,6 +44,7 @@ use sigil_state::{MutationEvent, MutationEventKind, OperationPayload, Transactio
 use crate::session_header::RequestSession;
 use crate::state::{ServerState, SessionId};
 
+use super::session::{GqlSessionInfo, derive_title};
 use super::types::{
     AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodesInput,
     DeletePageInput, OperationInput, RemoveTokenInput, RenamePageInput, RenameTokenInput,
@@ -1491,6 +1492,120 @@ impl MutationRoot {
             seq: seq.to_string(),
         })
     }
+
+    /// Open a session for the given workfile path.
+    ///
+    /// Spec 20 §2.2: callable WITHOUT the `X-Sigil-Session` header. This
+    /// mutation is how clients bootstrap a session before issuing
+    /// header-gated mutations.
+    ///
+    /// Idempotent: opening the same canonical path twice returns the same
+    /// [`sigil_state::SessionId`]. Errors map to typed GraphQL errors:
+    ///
+    /// - `INVALID_WORKFILE_PATH` — path is not a `.sigil/` directory or
+    ///   could not be canonicalized.
+    /// - `LOAD_FAILED` — manifest/page deserialization or schema-version
+    ///   check failed inside [`crate::workfile::load_workfile`].
+    ///
+    /// Note: the `path` argument is validated by [`sigil_state::Sessions::open`]
+    /// — it MUST resolve to an existing directory whose extension is
+    /// `.sigil`. This mirrors the Rust-side check; the frontend MUST NOT
+    /// rely on optimistic-path conventions and must call this mutation.
+    async fn open_session(&self, ctx: &Context<'_>, path: String) -> Result<GqlSessionInfo> {
+        let state = ctx.data::<ServerState>()?;
+        let path_buf = std::path::PathBuf::from(&path);
+
+        // Bridge the async `load_workfile` to the synchronous loader closure
+        // `Sessions::open` expects (Task 3 deliverable). The closure runs on
+        // a tokio worker thread and uses `block_in_place` internally; the
+        // server uses the multi-thread runtime so this is sound.
+        let loader =
+            |p: &std::path::Path| -> std::result::Result<sigil_core::Document, anyhow::Error> {
+                crate::workfile::load_workfile_sync(p)
+            };
+
+        let id = state.app.sessions.open(&path_buf, loader).map_err(|e| {
+            // Map registry errors to typed GraphQL error codes so clients can
+            // distinguish "bad path" from "load failed" without parsing
+            // strings. Mirrors the error taxonomy in spec 20 §A — Validation
+            // & Errors.
+            use sigil_state::SessionsError as E;
+            let code = match &e {
+                E::InvalidWorkfilePath(_) | E::PathError(_) => "INVALID_WORKFILE_PATH",
+                E::LoadFailed(_) => "LOAD_FAILED",
+                E::SessionNotFound(_) | E::SessionErrored => "INTERNAL",
+            };
+            error_with_code(&format!("openSession: {e}"), code)
+        })?;
+
+        let session = state.app.sessions.get(id).ok_or_else(|| {
+            // Theoretically unreachable — `open` either inserts or returns
+            // an existing id, and the registry is single-process. Surfacing
+            // as an error rather than panicking keeps the GraphQL contract
+            // honest.
+            error_with_code(
+                "openSession: registry returned an id with no matching session",
+                "INTERNAL",
+            )
+        })?;
+
+        let state_now = match session.state.lock() {
+            Ok(g) => *g,
+            Err(poison) => *poison.into_inner(),
+        };
+
+        Ok(GqlSessionInfo {
+            id: ID(session.id.to_string()),
+            workfile_path: session.workfile_path.to_string_lossy().into_owned(),
+            title: derive_title(&session.workfile_path),
+            // Task 17 will populate this with a real ISO-8601 timestamp.
+            opened_at: String::new(),
+            state: state_now.into(),
+        })
+    }
+
+    /// Close an open session.
+    ///
+    /// Spec 20 §2.2: callable WITHOUT the `X-Sigil-Session` header. The
+    /// Tauri shell calls this when the last window mapped to a session
+    /// closes; standalone clients (web demo) may also use it to release
+    /// session state.
+    ///
+    /// Returns `true` on success. Returns a typed `SESSION_NOT_FOUND`
+    /// error if `id` does not match an open session — close is not
+    /// idempotent. Clients that may close concurrently must treat
+    /// `SESSION_NOT_FOUND` as a success outcome at the application layer.
+    async fn close_session(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id: SessionId = id.0.parse().map_err(|e| {
+            error_with_code(
+                &format!("closeSession: invalid session id: {e}"),
+                "INVALID_SESSION_ID",
+            )
+        })?;
+        state.app.sessions.close(session_id).map_err(|e| {
+            let code = match &e {
+                sigil_state::SessionsError::SessionNotFound(_) => "SESSION_NOT_FOUND",
+                _ => "INTERNAL",
+            };
+            error_with_code(&format!("closeSession: {e}"), code)
+        })?;
+        Ok(true)
+    }
+}
+
+/// Build an `async_graphql::Error` with an `extensions.code` field set.
+///
+/// Spec 20 §A specifies a closed taxonomy of error codes for session
+/// operations (`INVALID_WORKFILE_PATH`, `LOAD_FAILED`, `SESSION_NOT_FOUND`,
+/// `INVALID_SESSION_ID`). Centralizing the extension-building keeps every
+/// resolver consistent.
+fn error_with_code(message: &str, code: &str) -> async_graphql::Error {
+    let mut err = async_graphql::Error::new(message.to_string());
+    let mut ext = async_graphql::ErrorExtensionValues::default();
+    ext.set("code", code);
+    err.extensions = Some(ext);
+    err
 }
 
 #[cfg(test)]

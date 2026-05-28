@@ -1,7 +1,8 @@
-use async_graphql::{Context, Object, Result};
+use async_graphql::{Context, ID, Object, Result};
 
 use crate::state::ServerState;
 
+use super::session::{GqlSessionInfo, derive_title};
 use super::types::{DocumentInfoGql, NodeGql, PageGql, TokenGql, node_to_gql};
 
 pub struct QueryRoot;
@@ -115,5 +116,40 @@ impl QueryRoot {
         };
 
         Ok(Some(node_to_gql(&doc, node_id, parsed_uuid)?))
+    }
+
+    /// List every currently-open document session.
+    ///
+    /// Spec 20 §2.2: callable WITHOUT the `X-Sigil-Session` request header.
+    /// Clients use this query to discover sessions before sending mutations
+    /// that require the header.
+    ///
+    /// The list is materialized under the registry's read lock; the
+    /// per-session state is then read individually outside the registry
+    /// lock to avoid a cross-lock hold. State reads recover from mutex
+    /// poisoning by treating the recovered value as authoritative.
+    async fn sessions(&self, ctx: &Context<'_>) -> Result<Vec<GqlSessionInfo>> {
+        let state = ctx.data::<ServerState>()?;
+        let sessions = state.app.sessions.list();
+        let infos: Vec<GqlSessionInfo> = sessions
+            .iter()
+            .map(|s| {
+                let state_now = match s.state.lock() {
+                    Ok(g) => *g,
+                    Err(poison) => *poison.into_inner(),
+                };
+                GqlSessionInfo {
+                    id: ID(s.id.to_string()),
+                    workfile_path: s.workfile_path.to_string_lossy().into_owned(),
+                    title: derive_title(&s.workfile_path),
+                    // Task 17 plumbs the real timestamp through
+                    // DocumentSession; until then the field is stable
+                    // (empty string) per the GraphQL contract.
+                    opened_at: String::new(),
+                    state: state_now.into(),
+                }
+            })
+            .collect();
+        Ok(infos)
     }
 }
