@@ -2137,6 +2137,7 @@ dependencies = [
  "async-graphql-axum",
  "async-stream",
  "axum",
+ "clap",
  "futures-util",
  "reqwest",
  "serde",
