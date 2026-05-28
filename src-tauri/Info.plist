@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    LSTypeIsPackage marks `.sigil/` directories as document packages so Finder
+    shows them as single files (double-click opens, no "show package contents"
+    is needed for normal use). This complements the UTI declaration in
+    tauri.conf.json `fileAssociations.exportedType.conformsTo = ["com.apple.package"]`.
+
+    Tauri 2.x auto-generates a CFBundleDocumentTypes entry from fileAssociations
+    but does not expose LSTypeIsPackage as a structured field. This partial
+    Info.plist is merged with Tauri's generated values per Tauri's macOS bundle
+    docs (https://v2.tauri.app/distribute/macos-application-bundle/).
+
+    Task 13 (CI bundling) verifies the merged Info.plist contains both the
+    Tauri-generated entry and this LSTypeIsPackage augmentation.
+  -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Sigil Workfile</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>dev.sigil.workfile</string>
+      </array>
+      <key>LSTypeIsPackage</key>
+      <true/>
+    </dict>
+  </array>
+</dict>
+</plist>

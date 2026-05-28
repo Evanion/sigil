@@ -13,7 +13,10 @@
     "format": "prettier --write 'src/**/*.{ts,tsx,json,css}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,json,css}'",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "tauri": "tauri",
+    "tauri-dev": "tauri dev",
+    "tauri-build": "tauri build"
   },
   "keywords": [],
   "author": "",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@solidjs/testing-library": "^0.8.10",
+    "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^25.5.0",
@@ -43,6 +47,7 @@
   "dependencies": {
     "@kobalte/core": "^0.13.11",
     "@mbarzda/solid-i18next": "^1.4.1",
+    "@tauri-apps/api": "^2",
     "@urql/solid": "^1.0.1",
     "dnd-kit-solid": "0.1.0",
     "graphql": "^16.13.2",
