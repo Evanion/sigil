@@ -2,6 +2,7 @@
 #![allow(clippy::module_name_repetitions)]
 
 pub mod error;
+pub mod http;
 pub mod resources;
 pub mod server;
 pub mod tools;

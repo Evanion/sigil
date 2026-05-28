@@ -55,10 +55,24 @@ pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
 
     let schema = graphql::build_schema(state.clone());
 
+    // Streamable HTTP MCP transport (Spec 20 / Task 8).
+    //
+    // Mounted as a Tower service so rmcp can own the JSON-RPC dispatch and
+    // protocol-version handshake. The service shares `AppState` with the rest
+    // of the server via the cloned `state.app.legacy` — every MCP tool call
+    // therefore sees the same document the GraphQL resolvers and WebSocket
+    // subscribers see.
+    //
+    // The route is intentionally outside the `session_header::middleware`
+    // chain: MCP carries its Sigil session id as a tool argument (Task 10),
+    // not as an HTTP header.
+    let mcp_service = sigil_mcp::http::mcp_http_service(state.app.legacy.clone());
+
     let mut app = Router::new()
         .route("/health", get(routes::health::health))
         .route("/heartbeat", get(crate::heartbeat::handler))
-        .route("/graphql/ws", get(graphql_ws_handler));
+        .route("/graphql/ws", get(graphql_ws_handler))
+        .nest_service("/mcp", mcp_service);
 
     // GraphQL endpoint: route through a custom handler that injects the
     // X-Sigil-Session header (extracted by `session_header::middleware`) into

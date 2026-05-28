@@ -24,7 +24,7 @@ use rmcp::{
     },
     service::RequestContext,
     service::RoleServer,
-    tool, tool_router,
+    tool, tool_handler, tool_router,
 };
 
 use sigil_state::{AppState, SendDocument};
@@ -503,6 +503,14 @@ pub fn start_stdio(state: AppState) -> tokio::task::JoinHandle<()> {
     })
 }
 
+// The `#[tool_handler]` macro wires the `tool_router` built by `#[tool_router]`
+// above into the `ServerHandler::list_tools` and `ServerHandler::call_tool`
+// methods. Without it, both the stdio and Streamable HTTP transports respond
+// to `tools/list` with an empty array and to `tools/call` with
+// "method not found" — the default `ServerHandler` impls in rmcp do nothing.
+// Discovered while wiring the Streamable HTTP transport (Spec 20 / Task 8);
+// also fixes the pre-existing same defect on stdio.
+#[tool_handler]
 impl ServerHandler for SigilMcpServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo::new(
