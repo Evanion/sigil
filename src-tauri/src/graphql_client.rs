@@ -61,7 +61,6 @@ impl GqlClient {
         .context("parse SessionInfo")
     }
 
-    #[allow(dead_code)] // Wired in Task 16 (window-close).
     pub async fn close_session(&self, id: &str) -> Result<()> {
         let body = serde_json::json!({
             "query": "mutation($id: ID!) { closeSession(id: $id) }",

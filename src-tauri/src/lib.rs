@@ -27,6 +27,11 @@ pub fn run() {
     let initial_workfile = file_assoc::extract_workfile_path(&std::env::args().collect::<Vec<_>>());
 
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                windows::handle_window_close(window);
+            }
+        })
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             let workfile = file_assoc::extract_workfile_path(&argv);
             tracing::info!("second-instance argv={argv:?} workfile={workfile:?}");
@@ -64,13 +69,16 @@ pub fn run() {
             let (supervisor, mut rx) = Supervisor::new(SERVER_PORT);
             tauri::async_runtime::spawn(supervisor.run());
 
-            // Drain the supervision channel — proper crash recovery lands in
-            // Task 16. Without a drainer, a backed-up channel would block the
-            // supervisor's `send()` after `MAX_FAILURES`.
+            // Drain the supervision channel: on CrashDetected, snapshot the
+            // open windows, respawn the sidecar, replay each openSession, and
+            // emit session-replaced (or session-recovery-failed) per window.
+            let recovery_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 while let Some(event) = rx.recv().await {
-                    if matches!(event, supervision::SupervisionEvent::CrashDetected) {
-                        tracing::error!("crash detected (recovery flow in Task 16)");
+                    if matches!(event, supervision::SupervisionEvent::CrashDetected)
+                        && let Err(e) = windows::handle_crash(recovery_handle.clone()).await
+                    {
+                        tracing::error!("crash recovery failed: {e}");
                     }
                 }
             });

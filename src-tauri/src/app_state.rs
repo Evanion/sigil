@@ -8,8 +8,10 @@ use crate::graphql_client::GqlClient;
 use crate::sidecar::SidecarProcess;
 
 pub struct AppState {
-    // server_proc is held for ownership (graceful shutdown lands in Task 16).
-    #[allow(dead_code)]
+    // server_proc is mutated on crash recovery (windows::handle_crash drops
+    // the dead child and stores the freshly-spawned one). Graceful Tauri-quit
+    // shutdown wiring lands in a later task; the field's storage role is
+    // independent of that.
     pub server_proc: Mutex<Option<SidecarProcess>>,
     pub windows: Mutex<HashMap<String, WindowBinding>>,
     pub gql: GqlClient,
@@ -19,8 +21,6 @@ pub struct AppState {
 #[derive(Debug, Clone)]
 pub struct WindowBinding {
     pub workfile_path: PathBuf,
-    // session_id is consumed by Task 16 (window-close → closeSession GraphQL).
-    #[allow(dead_code)]
     pub session_id: String,
 }
 

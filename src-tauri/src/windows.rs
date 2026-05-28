@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use anyhow::{Context as _, Result};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::app_state::{AppState, WindowBinding};
 
@@ -56,6 +56,141 @@ pub async fn open_workfile_window(app: AppHandle, workfile: PathBuf) -> Result<(
         .inner_size(1280.0, 800.0)
         .build()
         .with_context(|| format!("build window {label}"))?;
+
+    Ok(())
+}
+
+/// Handle a CloseRequested event. Removes the binding; if no other window
+/// is viewing the same workfile, calls closeSession to release the
+/// server-side session. Removal + "is anyone else viewing this path" are
+/// performed under a single lock acquisition — per rust-defensive.md
+/// "Hold Locks for the Full Read-Modify-Write Sequence", splitting the
+/// remove from the check would be a TOCTOU race if another window for the
+/// same path closed between the two acquisitions.
+pub fn handle_window_close(window: &tauri::Window) {
+    let label = window.label().to_string();
+    let app = window.app_handle().clone();
+
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+
+    let (removed_binding, still_open) = {
+        let mut windows = state.windows.lock().expect("windows lock");
+        let Some(binding) = windows.remove(&label) else {
+            return;
+        };
+        let still_open = windows
+            .values()
+            .any(|b| b.workfile_path == binding.workfile_path);
+        (binding, still_open)
+    };
+
+    if still_open {
+        // Another window is still viewing the same workfile — keep the
+        // server-side session alive.
+        return;
+    }
+
+    let gql = state.gql.clone();
+    let session_id = removed_binding.session_id;
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = gql.close_session(&session_id).await {
+            tracing::warn!(session_id = %session_id, error = %e, "closeSession failed");
+        }
+    });
+}
+
+/// Called when supervision detects a server crash. Snapshots current bindings
+/// under a held lock, respawns the server, replays openSession for each
+/// known path, and emits `session-replaced` events so frontend windows can
+/// rebind their urql clients. Per-window failures fall back to a
+/// `session-recovery-failed` event so the UI can surface a persistent error.
+pub async fn handle_crash(app: AppHandle) -> Result<()> {
+    tracing::error!("crash recovery: respawning sigil-server");
+
+    let snapshot: Vec<(String, PathBuf)> = {
+        let state = app.state::<AppState>();
+        let windows = state.windows.lock().expect("windows lock");
+        windows
+            .iter()
+            .map(|(label, b)| (label.clone(), b.workfile_path.clone()))
+            .collect()
+    };
+
+    // Notify each window of the crash so frontends can show a recovery toast
+    // before the new session arrives.
+    for (label, _) in &snapshot {
+        if let Some(window) = app.get_webview_window(label)
+            && let Err(e) = window.emit(
+                "engine-crashed",
+                serde_json::json!({
+                    "message": "Sigil's engine restarted. Reopening your workfile…"
+                }),
+            )
+        {
+            tracing::warn!(label = %label, error = %e, "emit engine-crashed failed");
+        }
+    }
+
+    // Respawn the sidecar on the same port. The old SidecarProcess is
+    // dropped here — `kill_on_drop(true)` ensures any zombie process is
+    // reaped — and replaced with the fresh handle.
+    let state = app.state::<AppState>();
+    let port = state.server_port;
+    let new_sidecar = crate::sidecar::SidecarProcess::spawn(port)
+        .await
+        .with_context(|| format!("respawn sidecar on port {port}"))?;
+    *state.server_proc.lock().expect("server_proc lock") = Some(new_sidecar);
+
+    // Brief delay to let the new server bind its listener before replay.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    // Replay each binding. We snapshotted labels-and-paths above and do not
+    // hold the windows lock across the awaits below.
+    for (label, path) in snapshot {
+        match state.gql.open_session(&path).await {
+            Ok(info) => {
+                state.windows.lock().expect("windows lock").insert(
+                    label.clone(),
+                    WindowBinding {
+                        workfile_path: path.clone(),
+                        session_id: info.id.clone(),
+                    },
+                );
+                if let Some(window) = app.get_webview_window(&label)
+                    && let Err(e) = window.emit(
+                        "session-replaced",
+                        serde_json::json!({
+                            "newSessionId": info.id,
+                            "serverPort": port,
+                        }),
+                    )
+                {
+                    tracing::warn!(
+                        label = %label,
+                        error = %e,
+                        "emit session-replaced failed",
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::error!(label = %label, error = %e, "replay openSession failed");
+                if let Some(window) = app.get_webview_window(&label)
+                    && let Err(emit_err) = window.emit(
+                        "session-recovery-failed",
+                        serde_json::json!({ "message": e.to_string() }),
+                    )
+                {
+                    tracing::warn!(
+                        label = %label,
+                        error = %emit_err,
+                        "emit session-recovery-failed failed",
+                    );
+                }
+            }
+        }
+    }
 
     Ok(())
 }
