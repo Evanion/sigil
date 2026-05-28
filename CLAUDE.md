@@ -75,6 +75,7 @@ sigil/
 │   ├── css/
 │   └── tailwind/
 ├── cli/               # sigil-cli — token export CLI
+├── src-tauri/         # Tauri 2.x desktop shell (NOT in workspace)
 ├── docs/
 │   └── superpowers/
 │       ├── specs/     # Product design records
@@ -108,6 +109,12 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Test: `./dev.sh pnpm --prefix frontend test`
 - Lint: `./dev.sh pnpm --prefix frontend lint`
 - Format: `./dev.sh pnpm --prefix frontend format` (check: `format:check`)
+
+### Tauri desktop
+
+- Dev: `pnpm --prefix frontend tauri-dev`
+- Production build: `pnpm --prefix frontend tauri-build`
+- Run server alone (sessionless): `cargo run --bin sigil-server -- --port 4680`
 
 ### Docker (production image)
 
@@ -190,6 +197,13 @@ Rules:
 - When adding a new operation type to an MCP tool, add the corresponding handler in `applyRemoteOperation` in the same PR. A broadcast without a handler is a no-op.
 - When changing the frontend handler for an operation type, search all MCP tools and GraphQL mutations for broadcasts of that `op_type` and update them in the same PR.
 - Entity-creation broadcasts (`create_node`, `create_page`, `create_component`, etc.) MUST include the entity's stable UUID in the `value` payload under the key `"id"`. The frontend handler cannot create the entity in the local store without its identity — a payload missing `"id"` produces a silent discard. This applies to both MCP and GraphQL broadcast paths.
+
+### `sigil-shell` (src-tauri/)
+
+- Tauri 2.x desktop shell. NOT a workspace member — intentionally excluded to keep `cargo build --workspace` fast.
+- Spawns a single `sigil-server` child process on fixed port 4680.
+- Owns: window lifecycle, native menubar, file association (`.sigil/` Document Package on macOS), single-instance routing, recent-files persistence, sessions.json persistence, crash recovery (auto-restart + session replay).
+- Each Tauri window is bound to one server-side session via injected `window.__SIGIL_SESSION_ID__`. Multiple windows on the same workfile share one session.
 
 ---
 
