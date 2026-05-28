@@ -12,7 +12,7 @@
 //! // Pass `server` to `rmcp::serve_server(…)`.
 //! ```
 
-use std::sync::MutexGuard;
+use std::sync::{Arc, MutexGuard};
 
 use rmcp::{
     ServerHandler,
@@ -27,16 +27,31 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use sigil_state::{AppState, SendDocument};
+use sigil_state::{AppState, SendDocument, Sessions};
 
 /// The MCP server for Sigil.
 ///
 /// Holds shared application state and a `ToolRouter` that dispatches
 /// incoming `tools/call` requests to the appropriate handler.
+///
+/// During the Spec 20 migration (Tasks 9–10), the server carries **both** the
+/// legacy single-document [`AppState`] (used by the existing mutation tools)
+/// and the multi-session [`Sessions`] registry (used by the new session-
+/// discovery tools added in Task 9 and the session-scoped mutation tools
+/// added in Task 10). Once Task 10 migrates every mutation tool to route
+/// through `sessions.with_session(...)`, the legacy `state` field can be
+/// removed.
 #[derive(Clone)]
 pub struct SigilMcpServer {
-    /// Shared in-memory document state, owned by the server process.
+    /// Shared in-memory document state, owned by the server process. Used by
+    /// the legacy single-document mutation tools while Task 10 is in flight.
     pub state: AppState,
+    /// Multi-session registry used by `list_open_sessions` and
+    /// `get_active_workfiles` (Task 9). In the running server this points at
+    /// the same `Sessions` instance the GraphQL resolvers and WebSocket
+    /// subscribers see, so the agent's view of which sessions are open is
+    /// identical to the frontend's.
+    pub sessions: Arc<Sessions>,
     /// Tool dispatch table, built at construction time via `#[tool_router]`.
     ///
     /// The field appears unused to dead-code analysis because the `#[tool_router]`
@@ -46,11 +61,20 @@ pub struct SigilMcpServer {
 }
 
 impl SigilMcpServer {
-    /// Creates a new `SigilMcpServer` wrapping the given `AppState`.
+    /// Creates a new `SigilMcpServer` wrapping the given `AppState` and
+    /// [`Sessions`] registry.
+    ///
+    /// The two arguments are passed independently (rather than as a single
+    /// `App`) so existing test sites that construct an isolated `AppState`
+    /// can pair it with a fresh empty `Sessions` registry without depending
+    /// on the higher-level `App` wrapper. The server crate passes
+    /// `state.app.legacy.clone()` and `state.app.sessions.clone()` from a
+    /// single source of truth.
     #[must_use]
-    pub fn new(state: AppState) -> Self {
+    pub fn new(state: AppState, sessions: Arc<Sessions>) -> Self {
         Self {
             state,
+            sessions,
             tool_router: Self::tool_router(),
         }
     }
@@ -476,19 +500,60 @@ impl SigilMcpServer {
             .map(Json)
             .map_err(|e| e.to_mcp_error())
     }
+
+    /// Lists every workfile session currently open in the running Sigil
+    /// server. Returns each session's id, workfile path, display title, and
+    /// lifecycle state.
+    ///
+    /// This is a **read-only, session-discovery** tool — it takes no
+    /// `session_id` argument. Call it FIRST when you connect to a Sigil
+    /// server with multiple workfiles open: the returned `id` is what you
+    /// pass as the `session_id` argument on subsequent mutation tools.
+    #[tool(
+        name = "list_open_sessions",
+        description = "List all currently open Sigil sessions. Each session corresponds to one \
+                        open .sigil workfile in the running Sigil server. Returns id, \
+                        workfile_path, title, and lifecycle state. Use the returned `id` as the \
+                        `session_id` argument on subsequent mutation tools."
+    )]
+    fn list_open_sessions(&self) -> Json<crate::types::SessionListResult> {
+        Json(crate::tools::sessions::list_open_sessions_impl(
+            &self.sessions,
+        ))
+    }
+
+    /// Alias for `list_open_sessions`. Returns the same shape.
+    ///
+    /// Some agent prompts find the name `get_active_workfiles` more
+    /// discoverable when looking up which documents are available to edit.
+    /// Both tools are kept in the catalogue to maximize the chance that the
+    /// agent finds one of them on its first scan of the tool list.
+    #[tool(
+        name = "get_active_workfiles",
+        description = "Alias for list_open_sessions: lists currently-open .sigil workfiles. \
+                        Returns the same shape as list_open_sessions: id, workfile_path, title, \
+                        and lifecycle state per session."
+    )]
+    fn get_active_workfiles(&self) -> Json<crate::types::SessionListResult> {
+        Json(crate::tools::sessions::list_open_sessions_impl(
+            &self.sessions,
+        ))
+    }
 }
 
 /// Spawns the MCP server on stdio in a background task.
 ///
 /// This is a convenience function for `main.rs` that encapsulates all MCP
-/// transport setup. The caller only needs to provide the shared `AppState`.
+/// transport setup. The caller provides the shared `AppState` (for the
+/// legacy mutation tools) and the [`Sessions`] registry (for the
+/// session-discovery tools added in Task 9).
 ///
 /// Returns a `JoinHandle` that resolves when the MCP server exits (either
 /// because the stdio transport closed or an error occurred).
 #[must_use]
-pub fn start_stdio(state: AppState) -> tokio::task::JoinHandle<()> {
+pub fn start_stdio(state: AppState, sessions: Arc<Sessions>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let server = SigilMcpServer::new(state);
+        let server = SigilMcpServer::new(state, sessions);
         let (stdin, stdout) = rmcp::transport::io::stdio();
         match rmcp::serve_server(server, (stdin, stdout)).await {
             Ok(running) => {
@@ -559,7 +624,8 @@ mod tests {
     #[test]
     fn test_server_get_info_returns_sigil_info() {
         let state = AppState::new();
-        let server = SigilMcpServer::new(state);
+        let sessions = Arc::new(Sessions::new(64));
+        let server = SigilMcpServer::new(state, sessions);
         let info = server.get_info();
 
         assert_eq!(info.server_info.name, "sigil");

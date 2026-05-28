@@ -98,11 +98,15 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        // MCP currently consumes the legacy `AppState`; the per-session
-        // plumbing lands in Tasks 8–10 when the Streamable HTTP transport is
-        // added. Cloning the legacy half keeps `state.app.sessions` reachable
-        // from the HTTP server side without affecting MCP behavior.
-        Some(sigil_mcp::server::start_stdio(state.app.legacy.clone()))
+        // MCP carries both the legacy `AppState` (for the existing mutation
+        // tools) and the shared `Sessions` registry (for the session-
+        // discovery tools added in Task 9). Cloning the `Arc<Sessions>` is
+        // cheap and ensures stdio MCP sees the same `register_in_memory`
+        // default session that the HTTP transport sees.
+        Some(sigil_mcp::server::start_stdio(
+            state.app.legacy.clone(),
+            state.app.sessions.clone(),
+        ))
     } else {
         None
     };

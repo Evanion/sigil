@@ -133,6 +133,46 @@ pub struct ComponentInfo {
     pub property_count: usize,
 }
 
+// ── Session types ─────────────────────────────────────────────────────
+
+/// One entry in the `list_open_sessions` / `get_active_workfiles` response.
+///
+/// The shape is deliberately a flat string-typed object so an agent prompt
+/// can render or compare entries without needing to understand the
+/// `SessionState` enum representation. The `id` here is the value an agent
+/// passes back as the `session_id` argument on subsequent mutation tools
+/// (Task 10).
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionListEntry {
+    /// Opaque session identifier. Stable for the lifetime of the running
+    /// `sigil-server` process; not persisted across restarts.
+    pub id: String,
+    /// Absolute canonical path of the workfile this session is editing.
+    /// For in-memory sessions (no `--workfile` argument, or sessions created
+    /// for testing) this is the synthetic `memory://<uuid>` form.
+    pub workfile_path: String,
+    /// Display title — the workfile filename without `.sigil` extension, or
+    /// `"Untitled"` if the path has no stem.
+    pub title: String,
+    /// Lifecycle state: either `"Live"` (accepts mutations) or `"Errored"`
+    /// (rejects further mutations after a panic — see
+    /// `Sessions::with_session`). Debug-formatted so the wire shape mirrors
+    /// the Rust enum names exactly.
+    pub state: String,
+}
+
+/// Wrapper for the `list_open_sessions` / `get_active_workfiles` response.
+///
+/// Wraps the array in an object so future schema additions (pagination
+/// cursor, default session pointer, total count) can be added without a
+/// breaking change.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionListResult {
+    /// All sessions currently registered with the server, in unspecified
+    /// order. Empty when no workfiles are open.
+    pub sessions: Vec<SessionListEntry>,
+}
+
 // ── Tool input types ──────────────────────────────────────────────────
 
 /// Input for creating a new page.

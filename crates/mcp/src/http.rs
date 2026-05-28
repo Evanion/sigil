@@ -29,7 +29,7 @@
 //! ```rust,ignore
 //! use sigil_mcp::http::mcp_http_service;
 //! let router = axum::Router::new()
-//!     .nest_service("/mcp", mcp_http_service(app_state));
+//!     .nest_service("/mcp", mcp_http_service(app_state, sessions));
 //! ```
 //!
 //! The endpoint MUST NOT sit behind the `X-Sigil-Session` middleware — MCP
@@ -39,23 +39,26 @@ use std::sync::Arc;
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
-use sigil_state::AppState;
+use sigil_state::{AppState, Sessions};
 
 use crate::server::SigilMcpServer;
 
 /// Builds the Streamable HTTP service for the MCP transport.
 ///
 /// Returns a Tower service that can be mounted with
-/// [`axum::Router::nest_service`] at `/mcp`. The service shares `state` with
-/// the rest of the server, so MCP tools see the same document mutations as
-/// GraphQL clients.
+/// [`axum::Router::nest_service`] at `/mcp`. The service shares `state` and
+/// `sessions` with the rest of the server, so MCP tools see the same
+/// document mutations as GraphQL clients AND the same open-sessions list
+/// that the GraphQL `sessions` query returns.
 ///
-/// The factory closure clones `state` on every incoming request — `AppState`
-/// is internally `Arc`-backed (document mutex, persistence channel, event
-/// broadcaster) so this is cheap.
+/// The factory closure clones `state` and `sessions` on every incoming
+/// request — `AppState` is internally `Arc`-backed (document mutex,
+/// persistence channel, event broadcaster) and `Sessions` is wrapped in
+/// `Arc` at the type level, so both clones are cheap.
 #[must_use]
 pub fn mcp_http_service(
     state: AppState,
+    sessions: Arc<Sessions>,
 ) -> StreamableHttpService<SigilMcpServer, LocalSessionManager> {
     // `StreamableHttpServerConfig` is `#[non_exhaustive]`; the builder methods
     // are the only public way to construct a custom configuration.
@@ -74,7 +77,7 @@ pub fn mcp_http_service(
     let config = StreamableHttpServerConfig::default();
 
     StreamableHttpService::new(
-        move || Ok(SigilMcpServer::new(state.clone())),
+        move || Ok(SigilMcpServer::new(state.clone(), sessions.clone())),
         Arc::new(LocalSessionManager::default()),
         config,
     )
@@ -84,7 +87,7 @@ pub fn mcp_http_service(
 mod tests {
     use super::*;
     use axum::Router;
-    use sigil_state::AppState;
+    use sigil_state::{AppState, Sessions};
     use tokio::net::TcpListener;
 
     /// End-to-end smoke test: mount the MCP HTTP service in an Axum router,
@@ -105,7 +108,8 @@ mod tests {
     #[tokio::test]
     async fn mcp_http_endpoint_initialize_then_tools_list_returns_tools() {
         let state = AppState::new();
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state));
+        let sessions = Arc::new(Sessions::new(64));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -203,6 +207,249 @@ mod tests {
             !tools.is_empty(),
             "Sigil exposes many MCP tools — list must be non-empty, got: {list_payload}",
         );
+    }
+
+    /// End-to-end smoke test: register two in-memory sessions, then call the
+    /// `list_open_sessions` MCP tool over HTTP and assert the response
+    /// contains both sessions with the correct shape.
+    ///
+    /// This is the spec-mandated smoke test for Task 9 of Spec 20 — it
+    /// proves the tool is reachable via the same Streamable HTTP transport
+    /// Claude Desktop / Cursor / Claude Code will use, and that the response
+    /// envelope (`content[0].text` carrying serialized JSON) matches what
+    /// the rmcp default `Json<T>` adapter emits.
+    #[tokio::test]
+    async fn list_open_sessions_via_http_returns_registered_sessions() {
+        use sigil_core::Document;
+
+        let state = AppState::new();
+        let sessions = Arc::new(Sessions::new(64));
+        // Register two in-memory sessions BEFORE building the service — the
+        // `Arc<Sessions>` is shared, so later additions would also be visible,
+        // but seeding up-front keeps the test deterministic.
+        let _id_a = sessions.register_in_memory(Document::new("alpha".into()));
+        let _id_b = sessions.register_in_memory(Document::new("beta".into()));
+
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/mcp");
+
+        // --- step 1: initialize ---
+        let init_body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": { "name": "sigil-test", "version": "0.0.0" }
+            }
+        });
+        let init_response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&init_body)
+            .send()
+            .await
+            .expect("send initialize");
+        assert_eq!(init_response.status(), 200);
+        let session_id = init_response
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("Mcp-Session-Id header on initialize")
+            .to_owned();
+        drop(read_first_sse_payload(init_response).await);
+
+        // --- step 2: notifications/initialized ---
+        let initialized_response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &session_id)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }))
+            .send()
+            .await
+            .expect("send notifications/initialized");
+        assert_eq!(initialized_response.status(), 202);
+
+        // --- step 3: tools/call list_open_sessions ---
+        let call_response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &session_id)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "list_open_sessions",
+                    "arguments": {}
+                }
+            }))
+            .send()
+            .await
+            .expect("send tools/call list_open_sessions");
+        assert_eq!(call_response.status(), 200);
+        let payload = read_first_sse_payload(call_response)
+            .await
+            .expect("SSE payload for list_open_sessions");
+
+        // rmcp's `Json<T>` adapter wraps the structured result in the
+        // `structuredContent` field per the MCP 2025-06-18 spec. The same
+        // value is also serialized into a `text` content block for clients
+        // that haven't migrated to `structuredContent` yet. Either field
+        // satisfies the contract — assert against whichever is present.
+        let structured = payload.pointer("/result/structuredContent");
+        let parsed: serde_json::Value = if let Some(s) = structured {
+            s.clone()
+        } else {
+            let text = payload
+                .pointer("/result/content/0/text")
+                .and_then(|v| v.as_str())
+                .expect("either structuredContent or content[0].text must be present");
+            serde_json::from_str(text).expect("content text must be valid JSON")
+        };
+
+        let sessions_array = parsed
+            .pointer("/sessions")
+            .and_then(|v| v.as_array())
+            .expect("response must contain a `sessions` array");
+        assert_eq!(
+            sessions_array.len(),
+            2,
+            "two in-memory sessions were registered, got payload: {parsed}"
+        );
+
+        // Every entry must carry the documented fields.
+        for entry in sessions_array {
+            assert!(entry.get("id").and_then(|v| v.as_str()).is_some());
+            assert!(
+                entry
+                    .get("workfile_path")
+                    .and_then(|v| v.as_str())
+                    .is_some()
+            );
+            assert!(entry.get("title").and_then(|v| v.as_str()).is_some());
+            assert_eq!(
+                entry.get("state").and_then(|v| v.as_str()),
+                Some("Live"),
+                "freshly-registered sessions are Live"
+            );
+        }
+    }
+
+    /// Verifies the alias tool `get_active_workfiles` is reachable and
+    /// returns the same shape as `list_open_sessions`.
+    #[tokio::test]
+    async fn get_active_workfiles_via_http_returns_same_shape_as_list_open_sessions() {
+        use sigil_core::Document;
+
+        let state = AppState::new();
+        let sessions = Arc::new(Sessions::new(64));
+        let _id = sessions.register_in_memory(Document::new("solo".into()));
+
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/mcp");
+
+        // initialize + initialized handshake
+        let init_response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": { "name": "sigil-test", "version": "0.0.0" }
+                }
+            }))
+            .send()
+            .await
+            .expect("send initialize");
+        let session_id = init_response
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("Mcp-Session-Id")
+            .to_owned();
+        drop(read_first_sse_payload(init_response).await);
+        let initialized = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &session_id)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }))
+            .send()
+            .await
+            .expect("initialized");
+        assert_eq!(initialized.status(), 202);
+
+        // tools/call get_active_workfiles
+        let call_response = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &session_id)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "get_active_workfiles",
+                    "arguments": {}
+                }
+            }))
+            .send()
+            .await
+            .expect("call get_active_workfiles");
+        assert_eq!(call_response.status(), 200);
+        let payload = read_first_sse_payload(call_response)
+            .await
+            .expect("SSE payload");
+
+        let structured = payload.pointer("/result/structuredContent");
+        let parsed: serde_json::Value = if let Some(s) = structured {
+            s.clone()
+        } else {
+            let text = payload
+                .pointer("/result/content/0/text")
+                .and_then(|v| v.as_str())
+                .expect("text fallback");
+            serde_json::from_str(text).expect("valid JSON")
+        };
+
+        let arr = parsed
+            .pointer("/sessions")
+            .and_then(|v| v.as_array())
+            .expect("`sessions` key");
+        assert_eq!(arr.len(), 1, "single session registered, got: {parsed}");
     }
 
     /// Consumes an SSE response body chunk-by-chunk and returns the first
