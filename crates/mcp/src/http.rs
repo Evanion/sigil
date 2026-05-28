@@ -452,6 +452,316 @@ mod tests {
         assert_eq!(arr.len(), 1, "single session registered, got: {parsed}");
     }
 
+    /// End-to-end smoke test for Spec 20 / Task 10: with two sessions open,
+    /// a mutation tool with `session_id == id_a` must mutate session A's
+    /// document only — session B's document must remain untouched.
+    ///
+    /// Verifies the three obligations the task introduces:
+    /// 1. The session resolver picks the explicitly-named session.
+    /// 2. The post-mutation mirror writes the new page into the resolved
+    ///    session's `store`.
+    /// 3. The non-resolved session's `store` is NOT mutated.
+    #[tokio::test]
+    async fn create_page_with_explicit_session_id_routes_to_named_session() {
+        use sigil_core::Document;
+
+        let state = AppState::new();
+        let sessions = Arc::new(Sessions::new(64));
+        let id_a = sessions.register_in_memory(Document::new("alpha".into()));
+        let id_b = sessions.register_in_memory(Document::new("beta".into()));
+
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/mcp");
+
+        // initialize + initialized handshake
+        let init = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": { "name": "sigil-test", "version": "0.0.0" }
+                }
+            }))
+            .send()
+            .await
+            .expect("init");
+        let mcp_session = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("Mcp-Session-Id")
+            .to_owned();
+        drop(read_first_sse_payload(init).await);
+        let _ = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }))
+            .send()
+            .await
+            .expect("initialized");
+
+        // tools/call create_page with explicit session_id == id_a
+        let call = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_page",
+                    "arguments": {
+                        "name": "RoutedToA",
+                        "session_id": id_a.to_string(),
+                    }
+                }
+            }))
+            .send()
+            .await
+            .expect("call create_page");
+        assert_eq!(call.status(), 200);
+        let payload = read_first_sse_payload(call).await.expect("SSE payload");
+        // The call should succeed; verify no `result.isError` and a non-null result.
+        assert!(
+            payload.pointer("/result").is_some(),
+            "create_page must succeed (no error envelope), got: {payload}"
+        );
+
+        // Assert the new page is visible in session A's store.
+        let session_a = sessions.get(id_a).expect("session a still present");
+        let a_doc = session_a.store.read().await;
+        let names: Vec<&str> = a_doc.pages.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            names.iter().any(|n| *n == "RoutedToA"),
+            "session A must contain the created page, got pages: {names:?}"
+        );
+
+        // Assert session B's store does NOT contain the page name.
+        let session_b = sessions.get(id_b).expect("session b still present");
+        let b_doc = session_b.store.read().await;
+        let names_b: Vec<&str> = b_doc.pages.iter().map(|p| p.name.as_str()).collect();
+        assert!(
+            !names_b.iter().any(|n| *n == "RoutedToA"),
+            "session B must NOT contain the page created against session A, got pages: {names_b:?}"
+        );
+    }
+
+    /// End-to-end smoke test for Spec 20 / Task 10: with two sessions open
+    /// and **no** `session_id` provided, a mutation tool must return an
+    /// error envelope with the `session_id_required` code and the
+    /// `open_sessions` recovery payload.
+    #[tokio::test]
+    async fn create_page_without_session_id_errors_when_multiple_open() {
+        use sigil_core::Document;
+
+        let state = AppState::new();
+        let sessions = Arc::new(Sessions::new(64));
+        let _a = sessions.register_in_memory(Document::new("alpha".into()));
+        let _b = sessions.register_in_memory(Document::new("beta".into()));
+
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/mcp");
+
+        // initialize + initialized handshake
+        let init = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": { "name": "sigil-test", "version": "0.0.0" }
+                }
+            }))
+            .send()
+            .await
+            .expect("init");
+        let mcp_session = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("Mcp-Session-Id")
+            .to_owned();
+        drop(read_first_sse_payload(init).await);
+        let _ = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }))
+            .send()
+            .await
+            .expect("initialized");
+
+        // tools/call create_page WITHOUT session_id
+        let call = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_page",
+                    "arguments": {
+                        "name": "Ambiguous"
+                    }
+                }
+            }))
+            .send()
+            .await
+            .expect("call create_page");
+        assert_eq!(call.status(), 200);
+        let payload = read_first_sse_payload(call).await.expect("SSE payload");
+
+        // The response should be a JSON-RPC error (not result). The
+        // structured `data` field carries the resolver payload.
+        let error = payload
+            .pointer("/error")
+            .expect("must be a JSON-RPC error envelope");
+        let data = error
+            .pointer("/data")
+            .expect("rmcp error must include structured data");
+        assert_eq!(
+            data.pointer("/code").and_then(|v| v.as_str()),
+            Some("session_id_required"),
+            "expected session_id_required code, got payload: {payload}"
+        );
+        let open_sessions = data
+            .pointer("/open_sessions")
+            .and_then(|v| v.as_array())
+            .expect("error data must include open_sessions array");
+        assert_eq!(
+            open_sessions.len(),
+            2,
+            "open_sessions must enumerate the two registered sessions for recovery"
+        );
+    }
+
+    /// Single-session deployments must continue to work without any
+    /// `session_id` argument — the resolver's "one session → use it" rule
+    /// keeps existing single-window clients working.
+    #[tokio::test]
+    async fn create_page_without_session_id_succeeds_with_single_session() {
+        use sigil_core::Document;
+
+        let state = AppState::new();
+        let sessions = Arc::new(Sessions::new(64));
+        let id = sessions.register_in_memory(Document::new("solo".into()));
+
+        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::new();
+        let url = format!("http://{addr}/mcp");
+
+        // handshake
+        let init = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                "params": {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": { "name": "sigil-test", "version": "0.0.0" }
+                }
+            }))
+            .send()
+            .await
+            .expect("init");
+        let mcp_session = init
+            .headers()
+            .get("mcp-session-id")
+            .and_then(|v| v.to_str().ok())
+            .expect("Mcp-Session-Id")
+            .to_owned();
+        drop(read_first_sse_payload(init).await);
+        let _ = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized"
+            }))
+            .send()
+            .await
+            .expect("initialized");
+
+        // tools/call create_page WITHOUT session_id; should default to the
+        // only registered session.
+        let call = client
+            .post(&url)
+            .header("Accept", "application/json, text/event-stream")
+            .header("Content-Type", "application/json")
+            .header("Mcp-Session-Id", &mcp_session)
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "create_page",
+                    "arguments": { "name": "DefaultedPage" }
+                }
+            }))
+            .send()
+            .await
+            .expect("call create_page");
+        assert_eq!(call.status(), 200);
+        let payload = read_first_sse_payload(call).await.expect("SSE payload");
+        assert!(
+            payload.pointer("/result").is_some() && payload.pointer("/error").is_none(),
+            "create_page must succeed for single-session deployment, got: {payload}"
+        );
+
+        // Verify the page landed in the sole session.
+        let session = sessions.get(id).expect("session present");
+        let doc = session.store.read().await;
+        assert!(
+            doc.pages.iter().any(|p| p.name == "DefaultedPage"),
+            "page must be created in the sole open session"
+        );
+    }
+
     /// Consumes an SSE response body chunk-by-chunk and returns the first
     /// non-empty `data:` event payload parsed as JSON.
     ///

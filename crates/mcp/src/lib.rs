@@ -5,6 +5,7 @@ pub mod error;
 pub mod http;
 pub mod resources;
 pub mod server;
+pub mod session_resolver;
 pub mod tools;
 pub mod types;
 
