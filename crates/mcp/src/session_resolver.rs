@@ -223,7 +223,7 @@ mod tests {
         let s = make_sessions();
         // Register one session so the resolver wouldn't pick "NoSessions"
         // before noticing the bad id format.
-        s.register_in_memory(Document::new("alpha".into()));
+        let _ = s.register_in_memory(Document::new("alpha".into()));
         let err = resolve_session(&s, Some("not-a-uuid")).unwrap_err();
         assert!(matches!(err, SessionResolveError::InvalidFormat(_)));
     }
@@ -250,7 +250,7 @@ mod tests {
         let s = make_sessions();
         // Keep registry non-empty so the helper does not short-circuit on
         // NoSessions; the explicit-id branch must run first.
-        s.register_in_memory(Document::new("alpha".into()));
+        let _ = s.register_in_memory(Document::new("alpha".into()));
         let stray = SessionId::new(); // not registered
         let err = resolve_session(&s, Some(&stray.to_string())).unwrap_err();
         match err {
@@ -335,8 +335,8 @@ mod tests {
     #[test]
     fn error_payload_shape_for_ambiguous() {
         let s = make_sessions();
-        s.register_in_memory(Document::new("a".into()));
-        s.register_in_memory(Document::new("b".into()));
+        let _ = s.register_in_memory(Document::new("a".into()));
+        let _ = s.register_in_memory(Document::new("b".into()));
         let err = resolve_session(&s, None).unwrap_err();
         let payload = err.to_mcp_error_payload();
         assert_eq!(
@@ -361,7 +361,7 @@ mod tests {
     #[test]
     fn error_payload_shape_for_not_found() {
         let s = make_sessions();
-        s.register_in_memory(Document::new("a".into()));
+        let _ = s.register_in_memory(Document::new("a".into()));
         let stray = SessionId::new();
         let err = resolve_session(&s, Some(&stray.to_string())).unwrap_err();
         let payload = err.to_mcp_error_payload();
@@ -400,7 +400,7 @@ mod tests {
     #[test]
     fn error_payload_shape_for_invalid_format() {
         let s = make_sessions();
-        s.register_in_memory(Document::new("a".into()));
+        let _ = s.register_in_memory(Document::new("a".into()));
         let err = resolve_session(&s, Some("not-a-uuid")).unwrap_err();
         let payload = err.to_mcp_error_payload();
         assert_eq!(

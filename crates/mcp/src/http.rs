@@ -219,6 +219,7 @@ mod tests {
     /// envelope (`content[0].text` carrying serialized JSON) matches what
     /// the rmcp default `Json<T>` adapter emits.
     #[tokio::test]
+    #[allow(clippy::too_many_lines)] // E2E HTTP smoke + assertions naturally exceed the per-fn line limit.
     async fn list_open_sessions_via_http_returns_registered_sessions() {
         use sigil_core::Document;
 
@@ -550,7 +551,7 @@ mod tests {
         let a_doc = session_a.store.read().await;
         let names: Vec<&str> = a_doc.pages.iter().map(|p| p.name.as_str()).collect();
         assert!(
-            names.iter().any(|n| *n == "RoutedToA"),
+            names.contains(&"RoutedToA"),
             "session A must contain the created page, got pages: {names:?}"
         );
 
@@ -559,7 +560,7 @@ mod tests {
         let b_doc = session_b.store.read().await;
         let names_b: Vec<&str> = b_doc.pages.iter().map(|p| p.name.as_str()).collect();
         assert!(
-            !names_b.iter().any(|n| *n == "RoutedToA"),
+            !names_b.contains(&"RoutedToA"),
             "session B must NOT contain the page created against session A, got pages: {names_b:?}"
         );
     }
