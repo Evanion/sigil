@@ -4,14 +4,17 @@ import commonEn from "../locales/en/common.json";
 import toolsEn from "../locales/en/tools.json";
 import panelsEn from "../locales/en/panels.json";
 import a11yEn from "../locales/en/a11y.json";
+import welcomeEn from "../locales/en/welcome.json";
 import commonEs from "../locales/es/common.json";
 import toolsEs from "../locales/es/tools.json";
 import panelsEs from "../locales/es/panels.json";
 import a11yEs from "../locales/es/a11y.json";
+import welcomeEs from "../locales/es/welcome.json";
 import commonFr from "../locales/fr/common.json";
 import toolsFr from "../locales/fr/tools.json";
 import panelsFr from "../locales/fr/panels.json";
 import a11yFr from "../locales/fr/a11y.json";
+import welcomeFr from "../locales/fr/welcome.json";
 
 /**
  * Creates a fresh i18next instance with the same config as initI18n()
@@ -22,7 +25,7 @@ async function createTestInstance(lng = "en"): Promise<i18n> {
   await instance.init({
     lng,
     fallbackLng: "en",
-    ns: ["common", "tools", "panels", "a11y"],
+    ns: ["common", "tools", "panels", "a11y", "welcome"],
     defaultNS: "common",
     resources: {
       en: {
@@ -30,18 +33,21 @@ async function createTestInstance(lng = "en"): Promise<i18n> {
         tools: toolsEn,
         panels: panelsEn,
         a11y: a11yEn,
+        welcome: welcomeEn,
       },
       es: {
         common: commonEs,
         tools: toolsEs,
         panels: panelsEs,
         a11y: a11yEs,
+        welcome: welcomeEs,
       },
       fr: {
         common: commonFr,
         tools: toolsFr,
         panels: panelsFr,
         a11y: a11yFr,
+        welcome: welcomeFr,
       },
     },
     interpolation: {

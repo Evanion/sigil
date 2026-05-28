@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOCALES_DIR = join(__dirname, "..", "src", "i18n", "locales");
-const NAMESPACES = ["common", "tools", "panels", "a11y"];
+const NAMESPACES = ["common", "tools", "panels", "a11y", "welcome"];
 const LOCALES = ["en", "fr", "es"];
 
 /**

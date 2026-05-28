@@ -38,6 +38,28 @@ pub(crate) fn persist_open_sessions(app: &AppHandle) {
     }
 }
 
+/// Open the welcome window on a cold launch with no workfile in argv.
+/// The window has a fixed label so a second open attempt focuses the
+/// existing window instead of spawning a duplicate. Fixed inner size —
+/// the welcome window is a single full-screen surface, not a resizable
+/// editor canvas.
+pub fn open_welcome_window(app: &AppHandle) -> Result<()> {
+    let label = "welcome";
+    if app.get_webview_window(label).is_some() {
+        return Ok(());
+    }
+    let _w = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::App("src/welcome/welcome.html".into()),
+    )
+    .title("Sigil")
+    .inner_size(640.0, 480.0)
+    .build()
+    .context("build welcome window")?;
+    Ok(())
+}
+
 /// Open a workfile in a window. Idempotent: opening a path that's already
 /// open in a window focuses the existing window instead of creating a new one.
 pub async fn open_workfile_window(app: AppHandle, workfile: PathBuf) -> Result<()> {

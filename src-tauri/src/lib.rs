@@ -55,6 +55,9 @@ pub fn run() {
             dialogs::open_workfile_dialog,
             dialogs::new_workfile_dialog,
             dialogs::get_recent_workfiles,
+            dialogs::get_restorable_workfiles,
+            dialogs::clear_restorable_workfiles,
+            dialogs::open_workfile_path,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();
@@ -98,8 +101,9 @@ pub fn run() {
                         tracing::error!("open initial workfile: {e}");
                     }
                 });
+            } else if let Err(e) = windows::open_welcome_window(&handle) {
+                tracing::error!("open welcome window: {e}");
             }
-            // Welcome window for the no-initial-workfile case lands in Task 18.
 
             Ok(())
         })

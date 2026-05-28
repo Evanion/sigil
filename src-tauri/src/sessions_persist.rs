@@ -31,7 +31,6 @@ pub fn path(app_data_dir: &Path) -> PathBuf {
 /// launch) or unparseable (logs the parse error so the diagnostic isn't
 /// lost). Returning `Default` on parse error is intentional — a corrupt
 /// `sessions.json` should not block app launch.
-#[allow(dead_code)] // Wired in Task 18 (welcome window restore banner).
 pub fn load(app_data_dir: &Path) -> PersistedSessions {
     let p = path(app_data_dir);
     if !p.exists() {

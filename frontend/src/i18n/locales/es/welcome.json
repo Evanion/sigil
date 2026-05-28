@@ -1,0 +1,19 @@
+{
+  "ariaLabel": "Bienvenida a Sigil",
+  "actionsHeading": "Acciones de archivo",
+  "openWorkfile": "Abrir archivo…",
+  "newWorkfile": "Nuevo archivo…",
+  "recent": "Recientes",
+  "recentEmpty": "No hay archivos recientes.",
+  "reopenPrompt": "¿Reabrir {{count}} archivos anteriores?",
+  "reopen": "Reabrir",
+  "skip": "Omitir",
+  "status": {
+    "reopening": "Reabriendo {{count}} archivos…",
+    "reopened": "Archivos anteriores reabiertos.",
+    "skipped": "Restauración de archivos anteriores omitida.",
+    "openFailed": "Error al abrir archivo.",
+    "newFailed": "Error al crear nuevo archivo.",
+    "openRecentFailed": "No se pudo abrir {{name}}."
+  }
+}

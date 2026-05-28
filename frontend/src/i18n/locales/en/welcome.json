@@ -1,0 +1,19 @@
+{
+  "ariaLabel": "Sigil welcome",
+  "actionsHeading": "Workfile actions",
+  "openWorkfile": "Open Workfile…",
+  "newWorkfile": "New Workfile…",
+  "recent": "Recent",
+  "recentEmpty": "No recent workfiles.",
+  "reopenPrompt": "Reopen {{count}} previous workfiles?",
+  "reopen": "Reopen",
+  "skip": "Skip",
+  "status": {
+    "reopening": "Reopening {{count}} workfiles…",
+    "reopened": "Reopened previous workfiles.",
+    "skipped": "Skipped restoring previous workfiles.",
+    "openFailed": "Open Workfile failed.",
+    "newFailed": "New Workfile failed.",
+    "openRecentFailed": "Failed to open {{name}}."
+  }
+}

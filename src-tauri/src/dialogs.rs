@@ -14,6 +14,7 @@
 //! so we can `await` the downstream `open_workfile_window` (which performs
 //! an async `openSession` GraphQL call).
 
+use tauri::Manager;
 use tauri_plugin_dialog::DialogExt;
 
 #[tauri::command]
@@ -65,10 +66,52 @@ pub async fn new_workfile_dialog(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_recent_workfiles(app: tauri::AppHandle) -> Vec<crate::recent_files::RecentEntry> {
-    use tauri::Manager;
     if let Ok(dir) = app.path().app_data_dir() {
         crate::recent_files::load(&dir).unwrap_or_default()
     } else {
         Vec::new()
     }
+}
+
+/// Return the list of workfile paths persisted in `sessions.json` for the
+/// welcome window's "reopen previous session" banner. Paths whose targets
+/// no longer exist on disk are pruned by `sessions_persist::load`.
+#[tauri::command]
+pub fn get_restorable_workfiles(app: tauri::AppHandle) -> Vec<String> {
+    if let Ok(dir) = app.path().app_data_dir() {
+        crate::sessions_persist::load(&dir)
+            .workfiles
+            .into_iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Clear `sessions.json` after the user dismisses the restore banner.
+/// Persists an empty list atomically.
+#[tauri::command]
+pub fn clear_restorable_workfiles(app: tauri::AppHandle) -> Result<(), String> {
+    if let Ok(dir) = app.path().app_data_dir() {
+        crate::sessions_persist::save(
+            &dir,
+            &crate::sessions_persist::PersistedSessions {
+                workfiles: Vec::new(),
+            },
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open a workfile by absolute path. Used by the welcome window's recent
+/// list + restore banner. Routes through `windows::open_workfile_window`
+/// which is idempotent (focusing an already-open window instead of
+/// duplicating).
+#[tauri::command]
+pub async fn open_workfile_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    crate::windows::open_workfile_window(app, std::path::PathBuf::from(path))
+        .await
+        .map_err(|e| e.to_string())
 }
