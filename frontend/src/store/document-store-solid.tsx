@@ -50,6 +50,12 @@ import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../pane
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
 import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
+import {
+  getSessionId,
+  getGraphqlHttpUrl,
+  getGraphqlWsUrl,
+  setSessionGlobals,
+} from "../transport/session";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -578,10 +584,11 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // Client session ID for self-echo suppression (RF-004)
   const clientSessionId = crypto.randomUUID();
 
-  // urql client
-  const httpUrl = `${window.location.origin}/graphql`;
-  const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${wsProtocol}//${window.location.host}/graphql/ws`;
+  // urql client — URLs and session header sourced from the Tauri-injected
+  // globals (`__SIGIL_SESSION_ID__`, `__SIGIL_SERVER_PORT__`); the helpers
+  // fall back to `window.location` for browser/dev mode (spec-20).
+  const httpUrl = getGraphqlHttpUrl();
+  const wsUrl = getGraphqlWsUrl();
 
   // Document state
   const [state, setState] = createStore<DocumentState>({
@@ -664,6 +671,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   const wsClient = createWSClient({
     url: wsUrl,
+    // Forward the Tauri-injected sessionId to the server's WS upgrade handler
+    // (spec-20 / Task 7). graphql-ws calls this lazily on every (re)connect,
+    // so a `setSessionGlobals` from a `session-replaced` listener takes effect
+    // on the next reconnect attempt without rebuilding the client.
+    connectionParams: () => {
+      const id = getSessionId();
+      return id !== null ? { sessionId: id } : {};
+    },
     on: {
       connected: () => {
         setConnected(true);
@@ -676,7 +691,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
 
   const client = createClient({
     url: httpUrl,
-    fetchOptions: { method: "POST" },
+    // `fetchOptions` accepts a function so we read `getSessionId()` per-request
+    // — this keeps the header live across `setSessionGlobals` updates.
+    fetchOptions: () => {
+      const sessionId = getSessionId();
+      const headers: Record<string, string> = {};
+      if (sessionId !== null) headers["X-Sigil-Session"] = sessionId;
+      return {
+        method: "POST",
+        headers,
+      };
+    },
     exchanges: [
       cacheExchange,
       subscriptionExchange({
@@ -693,6 +718,71 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       fetchExchange,
     ],
   });
+
+  // ── Tauri session-replaced + crash-recovery listeners (spec-20 Task 16) ──
+  //
+  // When the sidecar crashes and the Tauri host respawns it (Task 16), the
+  // host emits `session-replaced` with the new sessionId + port. We update
+  // `window.__SIGIL_*` so the next urql request and the next graphql-ws
+  // reconnect attempt pick up the new values (both `fetchOptions` and
+  // `connectionParams` are functions, so they re-read on every call).
+  //
+  // KNOWN CONCERN (deferred): the existing urql client and WS subscription
+  // are bound to the original port at construction. After a port change the
+  // WS will reconnect to the new port (graphql-ws retries automatically),
+  // but in-flight HTTP requests against the OLD origin will fail. A full
+  // urql-client rebuild is a larger refactor (closures in `sendOps`,
+  // `fetchPages`, `subscriptionHandle` all capture `client`). The minimum
+  // viable mitigation is `window.location.reload()` after the globals are
+  // swapped — Tauri's host will rehydrate the WebView against the new port.
+  // Track in Task 21/22 follow-up if a smoother in-place rebuild is needed.
+  let unlistenSessionReplaced: (() => void) | null = null;
+  let unlistenEngineCrashed: (() => void) | null = null;
+  let unlistenRecoveryFailed: (() => void) | null = null;
+
+  interface SessionReplacedPayload {
+    newSessionId: string;
+    serverPort: number;
+  }
+
+  async function installSessionEventListeners(): Promise<void> {
+    if (typeof window === "undefined") return;
+    if (!("__TAURI_INTERNALS__" in window)) return;
+
+    try {
+      const { listen } = await import("@tauri-apps/api/event");
+
+      unlistenSessionReplaced = await listen<SessionReplacedPayload>(
+        "session-replaced",
+        (event) => {
+          const { newSessionId, serverPort } = event.payload;
+          setSessionGlobals(newSessionId, serverPort);
+          console.warn("session-replaced: reloading WebView against new sidecar", {
+            newSessionId,
+            serverPort,
+          });
+          // Reload picks up the new globals and rebuilds the entire store
+          // with the new URLs. See KNOWN CONCERN above.
+          window.location.reload();
+        },
+      );
+
+      unlistenEngineCrashed = await listen<{ message: string }>("engine-crashed", (event) => {
+        console.warn("engine-crashed:", event.payload.message);
+      });
+
+      unlistenRecoveryFailed = await listen<{ message: string }>(
+        "session-recovery-failed",
+        (event) => {
+          console.error("session-recovery-failed:", event.payload.message);
+        },
+      );
+    } catch (e) {
+      console.error("installSessionEventListeners failed:", e);
+    }
+  }
+
+  void installSessionEventListeners();
 
   // ── Fetch pages ──────────────────────────────────────────────────────
 
@@ -2693,6 +2783,12 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     interceptor.destroy();
     subscriptionHandle.unsubscribe();
     void wsClient.dispose();
+    // Per frontend-defensive.md "Module-Level Timers and Subscriptions Must
+    // Be Cleared on Teardown" — release the Tauri event listeners installed
+    // in `installSessionEventListeners`.
+    unlistenSessionReplaced?.();
+    unlistenEngineCrashed?.();
+    unlistenRecoveryFailed?.();
   }
 
   return {
