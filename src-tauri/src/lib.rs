@@ -1,5 +1,7 @@
 //! Sigil desktop shell entry point.
 
+mod sidecar;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
