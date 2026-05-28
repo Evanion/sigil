@@ -39,6 +39,13 @@ anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1.23.0", features = ["v4"] }
+# NOTE: deviation from plan — plan specified `version = "0.12"` with feature
+# `rustls-tls`, but Tauri's dependency graph already pulls in reqwest 0.13.4
+# (see Cargo.lock). Using "0.13" matches the existing transitive resolution;
+# pinning "0.12" would compile two copies of reqwest + hyper for no functional
+# benefit. The feature was renamed `rustls-tls` -> `rustls` in 0.13. Both
+# avoid OpenSSL link issues on Windows.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 sigil-server = { path = "../crates/server" }
 
 [target.'cfg(unix)'.dependencies]
