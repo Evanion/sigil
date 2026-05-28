@@ -2162,6 +2162,7 @@ dependencies = [
  "sigil-core",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

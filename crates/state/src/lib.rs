@@ -15,6 +15,8 @@ use sigil_core::Document;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
 
+pub mod sessions;
+
 /// Capacity of the broadcast channel for mutation events.
 ///
 /// This determines the maximum number of unread events a subscriber can fall
