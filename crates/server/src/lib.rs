@@ -8,21 +8,23 @@
 pub mod graphql;
 pub mod persistence;
 pub mod routes;
+pub mod session_header;
 pub mod state;
 pub mod workfile;
 
 use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, GraphiQLSource};
-use async_graphql_axum::{GraphQL, GraphQLProtocol, GraphQLWebSocket};
+use async_graphql_axum::{GraphQLProtocol, GraphQLRequest, GraphQLResponse, GraphQLWebSocket};
 use axum::Extension;
 use axum::Router;
 use axum::extract::WebSocketUpgrade;
 use axum::http::{HeaderMap, HeaderValue, Method};
 use axum::response::{Html, IntoResponse};
-use axum::routing::{get, get_service};
+use axum::routing::get;
 use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 
 use crate::graphql::SigilSchema;
+use crate::session_header::RequestSession;
 use crate::state::ServerState;
 
 /// Builds the full application router.
@@ -56,18 +58,24 @@ pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
         .route("/health", get(routes::health::health))
         .route("/graphql/ws", get(graphql_ws_handler));
 
-    // GraphQL endpoint accepts both GET (query params) and POST (JSON body).
-    // GET is required because urql's fetchExchange sends queries as GET by default.
-    let graphql_service = GraphQL::new(schema.clone());
-    if std::env::var("SIGIL_DEV_CORS").is_ok() {
-        // RF-004: Also expose GraphiQL IDE in development mode (separate GET handler).
-        app = app.route("/graphql", get(graphiql).post_service(graphql_service));
+    // GraphQL endpoint: route through a custom handler that injects the
+    // X-Sigil-Session header (extracted by `session_header::middleware`) into
+    // the async-graphql request context. We attach the middleware to the
+    // `/graphql` route directly so it does not run for `/health` or the WS
+    // upgrade path (Task 7 wires session id into WS via connection_params).
+    let graphql_route = if std::env::var("SIGIL_DEV_CORS").is_ok() {
+        // RF-004: GET serves GraphiQL HTML in dev mode; POST serves GraphQL.
+        get(graphiql).post(graphql_post_handler)
     } else {
-        app = app.route(
-            "/graphql",
-            get_service(graphql_service.clone()).post_service(graphql_service),
-        );
-    }
+        // Production: both GET and POST serve GraphQL (some clients use GET
+        // for query operations).
+        get(graphql_post_handler).post(graphql_post_handler)
+    };
+
+    app = app.route(
+        "/graphql",
+        graphql_route.layer(axum::middleware::from_fn(session_header::middleware)),
+    );
 
     let app = app.layer(Extension(schema)).layer(cors).with_state(state);
 
@@ -87,6 +95,22 @@ async fn graphiql() -> Html<String> {
             .subscription_endpoint("/graphql/ws")
             .finish(),
     )
+}
+
+/// GraphQL POST/GET handler that injects [`RequestSession`] (extracted by
+/// [`session_header::middleware`]) into the async-graphql request context so
+/// resolvers can read `ctx.data::<RequestSession>()`.
+///
+/// Without this plumbing the middleware would populate the request extension
+/// but resolvers would have no way to read it from the async-graphql side.
+async fn graphql_post_handler(
+    Extension(schema): Extension<SigilSchema>,
+    Extension(session): Extension<RequestSession>,
+    req: GraphQLRequest,
+) -> GraphQLResponse {
+    let mut request = req.into_inner();
+    request = request.data(session);
+    schema.execute(request).await.into()
 }
 
 /// Returns `true` if the given origin is acceptable for WebSocket connections.

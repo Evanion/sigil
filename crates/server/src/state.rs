@@ -47,17 +47,36 @@ pub struct ServerState {
 
 impl ServerState {
     /// Creates a new `ServerState` with an empty document, no persistence,
-    /// and an empty [`Sessions`] registry.
+    /// and a default in-memory session registered in the [`Sessions`]
+    /// registry.
     ///
-    /// Suitable for tests and in-memory-only operation.
+    /// Suitable for tests and in-memory-only operation. The default session
+    /// id is set so GraphQL resolvers can resolve a session without an
+    /// `X-Sigil-Session` header.
     #[must_use]
     pub fn new() -> Self {
         let mut legacy = AppState::new();
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
         legacy.set_event_tx(tx);
-        Self {
-            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
-        }
+        let app = App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY);
+
+        // Register an in-memory default session so mutations in tests /
+        // in-memory mode have a resolvable session id. The session's
+        // initial document is a clone of the legacy document so the two
+        // start consistent (the mutation handlers mirror legacy after each
+        // apply to maintain that consistency).
+        let default_doc = {
+            let guard = app
+                .legacy
+                .document
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.0.clone()
+        };
+        let id = app.sessions.register_in_memory(default_doc);
+        app.set_default_session_id(Some(id));
+
+        Self { app }
     }
 
     /// Creates a `ServerState` backed by a workfile on disk.
@@ -156,9 +175,16 @@ mod tests {
     }
 
     #[test]
-    fn test_server_state_exposes_empty_sessions_registry() {
+    fn test_server_state_registers_default_in_memory_session() {
+        // Spec 20: `ServerState::new()` now registers an in-memory default
+        // session so GraphQL mutations can resolve a session id without an
+        // explicit workfile or `X-Sigil-Session` header.
         let state = ServerState::new();
-        assert!(state.app.sessions.is_empty());
-        assert!(state.app.default_session_id().is_none());
+        assert_eq!(state.app.sessions.len(), 1);
+        let id = state
+            .app
+            .default_session_id()
+            .expect("default session id should be set");
+        assert!(state.app.sessions.get(id).is_some());
     }
 }

@@ -38,9 +38,11 @@ use sigil_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
     MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
 };
-use sigil_state::{MutationEventKind, OperationPayload, TransactionPayload};
+use sigil_state::sessions::{DocumentSession, SessionEvent, SessionState};
+use sigil_state::{MutationEvent, MutationEventKind, OperationPayload, TransactionPayload};
 
-use crate::state::ServerState;
+use crate::session_header::RequestSession;
+use crate::state::{ServerState, SessionId};
 
 use super::types::{
     AddTokenInput, ApplyOperationsResult, CreateNodeInput, CreatePageInput, DeleteNodesInput,
@@ -64,17 +66,55 @@ fn multi_op_transaction(
     }
 }
 
-/// Acquires the document lock, recovering from mutex poisoning.
-fn acquire_document_lock(
-    state: &ServerState,
-) -> std::sync::MutexGuard<'_, crate::state::SendDocument> {
-    match state.app.document.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            tracing::error!("document mutex poisoned, recovering");
-            poisoned.into_inner()
-        }
+/// Resolves the [`SessionId`] for the current GraphQL request.
+///
+/// Reads the [`RequestSession`] populated by [`crate::session_header::middleware`]
+/// from the async-graphql request context. Falls back to
+/// [`crate::state::App::default_session_id`] when the request has no header,
+/// preserving compatibility with single-document deployments that have not yet
+/// adopted the multi-session client.
+///
+/// Returns `SESSION_REQUIRED` when neither a header nor a default session id
+/// is available — this indicates the server was started without a workfile and
+/// the client did not open a session explicitly (Task 6 adds `openSession`).
+fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
+    // `RequestSession` is only present for HTTP requests routed through the
+    // middleware. WebSocket-originated mutations (none today) and tests that
+    // bypass the router both fall through to `Ok(RequestSession(None))`.
+    let header_session = ctx.data::<RequestSession>().map(|rs| rs.0).unwrap_or(None);
+
+    if let Some(id) = header_session {
+        return Ok(id);
     }
+    state.app.default_session_id().ok_or_else(|| {
+        async_graphql::Error::new(
+            "SESSION_REQUIRED: provide X-Sigil-Session header or open a workfile session",
+        )
+    })
+}
+
+/// Loads a session by id, returning a typed error if it is missing or in
+/// the `Errored` state.
+fn require_live_session(
+    state: &ServerState,
+    session_id: SessionId,
+) -> Result<std::sync::Arc<DocumentSession>> {
+    let session = state
+        .app
+        .sessions
+        .get(session_id)
+        .ok_or_else(|| async_graphql::Error::new(format!("SESSION_NOT_FOUND: {session_id}")))?;
+
+    let st = match session.state.lock() {
+        Ok(g) => *g,
+        Err(p) => *p.into_inner(),
+    };
+    if st == SessionState::Errored {
+        return Err(async_graphql::Error::new(format!(
+            "SESSION_ERRORED: {session_id}"
+        )));
+    }
+    Ok(session)
 }
 
 // ── applyOperations helpers ──────────────────────────────────────────
@@ -103,8 +143,17 @@ fn acquire_document_lock(
 /// matches what `frontend/src/operations/apply-remote.ts` expects).
 struct ParsedOp {
     /// Builds the `FieldOperation` after UUID→NodeId resolution inside the lock.
+    ///
+    /// Both this closure and the produced `FieldOperation` are required to be
+    /// `Send` because `apply_operations` holds a `Vec<ParsedOp>` across the
+    /// `session.store.write().await` point — async-graphql's resolver
+    /// futures must be `Send`. All concrete `FieldOperation` impls in
+    /// `sigil-core` are `Send` (they contain only ids, primitives, and
+    /// owned data), so this bound is satisfied at every construction site
+    /// below.
     #[allow(clippy::type_complexity)]
-    builder: Box<dyn FnOnce(&sigil_core::Document) -> Result<Box<dyn FieldOperation>>>,
+    builder:
+        Box<dyn FnOnce(&sigil_core::Document) -> Result<Box<dyn FieldOperation + Send>> + Send>,
     /// The broadcast payload for this operation. For paths whose input shape
     /// already matches the frontend dispatcher's expected `value` shape, this
     /// is built eagerly from the input JSON. For paths that need a canonical
@@ -116,7 +165,8 @@ struct ParsedOp {
     /// the post-apply document. Required when the user-input shape differs
     /// from the frontend dispatcher's expected wire format.
     #[allow(clippy::type_complexity)]
-    post_apply_value: Option<Box<dyn FnOnce(&sigil_core::Document) -> Result<serde_json::Value>>>,
+    post_apply_value:
+        Option<Box<dyn FnOnce(&sigil_core::Document) -> Result<serde_json::Value> + Send>>,
 }
 
 /// Parses all operation inputs into `ParsedOp` structs.
@@ -185,7 +235,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTransform {
                         node_id,
                         new_transform,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -200,7 +250,8 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                         .arena
                         .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-                    Ok(Box::new(RenameNode { node_id, new_name }) as Box<dyn FieldOperation>)
+                    Ok(Box::new(RenameNode { node_id, new_name })
+                        as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -218,7 +269,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetVisible {
                         node_id,
                         new_visible,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -236,7 +287,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetLocked {
                         node_id,
                         new_locked,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -261,7 +312,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                         .arena
                         .id_by_uuid(&parsed_uuid)
                         .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-                    Ok(Box::new(SetFills { node_id, new_fills }) as Box<dyn FieldOperation>)
+                    Ok(Box::new(SetFills { node_id, new_fills }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -289,7 +340,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetStrokes {
                         node_id,
                         new_strokes,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -317,7 +368,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetEffects {
                         node_id,
                         new_effects,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -344,7 +395,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetOpacity {
                         node_id,
                         new_opacity,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -362,7 +413,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetBlendMode {
                         node_id,
                         new_blend_mode,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -401,7 +452,8 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                             Ok(Box::new(SetCorners {
                                 node_id,
                                 new_corners,
-                            }) as Box<dyn FieldOperation>)
+                            })
+                                as Box<dyn FieldOperation + Send>)
                         }),
                         broadcast,
                         post_apply_value: Some(Box::new(move |doc| {
@@ -457,7 +509,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextContent {
                         node_id,
                         new_content,
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -484,7 +536,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::FontFamily(font_family),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -505,7 +557,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::FontSize(font_size),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -523,7 +575,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::FontWeight(font_weight),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -541,7 +593,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::FontStyle(font_style),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -562,7 +614,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::LineHeight(line_height),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -583,7 +635,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::LetterSpacing(letter_spacing),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -601,7 +653,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::TextAlign(text_align),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -619,7 +671,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::TextDecoration(text_decoration),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -640,7 +692,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::TextColor(text_color),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -672,7 +724,7 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                     Ok(Box::new(SetTextStyleField {
                         node_id,
                         field: TextStyleField::TextShadow(opt_shadow),
-                    }) as Box<dyn FieldOperation>)
+                    }) as Box<dyn FieldOperation + Send>)
                 }),
                 broadcast,
                 post_apply_value: None,
@@ -753,7 +805,7 @@ fn parse_create_node(cn: &CreateNodeInput) -> Result<ParsedOp> {
                 name,
                 page_id,
                 initial_transform,
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -836,7 +888,7 @@ fn parse_delete_nodes(dn: &DeleteNodesInput) -> Result<ParsedOp> {
                 let page_id = node_to_page.get(&node_id).copied();
                 targets.push((node_id, page_id));
             }
-            Ok(Box::new(DeleteNodes { targets }) as Box<dyn FieldOperation>)
+            Ok(Box::new(DeleteNodes { targets }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -886,7 +938,7 @@ fn parse_reparent(rp: &ReparentInput) -> Result<ParsedOp> {
                 node_id,
                 new_parent_id: parent_id,
                 new_position: position_usize,
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -928,7 +980,7 @@ fn parse_reorder(ro: &ReorderInput) -> Result<ParsedOp> {
             Ok(Box::new(ReorderChildren {
                 node_id,
                 new_position: new_position_usize,
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -955,7 +1007,7 @@ fn parse_create_page(input: &CreatePageInput) -> Result<ParsedOp> {
 
     Ok(ParsedOp {
         builder: Box::new(move |_doc| {
-            Ok(Box::new(CreatePage { page_id, name }) as Box<dyn FieldOperation>)
+            Ok(Box::new(CreatePage { page_id, name }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -981,7 +1033,7 @@ fn parse_delete_page(input: &DeletePageInput) -> Result<ParsedOp> {
 
     Ok(ParsedOp {
         builder: Box::new(move |_doc| {
-            Ok(Box::new(DeletePage { page_id }) as Box<dyn FieldOperation>)
+            Ok(Box::new(DeletePage { page_id }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1008,7 +1060,7 @@ fn parse_rename_page(input: &RenamePageInput) -> Result<ParsedOp> {
 
     Ok(ParsedOp {
         builder: Box::new(move |_doc| {
-            Ok(Box::new(RenamePage { page_id, new_name }) as Box<dyn FieldOperation>)
+            Ok(Box::new(RenamePage { page_id, new_name }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1045,7 +1097,7 @@ fn parse_reorder_page(input: &ReorderPageInput) -> Result<ParsedOp> {
             Ok(Box::new(ReorderPage {
                 page_id,
                 new_position,
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1105,7 +1157,9 @@ fn parse_add_token(input: &AddTokenInput) -> Result<ParsedOp> {
     };
 
     Ok(ParsedOp {
-        builder: Box::new(move |_doc| Ok(Box::new(AddToken { token }) as Box<dyn FieldOperation>)),
+        builder: Box::new(move |_doc| {
+            Ok(Box::new(AddToken { token }) as Box<dyn FieldOperation + Send>)
+        }),
         broadcast,
         post_apply_value: None,
     })
@@ -1166,7 +1220,7 @@ fn parse_update_token(input: &UpdateTokenInput) -> Result<ParsedOp> {
             Ok(Box::new(UpdateToken {
                 new_token,
                 token_name,
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1190,7 +1244,7 @@ fn parse_remove_token(input: &RemoveTokenInput) -> Result<ParsedOp> {
         builder: Box::new(move |_doc| {
             Ok(Box::new(RemoveToken {
                 token_name: token_name.clone(),
-            }) as Box<dyn FieldOperation>)
+            }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1219,7 +1273,7 @@ fn parse_rename_token(input: &RenameTokenInput) -> Result<ParsedOp> {
 
     Ok(ParsedOp {
         builder: Box::new(move |_doc| {
-            Ok(Box::new(RenameToken { old_name, new_name }) as Box<dyn FieldOperation>)
+            Ok(Box::new(RenameToken { old_name, new_name }) as Box<dyn FieldOperation + Send>)
         }),
         broadcast,
         post_apply_value: None,
@@ -1282,6 +1336,13 @@ impl MutationRoot {
             OperationInput::RemoveToken(_) => MutationEventKind::TokenDeleted,
         };
 
+        // Resolve the target session BEFORE parsing or locking. Reads
+        // X-Sigil-Session via the middleware-populated `RequestSession`,
+        // falling back to the registry's default session id for clients
+        // that have not yet adopted multi-session.
+        let session_id = resolve_session(ctx, state)?;
+        let session = require_live_session(state, session_id)?;
+
         // First pass: parse all inputs (no lock needed).
         // This validates JSON formats, deserializes typed values, and checks
         // domain constraints (float ranges, path validity, etc.).
@@ -1304,8 +1365,16 @@ impl MutationRoot {
         // via `post_apply_value`. All broadcast payloads are collected AFTER
         // their corresponding apply has succeeded, so a failed batch never
         // emits a partial broadcast.
+        //
+        // Spec 20: Mutations route through the per-session document store
+        // (`session.store`) rather than the legacy `AppState.document`. We
+        // mirror the post-apply state back to the legacy store after the
+        // batch succeeds so that (a) the persistence task still reads the
+        // authoritative document, and (b) MCP tools that have not yet been
+        // migrated continue to see consistent state. The legacy mirror is
+        // dropped entirely once MCP migrates (Tasks 8–10).
         let broadcast_ops: Vec<OperationPayload> = {
-            let mut doc_guard = acquire_document_lock(state);
+            let mut doc_guard = session.store.write().await;
 
             // Snapshot the document state for rollback on partial failure
             let snapshot = doc_guard.0.clone();
@@ -1357,18 +1426,67 @@ impl MutationRoot {
                 collected.push(broadcast);
             }
 
+            // Mirror the post-apply session document to the legacy store so
+            // persistence (which reads `state.app.legacy.document`) and any
+            // un-migrated MCP tools observe the same state. This is a
+            // transitional bridge — Tasks 8–10 remove the legacy store and
+            // this mirror with it.
+            //
+            // We hold both locks in a strict order (session.store write
+            // already acquired above; legacy mutex acquired here) to avoid
+            // any future TOCTOU between the apply and the mirror.
+            {
+                let mut legacy = match state.app.legacy.document.lock() {
+                    Ok(g) => g,
+                    Err(p) => {
+                        tracing::error!("legacy document mutex poisoned during mirror, recovering");
+                        p.into_inner()
+                    }
+                };
+                legacy.0 = doc_guard.0.clone();
+            }
+
             collected
         };
 
-        // Signal dirty + broadcast
+        // Signal dirty + broadcast.
+        //
+        // The transaction payload is assigned a sequence number from the
+        // (legacy) per-app counter and broadcast on TWO channels:
+        //
+        // 1. `session.broadcast` — the per-session channel that
+        //    `subscription.rs` migrates to in this task. New subscribers
+        //    receive `SessionEvent::DocumentEvent(...)` here.
+        // 2. `state.app.legacy.event_tx` via `publish_transaction` — kept
+        //    for any subscribers / tests still on the legacy channel during
+        //    the Spec 20 migration window. Dropped together with the legacy
+        //    store in Tasks 8–10.
         state.app.signal_dirty();
-        state.app.publish_transaction(
-            event_kind,
-            None,
-            multi_op_transaction(Some(user_id), broadcast_ops),
-        );
 
-        let seq = state.app.next_seq();
+        let mut transaction = multi_op_transaction(Some(user_id), broadcast_ops);
+        transaction.seq = state.app.next_seq();
+
+        let mutation_event = MutationEvent {
+            kind: event_kind,
+            uuid: None,
+            data: None,
+            transaction: Some(transaction.clone()),
+        };
+
+        // Per-session broadcast: fire-and-forget. No subscribers is not an
+        // error.
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(mutation_event.clone()));
+
+        // Legacy broadcast: also fire-and-forget. `publish_transaction`
+        // would re-assign seq, so we use the lower-level `event_tx` path
+        // directly to preserve the seq we already assigned above.
+        if let Some(tx) = state.app.legacy.event_tx() {
+            let _ = tx.send(mutation_event);
+        }
+
+        let seq = transaction.seq;
         Ok(ApplyOperationsResult {
             seq: seq.to_string(),
         })
@@ -1384,13 +1502,54 @@ mod tests {
     fn test_schema(
         state: ServerState,
     ) -> Schema<super::super::query::QueryRoot, MutationRoot, EmptySubscription> {
+        // Inject `RequestSession(None)` so resolvers fall back to the
+        // registry's default session id. The default is registered by
+        // `ServerState::new()` via the in-memory session.
         Schema::build(
             super::super::query::QueryRoot,
             MutationRoot,
             EmptySubscription,
         )
         .data(state)
+        .data(RequestSession(None))
         .finish()
+    }
+
+    /// Applies a closure to the document held in BOTH the session store
+    /// (mutated by GraphQL `apply_operations`) and the legacy
+    /// `AppState.document` (read by tests for verification and by
+    /// persistence). Keeps the two stores consistent for tests that
+    /// pre-seed data outside the GraphQL apply path.
+    fn apply_to_session_and_legacy<F, R>(state: &ServerState, f: F) -> R
+    where
+        F: FnOnce(&mut sigil_core::Document) -> R,
+    {
+        let session_id = state.app.default_session_id().expect("default session id");
+        let session = state
+            .app
+            .sessions
+            .get(session_id)
+            .expect("default session registered");
+
+        // Use blocking_write because tests run inside `tokio::test` but
+        // these helpers are sync. `RwLock::blocking_write` only works on
+        // a multi-threaded runtime — `#[tokio::test]` uses the
+        // single-threaded runtime by default, so we instead use a
+        // try-loop guarded by a never-contended invariant: tests do not
+        // run concurrent mutations on the same store. A single-attempt
+        // `try_write` is sufficient.
+        let mut session_doc = session
+            .store
+            .try_write()
+            .expect("test session lock uncontended");
+        let result = f(&mut session_doc.0);
+
+        // Mirror to legacy.document so reads via `state.app.document.lock()`
+        // see the same state.
+        let mut legacy_doc = state.app.document.lock().expect("legacy lock");
+        legacy_doc.0 = session_doc.0.clone();
+
+        result
     }
 
     /// Helper: creates a frame node directly via the state and returns its UUID string.
@@ -1413,9 +1572,10 @@ mod tests {
             initial_transform: None,
         };
 
-        let mut doc = state.app.document.lock().unwrap();
-        cmd.validate(&doc).expect("create node validate");
-        cmd.apply(&mut doc).expect("create node apply");
+        apply_to_session_and_legacy(state, |doc| {
+            cmd.validate(doc).expect("create node validate");
+            cmd.apply(doc).expect("create node apply");
+        });
         node_uuid.to_string()
     }
 
@@ -1793,9 +1953,10 @@ mod tests {
             initial_transform: None,
         };
 
-        let mut doc = state.app.document.lock().unwrap();
-        cmd.validate(&doc).expect("create text node validate");
-        cmd.apply(&mut doc).expect("create text node apply");
+        apply_to_session_and_legacy(state, |doc| {
+            cmd.validate(doc).expect("create text node validate");
+            cmd.apply(doc).expect("create text node apply");
+        });
         node_uuid.to_string()
     }
 
@@ -2378,8 +2539,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a color token directly.
-        {
-            let mut doc = state.app.document.lock().unwrap();
+        apply_to_session_and_legacy(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.brand".to_string(),
@@ -2391,9 +2551,9 @@ mod tests {
             )
             .expect("valid token");
             let op = CoreAddToken { token };
-            op.validate(&doc).expect("validate");
-            op.apply(&mut doc).expect("apply");
-        }
+            op.validate(doc).expect("validate");
+            op.apply(doc).expect("apply");
+        });
 
         // Update it to a new value (Color uses serde tag = "space", rename_all = "snake_case").
         let new_value_json = r#"{\"type\":\"color\",\"value\":{\"space\":\"srgb\",\"r\":1.0,\"g\":0.0,\"b\":0.0,\"a\":1.0}}"#;
@@ -2431,8 +2591,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a token.
-        {
-            let mut doc = state.app.document.lock().unwrap();
+        apply_to_session_and_legacy(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.accent".to_string(),
@@ -2444,9 +2603,9 @@ mod tests {
             )
             .expect("valid token");
             let op = CoreAddToken { token };
-            op.validate(&doc).expect("validate");
-            op.apply(&mut doc).expect("apply");
-        }
+            op.validate(doc).expect("validate");
+            op.apply(doc).expect("apply");
+        });
 
         let query = r#"mutation {
             applyOperations(
@@ -2481,8 +2640,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a token first.
-        {
-            let mut doc = state.app.document.lock().unwrap();
+        apply_to_session_and_legacy(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.primary".to_string(),
@@ -2494,9 +2652,9 @@ mod tests {
             )
             .expect("valid token");
             let op = CoreAddToken { token };
-            op.validate(&doc).expect("validate");
-            op.apply(&mut doc).expect("apply");
-        }
+            op.validate(doc).expect("validate");
+            op.apply(doc).expect("apply");
+        });
 
         // Attempt to add again with same name — should fail.
         let token_uuid = uuid::Uuid::new_v4().to_string();
@@ -2755,5 +2913,170 @@ mod tests {
             "error message should mention superellipse or shape-level, got: {}",
             res.errors[0].message
         );
+    }
+
+    // ── Session resolution tests (Spec 20, Task 5) ────────────────────
+
+    /// `apply_operations` MUST return `SESSION_NOT_FOUND` when the
+    /// `X-Sigil-Session` header points at a session that is not registered
+    /// in the [`Sessions`] registry.
+    #[tokio::test]
+    async fn test_apply_operations_rejects_unknown_session_id() {
+        let state = ServerState::new();
+        let unknown_id = SessionId::new();
+        // Inject an explicit RequestSession pointing at an id that doesn't
+        // exist in the registry, overriding the default-session fallback.
+        let schema = Schema::build(
+            super::super::query::QueryRoot,
+            MutationRoot,
+            EmptySubscription,
+        )
+        .data(state.clone())
+        .data(RequestSession(Some(unknown_id)))
+        .finish();
+
+        // Use a setField that would fail validation anyway, but the session
+        // check happens BEFORE any validation, so we expect SESSION_NOT_FOUND
+        // not "node not found".
+        let query = r#"mutation {
+                applyOperations(
+                    operations: [{ setField: { nodeUuid: "00000000-0000-0000-0000-000000000000", path: "name", value: "\"x\"" } }],
+                    userId: "test"
+                ) { seq }
+            }"#;
+        let res = schema.execute(query).await;
+        assert_eq!(res.errors.len(), 1, "expected exactly one error");
+        assert!(
+            res.errors[0].message.starts_with("SESSION_NOT_FOUND"),
+            "expected SESSION_NOT_FOUND, got: {}",
+            res.errors[0].message
+        );
+    }
+
+    /// `apply_operations` MUST return `SESSION_REQUIRED` when neither a
+    /// header nor a default session id is available — this is the error
+    /// surfaced to a client that hits a server started without `--workfile`
+    /// and has not opened a session via Task 6's `openSession` mutation.
+    #[tokio::test]
+    async fn test_apply_operations_rejects_when_no_session_resolvable() {
+        let state = ServerState::new();
+        // Clear the default session id so resolve_session has no fallback.
+        state.app.set_default_session_id(None);
+
+        let schema = Schema::build(
+            super::super::query::QueryRoot,
+            MutationRoot,
+            EmptySubscription,
+        )
+        .data(state)
+        .data(RequestSession(None))
+        .finish();
+
+        let query = r#"mutation {
+            applyOperations(
+                operations: [{ setField: { nodeUuid: "00000000-0000-0000-0000-000000000000", path: "name", value: "\"x\"" } }],
+                userId: "test"
+            ) { seq }
+        }"#;
+        let res = schema.execute(query).await;
+        assert_eq!(res.errors.len(), 1, "expected exactly one error");
+        assert!(
+            res.errors[0].message.starts_with("SESSION_REQUIRED"),
+            "expected SESSION_REQUIRED, got: {}",
+            res.errors[0].message
+        );
+    }
+
+    /// `apply_operations` uses the explicit `X-Sigil-Session` header when
+    /// present even if a default session id is also configured.
+    #[tokio::test]
+    async fn test_apply_operations_prefers_header_session_over_default() {
+        let state = ServerState::new();
+        let _default = state.app.default_session_id().expect("default present");
+
+        // Register a second in-memory session and target it via header.
+        let second_doc = sigil_core::Document::new("Second".to_string());
+        let second_id = state.app.sessions.register_in_memory(second_doc);
+
+        // Seed a frame in the SECOND session's store so the rename
+        // succeeds — confirming the resolver actually used the header id.
+        let frame_uuid = uuid::Uuid::new_v4();
+        {
+            let session = state.app.sessions.get(second_id).expect("second");
+            let mut sd = session.store.try_write().expect("uncontested");
+            let cmd = sigil_core::commands::node_commands::CreateNode {
+                uuid: frame_uuid,
+                kind: sigil_core::node::NodeKind::Frame {
+                    layout: None,
+                    corners: sigil_core::node::default_corners(),
+                },
+                name: "second-frame".to_string(),
+                page_id: None,
+                initial_transform: None,
+            };
+            cmd.validate(&sd.0).expect("validate");
+            cmd.apply(&mut sd.0).expect("apply");
+        }
+
+        let schema = Schema::build(
+            super::super::query::QueryRoot,
+            MutationRoot,
+            EmptySubscription,
+        )
+        .data(state.clone())
+        .data(RequestSession(Some(second_id)))
+        .finish();
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{frame_uuid}", path: "name", value: "\"renamed\"" }} }}],
+                    userId: "test"
+                ) {{ seq }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "header-targeted session should succeed, errors: {:?}",
+            res.errors
+        );
+    }
+
+    /// `apply_operations` broadcasts the post-apply event on the per-session
+    /// channel — confirming Spec 20's per-session subscription contract.
+    #[tokio::test]
+    async fn test_apply_operations_broadcasts_to_session_channel() {
+        let state = ServerState::new();
+        let session_id = state.app.default_session_id().expect("default");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        let uuid = create_test_frame_direct(&state, "BroadcastTarget");
+        let schema = test_schema(state);
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "name", value: "\"NewName\"" }} }}],
+                    userId: "test"
+                ) {{ seq }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        let event = rx.try_recv().expect("session channel must receive event");
+        match event {
+            sigil_state::sessions::SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, MutationEventKind::NodeUpdated);
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.operations.len(), 1);
+                assert_eq!(tx.operations[0].path, "name");
+            }
+            sigil_state::sessions::SessionEvent::SessionFatal { reason } => {
+                panic!("expected DocumentEvent, got SessionFatal: {reason}");
+            }
+        }
     }
 }

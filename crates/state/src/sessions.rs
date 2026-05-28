@@ -260,6 +260,48 @@ impl Sessions {
         Ok(id)
     }
 
+    /// Register an in-memory session that is NOT backed by a workfile on disk.
+    ///
+    /// Used by tests and by single-document deployments started without a
+    /// `--workfile` argument. The session is keyed by a synthetic
+    /// `memory://<uuid>` path so it cannot collide with disk-backed sessions
+    /// opened via [`Sessions::open`].
+    ///
+    /// Unlike [`Sessions::open`], this does not perform any I/O — there is no
+    /// filesystem path to canonicalize and no loader to run. The caller
+    /// supplies the initial document directly.
+    ///
+    /// Returns the new [`SessionId`]. The session starts in
+    /// [`SessionState::Live`].
+    #[must_use]
+    pub fn register_in_memory(&self, document: Document) -> SessionId {
+        let id = SessionId::new();
+        // Synthetic path: `memory://<session-id>`. Cannot match any
+        // disk-backed path because `memory:` is not a valid filesystem
+        // component on the platforms we target.
+        let synthetic_path = PathBuf::from(format!("memory://{id}"));
+        let (tx, _rx) = broadcast::channel(self.broadcast_capacity);
+        let session = Arc::new(DocumentSession {
+            id,
+            workfile_path: synthetic_path.clone(),
+            store: RwLock::new(SendDocument(document)),
+            broadcast: tx,
+            state: std::sync::Mutex::new(SessionState::Live),
+        });
+
+        let mut by_id = self
+            .by_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut by_path = self
+            .by_path
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        by_id.insert(id, session);
+        by_path.insert(synthetic_path, id);
+        id
+    }
+
     /// Close a session and remove from both indexes atomically.
     ///
     /// # Errors
