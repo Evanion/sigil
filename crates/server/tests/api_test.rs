@@ -138,3 +138,57 @@ async fn test_graphql_mutation_unknown_session_returns_session_not_found() {
         "expected SESSION_NOT_FOUND error, got: {err_msg}"
     );
 }
+
+/// Spec 20 §3.3 (Task 7): `/heartbeat` returns 200 OK.
+///
+/// The Tauri supervision task uses this endpoint as a liveness probe; the
+/// status code is the only thing it checks.
+#[tokio::test]
+async fn test_heartbeat_endpoint_returns_200_ok() {
+    let (addr, _) = start_test_server().await;
+    let resp = reqwest::get(format!("http://{addr}/heartbeat"))
+        .await
+        .expect("GET /heartbeat");
+    assert_eq!(resp.status(), 200);
+}
+
+/// Spec 20 §3.3 (Task 7): `/heartbeat` MUST NOT require the
+/// `X-Sigil-Session` header.
+///
+/// The supervision task has no session bound when it first probes
+/// liveness; routing the heartbeat through the session middleware would
+/// force the shell to invent an unused session id and would couple
+/// liveness checks to session registry state. This test asserts the
+/// route bypasses the middleware: a request with no header (and a
+/// request with a deliberately malformed header) both receive 200.
+#[tokio::test]
+async fn test_heartbeat_does_not_require_session_header() {
+    let (addr, _) = start_test_server().await;
+    let client = reqwest::Client::new();
+
+    // No header at all.
+    let resp = client
+        .get(format!("http://{addr}/heartbeat"))
+        .send()
+        .await
+        .expect("GET /heartbeat without header");
+    assert_eq!(
+        resp.status(),
+        200,
+        "heartbeat must succeed without X-Sigil-Session"
+    );
+
+    // Malformed header (would 400 on /graphql) is still accepted on
+    // /heartbeat — proves the middleware isn't on this route.
+    let resp = client
+        .get(format!("http://{addr}/heartbeat"))
+        .header("X-Sigil-Session", "not-a-uuid")
+        .send()
+        .await
+        .expect("GET /heartbeat with malformed header");
+    assert_eq!(
+        resp.status(),
+        200,
+        "heartbeat must not validate X-Sigil-Session (middleware must be /graphql-scoped)"
+    );
+}

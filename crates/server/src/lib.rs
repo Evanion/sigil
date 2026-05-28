@@ -6,6 +6,7 @@
 //! integration tests can spin up test servers without duplicating setup.
 
 pub mod graphql;
+pub mod heartbeat;
 pub mod persistence;
 pub mod routes;
 pub mod session_header;
@@ -56,6 +57,7 @@ pub fn build_app(state: ServerState, static_dir: Option<&str>) -> Router {
 
     let mut app = Router::new()
         .route("/health", get(routes::health::health))
+        .route("/heartbeat", get(crate::heartbeat::handler))
         .route("/graphql/ws", get(graphql_ws_handler));
 
     // GraphQL endpoint: route through a custom handler that injects the
@@ -132,6 +134,18 @@ fn is_allowed_origin(origin: &str) -> bool {
 ///
 /// RF-002: Validates the `Origin` header before upgrading the connection.
 /// Rejects requests from disallowed origins with HTTP 403.
+///
+/// Spec 20 (Task 7): extracts `sessionId` from the graphql-ws
+/// `connection_init` payload via `on_connection_init` and inserts it into
+/// the subscription context as [`RequestSession`]. Subscription resolvers
+/// (`document_changed`, `transaction_applied`) read this to attach to the
+/// correct per-session broadcast channel.
+///
+/// Malformed or missing `sessionId` produces `RequestSession(None)`, which
+/// `resolve_subscription_session` resolves to the registry's default
+/// session — matching the soft-fallback behavior of the HTTP path. A bad
+/// session id surfaces as `SESSION_NOT_FOUND` from the resolver, not as a
+/// WS-level connection rejection.
 async fn graphql_ws_handler(
     ws: WebSocketUpgrade,
     headers: HeaderMap,
@@ -149,6 +163,121 @@ async fn graphql_ws_handler(
     }
 
     ws.protocols(ALL_WEBSOCKET_PROTOCOLS)
-        .on_upgrade(move |stream| GraphQLWebSocket::new(stream, schema, protocol).serve())
+        .on_upgrade(move |stream| {
+            GraphQLWebSocket::new(stream, schema, protocol)
+                .on_connection_init(extract_session_from_connection_params)
+                .serve()
+        })
         .into_response()
+}
+
+/// `on_connection_init` callback: parses `sessionId` from the graphql-ws
+/// `connection_init` payload and inserts a [`RequestSession`] into the
+/// subscription data context.
+///
+/// The payload format is `{ "sessionId": "<uuid-string>" }`. A missing or
+/// malformed `sessionId` is tolerated (returns `RequestSession(None)`):
+/// subscription resolvers fall back to the registry default. A non-UUID
+/// string surfaces as `SESSION_NOT_FOUND` only when a resolver tries to
+/// look it up.
+async fn extract_session_from_connection_params(
+    payload: serde_json::Value,
+) -> async_graphql::Result<async_graphql::Data> {
+    let session_id = parse_session_id_from_connection_params(&payload);
+    let mut data = async_graphql::Data::default();
+    data.insert(RequestSession(session_id));
+    Ok(data)
+}
+
+/// Parses the `sessionId` field out of a graphql-ws `connection_init`
+/// payload. Returns `None` when:
+///
+/// - the payload is not an object,
+/// - `sessionId` is missing or not a string,
+/// - `sessionId` is present but does not parse as a `UUIDv4`.
+///
+/// The caller (`extract_session_from_connection_params`) wraps this in a
+/// [`RequestSession`] so the soft-fallback to the registry default session
+/// happens at the resolver layer.
+fn parse_session_id_from_connection_params(
+    payload: &serde_json::Value,
+) -> Option<sigil_state::sessions::SessionId> {
+    payload
+        .get("sessionId")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|s| s.parse::<sigil_state::sessions::SessionId>().ok())
+}
+
+#[cfg(test)]
+mod ws_connection_init_tests {
+    //! Unit tests for the `on_connection_init` payload parsing.
+    //!
+    //! A full WS round-trip lives in `tests/` (integration); these tests
+    //! exercise the payload-parsing logic in isolation so a regression is
+    //! caught even when the WS harness is unavailable.
+
+    use super::parse_session_id_from_connection_params;
+    use serde_json::json;
+    use sigil_state::sessions::SessionId;
+
+    #[test]
+    fn extracts_session_id_from_valid_payload() {
+        let id = SessionId::new();
+        let payload = json!({ "sessionId": id.to_string() });
+        assert_eq!(parse_session_id_from_connection_params(&payload), Some(id));
+    }
+
+    #[test]
+    fn missing_session_id_yields_none() {
+        let payload = json!({});
+        assert_eq!(
+            parse_session_id_from_connection_params(&payload),
+            None,
+            "missing sessionId must fall through to the default session resolver"
+        );
+    }
+
+    #[test]
+    fn malformed_session_id_yields_none() {
+        // A non-UUID string is tolerated here (soft fallback); the
+        // resolver surfaces SESSION_NOT_FOUND if/when it tries to look up
+        // the resulting `None` against a registry that has no default.
+        let payload = json!({ "sessionId": "not-a-uuid" });
+        assert_eq!(parse_session_id_from_connection_params(&payload), None);
+    }
+
+    #[test]
+    fn non_string_session_id_yields_none() {
+        let payload = json!({ "sessionId": 42 });
+        assert_eq!(parse_session_id_from_connection_params(&payload), None);
+    }
+
+    #[test]
+    fn null_payload_yields_none() {
+        let payload = serde_json::Value::Null;
+        assert_eq!(parse_session_id_from_connection_params(&payload), None);
+    }
+
+    #[tokio::test]
+    async fn extract_callback_round_trips_valid_session_id() {
+        // Confirms the async callback (the one actually wired into
+        // GraphQLWebSocket) succeeds with a valid payload. Inspecting the
+        // returned Data requires plumbing through async-graphql's Context;
+        // we settle for Ok-vs-Err here and rely on the field-parse tests
+        // above for value correctness.
+        let id = SessionId::new();
+        let payload = json!({ "sessionId": id.to_string() });
+        let result = super::extract_session_from_connection_params(payload).await;
+        assert!(result.is_ok(), "valid payload must not error");
+    }
+
+    #[tokio::test]
+    async fn extract_callback_round_trips_missing_session_id() {
+        let payload = json!({});
+        let result = super::extract_session_from_connection_params(payload).await;
+        assert!(
+            result.is_ok(),
+            "missing sessionId must not error (soft fallback)"
+        );
+    }
 }
