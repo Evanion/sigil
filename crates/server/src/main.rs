@@ -46,40 +46,9 @@ async fn main() -> anyhow::Result<()> {
     let workfile_env = std::env::var("WORKFILE").ok();
 
     let mut state = if let Some(ref workfile_str) = workfile_env {
-        let workfile_path = std::path::PathBuf::from(workfile_str);
-        tracing::info!("loading workfile from {}", workfile_path.display());
-
-        let loaded = sigil_server::workfile::load_workfile(&workfile_path)
-            .await
-            .context("failed to load workfile")?;
-
-        let migrated_from = loaded.migrated_from;
-        let state = ServerState::new_with_document_and_workfile_migrated(
-            loaded.document,
-            workfile_path,
-            migrated_from,
-        );
-
-        // RF-009: if the document was migrated on load, signal the persistence
-        // task that the document is dirty so the v2 form is flushed back to disk.
-        if migrated_from.is_some() {
-            tracing::info!("triggering migrated-form save after workfile load");
-            state.app.signal_dirty();
-        }
-
-        state
+        load_workfile_into_state(workfile_str).await?
     } else {
-        tracing::info!("no WORKFILE configured — running in-memory mode");
-        // Create a default page so there's something to draw on
-        let state = ServerState::new();
-        {
-            let mut doc = state.app.document.lock().expect("lock for default page");
-            let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
-            let page =
-                sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
-            doc.add_page(page).expect("add default page");
-        }
-        state
+        new_in_memory_state()
     };
 
     // Take the persistence handle and dirty_tx before moving state into the app.
@@ -92,7 +61,11 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        Some(sigil_mcp::server::start_stdio(state.app.clone()))
+        // MCP currently consumes the legacy `AppState`; the per-session
+        // plumbing lands in Tasks 8–10 when the Streamable HTTP transport is
+        // added. Cloning the legacy half keeps `state.app.sessions` reachable
+        // from the HTTP server side without affecting MCP behavior.
+        Some(sigil_mcp::server::start_stdio(state.app.legacy.clone()))
     } else {
         None
     };
@@ -137,6 +110,77 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Loads the workfile at `workfile_str` into a fresh `ServerState` and
+/// registers it as the default session in the `Sessions` registry.
+///
+/// The legacy `AppState.document` continues to hold the authoritative
+/// document for the single-document deployment; the `Sessions` registry
+/// gets a clone so future per-session handlers (Tasks 5–10) can resolve the
+/// default `SessionId` once they are migrated. Until then the per-session
+/// store is dead — no code reads from it.
+async fn load_workfile_into_state(workfile_str: &str) -> anyhow::Result<ServerState> {
+    let workfile_path = std::path::PathBuf::from(workfile_str);
+    tracing::info!("loading workfile from {}", workfile_path.display());
+
+    let loaded = sigil_server::workfile::load_workfile(&workfile_path)
+        .await
+        .context("failed to load workfile")?;
+
+    let migrated_from = loaded.migrated_from;
+    // The legacy `AppState` continues to hold the authoritative document
+    // for the single-document deployment. We clone the loaded document
+    // into the `Sessions` registry so future per-session handlers can
+    // resolve the default `SessionId` once Tasks 5–10 migrate them.
+    let doc_for_session = loaded.document.clone();
+    let state = ServerState::new_with_document_and_workfile_migrated(
+        loaded.document,
+        workfile_path.clone(),
+        migrated_from,
+    );
+
+    // Register the loaded workfile as the default session. The loader
+    // closure returns the pre-loaded document (we already paid for the
+    // async load above), so this is a cheap registry insertion.
+    match state.app.open_session_with(&workfile_path, |_path| {
+        Ok::<_, std::convert::Infallible>(doc_for_session)
+    }) {
+        Ok(session_id) => tracing::info!(
+            "registered default session {session_id} for workfile {}",
+            workfile_path.display()
+        ),
+        Err(e) => {
+            tracing::warn!(
+                "failed to register default session for workfile {}: {e}. \
+                 Multi-session features will be unavailable.",
+                workfile_path.display()
+            );
+        }
+    }
+
+    // RF-009: if the document was migrated on load, signal the persistence
+    // task that the document is dirty so the v2 form is flushed back to disk.
+    if migrated_from.is_some() {
+        tracing::info!("triggering migrated-form save after workfile load");
+        state.app.signal_dirty();
+    }
+
+    Ok(state)
+}
+
+/// Constructs an in-memory `ServerState` with a single default page.
+fn new_in_memory_state() -> ServerState {
+    tracing::info!("no WORKFILE configured — running in-memory mode");
+    let state = ServerState::new();
+    {
+        let mut doc = state.app.document.lock().expect("lock for default page");
+        let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
+        let page =
+            sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
+        doc.add_page(page).expect("add default page");
+    }
+    state
 }
 
 async fn shutdown_signal() {
