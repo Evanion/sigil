@@ -1564,6 +1564,12 @@ impl MutationRoot {
         let migrated_from = migrated_cell.get();
         if let Some(session) = state.app.sessions.get(id) {
             state.persistence.register(session, migrated_from);
+        } else {
+            // Unreachable in practice — the session was just opened above, so
+            // it must be in the registry. Surface as an error-level diagnostic
+            // (mirrors `main.rs::load_workfile_into_state`) rather than silently
+            // skipping persistence registration (RF-006).
+            tracing::error!("session {id} missing from registry immediately after open");
         }
 
         // RF-007: once a real workfile session exists, the synthetic
@@ -3297,8 +3303,10 @@ mod tests {
     /// Spec 22a §3.3: `closeSession` MUST flush + join the per-session
     /// persistence task BEFORE closing the session in the registry, so the
     /// final save runs while the session `Arc` (and its store) is still alive.
-    /// Uses the multi-thread runtime because the persistence task's final
-    /// save may use blocking I/O.
+    /// Under the RF-008 refined contract, close flushes PENDING work — so this
+    /// test arms a deadline with one mutation broadcast before closing, then
+    /// proves the flush re-wrote the manifest. Uses the multi-thread runtime
+    /// because the persistence task's final save may use blocking I/O.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_close_session_flushes_and_deregisters_persistence() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3317,6 +3325,7 @@ mod tests {
 
         let state = ServerState::new();
         let persistence = state.persistence.clone();
+        let sessions = state.app.sessions.clone();
         let schema = test_schema(state);
 
         let open = schema
@@ -3340,6 +3349,20 @@ mod tests {
         tokio::fs::remove_file(workfile_path.join("manifest.json"))
             .await
             .expect("remove manifest");
+
+        // Arm the persistence deadline with one mutation broadcast (RF-008:
+        // close flushes PENDING work, so a clean session would write nothing).
+        let session = sessions
+            .get(id.parse::<SessionId>().expect("session id parses"))
+            .expect("session present before close");
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeUpdated,
+                uuid: None,
+                data: None,
+                transaction: None,
+            }));
 
         let close = schema
             .execute(&format!(r#"mutation {{ closeSession(id: "{id}") }}"#))
