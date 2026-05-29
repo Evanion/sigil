@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.2](https://github.com/Evanion/sigil/compare/v0.1.1...v0.1.2) (2026-05-29)
+
+
+### Features
+
+* atomic multi-node delete (Spec 19) ([#68](https://github.com/Evanion/sigil/issues/68)) ([c89fe3a](https://github.com/Evanion/sigil/commit/c89fe3abb71379df13b66ab6ba7fba91f15e5837))
+* canvas rendering for corner shapes + frame child clipping (Plan 14c) ([#64](https://github.com/Evanion/sigil/issues/64)) ([36c6f99](https://github.com/Evanion/sigil/commit/36c6f99f6361336880837d072b21cf59cbbb6c6c))
+* complete i18n migration + lock the gate (Spec 17) ([#66](https://github.com/Evanion/sigil/issues/66)) ([6e9ed74](https://github.com/Evanion/sigil/commit/6e9ed74cee20caa59e83c4368e6f547742d5fd6b))
+* corner editor UI — preview + hotspot popovers (Plan 14d) ([#65](https://github.com/Evanion/sigil/issues/65)) ([a81d40c](https://github.com/Evanion/sigil/commit/a81d40c6d8da311a24d85fd39919dda7ba4775e1))
+* corner shapes data layer + v1→v2 workfile migration (Plan 14a) ([#60](https://github.com/Evanion/sigil/issues/60)) ([b40d436](https://github.com/Evanion/sigil/commit/b40d436566e6e900a53ab5990d7867856f4ae91d))
+* Display-P3 color space support (Spec 18) ([#67](https://github.com/Evanion/sigil/issues/67)) ([fd32066](https://github.com/Evanion/sigil/commit/fd3206615bf1090043da224be06e93a4909502da))
+* **server:** complete session-native migration, remove legacy AppState (Spec 22b) ([#76](https://github.com/Evanion/sigil/issues/76)) ([ee5eb69](https://github.com/Evanion/sigil/commit/ee5eb696df89853df31a2c9a6ba192e08dcfcbe2))
+* **server:** per-session persistence (Spec 22a) ([#75](https://github.com/Evanion/sigil/issues/75)) ([00ac911](https://github.com/Evanion/sigil/commit/00ac911c37f74aa5c1f47bd717826ac5c4881c0a))
+* Slider wrapper + Kobalte import discipline rule (Plan 14b) ([#63](https://github.com/Evanion/sigil/issues/63)) ([6051d6b](https://github.com/Evanion/sigil/commit/6051d6b80802df3ac525684f6abb6e0c41b5b22b))
+* Tauri desktop + multi-session server (Spec 20) ([#74](https://github.com/Evanion/sigil/issues/74)) ([333fb5d](https://github.com/Evanion/sigil/commit/333fb5d928b272b3703e282a082650a1d8e6209c))
+
+
+### Bug Fixes
+
+* **a11y:** ColorArea exposes two ARIA sliders (RF-011) ([#71](https://github.com/Evanion/sigil/issues/71)) ([2de182c](https://github.com/Evanion/sigil/commit/2de182c0d4286a66cad4a9abad1ab16491429226))
+
 ## [0.1.1](https://github.com/Evanion/sigil/compare/v0.1.0...v0.1.1) (2026-04-23)
 
 
