@@ -21,7 +21,8 @@ This branch implements RF-014 part 22a: a per-session persistence manager driven
 ### RF-002 — Commit `adb9459` mislabeled `refactor`
 - **Severity:** Major
 - **Source:** Compliance
-- **Status:** open (decision pending — see remediation note; awaiting user call on branch-history rewrite vs. documented-accept)
+- **Status:** wont-fix (rationale below) — **the squash-merge PR title MUST be `feat(server): …`**
+- **Rationale:** This repo squash-merges every PR (main shows one conventional commit per PR with a `(#NN)` suffix, e.g. `feat: Tauri desktop + multi-session server (Spec 20) (#74)`). Individual branch commits — including `adb9459` — never reach main's permanent history; only the squash title does. §6 exists to calibrate review scrutiny by commit type, and that review already happened (Compliance caught this). Rewording `adb9459` would rewrite ~14 unpushed commit SHAs (invalidating the SHA receipts recorded in this file) for no lasting benefit, since the label is erased at squash. The §6 obligation is satisfied by authoring the PR squash title as `feat(server): per-session persistence (Spec 22a)`.
 - **Description:** Commit `adb9459` is typed `refactor(server):` but introduces a new function `write_prepared_with_migration_flag` and removes public API surface. Per CLAUDE.md §6 type semantics, a `refactor` MUST NOT introduce new functions or change the public API domain — this is a `feat`. Mislabeling invites lighter review of code that actually changes behavior.
 - **Recommended fix:** The commit is unpushed; amend the message to `feat(server):`. If history rewrite is undesirable, document the deviation with rationale.
 

@@ -176,7 +176,7 @@ When the server loads a workfile that requires a schema version upgrade (v1→v2
 2. **Back up the legacy artifacts.** Before the first migrated write overwrites any file in the workfile directory, the original v(N-1) `manifest.json` and `pages/*.json` MUST be copied to a sibling `.backup-v(N-1)/` directory. Migration is one-way; an unintended round-trip mutation must be recoverable. The backup is a one-shot — re-running the server on an already-migrated workfile MUST NOT touch the existing backup.
 3. **Plumb a `migrated_from` signal end-to-end.** The `LoadedWorkfile` type (or equivalent) MUST carry an `Option<u32>` indicating the source schema version; the persistence task MUST read this signal and trigger the dirty-flag and backup obligations.
 
-A CI smoke test MUST exercise each new migration path against a checked-in legacy fixture and assert: (a) `load_workfile` succeeds, (b) the post-load persistence tick produces a v(N) on-disk file, (c) the `.backup-v(N-1)/` directory exists and contains the original fixtures.
+A CI smoke test MUST exercise each new migration path against a checked-in legacy fixture and assert: (a) `load_workfile` succeeds, (b) the post-load persistence tick produces a v(N) on-disk file *within the debounce window* (assert the migrated `schema_version` field equals N, not merely that a file exists), (c) the `.backup-v(N-1)/` directory exists and its backed-up files equal the original legacy fixtures **byte-for-byte** (assert content equality via `read` + `assert_eq!`, not mere file presence — a backup that exists but was overwritten is no backup).
 
 ### `sigil-mcp`
 
