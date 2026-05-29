@@ -1519,9 +1519,19 @@ impl MutationRoot {
         // `Sessions::open` expects (Task 3 deliverable). The closure runs on
         // a tokio worker thread and uses `block_in_place` internally; the
         // server uses the multi-thread runtime so this is sound.
+        //
+        // Capture `migrated_from` out-of-band: the loader closure runs inline
+        // on this thread inside `Sessions::open`, so a `Cell` written by the
+        // closure is readable after `open_session_with` returns. If the
+        // session already existed, the loader does not run and the cell stays
+        // `None` (the existing session's persistence was registered on its
+        // first open).
+        let migrated_cell: std::cell::Cell<Option<u32>> = std::cell::Cell::new(None);
         let loader =
             |p: &std::path::Path| -> std::result::Result<sigil_core::Document, anyhow::Error> {
-                crate::workfile::load_workfile_sync(p)
+                let (doc, migrated_from) = crate::workfile::load_workfile_sync_migrated(p)?;
+                migrated_cell.set(migrated_from);
+                Ok(doc)
             };
 
         // RF-007: use App::open_session_with so default_session_id repoints
@@ -1546,6 +1556,15 @@ impl MutationRoot {
                 };
                 error_with_code(&format!("openSession: {e}"), code)
             })?;
+
+        // Spec 22a §3.3 invariant: register persistence in the SAME function
+        // as open. `register` is idempotent (a re-opened session already has
+        // a task) and skips `memory://` sessions, so registering an existing
+        // disk-backed session is a no-op.
+        let migrated_from = migrated_cell.get();
+        if let Some(session) = state.app.sessions.get(id) {
+            state.persistence.register(session, migrated_from);
+        }
 
         // RF-007: once a real workfile session exists, the synthetic
         // `memory://` session is no longer needed. Closing it prevents
@@ -3214,5 +3233,57 @@ mod tests {
                 panic!("expected DocumentEvent, got SessionFatal: {reason}");
             }
         }
+    }
+
+    /// Spec 22a §3.3: `openSession` MUST register a per-session persistence
+    /// task for the disk-backed session it opens, in the same function as the
+    /// open. Uses the multi-thread runtime because
+    /// `load_workfile_sync_migrated` calls `block_in_place` internally.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_open_session_registers_persistence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workfile_path = dir.path().join("opened.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create pages dir");
+        // Minimal valid v2 workfile.
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            serde_json::json!({"schema_version": 2, "name": "Opened", "page_order": []})
+                .to_string(),
+        )
+        .await
+        .expect("write manifest");
+
+        let state = ServerState::new();
+        let persistence = state.persistence.clone();
+        let app_sessions = state.app.sessions.clone();
+        let schema = test_schema(state);
+
+        let query = format!(
+            r#"mutation {{ openSession(path: "{}") {{ id }} }}"#,
+            workfile_path.display()
+        );
+        let resp = schema.execute(&query).await;
+        assert!(
+            resp.errors.is_empty(),
+            "openSession errored: {:?}",
+            resp.errors
+        );
+
+        // A persistence task now exists for exactly the disk-backed session.
+        assert_eq!(
+            persistence.len(),
+            1,
+            "openSession must register one persistence task"
+        );
+        // And the synthetic memory:// session was closed after open, leaving
+        // only the disk-backed session in the registry.
+        assert_eq!(
+            app_sessions.len(),
+            1,
+            "synthetic session should be closed after open"
+        );
     }
 }
