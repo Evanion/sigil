@@ -78,7 +78,7 @@ fn multi_op_transaction(
 /// Returns `SESSION_REQUIRED` when neither a header nor a default session id
 /// is available — this indicates the server was started without a workfile and
 /// the client did not open a session explicitly (Task 6 adds `openSession`).
-fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
+pub(crate) fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
     // `RequestSession` is only present for HTTP requests routed through the
     // middleware. WebSocket-originated mutations (none today) and tests that
     // bypass the router both fall through to `Ok(RequestSession(None))`.
@@ -96,7 +96,7 @@ fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> 
 
 /// Loads a session by id, returning a typed error if it is missing or in
 /// the `Errored` state.
-fn require_live_session(
+pub(crate) fn require_live_session(
     state: &ServerState,
     session_id: SessionId,
 ) -> Result<std::sync::Arc<DocumentSession>> {
