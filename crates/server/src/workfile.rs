@@ -554,6 +554,24 @@ pub fn load_workfile_sync(path: &Path) -> Result<Document> {
     Ok(loaded.document)
 }
 
+/// Synchronous variant of [`load_workfile`] that also returns the migration
+/// version, for callers that drive a synchronous loader closure (e.g. the
+/// GraphQL `openSession` resolver) but still need to force-persist + back up a
+/// migrated workfile.
+///
+/// Like [`load_workfile_sync`], requires the multi-threaded tokio runtime
+/// because it uses [`tokio::task::block_in_place`].
+///
+/// # Errors
+///
+/// Returns an error if the workfile cannot be loaded (see [`load_workfile`]).
+pub fn load_workfile_sync_migrated(path: &Path) -> Result<(Document, Option<u32>)> {
+    let loaded = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(load_workfile(path))
+    })?;
+    Ok((loaded.document, loaded.migrated_from))
+}
+
 /// Reconstructs a page and its nodes from a [`SerializedPage`] into the document.
 ///
 /// Nodes are deserialized through `Node`'s custom `Deserialize` impl (which
@@ -1290,6 +1308,44 @@ mod tests {
             "v1 page should produce migrated_from = Some(1)"
         );
         assert_eq!(loaded.document.metadata.name, "Legacy Doc");
+    }
+
+    /// `load_workfile_sync_migrated` returns the same document as the async loader
+    /// AND surfaces the migration version that `load_workfile_sync` drops.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_load_workfile_sync_migrated_surfaces_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let workfile_path = dir.path().join("v1.sigil");
+        let page_uuid = Uuid::new_v4();
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir).await.unwrap();
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            serde_json::json!({
+                "schema_version": 1, "name": "Legacy", "page_order": [page_uuid.to_string()]
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            pages_dir.join(format!("{page_uuid}.json")),
+            serde_json::json!({
+                "schema_version": 1, "id": page_uuid.to_string(),
+                "name": "P", "nodes": [], "transitions": []
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        let (doc, migrated_from) = load_workfile_sync_migrated(&workfile_path).unwrap();
+        assert_eq!(
+            migrated_from,
+            Some(1),
+            "v1 workfile must report migrated_from = Some(1)"
+        );
+        assert_eq!(doc.pages.len(), 1);
     }
 
     /// RF-010: when `prepared.migrated_from` is set, the writer copies the
