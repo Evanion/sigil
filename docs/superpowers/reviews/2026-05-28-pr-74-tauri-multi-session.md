@@ -54,3 +54,37 @@ Critical RF-001 (menubar disconnected) blocks the user-facing claim "menubar wor
 - `resolved` — fixed in a remediation commit on this branch.
 - `wont-fix-this-pr` — explicit deferral; documented for follow-up.
 - `wont-fix` — judged out of scope or non-issue.
+
+## Remediation status (post Phase 3)
+
+Commit `65c1f84` resolved RF-002 (CI compile). Commit `e880b31` resolved the
+remaining Critical, all High, all Major, three of four Medium, and two of
+five Low. Final status by ID:
+
+| ID | Status | Where |
+|----|--------|-------|
+| RF-001 | resolved | App.tsx wires `installMenuListener` + `onCleanup` |
+| RF-002 | resolved | session_resolver.rs + http.rs (commit 65c1f84) |
+| RF-003 | resolved | sessions_persist.rs UUID tmp suffix + concurrency test |
+| RF-004 | resolved | supervision.rs `draining` state |
+| RF-005 | resolved | frontend/src/types/session.ts + .test-d.ts sentinel |
+| RF-006 | resolved | sessions.rs MAX_SESSIONS + TooManySessions + test |
+| RF-007 | resolved | mutation.rs open_session_with + close_synthetic_sessions; integration test updated |
+| RF-008 | resolved | welcome.json _one/_other variants in en/es/fr |
+| RF-009 | resolved | Welcome.test.tsx (13 tests) + test-utils/i18n.tsx welcome namespace |
+| RF-010 | resolved | ci.yml pin-check loops `.github/workflows/*.yml` |
+| RF-011 | resolved | Welcome.tsx onReopen partial-failure status |
+| RF-012 | resolved | windows.rs replay loop skips closed-window labels and closes orphan session |
+| RF-013 | resolved | windows.rs wait_for_server_ready polls /heartbeat |
+| RF-014 | wont-fix-this-pr | legacy mirror cleanup planned for follow-up PR after MCP read tools migrate |
+| RF-015 | resolved | Welcome.tsx aria-label includes full path via i18n key |
+| RF-016 | wont-fix-this-pr | mpsc(16)→watch refactor; unlikely under realistic recovery times |
+| RF-017 | wont-fix | reverse path index unnecessary at realistic window count |
+| RF-018 | resolved | App.tsx onCleanup → store.destroy() |
+| RF-019 | resolved | tauri-build.yml concurrency block (tag-build exempt) |
+| RF-020 | wont-fix-this-pr | spec doc update is a docs PR, not implementation |
+| RF-021 | wont-fix-this-pr | pre-existing vitest teardown flake; separate cleanup |
+| RF-022 | wont-fix-this-pr | reload→in-place rebuild is the v2 follow-up per PR description |
+| RF-023 | wont-fix | commit-label labeling judgment confirmed acceptable |
+
+Net: 17 resolved this branch; 0 open; 6 explicitly deferred or judged out of scope.
