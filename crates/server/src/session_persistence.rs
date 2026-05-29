@@ -311,7 +311,7 @@ mod tests {
         );
     }
 
-    /// register() is a no-op for `memory://` sessions and idempotent for repeats.
+    /// `register()` is a no-op for `memory://` sessions and idempotent for repeats.
     #[tokio::test]
     async fn test_register_skips_memory_and_is_idempotent() {
         let sessions = Sessions::new(sigil_state::MUTATION_BROADCAST_CAPACITY);
@@ -346,7 +346,7 @@ mod tests {
         );
     }
 
-    /// close() fires a final flush and joins the task before returning.
+    /// `close()` fires a final flush and joins the task before returning.
     #[tokio::test]
     async fn test_close_flushes_before_returning() {
         let dir = tempfile::tempdir().unwrap();
