@@ -70,14 +70,22 @@ fn multi_op_transaction(
 /// Resolves the [`SessionId`] for the current GraphQL request.
 ///
 /// Reads the [`RequestSession`] populated by [`crate::session_header::middleware`]
-/// from the async-graphql request context. Falls back to
-/// [`crate::state::App::default_session_id`] when the request has no header,
-/// preserving compatibility with single-document deployments that have not yet
-/// adopted the multi-session client.
+/// from the async-graphql request context. When the request carries no header:
 ///
-/// Returns `SESSION_REQUIRED` when neither a header nor a default session id
-/// is available — this indicates the server was started without a workfile and
-/// the client did not open a session explicitly (Task 6 adds `openSession`).
+/// - exactly one session open → fall back to
+///   [`crate::state::App::default_session_id`], preserving compatibility with
+///   single-document deployments that have not yet adopted the multi-session
+///   client;
+/// - more than one session open → return `SESSION_REQUIRED` rather than
+///   silently routing to the last-opened (default) session. This matches the
+///   MCP `resolve_session` "Ambiguous" rule (RF-003: §11 "Validation Must Be
+///   Symmetric Across All Transports"); a header-less client with multiple
+///   sessions open must name its target explicitly;
+/// - zero sessions open / no default id → return `SESSION_REQUIRED`.
+///
+/// `SESSION_REQUIRED` indicates the server was started without a workfile and
+/// the client did not open a session explicitly (Task 6 adds `openSession`),
+/// OR multiple sessions are open and the request did not disambiguate.
 pub(crate) fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
     // `RequestSession` is only present for HTTP requests routed through the
     // middleware. WebSocket-originated mutations (none today) and tests that
@@ -87,6 +95,16 @@ pub(crate) fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<
     if let Some(id) = header_session {
         return Ok(id);
     }
+
+    // RF-003: header-less resolution is only unambiguous when exactly one
+    // session is open. With multiple sessions the default-session fallback
+    // would silently route to the last-opened session.
+    if state.app.sessions.len() > 1 {
+        return Err(async_graphql::Error::new(
+            "SESSION_REQUIRED: multiple sessions open — provide X-Sigil-Session header",
+        ));
+    }
+
     state.app.default_session_id().ok_or_else(|| {
         async_graphql::Error::new(
             "SESSION_REQUIRED: provide X-Sigil-Session header or open a workfile session",
@@ -1372,7 +1390,14 @@ impl MutationRoot {
         // writes, and broadcasts. The post-apply broadcast (below) drives both
         // the 22a persistence task and the GraphQL `transactionApplied`
         // subscription. There is no legacy mirror and no second broadcast.
-        let broadcast_ops: Vec<OperationPayload> = {
+        // RF-002: stamp the per-session seq and broadcast the transaction
+        // WHILE STILL HOLDING the store write lock, so apply/seq/broadcast are
+        // atomic per session. Concurrent mutations on one session would
+        // otherwise serialize their applies under the lock but interleave their
+        // seq-stamp/broadcast order after the guard dropped. `next_seq()` and
+        // `broadcast.send()` are both synchronous (no `.await`), so holding the
+        // write lock across them does not block the runtime.
+        let seq: u64 = {
             let mut doc_guard = session.store.write().await;
 
             // Snapshot the document state for rollback on partial failure
@@ -1425,35 +1450,36 @@ impl MutationRoot {
                 collected.push(broadcast);
             }
 
-            collected
+            // Stamp the seq + build + broadcast the transaction under the lock.
+            // The 22a persistence task and the GraphQL `transactionApplied`
+            // subscription both consume this event. Seq is per-session and
+            // strictly increasing within a session.
+            //
+            // We stamp via `session.next_seq()` rather than `session.publish`
+            // because `apply_operations` must return the assigned seq in
+            // `ApplyOperationsResult` (and `publish` consumes the transaction).
+            // The ordering domain is identical — both go through the session's
+            // `seq_counter`.
+            let mut transaction = multi_op_transaction(Some(user_id), collected);
+            transaction.seq = session.next_seq();
+            let stamped_seq = transaction.seq;
+
+            let mutation_event = MutationEvent {
+                kind: event_kind,
+                uuid: None,
+                data: None,
+                transaction: Some(transaction),
+            };
+
+            // Per-session broadcast: fire-and-forget. No subscribers is not an
+            // error.
+            let _ = session
+                .broadcast
+                .send(SessionEvent::DocumentEvent(mutation_event));
+
+            stamped_seq
         };
 
-        // Broadcast on the per-session channel only. The 22a persistence task
-        // and the GraphQL `transactionApplied` subscription both consume this
-        // event. Seq is per-session and strictly increasing within a session.
-        //
-        // We stamp the seq via `session.next_seq()` rather than
-        // `session.publish(...)` because `apply_operations` must return the
-        // assigned seq in `ApplyOperationsResult` (and `publish` consumes the
-        // transaction). The ordering domain is identical — both go through the
-        // session's `seq_counter`.
-        let mut transaction = multi_op_transaction(Some(user_id), broadcast_ops);
-        transaction.seq = session.next_seq();
-
-        let mutation_event = MutationEvent {
-            kind: event_kind,
-            uuid: None,
-            data: None,
-            transaction: Some(transaction.clone()),
-        };
-
-        // Per-session broadcast: fire-and-forget. No subscribers is not an
-        // error.
-        let _ = session
-            .broadcast
-            .send(SessionEvent::DocumentEvent(mutation_event));
-
-        let seq = transaction.seq;
         Ok(ApplyOperationsResult {
             seq: seq.to_string(),
         })
@@ -3239,6 +3265,109 @@ mod tests {
         assert_eq!(
             seq, "1",
             "first mutation on a fresh session gets per-session seq 1"
+        );
+    }
+
+    /// RF-002: the seq stamp + broadcast happen WHILE the store write lock is
+    /// held, so a fresh session's first mutation broadcasts seq 1 AND the apply
+    /// is reflected in the store atomically. This asserts both halves on the
+    /// same mutation: the broadcast event carries seq 1, and the post-mutation
+    /// store reflects the rename.
+    #[tokio::test]
+    async fn test_apply_operations_first_mutation_broadcasts_seq_one_and_applies() {
+        let state = ServerState::new();
+        let session_id = state.app.default_session_id().expect("default");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        let uuid = create_test_frame_direct(&state, "Original");
+        let schema = test_schema(state.clone());
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "name", value: "\"Renamed\"" }} }}],
+                    userId: "test"
+                ) {{ seq }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Returned seq is 1 (first mutation on a fresh session).
+        let returned_seq = res.data.into_json().expect("data")["applyOperations"]["seq"]
+            .as_str()
+            .expect("seq str")
+            .to_string();
+        assert_eq!(returned_seq, "1", "returned seq must be 1");
+
+        // The broadcast event carries the same seq, stamped under the lock.
+        let event = rx.try_recv().expect("session channel must receive event");
+        match event {
+            sigil_state::sessions::SessionEvent::DocumentEvent(me) => {
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.seq, 1, "broadcast transaction seq must be 1");
+            }
+            sigil_state::sessions::SessionEvent::SessionFatal { reason } => {
+                panic!("expected DocumentEvent, got SessionFatal: {reason}");
+            }
+        }
+
+        // The apply is reflected in the post-mutation store.
+        let doc = read_session_doc(&state);
+        let renamed = doc.arena.iter().any(|node| node.name == "Renamed");
+        assert!(
+            renamed,
+            "renamed node must be present in the post-mutation store"
+        );
+    }
+
+    /// RF-003: header-less GraphQL resolution must match MCP on ambiguity.
+    /// With more than one session open and NO `X-Sigil-Session` header, a
+    /// mutation must error with `SESSION_REQUIRED` rather than silently routing
+    /// to the default (last-opened) session.
+    #[tokio::test]
+    async fn test_apply_operations_errors_when_multiple_sessions_and_no_header() {
+        let state = ServerState::new();
+        // `ServerState::new` registers one in-memory default session. Register a
+        // second so the registry holds two; now header-less resolution is
+        // ambiguous.
+        let second_doc = sigil_core::Document::new("Second".to_string());
+        let _second_id = state.app.sessions.register_in_memory(second_doc);
+        assert_eq!(state.app.sessions.len(), 2, "two sessions must be open");
+
+        // `test_schema` injects `RequestSession(None)` — no header.
+        let schema = test_schema(state);
+        let query = format!(
+            r#"mutation {{ applyOperations(userId: "u", operations: [{{ createPage: {{ pageUuid: "{}", name: "X" }} }}]) {{ seq }} }}"#,
+            uuid::Uuid::new_v4()
+        );
+        let res = schema.execute(&query).await;
+        assert_eq!(res.errors.len(), 1, "expected exactly one error");
+        assert!(
+            res.errors[0].message.starts_with("SESSION_REQUIRED"),
+            "expected SESSION_REQUIRED, got: {}",
+            res.errors[0].message
+        );
+    }
+
+    /// RF-003 back-compat: with exactly ONE session open and no header, the
+    /// default-session fallback still resolves (single-document deployments).
+    #[tokio::test]
+    async fn test_apply_operations_resolves_when_single_session_and_no_header() {
+        let state = ServerState::new();
+        assert_eq!(state.app.sessions.len(), 1, "exactly one session open");
+
+        let schema = test_schema(state);
+        let query = format!(
+            r#"mutation {{ applyOperations(userId: "u", operations: [{{ createPage: {{ pageUuid: "{}", name: "X" }} }}]) {{ seq }} }}"#,
+            uuid::Uuid::new_v4()
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "single-session header-less resolution must succeed, errors: {:?}",
+            res.errors
         );
     }
 
