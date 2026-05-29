@@ -12,6 +12,7 @@ pub mod routes;
 pub mod session_header;
 pub mod session_persistence;
 pub mod state;
+pub mod test_support;
 pub mod workfile;
 
 use async_graphql::http::{ALL_WEBSOCKET_PROTOCOLS, GraphiQLSource};
