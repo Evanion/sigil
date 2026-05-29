@@ -113,12 +113,17 @@ impl SigilMcpServer {
             .to_rmcp_error()
         })?;
 
-        let (result, kind, uuid, transaction) = {
+        // RF-002: stamp the per-session seq and broadcast the transaction
+        // WHILE STILL HOLDING the store write lock, so apply/seq/broadcast are
+        // atomic per session. `session.publish` is synchronous (no `.await`),
+        // so holding the write lock across it does not block the runtime.
+        let result = {
             let mut guard = session.store.write().await;
-            impl_fn(&mut guard.0).map_err(|e| e.to_mcp_error())?
+            let (result, kind, uuid, transaction) =
+                impl_fn(&mut guard.0).map_err(|e| e.to_mcp_error())?;
+            session.publish(kind, uuid, transaction);
+            result
         };
-
-        session.publish(kind, uuid, transaction);
 
         Ok(Json(result))
     }
@@ -1147,9 +1152,14 @@ impl ServerHandler for SigilMcpServer {
     + '_ {
         let sessions = self.sessions.clone();
         async move {
-            // Resources carry no session argument — resolve via the default /
-            // single-session rule (the same contract mutation tools use when
-            // `session_id` is omitted), then read the resolved session's store.
+            // RF-005: the rmcp `ReadResource` request (`ReadResourceRequestParams`)
+            // carries only a `uri` — there is no tool-argument slot to thread a
+            // `session_id` through, unlike the session-scoped read/mutate tools
+            // which accept `SessionScopedInput`. Resource reads therefore use
+            // the default / single-session rule (`None` → the same contract a
+            // mutation tool applies when `session_id` is omitted), then read the
+            // resolved session's store. Multi-session resource addressing is
+            // deferred until the protocol exposes a way to scope a resource read.
             let session_id = resolve_session_or_error(&sessions, None)?;
             let session = sessions.get(session_id).ok_or_else(|| {
                 SessionResolveError::NotFound {
