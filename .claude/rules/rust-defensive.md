@@ -197,6 +197,29 @@ This validation obligation applies at two boundaries, both mandatory: (1) input 
 
 When implementing a mutation that requires lock acquisition and entity existence verification, all side-effect artifacts (broadcast payloads, response objects, audit log entries) MUST be constructed AFTER the lock is acquired and AFTER preconditions (entity exists, fields valid) are confirmed. Pre-building these artifacts before verification wastes allocation on error paths and risks constructing a payload from stale pre-lock state. Pattern: acquire lock, verify preconditions, apply mutation, construct broadcast payload from verified post-mutation state, release lock, send broadcast.
 
+### Monotonic Ordering Tokens and Broadcasts Must Be Emitted Under the Serializing Lock
+
+When a mutation path (a) serializes concurrent mutations of a resource under a write lock AND (b) stamps a monotonic ordering token (a per-session `seq`, a Lamport counter, a version number) that governs client-side ordering or dedup of that resource, the token assignment AND the broadcast enqueue MUST happen while the serializing lock is still held. Releasing the lock and *then* stamping the token or sending the broadcast lets two mutations that serialized their *applies* in order A,B interleave their *tokens/broadcasts* as B,A — apply-order, token-order, and broadcast-enqueue-order silently diverge.
+
+The invariant to preserve is: **apply-order == token-order == broadcast-enqueue-order**, per serialized resource.
+
+Pattern:
+```rust
+let mut guard = session.store.write().await; // serializes applies
+apply_mutation(&mut guard, &ops)?;           // (1) apply
+let seq = session.next_seq();                // (2) stamp UNDER the lock
+let payload = build_broadcast(&guard, seq);  // (3) build from post-apply state
+session.broadcast.send(payload);             // (4) enqueue UNDER the lock — must be non-blocking
+drop(guard);
+```
+Anti-pattern: `drop(guard); let seq = session.next_seq(); broadcast.send(...);` — the gap between unlock and stamp is the interleave window.
+
+The broadcast send MUST be synchronous/non-blocking (`tokio::sync::broadcast::Sender::send`, an unbounded channel, an enqueue that cannot `.await`). Do NOT hold the write lock across an `.await` point — if the only available send is async/awaiting, capture the payload + token under the lock, drop the guard, then send, accepting that the *token* is ordered correctly even though the *send* is not, and document that the consumer must reorder on the token in that case.
+
+This is the temporal complement to "Side-Effect Artifacts Must Be Constructed After Precondition Verification": that rule fixes *what* the payload is built from (post-mutation state); this rule fixes *when* the token is stamped and the payload is enqueued (under the lock). When adding a broadcast or a sequence stamp to one transport, search every other transport that mutates the same resource and apply the same ordering — GraphQL resolver, MCP tool envelope, and any future transport.
+
+Precedent: Spec 22b (RF-002) — GraphQL `apply_operations` dropped the `session.store` write guard before calling `session.next_seq()` and `broadcast.send()`; the MCP `run_session_scoped` envelope had the identical shape. Concurrent mutations on one session serialized their applies but could interleave seq-stamp/broadcast order. No client-visible effect today only because `apply-remote.ts` applies in arrival order, not seq order — a consumer accident, not a guarantee. The fix moved both the stamp and the send inside the write guard (no `.await` under the lock).
+
 ### Delete Operations Must Enforce Collection-Level Invariants
 
 Any `FieldOperation` that removes an entity from a bounded collection MUST validate both (1) that the entity exists, AND (2) that removing it will not violate a minimum-cardinality invariant. If a document must always contain at least one page, `DeletePage::validate` must check `page_count > MIN_PAGES_PER_DOCUMENT`. The minimum MUST be defined as a `MIN_*` constant in `validate.rs`. Do not rely on the frontend to enforce this — frontend guards are bypassable via GraphQL and MCP.

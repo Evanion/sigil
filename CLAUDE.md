@@ -309,6 +309,24 @@ Rules for parallel subagent execution:
 
 Precedent: PR #67 remediation — Batch A (Canvas wiring) and Batch C (Rust validation) ran concurrently. Batch A's `git add` swept up Batch C's staged-but-uncommitted Rust changes into a `refactor(frontend):` commit. The implementer caught and reset before push. Had the commit been pushed, the `feat(core):` commit Batch C planned would have come up empty, and the type-semantic rule "refactor MUST NOT introduce new types" would have been silently violated. The mis-attribution was a process race, not a coding error — explicit-file-path staging is the only mitigation that scales across future parallel-execution PRs.
 
+### Subagent Git Discipline
+
+An implementation subagent operates on a branch the controller prepared. The subagent MUST treat the branch HEAD as fixed ground and only ever *add* commits on top of it. The destructive failure this prevents is a subagent that `reset`s or `checkout`s to a stale commit (a dangling commit from a prior attempt, or the plan/spec commit) and commits there, producing orphaned commits, duplicated work, and a recovery burden on the controller.
+
+Rules for every implementation subagent:
+
+1. **Verify base before starting.** Before the first edit, run `git rev-parse HEAD` and `git rev-parse --abbrev-ref HEAD` and confirm HEAD matches the branch + commit SHA the controller named in the dispatch. The controller's dispatch instructions MUST include the expected branch name and HEAD SHA. If they do not match, STOP and report — do not "fix" it by resetting.
+
+2. **Never rewrite or relocate history.** A subagent MUST NOT run `git reset` (any mode), `git checkout <commit>` / `git switch --detach`, `git cherry-pick`, `git rebase`, `git commit --amend`, or `git push --force`. These are controller-only operations. A subagent only `git add <explicit-paths>` (per Parallel Execution Hygiene) and `git commit`.
+
+3. **Confirm parent after committing.** After `git commit`, run `git rev-parse HEAD~1` and confirm it equals the pre-commit HEAD recorded in rule 1. A new commit whose parent is not the prior HEAD is an orphaned/misplaced commit — report it to the controller immediately rather than continuing; continuing compounds the divergence.
+
+4. **Verify file writes landed on disk before staging.** In a worktree, after editing a file, the subagent MUST confirm the change is present on disk before `git add` (e.g., `git diff --stat -- <path>` shows the expected delta, or re-read the file). A stage/commit of an unflushed edit silently commits stale content; observed when an `Edit`-tool write did not appear in the working tree.
+
+The controller, on detecting an orphaned commit from any subagent, MUST recover (cherry-pick the orphan onto the correct HEAD or re-dispatch the task) before dispatching the next dependent batch — an orphaned commit left in place will be re-orphaned or duplicated by the following batch. These four rules SHOULD also be reflected in the implementation-subagent dispatch prompt template (the controller names the expected HEAD SHA + forbids history rewrites in the dispatch).
+
+Precedent: Spec 22b execution — two implementer subagents committed onto the wrong base (reset/checked-out to a dangling or plan commit instead of branch HEAD), producing orphaned commits and a re-done task; the controller recovered each time. Separately, an `Edit` write did not flush to the worktree before staging, risking a commit of stale content. Both are workflow hazards invisible to code review and only catchable by the subagent verifying its own git position and disk state.
+
 ---
 
 ## 10. Spec Authoring Requirements
@@ -418,7 +436,8 @@ Every validation constant (e.g., `MAX_FILE_SIZE`, `MAX_NESTING_DEPTH`, `MAX_NAME
 1. Add the enforcement check at every relevant boundary (constructor, deserialization, insertion).
 2. Add a test that verifies the limit is enforced (attempts to exceed it and expects an error).
 3. If a constant exists but is not enforced, treat it as a bug.
-4. Every numeric input control in the frontend (`NumberInput`, `Slider`) MUST have a named constant for its `min` and `max` bounds. Passing a hardcoded literal as the `max` prop, or omitting bounds on a domain-bounded value (pixel offset, opacity, angle), is a bug. The constant must match the corresponding Rust validation value.
+4. A boundary may be *exempted* from enforcement ONLY when it is an **infallible, controlled path** (a startup/bootstrap insertion, a test-only helper) where (a) making it fallible to enforce the limit would be disproportionate to the single controlled use, AND (b) a *sibling* fallible boundary that the limit actually protects (e.g., the public `open`/`register` API exposed to untrusted callers) DOES enforce it. The exemption MUST be a doc-comment on the exempt function naming: the constant, why this path is infallible/controlled, which sibling boundary enforces the cap, and the obligation that any future bulk or untrusted caller MUST route through the fallible boundary instead. An undocumented unenforced boundary remains a bug; a documented exemption is not. Precedent: Spec 22b (RF-004) — `register_in_memory` inserted sessions unconditionally while the public `open` enforced `MAX_SESSIONS`; the in-memory path is an infallible startup helper, so the resolution documented the exemption rather than making the helper fallible.
+5. Every numeric input control in the frontend (`NumberInput`, `Slider`) MUST have a named constant for its `min` and `max` bounds. Passing a hardcoded literal as the `max` prop, or omitting bounds on a domain-bounded value (pixel offset, opacity, angle), is a bug. The constant must match the corresponding Rust validation value.
 
 ### Recursive Functions Require Depth Guards
 
@@ -557,6 +576,8 @@ This rule exists because PR #39 deleted Command structs containing bounding box 
 When a validation check exists at one API boundary (GraphQL resolver, MCP tool handler, REST endpoint), the same check MUST exist at every other boundary that accepts the same input type. When adding or modifying a validation rule, search all transport layers for the same input type and update them in the same PR. Asymmetric validation means one transport silently accepts input that another rejects, which is a security inconsistency.
 
 The frontend store layer (functions in `document-store-solid.tsx` that call GraphQL mutations) is also a transport boundary — it must validate inputs against the same constants as the server before making the network call.
+
+**Resolution and routing semantics are subject to the same symmetry obligation, not only field validation.** When a request omits a routing discriminant (no session header, no tenant id, no explicit target) and the server must *resolve* which entity the request acts on, every transport MUST resolve identically — specifically, an input that is *ambiguous* on one transport (e.g., "no session header, but >1 session open") MUST NOT *silently succeed* on another. If one transport returns a typed "disambiguation required" error, every other transport accepting the same request MUST return the equivalent error under the same condition; a silent default-fallback on a second transport is a routing/data-integrity hazard (the request lands on the wrong entity with no error). When adding or changing a resolution/disambiguation rule on one transport, search every other transport's resolver and update it in the same PR. Precedent: Spec 22b (RF-003) — GraphQL `resolve_session` fell back to `default_session_id` for a header-less request regardless of session count, while MCP `session_resolver` returned `Ambiguous` when >1 session was open; a header-less GraphQL client with multiple sessions open silently wrote to the last-opened session. Fixed by making GraphQL return `SESSION_REQUIRED` when `sessions.len() > 1`.
 
 Symmetry also applies **within a single parser** that accepts multiple input shapes (shorthand scalar, shorthand object, full per-item array). Every branch of a polymorphic parser MUST apply the same validation rules to the same logical field. If the shorthand branch rejects an out-of-domain field (e.g., `smoothing` on a non-superellipse shape), the per-item-array branch MUST reject it identically — silently dropping the field in one branch and rejecting it in the other is a data-integrity inconsistency, even though both branches live in the same function. When adding a validation check to one branch of a polymorphic parser, add it to every other branch in the same commit.
 
