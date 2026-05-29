@@ -127,22 +127,39 @@ mod tests {
     use super::*;
     use crate::graphql::types::DocumentEventType;
     use crate::state::{MutationEvent, MutationEventKind};
+    use crate::test_support::new_state_with_session;
+    use sigil_state::sessions::SessionEvent;
     use sigil_state::{OperationPayload, TransactionPayload};
+
+    /// Receive the next `SessionEvent::DocumentEvent` from a session broadcast
+    /// receiver, unwrapping to its inner `MutationEvent`. Panics on
+    /// `SessionFatal` (not expected in these tests).
+    async fn recv_doc_event(
+        rx: &mut tokio::sync::broadcast::Receiver<SessionEvent>,
+    ) -> MutationEvent {
+        match rx.recv().await.expect("should receive event") {
+            SessionEvent::DocumentEvent(me) => me,
+            SessionEvent::SessionFatal { reason } => {
+                panic!("expected DocumentEvent, got SessionFatal: {reason}")
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_broadcast_delivers_to_subscriber() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
-        let _ = event_tx.send(MutationEvent {
-            kind: MutationEventKind::NodeCreated,
-            uuid: Some("abc-123".to_string()),
-            data: None,
-            transaction: None,
-        });
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeCreated,
+                uuid: Some("abc-123".to_string()),
+                data: None,
+                transaction: None,
+            }));
 
-        let received = rx.recv().await.expect("should receive event");
+        let received = recv_doc_event(&mut rx).await;
         let doc_event = DocumentEvent::from_mutation_event(received);
         assert_eq!(doc_event.event_type, DocumentEventType::NodeCreated);
         assert_eq!(doc_event.uuid.as_deref(), Some("abc-123"));
@@ -152,37 +169,35 @@ mod tests {
 
     #[tokio::test]
     async fn test_broadcast_without_listeners_does_not_panic() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
+        let (_state, session) = new_state_with_session();
         // No subscribers -- send should not panic.
-        let _ = event_tx.send(MutationEvent {
-            kind: MutationEventKind::NodeDeleted,
-            uuid: Some("def-456".to_string()),
-            data: None,
-            transaction: None,
-        });
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeDeleted,
+                uuid: Some("def-456".to_string()),
+                data: None,
+                transaction: None,
+            }));
     }
 
     #[tokio::test]
     async fn test_multiple_subscribers_each_receive_event() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx1 = event_tx.subscribe();
-        let mut rx2 = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx1 = session.broadcast.subscribe();
+        let mut rx2 = session.broadcast.subscribe();
 
-        let _ = event_tx.send(MutationEvent {
-            kind: MutationEventKind::NodeUpdated,
-            uuid: Some("ghi-789".to_string()),
-            data: Some(serde_json::json!({"field": "transform"})),
-            transaction: None,
-        });
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeUpdated,
+                uuid: Some("ghi-789".to_string()),
+                data: Some(serde_json::json!({"field": "transform"})),
+                transaction: None,
+            }));
 
-        let r1 = DocumentEvent::from_mutation_event(
-            rx1.recv().await.expect("subscriber 1 should receive"),
-        );
-        let r2 = DocumentEvent::from_mutation_event(
-            rx2.recv().await.expect("subscriber 2 should receive"),
-        );
+        let r1 = DocumentEvent::from_mutation_event(recv_doc_event(&mut rx1).await);
+        let r2 = DocumentEvent::from_mutation_event(recv_doc_event(&mut rx2).await);
         assert_eq!(r1.event_type, DocumentEventType::NodeUpdated);
         assert_eq!(r2.event_type, DocumentEventType::NodeUpdated);
         assert_eq!(r1.uuid, r2.uuid);
@@ -197,9 +212,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscriber_receives_events_in_order() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
         let event_kinds = [
             MutationEventKind::NodeCreated,
@@ -218,17 +232,18 @@ mod tests {
         ];
 
         for kind in &event_kinds {
-            let _ = event_tx.send(MutationEvent {
-                kind: *kind,
-                uuid: None,
-                data: None,
-                transaction: None,
-            });
+            let _ = session
+                .broadcast
+                .send(SessionEvent::DocumentEvent(MutationEvent {
+                    kind: *kind,
+                    uuid: None,
+                    data: None,
+                    transaction: None,
+                }));
         }
 
         for et in &expected_types {
-            let received =
-                DocumentEvent::from_mutation_event(rx.recv().await.expect("should receive event"));
+            let received = DocumentEvent::from_mutation_event(recv_doc_event(&mut rx).await);
             assert_eq!(received.event_type, *et);
         }
     }
@@ -308,11 +323,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_applied_yields_full_payload() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
-        state.app.publish_transaction(
+        session.publish(
             MutationEventKind::NodeUpdated,
             Some("node-abc".to_string()),
             TransactionPayload {
@@ -329,15 +343,12 @@ mod tests {
             },
         );
 
-        let received = rx.recv().await.expect("should receive event");
+        let received = recv_doc_event(&mut rx).await;
         let event = TransactionAppliedEvent::from_mutation_event(received);
 
         assert_eq!(event.transaction_id, "tx-sub-1");
         assert_eq!(event.user_id, "user-sub-1");
-        assert_ne!(
-            event.seq, "0",
-            "seq should be assigned by publish_transaction"
-        );
+        assert_ne!(event.seq, "0", "seq should be assigned by publish");
         assert_eq!(event.event_type, DocumentEventType::NodeUpdated);
         assert_eq!(event.uuid.as_deref(), Some("node-abc"));
         assert_eq!(event.operations.len(), 1);
@@ -347,19 +358,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_applied_legacy_fallback() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
-        // Send a legacy event without a transaction payload directly on the channel
-        let _ = event_tx.send(MutationEvent {
-            kind: MutationEventKind::NodeDeleted,
-            uuid: None,
-            data: Some(serde_json::json!({"field": "test"})),
-            transaction: None,
-        });
+        // Send an event without a transaction payload directly on the channel.
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeDeleted,
+                uuid: None,
+                data: Some(serde_json::json!({"field": "test"})),
+                transaction: None,
+            }));
 
-        let received = rx.recv().await.expect("should receive event");
+        let received = recv_doc_event(&mut rx).await;
         let event = TransactionAppliedEvent::from_mutation_event(received);
 
         assert!(
@@ -376,13 +388,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_transaction_applied_preserves_order() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
         // Publish three transactions
         for i in 1..=3 {
-            state.app.publish_transaction(
+            session.publish(
                 MutationEventKind::NodeUpdated,
                 Some(format!("node-{i}")),
                 TransactionPayload {
@@ -396,7 +407,7 @@ mod tests {
 
         let mut seq_values = Vec::new();
         for _ in 0..3 {
-            let received = rx.recv().await.expect("should receive event");
+            let received = recv_doc_event(&mut rx).await;
             let event = TransactionAppliedEvent::from_mutation_event(received);
             let seq: u64 = event.seq.parse().expect("seq should be a number");
             seq_values.push(seq);
@@ -413,12 +424,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_document_changed_still_works_alongside_transaction_applied() {
-        let state = ServerState::new();
-        let event_tx = state.app.event_tx().expect("event_tx configured");
-        let mut rx = event_tx.subscribe();
+        let (_state, session) = new_state_with_session();
+        let mut rx = session.broadcast.subscribe();
 
         // Publish an event with a transaction payload
-        state.app.publish_transaction(
+        session.publish(
             MutationEventKind::NodeCreated,
             Some("node-compat".to_string()),
             TransactionPayload {
@@ -435,7 +445,7 @@ mod tests {
             },
         );
 
-        let received = rx.recv().await.expect("should receive event");
+        let received = recv_doc_event(&mut rx).await;
 
         // The old subscription path still works
         let doc_event = DocumentEvent::from_mutation_event(received.clone());
