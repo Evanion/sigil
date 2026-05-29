@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use sigil_core::Document;
 use tokio::sync::{broadcast, mpsc};
-use tokio::task::JoinHandle;
 
 pub mod sessions;
 
@@ -165,12 +164,13 @@ pub struct AppState {
     pub workfile_path: Option<PathBuf>,
     /// Sender to signal the persistence task that the document has changed.
     /// `None` when persistence is not configured (in-memory mode).
+    ///
+    /// As of Spec 22a persistence is owned per-session by
+    /// `SessionPersistence` (in the server crate), so this is always `None`
+    /// on instances the server constructs and `signal_dirty` is a silent
+    /// no-op. The field and `signal_dirty` are retained because MCP/GraphQL
+    /// handlers still call `signal_dirty`; it is removed in 22c.
     dirty_tx: Option<mpsc::Sender<()>>,
-    /// Handle for the background persistence task, used for graceful shutdown.
-    /// Wrapped in `Arc<Mutex<Option<...>>>` so `AppState` can derive `Clone`
-    /// while only one caller can take the handle.
-    /// `None` when persistence is not configured (in-memory mode).
-    persistence_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Optional broadcast sender for mutation events.
     ///
     /// When set, `broadcast_internal` sends events to all subscribers (e.g. GraphQL
@@ -195,28 +195,6 @@ impl AppState {
             )))),
             workfile_path: None,
             dirty_tx: None,
-            persistence_handle: Arc::new(Mutex::new(None)),
-            event_tx: None,
-            seq_counter: Arc::new(AtomicU64::new(1)),
-        }
-    }
-
-    /// Creates a new `AppState` with persistence support.
-    ///
-    /// The caller provides a pre-spawned persistence task's sender and handle.
-    /// This keeps file I/O concerns out of this crate.
-    #[must_use]
-    pub fn new_with_persistence(
-        document: Arc<Mutex<SendDocument>>,
-        workfile_path: PathBuf,
-        dirty_tx: mpsc::Sender<()>,
-        persistence_handle: JoinHandle<()>,
-    ) -> Self {
-        Self {
-            document,
-            workfile_path: Some(workfile_path),
-            dirty_tx: Some(dirty_tx),
-            persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
             event_tx: None,
             seq_counter: Arc::new(AtomicU64::new(1)),
         }
@@ -236,7 +214,6 @@ impl AppState {
             document,
             workfile_path: Some(workfile_path),
             dirty_tx: None,
-            persistence_handle: Arc::new(Mutex::new(None)),
             event_tx: None,
             seq_counter: Arc::new(AtomicU64::new(1)),
         }
@@ -315,27 +292,6 @@ impl AppState {
                 tracing::trace!("dirty signal dropped — save already pending");
             }
         }
-    }
-
-    /// Takes the persistence `JoinHandle` out of this state, if present.
-    ///
-    /// Used during shutdown to await the persistence task after dropping
-    /// the dirty sender. Only the first caller gets the handle; subsequent
-    /// calls return `None`.
-    #[must_use]
-    pub fn take_persistence_handle(&self) -> Option<JoinHandle<()>> {
-        self.persistence_handle
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-    }
-
-    /// Takes the dirty sender out of this state, if present.
-    ///
-    /// Dropping the returned sender signals the persistence task to perform
-    /// a final save and shut down.
-    pub fn take_dirty_tx(&mut self) -> Option<mpsc::Sender<()>> {
-        self.dirty_tx.take()
     }
 }
 
