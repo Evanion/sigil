@@ -1,8 +1,8 @@
 //! Token operation tools — list, create, update, delete.
 //!
 //! All mutations follow the pattern:
-//!   lock → construct operation →
-//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
+//!   acquire session store → construct operation →
+//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → `session.publish` (broadcast)
 //!
 //! The `TokenValue` for create/update is passed in as a raw `serde_json::Value`
 //! and deserialized into `TokenValue` inside the tool. Validation is performed

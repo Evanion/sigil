@@ -2,21 +2,21 @@
 
 //! Server-specific application state.
 //!
-//! Re-exports the core `AppState` and `SendDocument` from the `state` crate
-//! and provides convenience constructors that wire up persistence and the
-//! mutation event broadcast channel.
+//! Re-exports the shared [`App`] and supporting types from the `state` crate
+//! and provides convenience constructors that register the default session and
+//! wire up per-session persistence.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use sigil_core::Document;
 
 use crate::session_persistence::SessionPersistence;
 
-// Re-export the core state types so existing code can use `crate::state::AppState`.
+// Re-export the shared state types so existing code can use `crate::state::*`.
 pub use sigil_state::{
-    App, AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
-    SessionId, Sessions, SessionsError,
+    App, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument, SessionId,
+    Sessions, SessionsError,
 };
 
 /// Server-level state that wraps the shared [`App`].
@@ -27,14 +27,10 @@ pub use sigil_state::{
 /// across all transports (GraphQL queries/mutations, MCP tools). A session is
 /// resolved via the `X-Sigil-Session` header or the `default_session_id`
 /// anchor, then `session.store` is read/written directly.
-///
-/// `App` (from `sigil-state`) still carries a legacy single-document
-/// `AppState` field, but no handler reads or writes it; it is retained only
-/// until a later task removes it entirely.
 #[derive(Clone)]
 pub struct ServerState {
-    /// High-level application state: the [`Sessions`] registry (and a retained
-    /// but unused legacy `AppState`). Shared with MCP via `state.app.clone()`.
+    /// High-level application state: the [`Sessions`] registry. Shared with
+    /// MCP via `state.app.clone()`.
     pub app: App,
     /// Per-session persistence manager (Spec 22a). Owns one debounced save task
     /// per disk-backed session. Shared (`Arc`) so clones for Axum/MCP observe
@@ -43,23 +39,19 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    /// Creates a new `ServerState` with an empty document, no persistence,
-    /// and a default in-memory session registered in the [`Sessions`]
-    /// registry.
+    /// Creates a new `ServerState` with no persistence and a default in-memory
+    /// session registered in the [`Sessions`] registry.
     ///
     /// Suitable for tests and in-memory-only operation. The default session
     /// id is set so GraphQL resolvers can resolve a session without an
     /// `X-Sigil-Session` header.
     #[must_use]
     pub fn new() -> Self {
-        let legacy = AppState::new();
-        let app = App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY);
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
 
         // Register an in-memory default session seeded with a fresh empty
         // document. The session store is the single source of truth for all
-        // reads, writes, and broadcasts (Spec 22b). The legacy `AppState`
-        // still exists (deleted in a later task) but no handler reads or
-        // writes it.
+        // reads, writes, and broadcasts (Spec 22b).
         let id = app
             .sessions
             .register_in_memory(Document::new("Untitled".to_string()));
@@ -71,33 +63,27 @@ impl ServerState {
         }
     }
 
-    /// Creates a `ServerState` holding a pre-loaded document for `workfile_path`.
+    /// Creates a `ServerState` for a workfile-backed deployment.
     ///
-    /// Spec 22a: this no longer spawns a persistence task. The legacy `AppState`
-    /// holds the document for the still-present mirror (removed in 22c), but
-    /// persistence is owned per-session by [`SessionPersistence`]. The caller is
-    /// responsible for registering the session in `app.sessions` AND registering
-    /// it with `persistence` (passing the migration flag) — see
-    /// `main.rs::load_workfile_into_state`.
+    /// The session store is the single source of truth for reads, writes, and
+    /// persistence (Spec 22a/22b). The disk-backed session itself is registered
+    /// by the caller (`main.rs::load_workfile_into_state`) via
+    /// [`App::open_session_with`], which also registers the per-session
+    /// persistence task (passing `migrated_from`). This constructor therefore
+    /// only builds the empty `App` + persistence manager; the document, path,
+    /// and migration flag are threaded by the caller into the session and
+    /// persistence registration.
     ///
-    /// `_migrated_from` is accepted for call-site compatibility but is now
-    /// threaded by the caller into `SessionPersistence::register`; it is not used
-    /// here.
+    /// The parameters are retained for call-site compatibility with
+    /// `load_workfile_into_state` and are intentionally unused here.
     #[must_use]
     pub fn new_with_document_and_workfile_migrated(
-        doc: Document,
-        workfile_path: PathBuf,
+        _doc: Document,
+        _workfile_path: PathBuf,
         _migrated_from: Option<u32>,
     ) -> Self {
-        // The session store is the read + persistence source (Spec 22a/22b).
-        // The disk-backed session is registered by the caller
-        // (`load_workfile_into_state`) via `open_session_with`; the legacy
-        // `AppState` no longer mirrors the document and is not read by any
-        // handler. It is retained only until a later task deletes it.
-        let document = Arc::new(Mutex::new(SendDocument(doc)));
-        let legacy = AppState::new_with_document(document, workfile_path);
         Self {
-            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+            app: App::new(MUTATION_BROADCAST_CAPACITY),
             persistence: Arc::new(SessionPersistence::new()),
         }
     }

@@ -1,6 +1,6 @@
 //! Document query tools — `get_document_info`, `get_document_tree`.
 //!
-//! These functions read document state through the shared `AppState` and
+//! These functions read document state from the resolved session store and
 //! return token-efficient summaries for MCP agent consumption.
 
 use sigil_core::NodeKind;
