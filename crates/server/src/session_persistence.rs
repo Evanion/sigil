@@ -139,6 +139,11 @@ impl SessionPersistence {
 
     /// Drain every task within one bounded total timeout (graceful shutdown).
     /// Fires all shutdowns first so tasks flush in parallel.
+    ///
+    /// Callers MUST NOT register new sessions after `shutdown_all` begins: this
+    /// method drains the handle map once, and a session registered after that
+    /// drain will not be flushed. This is safe because shutdown is terminal —
+    /// no new sessions are opened once the shutdown signal has fired.
     pub async fn shutdown_all(&self, timeout: Duration) {
         let handles: Vec<PersistenceHandle> = {
             let mut map = self.handles.lock().unwrap_or_else(PoisonError::into_inner);
@@ -149,6 +154,13 @@ impl SessionPersistence {
             let _ = h.shutdown.send(());
             joins.push(h.join);
         }
+        // Capture abort handles BEFORE moving the joins into the timeout future.
+        // On timeout we must ABORT the stragglers (not merely drop the joins,
+        // which detaches them and lets them run unsupervised) — RF-003.
+        let abort_handles: Vec<_> = joins
+            .iter()
+            .map(tokio::task::JoinHandle::abort_handle)
+            .collect();
         let drained = tokio::time::timeout(timeout, async {
             for j in joins {
                 if let Err(e) = j.await {
@@ -158,7 +170,16 @@ impl SessionPersistence {
         })
         .await;
         if drained.is_err() {
-            tracing::warn!("persistence drain exceeded {timeout:?} — abandoning remaining tasks");
+            let n = abort_handles.len();
+            // Aborting an already-completed task is a harmless no-op, so it is
+            // fine to iterate every handle here.
+            for ah in &abort_handles {
+                ah.abort();
+            }
+            tracing::warn!(
+                "persistence drain exceeded {timeout:?} — aborted {n} task(s) that did not \
+                 flush in time; their unsaved changes may be lost"
+            );
         }
     }
 }
@@ -204,7 +225,45 @@ async fn persist_loop(
 
         tokio::select! {
             _ = &mut shutdown_rx => {
-                do_save_session(&session, &migration_flag).await;
+                // Before deciding whether to flush, drain any broadcast events
+                // already buffered in the receiver. `tokio::select!` is
+                // unbiased: when a final mutation broadcast and the shutdown
+                // signal are both ready, the shutdown branch can win and the
+                // mutation — which would otherwise arm the deadline — is left
+                // unprocessed in the channel buffer. Treat a buffered
+                // `DocumentEvent` (or a `Lagged` gap) as pending work so the
+                // final flush is not lost to that race (RF-008).
+                if arming {
+                    loop {
+                        match rx.try_recv() {
+                            Ok(SessionEvent::DocumentEvent(_))
+                            | Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                                deadline = Some(Instant::now());
+                            }
+                            Ok(SessionEvent::SessionFatal { .. }) => {
+                                // Stop draining on a fatal, but keep any
+                                // deadline armed by events drained before it
+                                // (RF-009). The loop is terminating, so there
+                                // is no need to mutate `arming`.
+                                break;
+                            }
+                            Err(
+                                broadcast::error::TryRecvError::Empty
+                                | broadcast::error::TryRecvError::Closed,
+                            ) => break,
+                        }
+                    }
+                }
+                // Flush on shutdown ONLY if there is pending work. `deadline`
+                // is `Some` iff the session is dirty/pending: register installs
+                // a deadline only for a forced migration, and a mutation
+                // broadcast arms one — `do_save_session` clears it. When
+                // `deadline` is `None` the store already matches disk
+                // (register runs right after load with disk == memory), so
+                // skipping the write is correct, not lossy (RF-008).
+                if deadline.is_some() {
+                    do_save_session(&session, &migration_flag).await;
+                }
                 break;
             }
             ev = rx.recv() => match ev {
@@ -214,6 +273,8 @@ async fn persist_loop(
                     }
                 }
                 Ok(SessionEvent::SessionFatal { .. }) => {
+                    // Stop arming NEW saves, but intentionally leave `deadline`
+                    // intact so any already-armed save still flushes (RF-009).
                     arming = false;
                 }
                 Err(RecvError::Closed) => {
@@ -346,9 +407,12 @@ mod tests {
         );
     }
 
-    /// `close()` fires a final flush and joins the task before returning.
+    /// `close()` flushes PENDING work and joins the task before returning,
+    /// without waiting for the debounce window to elapse. A broadcast arms the
+    /// deadline; closing immediately afterward (before the debounce fires) must
+    /// still land the dirty document on disk (RF-008).
     #[tokio::test]
-    async fn test_close_flushes_before_returning() {
+    async fn test_close_flushes_pending_work_before_returning() {
         let dir = tempfile::tempdir().unwrap();
         let sessions = Sessions::new(sigil_state::MUTATION_BROADCAST_CAPACITY);
         let session = open_disk_session(&sessions, dir.path(), "flush").await;
@@ -357,17 +421,25 @@ mod tests {
         let manager = SessionPersistence::new();
         manager.register(Arc::clone(&session), None);
 
-        // No broadcast fired; close still flushes last-good state immediately.
+        // Arm the deadline with one mutation broadcast, then close IMMEDIATELY —
+        // before the debounce can elapse. close() must flush the pending work.
+        let _ = session
+            .broadcast
+            .send(sigil_state::sessions::SessionEvent::DocumentEvent(
+                test_mutation_event(),
+            ));
         manager.close(session.id).await;
 
         assert!(
             workfile_path.join("manifest.json").exists(),
-            "close() must flush before returning, without waiting for a debounce"
+            "close() must flush pending work before returning, without waiting for a debounce"
         );
         assert_eq!(manager.len(), 0, "handle removed after close");
     }
 
-    /// A migrated session force-persists on first save and creates .backup-v1/.
+    /// A migrated session force-persists on first save, backs up the original
+    /// v1 artifacts byte-for-byte to `.backup-v1/`, and rewrites the live
+    /// `manifest.json` to the current (v2) schema version (RF-004).
     #[tokio::test]
     async fn test_migrated_session_force_persists_and_backs_up() {
         let dir = tempfile::tempdir().unwrap();
@@ -375,12 +447,10 @@ mod tests {
         let session = open_disk_session(&sessions, dir.path(), "mig").await;
         let workfile_path = session.workfile_path.clone();
         // A v1 manifest must exist for the backup to capture something.
-        tokio::fs::write(
-            workfile_path.join("manifest.json"),
-            r#"{"schema_version": 1, "name": "Original", "page_order": []}"#,
-        )
-        .await
-        .unwrap();
+        let original_v1_manifest = r#"{"schema_version": 1, "name": "Original", "page_order": []}"#;
+        tokio::fs::write(workfile_path.join("manifest.json"), original_v1_manifest)
+            .await
+            .unwrap();
 
         let manager = SessionPersistence::new();
         manager.register(Arc::clone(&session), Some(1)); // migrated_from = Some(1)
@@ -388,11 +458,40 @@ mod tests {
         // No broadcast: the migration flag must trigger the first save on its own.
         sleep(Duration::from_millis(SAVE_DEBOUNCE_MS + 300)).await;
 
+        // (existing assertion) the backup directory must exist.
+        let backup_manifest_path = workfile_path.join(".backup-v1").join("manifest.json");
         assert!(
             tokio::fs::metadata(workfile_path.join(".backup-v1"))
                 .await
                 .is_ok(),
             "migrated session must force-persist and create .backup-v1/"
+        );
+
+        // (a) the backed-up manifest must be the ORIGINAL v1 bytes, unmodified.
+        let backed_up = tokio::fs::read(&backup_manifest_path)
+            .await
+            .expect(".backup-v1/manifest.json must exist");
+        assert_eq!(
+            backed_up,
+            original_v1_manifest.as_bytes(),
+            ".backup-v1/manifest.json must preserve the original v1 manifest byte-for-byte"
+        );
+
+        // (b) the LIVE manifest must have been rewritten to the current (v2) schema.
+        let live = tokio::fs::read(workfile_path.join("manifest.json"))
+            .await
+            .expect("live manifest.json must exist after save");
+        let parsed: crate::workfile::Manifest =
+            serde_json::from_slice(&live).expect("live manifest.json must parse");
+        assert_eq!(
+            parsed.schema_version,
+            sigil_core::CURRENT_SCHEMA_VERSION,
+            "live manifest must be rewritten to the current schema version"
+        );
+        assert_eq!(
+            sigil_core::CURRENT_SCHEMA_VERSION,
+            2,
+            "this assertion pins the expected migrated-to version (v2) for RF-004"
         );
     }
 
