@@ -289,6 +289,7 @@ mod tests {
             token_type: "number".to_string(),
             value: serde_json::json!({ "type": "number", "value": value }),
             description: None,
+            session_id: None,
         }
     }
 
@@ -323,6 +324,7 @@ mod tests {
             token_type: "number".to_string(),
             value: serde_json::json!({ "type": "number", "value": 24.0 }),
             description: Some("Updated spacing".to_string()),
+            session_id: None,
         };
         let updated = update_token_impl(&state, &update).expect("update token");
         assert_eq!(updated.name, "spacing.md");
@@ -401,6 +403,7 @@ mod tests {
             token_type: "not_a_real_type".to_string(),
             value: serde_json::json!(42),
             description: None,
+            session_id: None,
         };
         let result = create_token_impl(&state, &input);
         assert!(result.is_err());

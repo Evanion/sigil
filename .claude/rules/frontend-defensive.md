@@ -195,3 +195,20 @@ All `@kobalte/core/*` imports MUST live inside `frontend/src/components/<wrapper
 - When consuming a Kobalte primitive from any non-`components/` file, import from the project wrapper.
 - The wrapper is responsible for: applying the project's Number.isFinite guards on numeric callbacks, exposing gesture-start/end events for history coalescing (when applicable), enforcing the project's CSS naming convention (`sigil-*` prefix), and respecting `prefers-reduced-motion` on any transitions.
 - A direct import from `@kobalte/core/*` anywhere outside `frontend/src/components/` is a bug. Enforced by a CI grep (see `.github/workflows/ci.yml` "kobalte-import-discipline" step).
+
+### i18n Keys With `{{count}}` Must Have Plural Variants
+
+Any i18next key that interpolates `{{count}}` MUST have `_one` and `_other` variants for every supported locale. The base key (e.g., `reopenPrompt`) is the singular-OR-fallback form and is not sufficient on its own — i18next selects `<key>_one` for `count === 1` and `<key>_other` otherwise. A key called with `t("foo", { count: n })` whose locale JSON contains only `foo` produces "Reopen 1 previous workfiles?" in English and equivalent grammar bugs in every locale.
+
+When adding a translation key that takes `count`:
+1. Add `<key>_one` and `<key>_other` to every locale JSON file. Languages with more than two plural categories (e.g., Russian, Arabic) require additional `_few`/`_many`/`_zero` variants per CLDR — when adding such a locale, every existing `_one`/`_other` pair must be expanded; the locale-parity script (below) enforces that the expansion is complete.
+2. Use the singular form in `_one` and the plural form (with `{{count}}` interpolated) in `_other`.
+3. Verify the key is reached with `count` from at least one test case.
+
+**CI enforcement.** The locale-parity script in `.github/workflows/ci.yml` MUST be extended to:
+- Detect every `t("<key>"…, { count: … })` and every `<Trans i18nKey="<key>" count={…} />` call site in `frontend/src/`.
+- For each such key, assert every locale JSON file contains both `<key>_one` and `<key>_other` (and any additional CLDR categories the locale requires).
+- A locale missing a required plural variant fails CI with a message naming the key and the locale.
+- Ship the script with a violation-fires sentinel test per the §11 "CI Guards Must Ship With a Violation-Fires Test" rule.
+
+Precedent: PR #74 (RF-008) — `welcome.json` (en/es/fr) defined `reopenPrompt` and `reopening` as base keys; `Welcome.tsx` called them with `{ count }`. The result was grammatically broken in all three supplied locales; lint and the locale-parity script (which only checked key presence) gave a green light. The fix added `_one`/`_other` per locale; the CI script needs the count-call detector to catch the next instance.

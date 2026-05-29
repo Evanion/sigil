@@ -1,8 +1,10 @@
 #![warn(clippy::all, clippy::pedantic)]
 
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::Context as _;
+use clap::Parser;
 
 use sigil_server::{build_app, state::ServerState};
 use tracing_subscriber::EnvFilter;
@@ -13,6 +15,23 @@ const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Maximum time to wait for the MCP stdio task to drain on shutdown.
 const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Sigil server. Runs the axum HTTP+WebSocket+MCP stack.
+///
+/// CLI args take precedence over environment variables; env vars take
+/// precedence over defaults. Env vars (`PORT`, `WORKFILE`, `HOST`) remain
+/// supported for docker compatibility.
+#[derive(Parser, Debug, Default)]
+#[command(name = "sigil-server", version)]
+struct Cli {
+    /// Port to bind. Overrides PORT env var.
+    #[arg(long)]
+    port: Option<u16>,
+
+    /// Workfile directory to load. Overrides WORKFILE env var.
+    #[arg(long, value_name = "PATH")]
+    workfile: Option<PathBuf>,
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -35,51 +54,38 @@ async fn main() -> anyhow::Result<()> {
         );
     }
 
+    let cli = Cli::parse();
+
     let host = std::env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-    let port = std::env::var("PORT")
-        .unwrap_or_else(|_| "4680".to_string())
-        .parse::<u16>()?;
 
     let static_dir = std::env::var("STATIC_DIR")
         .unwrap_or_else(|_| "/usr/local/share/sigil/frontend".to_string());
 
-    let workfile_env = std::env::var("WORKFILE").ok();
+    // Workfile: CLI > WORKFILE env > None
+    let workfile_path: Option<PathBuf> = cli
+        .workfile
+        .or_else(|| std::env::var("WORKFILE").ok().map(PathBuf::from));
 
-    let mut state = if let Some(ref workfile_str) = workfile_env {
-        let workfile_path = std::path::PathBuf::from(workfile_str);
-        tracing::info!("loading workfile from {}", workfile_path.display());
-
-        let loaded = sigil_server::workfile::load_workfile(&workfile_path)
-            .await
-            .context("failed to load workfile")?;
-
-        let migrated_from = loaded.migrated_from;
-        let state = ServerState::new_with_document_and_workfile_migrated(
-            loaded.document,
-            workfile_path,
-            migrated_from,
-        );
-
-        // RF-009: if the document was migrated on load, signal the persistence
-        // task that the document is dirty so the v2 form is flushed back to disk.
-        if migrated_from.is_some() {
-            tracing::info!("triggering migrated-form save after workfile load");
-            state.app.signal_dirty();
-        }
-
-        state
+    // Resolve port after `cli.workfile` is consumed.
+    // Port: CLI > PORT env (error on malformed) > default 4680.
+    // Distinguish "PORT unset" (fall through to default) from "PORT set but
+    // malformed" (surface a typed error) per CLAUDE.md §11 "No Silent Error
+    // Suppression".
+    let port = if let Some(p) = cli.port {
+        p
     } else {
-        tracing::info!("no WORKFILE configured — running in-memory mode");
-        // Create a default page so there's something to draw on
-        let state = ServerState::new();
-        {
-            let mut doc = state.app.document.lock().expect("lock for default page");
-            let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
-            let page =
-                sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
-            doc.add_page(page).expect("add default page");
+        match std::env::var("PORT") {
+            Ok(s) => s
+                .parse::<u16>()
+                .with_context(|| format!("PORT env var '{s}' is not a valid u16"))?,
+            Err(_) => 4680,
         }
-        state
+    };
+
+    let mut state = if let Some(ref workfile_path) = workfile_path {
+        load_workfile_into_state(workfile_path).await?
+    } else {
+        new_in_memory_state()
     };
 
     // Take the persistence handle and dirty_tx before moving state into the app.
@@ -92,7 +98,15 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        Some(sigil_mcp::server::start_stdio(state.app.clone()))
+        // MCP carries both the legacy `AppState` (for the existing mutation
+        // tools) and the shared `Sessions` registry (for the session-
+        // discovery tools added in Task 9). Cloning the `Arc<Sessions>` is
+        // cheap and ensures stdio MCP sees the same `register_in_memory`
+        // default session that the HTTP transport sees.
+        Some(sigil_mcp::server::start_stdio(
+            state.app.legacy.clone(),
+            state.app.sessions.clone(),
+        ))
     } else {
         None
     };
@@ -139,6 +153,76 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Loads the workfile at `workfile_path` into a fresh `ServerState` and
+/// registers it as the default session in the `Sessions` registry.
+///
+/// The legacy `AppState.document` continues to hold the authoritative
+/// document for the single-document deployment; the `Sessions` registry
+/// gets a clone so future per-session handlers (Tasks 5–10) can resolve the
+/// default `SessionId` once they are migrated. Until then the per-session
+/// store is dead — no code reads from it.
+async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<ServerState> {
+    tracing::info!("loading workfile from {}", workfile_path.display());
+
+    let loaded = sigil_server::workfile::load_workfile(workfile_path)
+        .await
+        .context("failed to load workfile")?;
+
+    let migrated_from = loaded.migrated_from;
+    // The legacy `AppState` continues to hold the authoritative document
+    // for the single-document deployment. We clone the loaded document
+    // into the `Sessions` registry so future per-session handlers can
+    // resolve the default `SessionId` once Tasks 5–10 migrate them.
+    let doc_for_session = loaded.document.clone();
+    let state = ServerState::new_with_document_and_workfile_migrated(
+        loaded.document,
+        workfile_path.to_path_buf(),
+        migrated_from,
+    );
+
+    // Register the loaded workfile as the default session. The loader
+    // closure returns the pre-loaded document (we already paid for the
+    // async load above), so this is a cheap registry insertion.
+    match state.app.open_session_with(workfile_path, |_path| {
+        Ok::<_, std::convert::Infallible>(doc_for_session)
+    }) {
+        Ok(session_id) => tracing::info!(
+            "registered default session {session_id} for workfile {}",
+            workfile_path.display()
+        ),
+        Err(e) => {
+            tracing::warn!(
+                "failed to register default session for workfile {}: {e}. \
+                 Multi-session features will be unavailable.",
+                workfile_path.display()
+            );
+        }
+    }
+
+    // RF-009: if the document was migrated on load, signal the persistence
+    // task that the document is dirty so the v2 form is flushed back to disk.
+    if migrated_from.is_some() {
+        tracing::info!("triggering migrated-form save after workfile load");
+        state.app.signal_dirty();
+    }
+
+    Ok(state)
+}
+
+/// Constructs an in-memory `ServerState` with a single default page.
+fn new_in_memory_state() -> ServerState {
+    tracing::info!("no WORKFILE configured — running in-memory mode");
+    let state = ServerState::new();
+    {
+        let mut doc = state.app.document.lock().expect("lock for default page");
+        let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
+        let page =
+            sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
+        doc.add_page(page).expect("add default page");
+    }
+    state
+}
+
 async fn shutdown_signal() {
     #[cfg(unix)]
     {
@@ -156,4 +240,38 @@ async fn shutdown_signal() {
             .expect("install ctrl+c handler");
     }
     tracing::info!("shutdown signal received");
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_parses_port() {
+        let cli = Cli::try_parse_from(["sigil-server", "--port", "5000"]).unwrap();
+        assert_eq!(cli.port, Some(5000));
+    }
+
+    #[test]
+    fn test_cli_parses_workfile() {
+        let cli = Cli::try_parse_from(["sigil-server", "--workfile", "/tmp/foo.sigil"]).unwrap();
+        assert_eq!(
+            cli.workfile.as_deref().unwrap().to_str(),
+            Some("/tmp/foo.sigil")
+        );
+    }
+
+    #[test]
+    fn test_cli_no_args_is_valid() {
+        let cli = Cli::try_parse_from(["sigil-server"]).unwrap();
+        assert_eq!(cli.port, None);
+        assert!(cli.workfile.is_none());
+    }
+
+    #[test]
+    fn test_cli_rejects_invalid_port() {
+        let result = Cli::try_parse_from(["sigil-server", "--port", "abc"]);
+        assert!(result.is_err());
+    }
 }

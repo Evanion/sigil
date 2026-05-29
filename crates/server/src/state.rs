@@ -14,32 +14,68 @@ use tokio::sync::broadcast;
 
 // Re-export the core state types so existing code can use `crate::state::AppState`.
 pub use sigil_state::{
-    AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
+    App, AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
+    SessionId, Sessions, SessionsError,
 };
 
-/// Server-level state that wraps the shared `AppState`.
+/// Server-level state that wraps the shared [`App`].
 ///
-/// This is what gets stored in Axum's state extractor and passed to
-/// GraphQL schema data. The MCP crate only needs `AppState` (no server-specific
-/// fields). The mutation event broadcast channel lives inside `AppState` so
-/// that both MCP tools and GraphQL mutations can publish events through the
-/// same path.
+/// `ServerState` is the value passed through Axum's state extractor and into
+/// GraphQL schema `Data`. `App` (from `sigil-state`) owns:
+///
+/// - the legacy single-document [`AppState`] (the current source of truth
+///   for mutations), reachable via `state.app.legacy.*` or through the
+///   `Deref` impl on `App` as `state.app.*` (which is what existing
+///   resolvers/tools use unchanged), and
+/// - the [`Sessions`] registry (multi-session), reachable via
+///   `state.app.sessions.*`. The CLI startup path opens the `--workfile`
+///   directory as the **default session** so multi-session-aware code
+///   (Tasks 5–10) can look up the session by id without forcing the
+///   single-document deployment to break.
+///
+/// Until Tasks 5–10 land, the legacy `AppState.document` is the authoritative
+/// store and the per-session `store` field on `DocumentSession` is unused.
+/// This duplication is intentional and scoped: it lets us wire the
+/// [`Sessions`] registry into the application boundary now without forcing
+/// a 75-callsite mechanical refactor in a single commit.
 #[derive(Clone)]
 pub struct ServerState {
-    /// Core application state (document + persistence + event broadcast),
-    /// shared with MCP.
-    pub app: AppState,
+    /// High-level application state: legacy single-document `AppState` plus
+    /// [`Sessions`] registry. Shared with MCP via `state.app.clone()`.
+    pub app: App,
 }
 
 impl ServerState {
-    /// Creates a new `ServerState` with an empty document and no persistence.
+    /// Creates a new `ServerState` with an empty document, no persistence,
+    /// and a default in-memory session registered in the [`Sessions`]
+    /// registry.
     ///
-    /// Suitable for tests and in-memory-only operation.
+    /// Suitable for tests and in-memory-only operation. The default session
+    /// id is set so GraphQL resolvers can resolve a session without an
+    /// `X-Sigil-Session` header.
     #[must_use]
     pub fn new() -> Self {
-        let mut app = AppState::new();
+        let mut legacy = AppState::new();
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        app.set_event_tx(tx);
+        legacy.set_event_tx(tx);
+        let app = App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY);
+
+        // Register an in-memory default session so mutations in tests /
+        // in-memory mode have a resolvable session id. The session's
+        // initial document is a clone of the legacy document so the two
+        // start consistent (the mutation handlers mirror legacy after each
+        // apply to maintain that consistency).
+        let default_doc = {
+            let guard = app
+                .legacy
+                .document
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.0.clone()
+        };
+        let id = app.sessions.register_in_memory(default_doc);
+        app.set_default_session_id(Some(id));
+
         Self { app }
     }
 
@@ -56,11 +92,13 @@ impl ServerState {
             Arc::clone(&document),
             workfile_path.clone(),
         );
-        let mut app =
+        let mut legacy =
             AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        app.set_event_tx(tx);
-        Self { app }
+        legacy.set_event_tx(tx);
+        Self {
+            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+        }
     }
 
     /// Creates a `ServerState` with a pre-loaded document and workfile persistence.
@@ -91,11 +129,13 @@ impl ServerState {
                 workfile_path.clone(),
                 Arc::clone(&migration_flag),
             );
-        let mut app =
+        let mut legacy =
             AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        app.set_event_tx(tx);
-        Self { app }
+        legacy.set_event_tx(tx);
+        Self {
+            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+        }
     }
 }
 
@@ -132,5 +172,19 @@ mod tests {
             state.app.event_tx().is_some(),
             "ServerState should configure the event broadcast channel"
         );
+    }
+
+    #[test]
+    fn test_server_state_registers_default_in_memory_session() {
+        // Spec 20: `ServerState::new()` now registers an in-memory default
+        // session so GraphQL mutations can resolve a session id without an
+        // explicit workfile or `X-Sigil-Session` header.
+        let state = ServerState::new();
+        assert_eq!(state.app.sessions.len(), 1);
+        let id = state
+            .app
+            .default_session_id()
+            .expect("default session id should be set");
+        assert!(state.app.sessions.get(id).is_some());
     }
 }

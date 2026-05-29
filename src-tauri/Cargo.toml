@@ -1,0 +1,58 @@
+[package]
+name = "sigil-shell"
+version = "0.1.1"
+edition = "2024"
+license = "BUSL-1.1"
+description = "Sigil desktop shell (Tauri 2.x)."
+publish = false
+
+# src-tauri is intentionally a standalone crate, NOT a workspace member of
+# the root sigil workspace. The empty [workspace] table detaches this crate
+# from any parent workspace Cargo might discover by walking up the directory
+# tree (which matters in git-worktree checkouts where multiple Cargo.toml
+# files exist). The Tauri shell has its own dependency tree (Tauri runtime,
+# WebView, platform bundling) that should not pollute the core workspace.
+[workspace]
+
+[lib]
+name = "sigil_shell_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+# NOTE: deviation from plan — the plan listed `features = ["macos-private-api"]`,
+# but this feature requires `app.macOSPrivateApi = true` in tauri.conf.json AND
+# disqualifies the app from the macOS App Store. No current Sigil requirement
+# needs it (window transparency is the only use case), and Task 7 (menubar) does
+# not require it either. Re-enable + flip the config flag if/when a feature
+# explicitly needs private APIs and the App Store deferral is accepted.
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-single-instance = "2"
+tokio = { version = "1.50.0", features = ["full"] }
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.23.0", features = ["v4"] }
+# NOTE: deviation from plan — plan specified `version = "0.12"` with feature
+# `rustls-tls`, but Tauri's dependency graph already pulls in reqwest 0.13.4
+# (see Cargo.lock). Using "0.13" matches the existing transitive resolution;
+# pinning "0.12" would compile two copies of reqwest + hyper for no functional
+# benefit. The feature was renamed `rustls-tls` -> `rustls` in 0.13. Both
+# avoid OpenSSL link issues on Windows.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
+sigil-server = { path = "../crates/server" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

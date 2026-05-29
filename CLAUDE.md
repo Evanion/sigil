@@ -75,6 +75,7 @@ sigil/
 │   ├── css/
 │   └── tailwind/
 ├── cli/               # sigil-cli — token export CLI
+├── src-tauri/         # Tauri 2.x desktop shell (NOT in workspace)
 ├── docs/
 │   └── superpowers/
 │       ├── specs/     # Product design records
@@ -108,6 +109,12 @@ All build/test/lint commands run inside the dev container. Use `./dev.sh` as a p
 - Test: `./dev.sh pnpm --prefix frontend test`
 - Lint: `./dev.sh pnpm --prefix frontend lint`
 - Format: `./dev.sh pnpm --prefix frontend format` (check: `format:check`)
+
+### Tauri desktop
+
+- Dev: `pnpm --prefix frontend tauri-dev`
+- Production build: `pnpm --prefix frontend tauri-build`
+- Run server alone (sessionless): `cargo run --bin sigil-server -- --port 4680`
 
 ### Docker (production image)
 
@@ -190,6 +197,13 @@ Rules:
 - When adding a new operation type to an MCP tool, add the corresponding handler in `applyRemoteOperation` in the same PR. A broadcast without a handler is a no-op.
 - When changing the frontend handler for an operation type, search all MCP tools and GraphQL mutations for broadcasts of that `op_type` and update them in the same PR.
 - Entity-creation broadcasts (`create_node`, `create_page`, `create_component`, etc.) MUST include the entity's stable UUID in the `value` payload under the key `"id"`. The frontend handler cannot create the entity in the local store without its identity — a payload missing `"id"` produces a silent discard. This applies to both MCP and GraphQL broadcast paths.
+
+### `sigil-shell` (src-tauri/)
+
+- Tauri 2.x desktop shell. NOT a workspace member — intentionally excluded to keep `cargo build --workspace` fast.
+- Spawns a single `sigil-server` child process on fixed port 4680.
+- Owns: window lifecycle, native menubar, file association (`.sigil/` Document Package on macOS), single-instance routing, recent-files persistence, sessions.json persistence, crash recovery (auto-restart + session replay).
+- Each Tauri window is bound to one server-side session via injected `window.__SIGIL_SESSION_ID__`. Multiple windows on the same workfile share one session.
 
 ---
 
@@ -497,6 +511,17 @@ This applies equally to:
 - Schema/file-presence assertions (verify the assertion fails when the required file is absent).
 
 Precedent: PR #66 (i18n migration) — `mode: "jsx-text-only"` silently bypassed all 83+ JSX attribute literals in the codebase despite the PR claiming the migration was complete. Six reviewers converged on this single finding. Without a violation-fires test, the gate would have green-lit every future hardcoded `aria-label`.
+
+### CI Guards Must Cover Their Whole File Class
+
+When a CI check enforces a constraint over a *class of files* (every workflow, every JSON locale, every `.tsx` component, every `Cargo.toml`), the script MUST enumerate the class by glob — not by naming a single file. Naming `.github/workflows/ci.yml` as the only file scanned by a pin-check is silent scope drift: every new workflow that lands (`release.yml`, `deploy.yml`, `tauri-build.yml`) escapes the check and accumulates unpinned actions until someone notices manually.
+
+Required pattern:
+- Use a glob: `for f in .github/workflows/*.yml; do …; done` (bash) or `find .github/workflows -name '*.yml'` (cross-shell).
+- The violation-fires sentinel test for the guard MUST include at least two files in the class — one that violates and one that does not — so a future maintainer who narrows the glob to a single path fails the sentinel.
+- If the guard legitimately exempts a subset (e.g., a docs-only workflow), the exemption MUST be a property of the file (a comment marker or filename pattern) checked by the script, NOT a hardcoded skip-list inside the script. Hardcoded skip-lists drift; in-file exemption markers travel with the file.
+
+Precedent: PR #74 (RF-010) — `ci.yml`'s pin-check job hardcoded `.github/workflows/ci.yml` as the single scanned file. `tauri-build.yml` landed in the same PR with no enforcement; subsequent workflows would inherit the gap. The fix loops over `.github/workflows/*.yml`. Combine with the parent rule's violation-fires obligation: the sentinel test must include both a clean and a violating workflow so narrowing the glob fails CI.
 
 ### Third-Party Plugin Options Must Be Verified, Not Inferred
 

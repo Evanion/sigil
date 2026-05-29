@@ -28,7 +28,7 @@ import { MAX_LOCALE_NESTING_DEPTH, loadLocaleNamespace } from "./check-locale-pa
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const FRONTEND_SRC = join(__dirname, "..", "src");
-const NAMESPACES = ["common", "tools", "panels", "a11y"];
+const NAMESPACES = ["common", "tools", "panels", "a11y", "welcome"];
 
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx"]);
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage"]);

@@ -1,11 +1,33 @@
 use async_graphql::{Context, Result, Subscription};
 use futures_util::Stream;
+use sigil_state::sessions::SessionEvent;
 
-use crate::state::ServerState;
+use crate::session_header::RequestSession;
+use crate::state::{ServerState, SessionId};
 
 use super::types::{DocumentEvent, TransactionAppliedEvent};
 
 pub struct SubscriptionRoot;
+
+/// Resolve the session for a subscription stream.
+///
+/// HTTP subscriptions (rare; subscriptions typically arrive over WebSocket)
+/// will see `RequestSession` populated by the
+/// [`crate::session_header::middleware`]. WebSocket subscriptions land
+/// without a `RequestSession` in the async-graphql context — Task 7 wires
+/// `session_id` into the WS `connection_init` params. Until that lands, WS
+/// subscriptions fall back to the registry's default session id.
+fn resolve_subscription_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
+    let header_session = ctx.data::<RequestSession>().map(|rs| rs.0).unwrap_or(None);
+    if let Some(id) = header_session {
+        return Ok(id);
+    }
+    state.app.default_session_id().ok_or_else(|| {
+        async_graphql::Error::new(
+            "SESSION_REQUIRED: provide X-Sigil-Session header or open a workfile session",
+        )
+    })
+}
 
 #[Subscription]
 #[allow(clippy::unused_async)]
@@ -14,38 +36,41 @@ impl SubscriptionRoot {
     /// Stream of document change events (legacy).
     ///
     /// Yields a [`DocumentEvent`] every time a mutation modifies the document.
-    /// Subscribes to the [`MutationEvent`](sigil_state::MutationEvent)
-    /// broadcast channel on `AppState` and converts each event to a GraphQL
-    /// `DocumentEvent`. This means events published by MCP tools also appear
-    /// in the subscription stream.
+    /// Spec 20: subscribes to the per-session broadcast channel
+    /// ([`sigil_state::sessions::DocumentSession::broadcast`]) rather than
+    /// the legacy app-wide channel. Events from other sessions are never
+    /// delivered to this subscriber.
     ///
     /// Clients that fall behind (lagged receivers) log a warning and continue
     /// receiving from the latest message rather than disconnecting.
     ///
-    /// RF-011: The `GraphQLSubscription` service from async-graphql-axum does
-    /// not expose message size configuration easily. If RF-002's fix switches
-    /// to `GraphQLWebSocket` directly, message size can be configured there.
+    /// `SessionEvent::SessionFatal` events are dropped here — they signal an
+    /// errored session and need a richer GraphQL type (added in a later task).
     ///
     /// **Deprecated:** Prefer `transaction_applied` for new clients. This
     /// subscription is retained for backwards compatibility during the transition
     /// period (Phase 15d will remove it).
-    // TODO(RF-011): configure max WS message size when switching to GraphQLWebSocket
     async fn document_changed(
         &self,
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = DocumentEvent>> {
-        // RF-013: use fallible `data()` instead of `data_unchecked()`
         let state = ctx.data::<ServerState>()?;
-        let event_tx = state
-            .app
-            .event_tx()
-            .ok_or_else(|| async_graphql::Error::new("event broadcast channel not configured"))?;
-        let mut rx = event_tx.subscribe();
+        let session_id = resolve_subscription_session(ctx, state)?;
+        let session =
+            state.app.sessions.get(session_id).ok_or_else(|| {
+                async_graphql::Error::new(format!("SESSION_NOT_FOUND: {session_id}"))
+            })?;
+        let mut rx = session.broadcast.subscribe();
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
-                    Ok(mutation_event) => {
+                    Ok(SessionEvent::DocumentEvent(mutation_event)) => {
                         yield DocumentEvent::from_mutation_event(mutation_event);
+                    }
+                    Ok(SessionEvent::SessionFatal { reason }) => {
+                        // Surface only to logs for now. A dedicated GraphQL
+                        // event type lands with Task 6 (session operations).
+                        tracing::warn!(session = %session_id, reason = %reason, "session marked errored");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("GraphQL subscription client lagged by {n} messages");
@@ -62,6 +87,8 @@ impl SubscriptionRoot {
     /// operation payloads. Clients use this to apply changes directly to their
     /// local store without refetching.
     ///
+    /// Spec 20: scoped to the requesting session's broadcast channel.
+    ///
     /// Events without a transaction payload (legacy mutations not yet migrated)
     /// are converted to a synthetic single-operation transaction so the client
     /// always receives a consistent format (empty operations list, seq=0).
@@ -70,16 +97,20 @@ impl SubscriptionRoot {
         ctx: &Context<'_>,
     ) -> Result<impl Stream<Item = TransactionAppliedEvent>> {
         let state = ctx.data::<ServerState>()?;
-        let event_tx = state
-            .app
-            .event_tx()
-            .ok_or_else(|| async_graphql::Error::new("event broadcast channel not configured"))?;
-        let mut rx = event_tx.subscribe();
+        let session_id = resolve_subscription_session(ctx, state)?;
+        let session =
+            state.app.sessions.get(session_id).ok_or_else(|| {
+                async_graphql::Error::new(format!("SESSION_NOT_FOUND: {session_id}"))
+            })?;
+        let mut rx = session.broadcast.subscribe();
         Ok(async_stream::stream! {
             loop {
                 match rx.recv().await {
-                    Ok(mutation_event) => {
+                    Ok(SessionEvent::DocumentEvent(mutation_event)) => {
                         yield TransactionAppliedEvent::from_mutation_event(mutation_event);
+                    }
+                    Ok(SessionEvent::SessionFatal { reason }) => {
+                        tracing::warn!(session = %session_id, reason = %reason, "session marked errored");
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!("transaction subscription client lagged by {n} messages");
@@ -416,5 +447,83 @@ mod tests {
         assert_eq!(tx_event.event_type, DocumentEventType::NodeCreated);
         assert_eq!(tx_event.transaction_id, "tx-compat");
         assert_eq!(tx_event.operations.len(), 1);
+    }
+
+    // ── Per-session subscription tests (Spec 20, Task 5) ───────────────
+
+    /// Spec 20: `SessionEvent::DocumentEvent` published on a session's
+    /// broadcast channel is what subscribers consume — confirms the
+    /// migration off the legacy `event_tx` channel.
+    #[tokio::test]
+    async fn test_session_channel_delivers_document_event() {
+        let state = ServerState::new();
+        let id = state.app.default_session_id().expect("default");
+        let session = state.app.sessions.get(id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        let _ = session
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeCreated,
+                uuid: Some("abc-123".to_string()),
+                data: None,
+                transaction: None,
+            }));
+
+        let event = rx.try_recv().expect("event delivered");
+        match event {
+            SessionEvent::DocumentEvent(me) => {
+                let doc_event = DocumentEvent::from_mutation_event(me);
+                assert_eq!(doc_event.event_type, DocumentEventType::NodeCreated);
+                assert_eq!(doc_event.uuid.as_deref(), Some("abc-123"));
+            }
+            SessionEvent::SessionFatal { reason } => {
+                panic!("expected DocumentEvent, got SessionFatal: {reason}");
+            }
+        }
+    }
+
+    /// Spec 20: two open sessions have independent broadcast channels —
+    /// events published on one are NOT delivered to subscribers of the other.
+    #[tokio::test]
+    async fn test_sessions_have_independent_broadcast_channels() {
+        let state = ServerState::new();
+        let a = state.app.default_session_id().expect("default");
+        let b = state
+            .app
+            .sessions
+            .register_in_memory(sigil_core::Document::new("B".to_string()));
+
+        let session_a = state.app.sessions.get(a).expect("a");
+        let session_b = state.app.sessions.get(b).expect("b");
+        let mut rx_a = session_a.broadcast.subscribe();
+        let mut rx_b = session_b.broadcast.subscribe();
+
+        // Publish only on A.
+        let _ = session_a
+            .broadcast
+            .send(SessionEvent::DocumentEvent(MutationEvent {
+                kind: MutationEventKind::NodeUpdated,
+                uuid: Some("only-a".to_string()),
+                data: None,
+                transaction: None,
+            }));
+
+        // A receives it.
+        let recv_a = rx_a.try_recv().expect("A receives its own event");
+        match recv_a {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.uuid.as_deref(), Some("only-a"));
+            }
+            SessionEvent::SessionFatal { reason } => {
+                panic!("unexpected SessionFatal: {reason}");
+            }
+        }
+
+        // B does NOT receive it (different channel).
+        assert!(
+            rx_b.try_recv().is_err(),
+            "session B must not receive session A's events"
+        );
     }
 }

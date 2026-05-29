@@ -133,6 +133,46 @@ pub struct ComponentInfo {
     pub property_count: usize,
 }
 
+// ── Session types ─────────────────────────────────────────────────────
+
+/// One entry in the `list_open_sessions` / `get_active_workfiles` response.
+///
+/// The shape is deliberately a flat string-typed object so an agent prompt
+/// can render or compare entries without needing to understand the
+/// `SessionState` enum representation. The `id` here is the value an agent
+/// passes back as the `session_id` argument on subsequent mutation tools
+/// (Task 10).
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionListEntry {
+    /// Opaque session identifier. Stable for the lifetime of the running
+    /// `sigil-server` process; not persisted across restarts.
+    pub id: String,
+    /// Absolute canonical path of the workfile this session is editing.
+    /// For in-memory sessions (no `--workfile` argument, or sessions created
+    /// for testing) this is the synthetic `memory://<uuid>` form.
+    pub workfile_path: String,
+    /// Display title — the workfile filename without `.sigil` extension, or
+    /// `"Untitled"` if the path has no stem.
+    pub title: String,
+    /// Lifecycle state: either `"Live"` (accepts mutations) or `"Errored"`
+    /// (rejects further mutations after a panic — see
+    /// `Sessions::with_session`). Debug-formatted so the wire shape mirrors
+    /// the Rust enum names exactly.
+    pub state: String,
+}
+
+/// Wrapper for the `list_open_sessions` / `get_active_workfiles` response.
+///
+/// Wraps the array in an object so future schema additions (pagination
+/// cursor, default session pointer, total count) can be added without a
+/// breaking change.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionListResult {
+    /// All sessions currently registered with the server, in unspecified
+    /// order. Empty when no workfiles are open.
+    pub sessions: Vec<SessionListEntry>,
+}
+
 // ── Tool input types ──────────────────────────────────────────────────
 
 /// Input for creating a new page.
@@ -140,6 +180,11 @@ pub struct ComponentInfo {
 pub struct CreatePageInput {
     /// Page name.
     pub name: String,
+    /// Optional session id. Required when multiple sessions are open.
+    /// When omitted with a single open session, the only session is used.
+    /// Call `list_open_sessions` to discover available session ids.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for deleting a page.
@@ -147,6 +192,9 @@ pub struct CreatePageInput {
 pub struct DeletePageInput {
     /// UUID of the page to delete.
     pub page_id: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for renaming a page.
@@ -156,6 +204,9 @@ pub struct RenamePageInput {
     pub page_id: String,
     /// New name for the page.
     pub new_name: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for reordering a page within the document's page list.
@@ -165,6 +216,9 @@ pub struct ReorderPageInput {
     pub page_id: String,
     /// New zero-based position in the page list.
     pub new_position: u32,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for atomically deleting N nodes (Spec 19).
@@ -172,6 +226,9 @@ pub struct ReorderPageInput {
 pub struct DeleteNodesInput {
     /// UUIDs of nodes to delete. Length [1, 1000]; duplicates rejected.
     pub node_uuids: Vec<String>,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for renaming a node.
@@ -181,6 +238,9 @@ pub struct RenameNodeInput {
     pub uuid: String,
     /// New display name for the node.
     pub new_name: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's visibility.
@@ -190,6 +250,9 @@ pub struct SetVisibleInput {
     pub uuid: String,
     /// New visibility state.
     pub visible: bool,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's locked state.
@@ -199,6 +262,9 @@ pub struct SetLockedInput {
     pub uuid: String,
     /// New locked state.
     pub locked: bool,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's transform.
@@ -208,6 +274,9 @@ pub struct SetTransformInput {
     pub uuid: String,
     /// New transform values.
     pub transform: TransformInput,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for creating a new node.
@@ -223,6 +292,9 @@ pub struct CreateNodeInput {
     pub parent_uuid: Option<String>,
     /// Optional initial position and size.
     pub transform: Option<TransformInput>,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for reparenting a node to a new parent.
@@ -235,6 +307,9 @@ pub struct ReparentNodeInput {
     /// Position within the new parent's children list (0-based).
     /// Positions beyond the children count are clamped to append.
     pub position: u32,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for reordering a node within its parent's children list.
@@ -245,6 +320,9 @@ pub struct ReorderChildrenInput {
     /// New position within the parent's children list (0-based).
     /// Positions beyond the children count are clamped by the core engine.
     pub new_position: u32,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's transform.
@@ -293,6 +371,9 @@ pub struct CreateTokenInput {
     pub value: serde_json::Value,
     /// Optional human-readable description.
     pub description: Option<String>,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for updating a design token.
@@ -306,6 +387,9 @@ pub struct UpdateTokenInput {
     pub value: serde_json::Value,
     /// Optional new description.
     pub description: Option<String>,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for deleting a design token.
@@ -313,6 +397,9 @@ pub struct UpdateTokenInput {
 pub struct DeleteTokenInput {
     /// Name of the token to delete (e.g. "color.primary").
     pub name: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for atomically renaming a design token.
@@ -322,6 +409,9 @@ pub struct RenameTokenInput {
     pub old_name: String,
     /// Desired new name for the token (e.g. "color.brand").
     pub new_name: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's opacity.
@@ -331,6 +421,9 @@ pub struct SetOpacityInput {
     pub uuid: String,
     /// Opacity value in [0.0, 1.0].
     pub opacity: f64,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's blend mode.
@@ -340,6 +433,9 @@ pub struct SetBlendModeInput {
     pub uuid: String,
     /// Blend mode name (e.g. "normal", "multiply", "screen", "overlay").
     pub blend_mode: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's fills.
@@ -349,6 +445,9 @@ pub struct SetFillsInput {
     pub uuid: String,
     /// Array of fill objects. Deserialized to `Vec<Fill>` in the handler.
     pub fills: serde_json::Value,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's strokes.
@@ -358,6 +457,9 @@ pub struct SetStrokesInput {
     pub uuid: String,
     /// Array of stroke objects. Deserialized to `Vec<Stroke>` in the handler.
     pub strokes: serde_json::Value,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's effects.
@@ -367,6 +469,9 @@ pub struct SetEffectsInput {
     pub uuid: String,
     /// Array of effect objects. Deserialized to `Vec<Effect>` in the handler.
     pub effects: serde_json::Value,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting a node's corner shapes.
@@ -393,6 +498,9 @@ pub struct SetCornersInput {
     pub uuid: String,
     /// The corner specification. See struct-level doc for accepted shapes.
     pub corners: serde_json::Value,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 // ── Text tool input types ─────────────────────────────────────────────
@@ -404,6 +512,9 @@ pub struct SetTextContentInput {
     pub uuid: String,
     /// New text content.
     pub content: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// Input for setting text style properties on a text node.
@@ -416,6 +527,9 @@ pub struct SetTextStyleInput {
     pub uuid: String,
     /// Partial text style — only fields that are `Some` will be applied.
     pub style: PartialTextStyle,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 /// A partial text style object — only fields that are present will be updated.

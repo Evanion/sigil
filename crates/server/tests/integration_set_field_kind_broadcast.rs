@@ -20,19 +20,25 @@
 //! contract that this test parallels.
 
 use async_graphql::{EmptySubscription, Schema};
+use sigil_core::FieldOperation;
 use sigil_core::commands::node_commands::CreateNode;
 use sigil_core::commands::page_commands::CreatePage;
 use sigil_core::id::PageId;
 use sigil_core::node::NodeKind;
-use sigil_core::{Document, FieldOperation};
 use sigil_server::graphql::mutation::MutationRoot;
 use sigil_server::graphql::query::QueryRoot;
+use sigil_server::session_header::RequestSession;
 use sigil_server::state::ServerState;
 use sigil_state::{MUTATION_BROADCAST_CAPACITY, MutationEventKind};
 use tokio::sync::broadcast;
 
 /// Builds a `ServerState` whose broadcast channel we control, plus a
-/// receiver to assert against. Returns `(state, rx, page_uuid, rect_uuid)`.
+/// receiver to assert against. Returns `(state, rx, rect_uuid)`.
+///
+/// Spec 20: `apply_operations` now mutates `session.store` directly and
+/// mirrors back to the legacy store. The seed below writes to the default
+/// session's store (so the mutation can find the node) AND mirrors to
+/// legacy so any other readers see consistent state.
 fn make_state_with_rect() -> (
     ServerState,
     broadcast::Receiver<sigil_state::MutationEvent>,
@@ -45,14 +51,25 @@ fn make_state_with_rect() -> (
     let (tx, rx) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
     state.app.set_event_tx(tx);
 
-    // Seed: one page + one rectangle, applied directly through the core
-    // engine so the test does not depend on GraphQL CreateNode / CreatePage
-    // shape (which requires escaping the kind JSON).
+    // Seed: one page + one rectangle, applied directly to the default
+    // session's store (and mirrored to legacy.document so other readers
+    // remain consistent during the Spec 20 migration window).
     let page_id = PageId::new(uuid::Uuid::new_v4());
     let rect_uuid = uuid::Uuid::new_v4();
+
+    let session_id = state
+        .app
+        .default_session_id()
+        .expect("default session id registered by ServerState::new()");
+    let session = state
+        .app
+        .sessions
+        .get(session_id)
+        .expect("default session present");
+
     {
-        let mut guard = state.app.document.lock().expect("document lock");
-        let doc: &mut Document = &mut guard.0;
+        let mut session_doc = session.store.try_write().expect("uncontested test lock");
+        let doc = &mut session_doc.0;
 
         let create_page = CreatePage {
             page_id,
@@ -72,14 +89,22 @@ fn make_state_with_rect() -> (
         };
         create_rect.validate(doc).expect("create_node validate");
         create_rect.apply(doc).expect("create_node apply");
+
+        // Mirror the seeded state into the legacy document so the rest of
+        // the system (persistence, un-migrated MCP) sees the same view.
+        let mut legacy = state.app.legacy.document.lock().expect("legacy lock");
+        legacy.0 = doc.clone();
     }
 
     (state, rx, rect_uuid.to_string())
 }
 
 fn test_schema(state: ServerState) -> Schema<QueryRoot, MutationRoot, EmptySubscription> {
+    // Inject `RequestSession(None)` so resolvers fall back to the default
+    // session id (set by `ServerState::new()`).
     Schema::build(QueryRoot, MutationRoot, EmptySubscription)
         .data(state)
+        .data(RequestSession(None))
         .finish()
 }
 

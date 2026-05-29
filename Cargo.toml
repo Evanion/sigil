@@ -7,6 +7,12 @@ members = [
     "crates/mcp",
     "cli",
 ]
+# src-tauri/ is intentionally excluded from the workspace.
+# The Tauri shell has its own dependency tree (Tauri 2.x runtime, WebView,
+# platform-specific bundling) that should not pollute the core workspace
+# build. It is compiled separately via `cd src-tauri && cargo build` or
+# via the `pnpm tauri-{dev,build}` scripts.
+exclude = ["src-tauri"]
 
 [workspace.package]
 version = "0.1.1"
@@ -32,7 +38,11 @@ tower = "0.5.3"
 tower-http = { version = "0.6.8", features = ["fs", "cors"] }
 
 # MCP
-rmcp = { version = "1.3.0", features = ["server", "transport-io"] }
+rmcp = { version = "1.3.0", features = [
+    "server",
+    "transport-io",
+    "transport-streamable-http-server",
+] }
 schemars = "1.0"
 
 # Error handling

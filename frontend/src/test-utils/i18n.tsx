@@ -12,6 +12,7 @@ import commonEn from "../i18n/locales/en/common.json";
 import toolsEn from "../i18n/locales/en/tools.json";
 import panelsEn from "../i18n/locales/en/panels.json";
 import a11yEn from "../i18n/locales/en/a11y.json";
+import welcomeEn from "../i18n/locales/en/welcome.json";
 
 /**
  * Shared synchronously-initialized i18next instance used by `withI18n`
@@ -27,7 +28,7 @@ function ensureInstance(): i18n {
   instance.init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["common", "tools", "panels", "a11y"],
+    ns: ["common", "tools", "panels", "a11y", "welcome"],
     defaultNS: "common",
     resources: {
       en: {
@@ -35,6 +36,7 @@ function ensureInstance(): i18n {
         tools: toolsEn,
         panels: panelsEn,
         a11y: a11yEn,
+        welcome: welcomeEn,
       },
     },
     // Mirrors production `initI18n` (RF-004): missing keys return null so
@@ -69,7 +71,7 @@ export async function createTestI18n(): Promise<i18n> {
   await instance.init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["common", "tools", "panels", "a11y"],
+    ns: ["common", "tools", "panels", "a11y", "welcome"],
     defaultNS: "common",
     resources: {
       en: {
@@ -77,6 +79,7 @@ export async function createTestI18n(): Promise<i18n> {
         tools: toolsEn,
         panels: panelsEn,
         a11y: a11yEn,
+        welcome: welcomeEn,
       },
     },
     // Mirrors production `initI18n` (RF-004): missing keys return null so

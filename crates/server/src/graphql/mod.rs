@@ -1,5 +1,6 @@
 pub mod mutation;
 pub mod query;
+pub mod session;
 pub mod subscription;
 pub mod types;
 

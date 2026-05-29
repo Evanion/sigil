@@ -1,0 +1,210 @@
+/* Welcome window styles. Uses theme tokens from styles/theme.css per
+   CLAUDE.md §5 "No hardcoded visual values in component CSS". */
+
+html,
+body {
+  /* Welcome window scrolls vertically if recents overflow — the editor's
+     global.css sets overflow:hidden for the canvas shell, which is wrong
+     for a content-paged welcome surface. */
+  overflow: auto;
+}
+
+.sigil-welcome {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4);
+  padding: var(--size-5);
+  max-width: 640px;
+  margin: 0 auto;
+  min-height: 100vh;
+  background: var(--surface-1);
+  color: var(--text-1);
+}
+
+.sigil-welcome__header h1 {
+  font-size: var(--font-size-5);
+  font-weight: 600;
+  margin: 0;
+  color: var(--text-1);
+}
+
+/* Visually-hidden helper for accessible headings that don't appear on screen
+   (the actions section's heading is for AT only). */
+.sigil-welcome .sigil-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Reopen banner ────────────────────────────────────────────────── */
+
+.sigil-welcome-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--size-3);
+  padding: var(--size-3) var(--size-4);
+  background: var(--brand-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-2);
+}
+
+.sigil-welcome-banner__text {
+  flex: 1;
+  font-size: var(--font-size-1);
+  font-weight: 500;
+  margin: 0;
+  color: var(--text-1);
+}
+
+.sigil-welcome-banner__primary,
+.sigil-welcome-banner__secondary {
+  padding: var(--size-2) var(--size-3);
+  font: inherit;
+  font-weight: 500;
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.sigil-welcome-banner__primary {
+  background: var(--accent);
+  color: var(--text-on-accent);
+  border: 1px solid var(--accent);
+}
+
+.sigil-welcome-banner__primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.sigil-welcome-banner__primary:active {
+  background: var(--accent-active);
+  border-color: var(--accent-active);
+}
+
+.sigil-welcome-banner__secondary {
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid var(--border-1);
+}
+
+.sigil-welcome-banner__secondary:hover {
+  background: var(--surface-3);
+}
+
+.sigil-welcome-banner__primary:focus-visible,
+.sigil-welcome-banner__secondary:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Open / New actions ───────────────────────────────────────────── */
+
+.sigil-welcome-actions {
+  display: flex;
+  gap: var(--size-3);
+}
+
+.sigil-welcome-actions button {
+  flex: 1;
+  padding: var(--size-3) var(--size-4);
+  font: inherit;
+  font-size: var(--font-size-1);
+  font-weight: 500;
+  background: var(--surface-2);
+  color: var(--text-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.sigil-welcome-actions button:hover {
+  background: var(--surface-3);
+}
+
+.sigil-welcome-actions button:active {
+  background: var(--surface-4);
+}
+
+.sigil-welcome-actions button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Recents ──────────────────────────────────────────────────────── */
+
+.sigil-welcome-recent h2 {
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  margin: 0 0 var(--size-2);
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.sigil-welcome-recent ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-1);
+}
+
+.sigil-welcome-recent li button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: var(--size-2) var(--size-3);
+  font: inherit;
+  font-size: var(--font-size-0);
+  background: transparent;
+  color: var(--text-1);
+  border: 1px solid transparent;
+  border-radius: var(--button-radius);
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.sigil-welcome-recent li button:hover {
+  background: var(--surface-2);
+  border-color: var(--border-1);
+}
+
+.sigil-welcome-recent li button:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.sigil-welcome-recent__empty {
+  color: var(--text-3);
+  font-style: italic;
+  margin: 0;
+}
+
+/* ── Status region ────────────────────────────────────────────────── */
+
+.sigil-welcome-status {
+  margin-top: var(--size-2);
+  color: var(--text-2);
+  font-size: var(--font-size-0);
+  min-height: 1.5em;
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .sigil-welcome-banner__primary,
+  .sigil-welcome-banner__secondary,
+  .sigil-welcome-actions button,
+  .sigil-welcome-recent li button {
+    transition: none;
+  }
+}

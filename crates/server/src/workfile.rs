@@ -509,6 +509,40 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     })
 }
 
+/// Synchronous bridge to [`load_workfile`] for callers that cannot `await`.
+///
+/// This exists to plug into [`sigil_state::Sessions::open`], which accepts a
+/// synchronous loader closure (sigil-state is transport-agnostic and cannot
+/// depend on a specific async runtime). Inside a `#[tokio::main]` deployment
+/// running on the multi-threaded runtime, [`tokio::task::block_in_place`]
+/// safely yields the current worker thread back to the runtime so other tasks
+/// keep making progress while the load blocks.
+///
+/// The returned [`Document`] is the deserialized workfile; the
+/// `migrated_from` flag from [`LoadedWorkfile`] is intentionally dropped at
+/// the sync boundary because [`sigil_state::Sessions::open`] consumes only
+/// `Document`. Callers that need `migrated_from` should continue to use
+/// [`load_workfile`] directly on the legacy `--workfile` startup path.
+///
+/// # Panics
+///
+/// Panics if called outside a Tokio runtime, or from a current-thread
+/// runtime where [`tokio::task::block_in_place`] is not supported.
+/// Production deployments use `#[tokio::main]` which defaults to the
+/// multi-threaded runtime; integration tests that need the sync bridge must
+/// opt into `#[tokio::test(flavor = "multi_thread")]`.
+///
+/// # Errors
+///
+/// Propagates any error from [`load_workfile`] (workfile validation,
+/// manifest parse failure, page deserialization, schema-version mismatch).
+pub fn load_workfile_sync(path: &Path) -> Result<Document> {
+    let loaded = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(load_workfile(path))
+    })?;
+    Ok(loaded.document)
+}
+
 /// Reconstructs a page and its nodes from a [`SerializedPage`] into the document.
 ///
 /// Nodes are deserialized through `Node`'s custom `Deserialize` impl (which
@@ -696,6 +730,57 @@ mod tests {
             .document;
         assert_eq!(loaded.metadata.name, "Empty Project");
         assert!(loaded.pages.is_empty());
+    }
+
+    /// Verifies the sync bridge that lets `sigil_state::Sessions::open`
+    /// invoke the async `load_workfile` from a synchronous loader closure.
+    /// Requires the multi-threaded tokio runtime so `block_in_place` works.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_load_workfile_sync_round_trip() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("sync.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let doc = Document::new("Sync Bridge".to_string());
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("save workfile");
+
+        // `load_workfile_sync` uses `block_in_place` + `block_on`; this is
+        // the canonical pattern for invoking an async API from a sync
+        // boundary on a multi-thread runtime worker thread.
+        let loaded = super::load_workfile_sync(&workfile_path).expect("load_workfile_sync");
+        assert_eq!(loaded.metadata.name, "Sync Bridge");
+    }
+
+    /// Verifies that the sync bridge composes with `sigil_state::Sessions::open`
+    /// — the actual integration this helper exists for. The loader closure runs
+    /// synchronously inside `Sessions::open` and is bridged to the async
+    /// `load_workfile` by `load_workfile_sync`.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_load_workfile_sync_composes_with_sessions_open() {
+        use sigil_state::Sessions;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("compose.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let doc = Document::new("Compose".to_string());
+        save_workfile(&doc, &workfile_path)
+            .await
+            .expect("save workfile");
+
+        let sessions = Sessions::new(64);
+        let id = sessions
+            .open(&workfile_path, super::load_workfile_sync)
+            .expect("session opens via sync bridge");
+        let session = sessions.get(id).expect("registered session");
+        let stored = session.store.read().await;
+        assert_eq!(stored.metadata.name, "Compose");
     }
 
     #[tokio::test]

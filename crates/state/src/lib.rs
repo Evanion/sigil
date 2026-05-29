@@ -7,13 +7,17 @@
 //! and the MCP server without introducing a dependency cycle.
 
 use std::ops::{Deref, DerefMut};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use sigil_core::Document;
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
+
+pub mod sessions;
+
+pub use sessions::{SessionId, Sessions, SessionsError};
 
 /// Capacity of the broadcast channel for mutation events.
 ///
@@ -321,6 +325,191 @@ impl Default for AppState {
     }
 }
 
+/// High-level application wrapper that owns the [`Sessions`] registry and the
+/// legacy single-document [`AppState`].
+///
+/// This is the new entry point for sigil-server and sigil-mcp. Existing
+/// callsites continue to reach the legacy single-document store via
+/// [`App::legacy`] (or the `Deref` impl that exposes the same fields), while
+/// new code can route mutations through [`App::sessions`] —
+/// `App::sessions.with_session(session_id, ...)` — for per-workfile isolation
+/// and panic safety (see `sessions::Sessions::with_session`).
+///
+/// During the Spec-20 migration the two halves coexist:
+///
+/// - The legacy [`AppState`] holds the authoritative document for the
+///   single-session deployment. Existing GraphQL resolvers and MCP tools
+///   continue to mutate it directly while their handlers are migrated in
+///   later sub-tasks (Tasks 5–10) to route through `Sessions`.
+/// - The [`Sessions`] registry tracks open workfile paths and per-session
+///   broadcast channels. The CLI startup path (Task 4) registers the
+///   `--workfile` directory as the **default session** via
+///   [`App::open_session_with`], which stores the resulting [`SessionId`] in
+///   [`App::default_session_id`]. Future tasks plumb that id through GraphQL
+///   extensions and MCP context.
+///
+/// The wrapper does **not** synchronize the document between the legacy store
+/// and per-session stores — that unification happens when handlers are
+/// migrated. Until then the legacy `AppState.document` is the source of
+/// truth and the session's `store` is unused.
+#[derive(Clone)]
+pub struct App {
+    /// Legacy single-document state. Existing GraphQL/MCP callsites reach the
+    /// document via `app.document.lock()` (or through helpers like
+    /// `acquire_document_lock`). New code should prefer routing through
+    /// [`App::sessions`] instead.
+    pub legacy: AppState,
+    /// Multi-session registry. Even in single-document mode the
+    /// `--workfile` path is registered here so per-session broadcast channels
+    /// and panic isolation are available to migrated handlers.
+    pub sessions: Arc<Sessions>,
+    /// The default [`SessionId`] for the single-document deployment mode.
+    ///
+    /// `Some` after [`App::open_session_with`] has registered a workfile.
+    /// Resolvers that have not yet been migrated to receive `session_id`
+    /// from a transport header/extension can read this value as a
+    /// fallback. Future tasks (5–10) replace fallback reads with explicit
+    /// per-request session ids.
+    ///
+    /// Held under `std::sync::RwLock` because reads are frequent and writes
+    /// happen only at startup / session lifecycle transitions.
+    pub default_session_id: Arc<RwLock<Option<SessionId>>>,
+}
+
+impl App {
+    /// Constructs an `App` with an empty legacy [`AppState`] and an empty
+    /// [`Sessions`] registry. The default session id is unset.
+    ///
+    /// `broadcast_capacity` is the buffer size for each session's per-session
+    /// broadcast channel (see [`Sessions::new`]). The legacy event broadcast
+    /// channel on [`AppState`] is configured separately via
+    /// [`AppState::set_event_tx`].
+    #[must_use]
+    pub fn new(broadcast_capacity: usize) -> Self {
+        Self {
+            legacy: AppState::new(),
+            sessions: Arc::new(Sessions::new(broadcast_capacity)),
+            default_session_id: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Wraps a pre-built [`AppState`] in a new `App`. Used by the server
+    /// crate when constructing a workfile-backed deployment whose
+    /// persistence task already wires up `dirty_tx`/`persistence_handle`.
+    #[must_use]
+    pub fn from_legacy(legacy: AppState, broadcast_capacity: usize) -> Self {
+        Self {
+            legacy,
+            sessions: Arc::new(Sessions::new(broadcast_capacity)),
+            default_session_id: Arc::new(RwLock::new(None)),
+        }
+    }
+
+    /// Opens a session for `path` via the embedded [`Sessions`] registry and
+    /// records its id in [`App::default_session_id`].
+    ///
+    /// The `loader` closure performs the actual document load — sigil-state
+    /// has no workfile I/O of its own. The server crate plugs in a
+    /// synchronous bridge to its async `load_workfile` (see
+    /// `sigil_server::workfile::load_workfile_sync`).
+    ///
+    /// Idempotent for the same canonical path: if a session already exists
+    /// for `path`, returns its existing [`SessionId`] and updates the default
+    /// session id to point at it.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`SessionsError`] from [`Sessions::open`].
+    pub fn open_session_with<F, E>(
+        &self,
+        path: &Path,
+        loader: F,
+    ) -> Result<SessionId, SessionsError>
+    where
+        F: FnOnce(&Path) -> Result<Document, E>,
+        E: std::fmt::Display,
+    {
+        let id = self.sessions.open(path, loader)?;
+        let mut guard = self
+            .default_session_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = Some(id);
+        Ok(id)
+    }
+
+    /// Returns the default [`SessionId`], if one has been registered.
+    ///
+    /// Resolvers / tools that have not yet been migrated to receive
+    /// `session_id` from a transport-level extension fall back to this id.
+    #[must_use]
+    pub fn default_session_id(&self) -> Option<SessionId> {
+        let guard = self
+            .default_session_id
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard
+    }
+
+    /// Sets the default session id explicitly. Used by tests and by callers
+    /// that construct a `Sessions` entry outside [`App::open_session_with`].
+    pub fn set_default_session_id(&self, id: Option<SessionId>) {
+        let mut guard = self
+            .default_session_id
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = id;
+    }
+
+    /// Close every synthetic in-memory session (those whose canonical path is
+    /// the `memory://` scheme used by [`Sessions::register_in_memory`]).
+    ///
+    /// RF-007: at server startup we register a synthetic session so that
+    /// header-less requests have something to route to. Once a real workfile
+    /// session is opened, the synthetic one becomes a confusing extra entry
+    /// (it would make [`crate::Sessions::list`] return both, and break the
+    /// "exactly one session" defaulting rule in MCP's `session_resolver`).
+    /// This closes any synthetic sessions and returns how many were closed.
+    #[must_use = "callers typically log the count or assert it in tests"]
+    pub fn close_synthetic_sessions(&self) -> usize {
+        let synthetic: Vec<SessionId> = self
+            .sessions
+            .list()
+            .into_iter()
+            .filter(|s| {
+                s.workfile_path
+                    .to_str()
+                    .is_some_and(|p| p.starts_with("memory://"))
+            })
+            .map(|s| s.id)
+            .collect();
+        let count = synthetic.len();
+        for id in synthetic {
+            let _ = self.sessions.close(id);
+        }
+        count
+    }
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new(MUTATION_BROADCAST_CAPACITY)
+    }
+}
+
+impl Deref for App {
+    type Target = AppState;
+    fn deref(&self) -> &AppState {
+        &self.legacy
+    }
+}
+
+impl DerefMut for App {
+    fn deref_mut(&mut self) -> &mut AppState {
+        &mut self.legacy
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,5 +705,118 @@ mod tests {
             "transaction should be None for legacy events"
         );
         assert!(received.data.is_some(), "legacy data should be preserved");
+    }
+}
+
+#[cfg(test)]
+mod app_wrapper_tests {
+    use super::*;
+    use std::convert::Infallible;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    /// Stub loader for sessions tests. Mirrors `sessions::registry_tests`.
+    #[allow(clippy::unnecessary_wraps)]
+    fn stub_loader(_path: &Path) -> Result<Document, Infallible> {
+        Ok(Document::new("app-test".to_string()))
+    }
+
+    fn make_workfile(tmp: &TempDir, name: &str) -> std::path::PathBuf {
+        let path = tmp.path().join(format!("{name}.sigil"));
+        std::fs::create_dir(&path).expect("create .sigil dir");
+        path
+    }
+
+    /// Compile-time assertion: `App` must implement `Send` and `Sync` so it
+    /// can be wrapped in Axum's state extractor and shared across MCP tasks.
+    fn _assert_app_is_send_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<App>();
+    }
+
+    #[test]
+    fn test_app_new_constructs_empty_sessions_registry() {
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+        assert!(app.sessions.is_empty(), "no sessions before open");
+        assert!(
+            app.default_session_id().is_none(),
+            "no default session before open"
+        );
+    }
+
+    #[test]
+    fn test_app_deref_exposes_legacy_appstate() {
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+        // Reach AppState methods through Deref.
+        let doc = app.document.lock().expect("document lock");
+        assert_eq!(doc.metadata.name, "Untitled");
+    }
+
+    #[test]
+    fn test_open_session_with_records_default_session_id() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "default");
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+
+        let id = app
+            .open_session_with(&path, stub_loader)
+            .expect("open session");
+
+        assert_eq!(app.default_session_id(), Some(id));
+        assert_eq!(app.sessions.len(), 1);
+        assert!(app.sessions.get(id).is_some());
+    }
+
+    #[test]
+    fn test_open_session_with_is_idempotent_for_same_path() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "idemp");
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+
+        let a = app.open_session_with(&path, stub_loader).expect("open a");
+        let b = app.open_session_with(&path, stub_loader).expect("open b");
+        assert_eq!(a, b, "reopening same path returns same SessionId");
+        assert_eq!(app.sessions.len(), 1, "no duplicate session");
+        assert_eq!(app.default_session_id(), Some(b));
+    }
+
+    #[test]
+    fn test_open_session_with_surfaces_loader_failure() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "fails");
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+
+        let result = app.open_session_with(&path, |_: &Path| -> Result<Document, String> {
+            Err("synthetic loader failure".into())
+        });
+        assert!(matches!(result, Err(SessionsError::LoadFailed(_))));
+        assert!(
+            app.default_session_id().is_none(),
+            "failed open must not set default session id"
+        );
+    }
+
+    #[test]
+    fn test_set_default_session_id_overrides_value() {
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
+        let id = SessionId::new();
+        app.set_default_session_id(Some(id));
+        assert_eq!(app.default_session_id(), Some(id));
+        app.set_default_session_id(None);
+        assert!(app.default_session_id().is_none());
+    }
+
+    #[test]
+    fn test_app_from_legacy_preserves_existing_appstate() {
+        let mut legacy = AppState::new();
+        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
+        legacy.set_event_tx(tx);
+
+        let app = App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY);
+        assert!(
+            app.legacy.event_tx().is_some(),
+            "legacy event_tx must survive wrapping"
+        );
+        assert!(app.sessions.is_empty(), "fresh sessions registry");
     }
 }
