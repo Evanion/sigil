@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use sigil_state::SessionId;
 use sigil_state::sessions::{DocumentSession, SessionEvent};
+use tokio::sync::broadcast;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -69,8 +70,17 @@ impl SessionPersistence {
         let (shutdown_tx, shutdown_rx) = oneshot::channel();
         let migration_flag: MigrationFlag = Arc::new(Mutex::new(migrated_from));
         let force_initial_save = migrated_from.is_some();
+        // Subscribe to the broadcast SYNCHRONOUSLY, before spawning the task.
+        // `broadcast::Sender::send` only reaches receivers that have already
+        // subscribed; deferring the subscribe into the spawned task opens a
+        // window where a mutation broadcast immediately after `register()`
+        // would be lost — violating the §3.1 invariant ("it is structurally
+        // impossible to broadcast without persisting"). Subscribing here
+        // guarantees the receiver exists before `register()` returns.
+        let rx = session.broadcast.subscribe();
         let join = tokio::spawn(persist_loop(
             session,
+            rx,
             shutdown_rx,
             migration_flag,
             force_initial_save,
@@ -162,11 +172,11 @@ impl SessionPersistence {
 /// `Closed` arm is kept only for match exhaustiveness + belt-and-suspenders.
 async fn persist_loop(
     session: Arc<DocumentSession>,
+    mut rx: broadcast::Receiver<SessionEvent>,
     mut shutdown_rx: oneshot::Receiver<()>,
     migration_flag: MigrationFlag,
     force_initial_save: bool,
 ) {
-    let mut rx = session.broadcast.subscribe();
     let debounce = Duration::from_millis(SAVE_DEBOUNCE_MS);
 
     // None = idle (no save pending). Some(deadline) = save armed for that instant.
