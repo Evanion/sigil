@@ -211,8 +211,6 @@ describe("Welcome — reactive pipelines (RF-009)", () => {
     await new Promise((r) => setTimeout(r, 0));
     await new Promise((r) => setTimeout(r, 0));
 
-    expect(
-      await screen.findByText(/Reopened 1 of 2; 1 failed\./),
-    ).toBeDefined();
+    expect(await screen.findByText(/Reopened 1 of 2; 1 failed\./)).toBeDefined();
   });
 });
