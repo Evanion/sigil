@@ -29,6 +29,12 @@ pub struct Supervisor {
     port: u16,
     tx: mpsc::Sender<SupervisionEvent>,
     failures: u32,
+    /// RF-004: after firing `CrashDetected`, the supervisor enters a "draining"
+    /// state until it observes the next `Healthy` ping. While draining, failed
+    /// pings DO NOT increment `failures`, so a second `CrashDetected` cannot
+    /// fire while the consumer is mid-recovery. The flag clears when the new
+    /// sigil-server responds to `/heartbeat`, signaling recovery is complete.
+    draining: bool,
 }
 
 impl Supervisor {
@@ -41,6 +47,7 @@ impl Supervisor {
                 port,
                 tx,
                 failures: 0,
+                draining: false,
             },
             rx,
         )
@@ -69,7 +76,10 @@ impl Supervisor {
             interval.tick().await;
             match client.get(&url).send().await {
                 Ok(resp) if resp.status().is_success() => {
-                    if self.failures > 0 {
+                    if self.draining {
+                        tracing::info!("heartbeat returned after crash recovery — resuming");
+                        self.draining = false;
+                    } else if self.failures > 0 {
                         tracing::info!("heartbeat recovered after {} failures", self.failures);
                     }
                     self.failures = 0;
@@ -79,28 +89,40 @@ impl Supervisor {
                     }
                 }
                 Ok(resp) => {
-                    self.failures += 1;
+                    if !self.draining {
+                        self.failures += 1;
+                    }
                     tracing::warn!(
                         status = %resp.status(),
                         failures = self.failures,
+                        draining = self.draining,
                         "heartbeat non-2xx",
                     );
                 }
                 Err(e) => {
-                    self.failures += 1;
+                    if !self.draining {
+                        self.failures += 1;
+                    }
                     tracing::warn!(
                         error = %e,
                         failures = self.failures,
+                        draining = self.draining,
                         "heartbeat error",
                     );
                 }
             }
-            if self.failures >= MAX_FAILURES {
-                tracing::error!("heartbeat failed {} times — declaring crash", self.failures,);
+            if !self.draining && self.failures >= MAX_FAILURES {
+                tracing::error!("heartbeat failed {} times — declaring crash", self.failures);
                 if self.tx.send(SupervisionEvent::CrashDetected).await.is_err() {
                     return;
                 }
+                // RF-004: enter draining state. Subsequent failures don't
+                // increment the counter and don't re-fire CrashDetected until
+                // the new server responds to a heartbeat. This prevents the
+                // double-respawn race when handle_crash takes longer than
+                // MAX_FAILURES * HEARTBEAT_INTERVAL to bring the new server up.
                 self.failures = 0;
+                self.draining = true;
             }
         }
     }
@@ -115,6 +137,7 @@ mod tests {
         let (sup, rx) = Supervisor::new(4680);
         assert_eq!(sup.port, 4680);
         assert_eq!(sup.failures, 0);
+        assert!(!sup.draining);
         // The receiver is held so the channel stays open.
         drop(rx);
     }

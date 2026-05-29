@@ -259,7 +259,9 @@ async fn sessions_query_works_without_header_and_lists_open_sessions() {
         .expect("id")
         .to_string();
 
-    // Sessions list now contains BOTH the default and the newly opened.
+    // RF-007: sessions list now contains the newly-opened workfile session
+    // ONLY — the synthetic in-memory default was displaced by the first
+    // real openSession so it doesn't pollute MCP/header-less defaulting.
     let resp = post_graphql(
         addr,
         json!({ "query": "{ sessions { id workfilePath title state } }" }),
@@ -274,12 +276,17 @@ async fn sessions_query_works_without_header_and_lists_open_sessions() {
         .filter_map(|s| s.pointer("/id").and_then(Value::as_str).map(String::from))
         .collect();
     assert!(
-        listed_ids.contains(&default_id),
-        "default session must remain listed, got: {listed_ids:?}"
+        !listed_ids.contains(&default_id),
+        "RF-007: synthetic in-memory session must be closed after first openSession, got: {listed_ids:?}",
     );
     assert!(
         listed_ids.contains(&opened_id),
         "opened session must appear in sessions list, got: {listed_ids:?}"
+    );
+    assert_eq!(
+        listed.len(),
+        1,
+        "only the workfile session should remain after the synthetic default is displaced",
     );
     // Every entry must declare a state (LIVE on a healthy session).
     for s in listed {

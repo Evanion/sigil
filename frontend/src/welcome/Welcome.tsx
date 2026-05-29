@@ -44,15 +44,30 @@ export function Welcome() {
   const onReopen = async () => {
     const list = reopenList();
     setStatus(t("welcome:status.reopening", { count: list.length }));
+    // RF-011: track per-entry failures so the status region announces
+    // partial success instead of silently masking errors.
+    const failed: string[] = [];
     for (const p of list) {
       try {
         await invoke("open_workfile_path", { path: p });
       } catch (e) {
         console.error(`open_workfile_path ${p} failed:`, e);
+        failed.push(fileNameFromPath(p));
       }
     }
     setReopenList([]);
-    setStatus(t("welcome:status.reopened"));
+    if (failed.length === 0) {
+      setStatus(t("welcome:status.reopened"));
+    } else {
+      setStatus(
+        t("welcome:status.reopenedPartial", {
+          succeeded: list.length - failed.length,
+          failed: failed.length,
+          total: list.length,
+          count: failed.length,
+        }),
+      );
+    }
   };
 
   const onSkipReopen = async () => {
@@ -139,7 +154,18 @@ export function Welcome() {
             <For each={recents()}>
               {(entry) => (
                 <li>
-                  <button type="button" onClick={() => onRecent(entry.path)} title={entry.path}>
+                  {/* RF-015: Include the full path in the accessible name so
+                      keyboard + screen-reader users get the same disambiguation
+                      sighted users get from the on-hover tooltip. */}
+                  <button
+                    type="button"
+                    onClick={() => onRecent(entry.path)}
+                    title={entry.path}
+                    aria-label={t("welcome:recentItemAriaLabel", {
+                      name: fileNameFromPath(entry.path),
+                      path: entry.path,
+                    })}
+                  >
                     {fileNameFromPath(entry.path)}
                   </button>
                 </li>

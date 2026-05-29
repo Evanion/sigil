@@ -19,6 +19,13 @@ on:
 permissions:
   contents: write
 
+# RF-019: cancel in-progress builds for the same ref when a new push lands.
+# Tag builds (release artifacts) are protected — ${{ github.ref }} is unique
+# per tag, so they never cancel a previous tag's build.
+concurrency:
+  group: tauri-build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
   build:
     name: Build (${{ matrix.artifact-name }})

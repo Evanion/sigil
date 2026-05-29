@@ -1524,7 +1524,12 @@ impl MutationRoot {
                 crate::workfile::load_workfile_sync(p)
             };
 
-        let id = state.app.sessions.open(&path_buf, loader).map_err(|e| {
+        // RF-007: use App::open_session_with so default_session_id repoints
+        // at the freshly-opened real workfile session. Without this, the
+        // synthetic in-memory session created at server startup stays as the
+        // default — header-less mutations route there instead of to the
+        // workfile.
+        let id = state.app.open_session_with(&path_buf, loader).map_err(|e| {
             // Map registry errors to typed GraphQL error codes so clients can
             // distinguish "bad path" from "load failed" without parsing
             // strings. Mirrors the error taxonomy in spec 20 §A — Validation
@@ -1533,10 +1538,23 @@ impl MutationRoot {
             let code = match &e {
                 E::InvalidWorkfilePath(_) | E::PathError(_) => "INVALID_WORKFILE_PATH",
                 E::LoadFailed(_) => "LOAD_FAILED",
+                E::TooManySessions { .. } => "TOO_MANY_SESSIONS",
                 E::SessionNotFound(_) | E::SessionErrored => "INTERNAL",
             };
             error_with_code(&format!("openSession: {e}"), code)
         })?;
+
+        // RF-007: once a real workfile session exists, the synthetic
+        // `memory://` session is no longer needed. Closing it prevents
+        // `list_open_sessions` from showing both, and prevents the MCP
+        // resolver's "exactly one session" rule from going ambiguous.
+        let closed = state.app.close_synthetic_sessions();
+        if closed > 0 {
+            tracing::info!(
+                "closed {closed} synthetic session(s) after openSession({path})",
+                path = path_buf.display(),
+            );
+        }
 
         let session = state.app.sessions.get(id).ok_or_else(|| {
             // Theoretically unreachable — `open` either inserts or returns

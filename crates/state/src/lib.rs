@@ -460,6 +460,35 @@ impl App {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = id;
     }
+
+    /// Close every synthetic in-memory session (those whose canonical path is
+    /// the `memory://` scheme used by [`Sessions::register_in_memory`]).
+    ///
+    /// RF-007: at server startup we register a synthetic session so that
+    /// header-less requests have something to route to. Once a real workfile
+    /// session is opened, the synthetic one becomes a confusing extra entry
+    /// (it would make [`crate::Sessions::list`] return both, and break the
+    /// "exactly one session" defaulting rule in MCP's `session_resolver`).
+    /// This closes any synthetic sessions and returns how many were closed.
+    #[must_use = "callers typically log the count or assert it in tests"]
+    pub fn close_synthetic_sessions(&self) -> usize {
+        let synthetic: Vec<SessionId> = self
+            .sessions
+            .list()
+            .into_iter()
+            .filter(|s| {
+                s.workfile_path
+                    .to_str()
+                    .is_some_and(|p| p.starts_with("memory://"))
+            })
+            .map(|s| s.id)
+            .collect();
+        let count = synthetic.len();
+        for id in synthetic {
+            let _ = self.sessions.close(id);
+        }
+        count
+    }
 }
 
 impl Default for App {

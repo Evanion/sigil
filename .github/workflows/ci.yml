@@ -179,13 +179,18 @@ jobs:
           # Check GitHub Actions for uses: lines without SHA pins (40-char hex).
           # Only match YAML key lines (indented "- uses:" or "uses:"), not strings
           # inside run: blocks that happen to contain "uses:".
-          while IFS= read -r ref; do
-            if [ -z "$ref" ]; then continue; fi
-            if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
-              echo "::error file=.github/workflows/ci.yml::Action not pinned to SHA: $ref"
-              ERRORS=$((ERRORS + 1))
-            fi
-          done < <(grep -E '^\s+uses:\s' .github/workflows/ci.yml | sed 's/.*uses:\s*//' | sed 's/\s*#.*//')
+          # RF-010: scan EVERY workflow file under .github/workflows/, not just
+          # ci.yml. The earlier hardcoded path missed new workflows
+          # (tauri-build.yml, future release.yml, etc.).
+          for workflow_file in .github/workflows/*.yml; do
+            while IFS= read -r ref; do
+              if [ -z "$ref" ]; then continue; fi
+              if ! echo "$ref" | grep -qE '@[0-9a-f]{40}'; then
+                echo "::error file=${workflow_file}::Action not pinned to SHA: $ref"
+                ERRORS=$((ERRORS + 1))
+              fi
+            done < <(grep -E '^\s+uses:\s' "$workflow_file" | sed 's/.*uses:\s*//' | sed 's/\s*#.*//')
+          done
           if [ "$ERRORS" -gt 0 ]; then
             echo "Found $ERRORS floating version reference(s). Pin to exact versions."
             exit 1

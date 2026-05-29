@@ -140,6 +140,16 @@ impl DocumentSession {
     }
 }
 
+/// Maximum number of sessions a single server can hold concurrently.
+///
+/// RF-006: prevents an abusive caller (runaway agent, hostile MCP script)
+/// from looping `openSession` calls until OOM. 256 is well above any
+/// realistic per-user desktop workload (Spec 21's planned multi-workfile
+/// UI tops out at single-digit windows) and well below the ulimit on file
+/// descriptors most operating systems impose. Tune if dogfooding shows the
+/// ceiling is wrong; right now there is no real workload pressing the limit.
+pub const MAX_SESSIONS: usize = 256;
+
 /// Registry of open document sessions.
 ///
 /// Sessions are deduplicated by canonical workfile path: opening the same
@@ -243,6 +253,15 @@ impl Sessions {
 
         if let Some(existing) = by_path.get(&canonical) {
             return Ok(*existing);
+        }
+
+        // RF-006: enforce MAX_SESSIONS before inserting. Bound prevents OOM
+        // from a runaway openSession loop.
+        if by_id.len() >= MAX_SESSIONS {
+            return Err(SessionsError::TooManySessions {
+                open: by_id.len(),
+                max: MAX_SESSIONS,
+            });
         }
 
         let id = SessionId::new();
@@ -475,6 +494,9 @@ pub enum SessionsError {
     /// The session is marked `Errored` and rejects further mutations.
     #[error("session has been marked errored")]
     SessionErrored,
+    /// Opening this session would exceed [`MAX_SESSIONS`].
+    #[error("too many sessions open ({open} of max {max}); close one before opening another")]
+    TooManySessions { open: usize, max: usize },
 }
 
 #[cfg(test)]
@@ -614,6 +636,36 @@ mod registry_tests {
         });
         assert!(matches!(result, Err(SessionsError::LoadFailed(_))));
         assert_eq!(sessions.len(), 0, "failed load must not register a session");
+    }
+
+    #[test]
+    fn test_max_sessions_enforced() {
+        // RF-006: Sessions::open rejects after MAX_SESSIONS are already
+        // registered. Uses register_in_memory to pre-fill the registry to
+        // the cap (cheap), then attempts to open a real .sigil/ via
+        // Sessions::open and asserts TooManySessions.
+        let tmp = TempDir::new().expect("tempdir");
+        let extra = make_workfile(&tmp, "extra");
+        let sessions = Sessions::new(64);
+        for i in 0..MAX_SESSIONS {
+            let _ = sessions.register_in_memory(Document::new(format!("fill-{i}")));
+        }
+        assert_eq!(sessions.len(), MAX_SESSIONS);
+
+        let result = sessions.open(&extra, stub_loader);
+        assert!(
+            matches!(
+                result,
+                Err(SessionsError::TooManySessions { open, max })
+                    if open == MAX_SESSIONS && max == MAX_SESSIONS
+            ),
+            "expected TooManySessions, got {result:?}",
+        );
+        assert_eq!(
+            sessions.len(),
+            MAX_SESSIONS,
+            "rejected open must not change the count",
+        );
     }
 
     #[test]

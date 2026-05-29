@@ -205,14 +205,40 @@ pub async fn handle_crash(app: AppHandle) -> Result<()> {
         .with_context(|| format!("respawn sidecar on port {port}"))?;
     *state.server_proc.lock().expect("server_proc lock") = Some(new_sidecar);
 
-    // Brief delay to let the new server bind its listener before replay.
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    // RF-013: poll /heartbeat with a bounded timeout instead of sleeping a
+    // hard-coded 500ms. On slow machines or under load the new server may not
+    // have bound its listener within an arbitrary delay; on a fast machine
+    // 500ms is needlessly long. Polling makes the wait adaptive.
+    if let Err(e) = wait_for_server_ready(port, std::time::Duration::from_secs(5)).await {
+        tracing::warn!(error = %e, "new server did not become ready in time; attempting replay anyway");
+    }
 
     // Replay each binding. We snapshotted labels-and-paths above and do not
     // hold the windows lock across the awaits below.
     for (label, path) in snapshot {
+        // RF-012: skip the binding re-insert if the user closed the window
+        // during the await. Otherwise we leak a binding for a label whose
+        // webview is gone — handle_window_close already fired for it (clean
+        // exit), and the new entry would never be cleaned up because the
+        // close event won't fire again.
+        if app.get_webview_window(&label).is_none() {
+            tracing::info!(label = %label, "window closed during recovery; skipping replay");
+            continue;
+        }
+
         match state.gql.open_session(&path).await {
             Ok(info) => {
+                // RF-012: re-check the window exists between the await and the
+                // insert. The user may have closed it while we were waiting on
+                // openSession.
+                if app.get_webview_window(&label).is_none() {
+                    tracing::info!(
+                        label = %label,
+                        "window closed mid-replay; closing the just-opened session",
+                    );
+                    let _ = state.gql.close_session(&info.id).await;
+                    continue;
+                }
                 state.windows.lock().expect("windows lock").insert(
                     label.clone(),
                     WindowBinding {
@@ -255,4 +281,27 @@ pub async fn handle_crash(app: AppHandle) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Poll `/heartbeat` until it returns 2xx or `timeout` elapses.
+/// Used by [`handle_crash`] to wait for a freshly respawned server to bind
+/// its listener.
+async fn wait_for_server_ready(port: u16, timeout: std::time::Duration) -> Result<()> {
+    let url = format!("http://127.0.0.1:{port}/heartbeat");
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(500))
+        .build()
+        .context("build heartbeat client")?;
+    let start = std::time::Instant::now();
+    loop {
+        if start.elapsed() >= timeout {
+            anyhow::bail!("server did not respond to /heartbeat within {timeout:?}");
+        }
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() => return Ok(()),
+            _ => {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }
+    }
 }

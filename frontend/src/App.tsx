@@ -1,4 +1,5 @@
-import { createSignal, type Component } from "solid-js";
+import { createSignal, onCleanup, type Component } from "solid-js";
+import type { UnlistenFn } from "@tauri-apps/api/event";
 import { TransProvider, useTransContext } from "@mbarzda/solid-i18next";
 import { DragDropProvider } from "dnd-kit-solid";
 import { i18nInstance } from "./i18n";
@@ -12,6 +13,7 @@ import { TabRegion } from "./panels/TabRegion";
 import { registerDefaultPanels } from "./panels/register-panels";
 import { TokenEditorProvider } from "./panels/token-editor-context";
 import { TokenEditor } from "./panels/token-editor/TokenEditor";
+import { installMenuListener } from "./transport/menu-events";
 import "./App.css";
 
 /**
@@ -21,6 +23,11 @@ const AppShell: Component = () => {
   const [t] = useTransContext();
   const store = createDocumentStoreSolid();
   registerDefaultPanels(store);
+  // RF-018: release the urql/WS client + Tauri event listeners when the
+  // editor unmounts (HMR, test teardown). Without this the store leaks its
+  // listeners across reloads — fine in production where the SPA lives for
+  // the document lifetime, but a correctness gap that test harnesses surface.
+  onCleanup(() => store.destroy());
   const [announcement, setAnnouncement] = createSignal("");
   const [tokenEditorOpen, setTokenEditorOpen] = createSignal(false);
   const tokenEditorValue = {
@@ -35,6 +42,30 @@ const AppShell: Component = () => {
     setAnnouncement("");
     queueMicrotask(() => setAnnouncement(message));
   }
+
+  // RF-001: Wire the native menubar's menu-action events to store handlers.
+  // The cleanup handle must be registered synchronously during setup
+  // (frontend-defensive.md: "Never call Solid.js onCleanup inside a Promise.then
+  // ... onCleanup registers with the reactive owner active at call time").
+  const [menuUnlisten, setMenuUnlisten] = createSignal<UnlistenFn | null>(null);
+  onCleanup(() => {
+    const fn = menuUnlisten();
+    if (fn) fn();
+  });
+  installMenuListener({
+    onUndo: () => store.undo(),
+    onRedo: () => store.redo(),
+    // File/Zoom handlers are owned by the Tauri shell (open/new dialogs invoke
+    // Tauri commands; window-close is handled by the OS via Cmd+W; zoom is
+    // deferred per spec §6 — needs viewport state exposure to a menu-level
+    // handler in a follow-up).
+  })
+    .then((unlisten) => {
+      if (unlisten) setMenuUnlisten(() => unlisten);
+    })
+    .catch((err) => {
+      console.error("installMenuListener failed:", err);
+    });
 
   return (
     <DocumentProvider store={store}>
