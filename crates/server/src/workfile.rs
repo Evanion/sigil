@@ -146,20 +146,31 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
     })
 }
 
-/// Atomically writes content to a file by writing to a `.tmp` sibling first,
-/// then renaming into place.
+/// Atomically writes content to a file by writing to a uniquely-named temp
+/// sibling first, then renaming into place.
+///
+/// The temp filename carries a per-call UUID suffix so concurrent writers to
+/// the same target never collide on the temp path (rust-defensive
+/// "Filesystem Writes Must Be Atomic"). The rename is the atomic commit point.
 ///
 /// # Errors
 ///
-/// Returns an error if the write or rename fails.
+/// Returns an error if the write or rename fails. On rename failure the temp
+/// file is best-effort removed so a failed write does not leak temp files.
 async fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = path.with_extension(format!("json.tmp.{}", Uuid::new_v4().simple()));
     tokio::fs::write(&tmp_path, content)
         .await
         .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
-    tokio::fs::rename(&tmp_path, path)
-        .await
-        .with_context(|| format!("failed to rename temp file to: {}", path.display()))?;
+    if let Err(e) = tokio::fs::rename(&tmp_path, path).await {
+        // Best-effort cleanup: leaving a stray .tmp.<uuid> is a leak. We log at
+        // debug because the rename error below is the actionable failure.
+        if let Err(rm) = tokio::fs::remove_file(&tmp_path).await {
+            tracing::debug!("failed to clean up temp file {}: {rm}", tmp_path.display());
+        }
+        return Err(e)
+            .with_context(|| format!("failed to rename temp file to: {}", path.display()));
+    }
     Ok(())
 }
 
@@ -1387,6 +1398,51 @@ mod tests {
             backup_manifest, "ORIGINAL_BACKUP",
             "existing backup must not be overwritten"
         );
+    }
+
+    /// Spec 22a §4 + rust-defensive "Filesystem Writes Must Be Atomic": N concurrent
+    /// writers to the same path must leave exactly one writer's content on disk —
+    /// never partial bytes, never ENOENT. A fixed temp suffix fails this (the temp
+    /// path collides and one rename races ahead of another writer's write).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_atomic_write_concurrent_writers_no_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("contended.json");
+
+        let payloads: Vec<String> = (0..16).map(|i| format!("{{\"writer\":{i}}}")).collect();
+
+        let mut handles = Vec::new();
+        for content in payloads.clone() {
+            let target = target.clone();
+            handles.push(tokio::spawn(async move {
+                // Run many times to widen the race window.
+                for _ in 0..8 {
+                    super::atomic_write(&target, &content)
+                        .await
+                        .expect("atomic_write");
+                }
+            }));
+        }
+        for h in handles {
+            h.await.expect("writer task");
+        }
+
+        let final_content = tokio::fs::read_to_string(&target)
+            .await
+            .expect("read target");
+        assert!(
+            payloads.contains(&final_content),
+            "final on-disk content must equal exactly one writer's payload, got: {final_content}"
+        );
+        // No stray temp files left behind.
+        let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains(".json.tmp"),
+                "no temp files should remain after writes, found: {name}"
+            );
+        }
     }
 
     /// RF-010: when `migrated_from` is `None`, the writer must NOT create a
