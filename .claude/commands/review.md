@@ -36,6 +36,24 @@ Determine review mode from `$ARGUMENTS`:
 6. Present a unified review summary grouped by severity (Critical > High > Major > Medium > Minor > Low > Info)
 7. If any Critical or High findings exist, flag them clearly and halt until addressed
 
+### Large-diff handling
+
+When the diff exceeds 5,000 lines OR 100 changed files, the full raw diff overwhelms the reviewer stream-rate budget and the 10-minute watchdog. PR #74 (21,570 lines, 130 files) saw all 10 reviewers stall at the watchdog with only partial output captured. Mitigation: scope each reviewer's diff to their domain rather than passing the full raw diff.
+
+Scoping rules:
+- **FE / A11y / UX:** diff containing only files matching `frontend/**`.
+- **BE / Logic:** diff containing only files matching `crates/**` AND `src-tauri/**` (Rust).
+- **DevOps:** diff containing only files matching `.github/**`, `Dockerfile`, `.devcontainer/**`, AND any file in `crates/server/**` (server config / ports / binding addresses).
+- **Security:** full diff but with non-Rust, non-config files truncated to header-only (file path + insertion/deletion line count).
+- **Data Scientist:** diff containing only files that define data types, serialization, or collection sizing (`crates/core/**`, `crates/state/**`, `frontend/src/types/**`, plus any `*Cargo.toml` and `package.json` dep additions).
+- **Architect / Compliance:** full diff but with non-domain files truncated to header-only as for Security. These two reviewers MUST see the whole shape but do not need raw line-by-line for unrelated subsystems.
+
+The truncation strategy MUST be cited in each reviewer's prompt so the reviewer can request the full file content for any path they need to inspect deeply (`Read` is available; the controller can provide the path).
+
+Diff sizing: compute total line count via `wc -l <diff-file>` and file count via `gh pr diff <n> --name-only | wc -l` BEFORE dispatching. Apply scoping if either crosses the threshold.
+
+Precedent: PR #74 governance meta-finding — all 10 reviewers stalled at the watchdog because the prompts passed the full 21k-line diff. The fix is per-reviewer scoping at dispatch time, not pre-summarization (which costs an extra LLM round-trip per reviewer).
+
 ## Spec Review Mode
 
 When the argument is a spec directory:
