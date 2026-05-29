@@ -105,7 +105,7 @@ async fn main() -> anyhow::Result<()> {
     let state = if let Some(ref workfile_path) = workfile_path {
         load_workfile_into_state(workfile_path).await?
     } else {
-        new_in_memory_state()
+        new_in_memory_state().await
     };
 
     // Clone the persistence manager handle for graceful shutdown after serve.
@@ -116,15 +116,11 @@ async fn main() -> anyhow::Result<()> {
     // runs on the configured port for human users.
     let mcp_handle = if use_mcp_stdio {
         tracing::info!("starting MCP server on stdio");
-        // MCP carries both the legacy `AppState` (for the existing mutation
-        // tools) and the shared `Sessions` registry (for the session-
-        // discovery tools added in Task 9). Cloning the `Arc<Sessions>` is
-        // cheap and ensures stdio MCP sees the same `register_in_memory`
-        // default session that the HTTP transport sees.
-        Some(sigil_mcp::server::start_stdio(
-            state.app.legacy.clone(),
-            state.app.sessions.clone(),
-        ))
+        // MCP shares the `Sessions` registry with the rest of the server.
+        // Cloning the `Arc<Sessions>` is cheap and ensures stdio MCP sees the
+        // same `register_in_memory` default session that the HTTP transport
+        // sees.
+        Some(sigil_mcp::server::start_stdio(state.app.sessions.clone()))
     } else {
         None
     };
@@ -192,8 +188,8 @@ async fn main() -> anyhow::Result<()> {
 ///
 /// Spec 22a §3.3 invariant: no disk-backed session exists without a persistence
 /// entry. The session registration and the persistence registration therefore
-/// happen in the same function. The legacy `AppState.document` still mirrors the
-/// document (removed in 22c); the session store is the persistence source.
+/// happen in the same function. The session store is the single source of
+/// truth for reads, writes, and persistence (Spec 22b).
 async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<ServerState> {
     tracing::info!("loading workfile from {}", workfile_path.display());
 
@@ -202,8 +198,8 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
         .context("failed to load workfile")?;
 
     let migrated_from = loaded.migrated_from;
-    // The legacy `AppState` still mirrors the document (removed in 22c). The
-    // session store is the persistence source as of Spec 22a.
+    // The session store is the read + persistence source (Spec 22a/22b). The
+    // loaded document is moved into the session below via `open_session_with`.
     let doc_for_session = loaded.document.clone();
     let state = ServerState::new_with_document_and_workfile_migrated(
         loaded.document,
@@ -244,16 +240,20 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
     Ok(state)
 }
 
-/// Constructs an in-memory `ServerState` with a single default page.
-fn new_in_memory_state() -> ServerState {
+/// Constructs an in-memory `ServerState` with a single default page seeded on
+/// the default session store (Spec 22b — the session store is the single
+/// source of truth). `ServerState::new` already registers the default
+/// in-memory session; this only seeds its "Page 1".
+async fn new_in_memory_state() -> ServerState {
     tracing::info!("no WORKFILE configured — running in-memory mode");
     let state = ServerState::new();
-    {
-        let mut doc = state.app.document.lock().expect("lock for default page");
+    let id = state.app.default_session_id().expect("default session");
+    if let Some(session) = state.app.sessions.get(id) {
+        let mut guard = session.store.write().await;
         let page_id = sigil_core::PageId::new(uuid::Uuid::new_v4());
         let page =
             sigil_core::Page::new(page_id, "Page 1".to_string()).expect("create default page");
-        doc.add_page(page).expect("add default page");
+        guard.0.add_page(page).expect("add default page");
     }
     state
 }
