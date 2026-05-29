@@ -146,20 +146,31 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
     })
 }
 
-/// Atomically writes content to a file by writing to a `.tmp` sibling first,
-/// then renaming into place.
+/// Atomically writes content to a file by writing to a uniquely-named temp
+/// sibling first, then renaming into place.
+///
+/// The temp filename carries a per-call UUID suffix so concurrent writers to
+/// the same target never collide on the temp path (rust-defensive
+/// "Filesystem Writes Must Be Atomic"). The rename is the atomic commit point.
 ///
 /// # Errors
 ///
-/// Returns an error if the write or rename fails.
+/// Returns an error if the write or rename fails. On rename failure the temp
+/// file is best-effort removed so a failed write does not leak temp files.
 async fn atomic_write(path: &Path, content: &str) -> Result<()> {
-    let tmp_path = path.with_extension("json.tmp");
+    let tmp_path = path.with_extension(format!("json.tmp.{}", Uuid::new_v4().simple()));
     tokio::fs::write(&tmp_path, content)
         .await
         .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
-    tokio::fs::rename(&tmp_path, path)
-        .await
-        .with_context(|| format!("failed to rename temp file to: {}", path.display()))?;
+    if let Err(e) = tokio::fs::rename(&tmp_path, path).await {
+        // Best-effort cleanup: leaving a stray .tmp.<uuid> is a leak. We log at
+        // debug because the rename error below is the actionable failure.
+        if let Err(rm) = tokio::fs::remove_file(&tmp_path).await {
+            tracing::debug!("failed to clean up temp file {}: {rm}", tmp_path.display());
+        }
+        return Err(e)
+            .with_context(|| format!("failed to rename temp file to: {}", path.display()));
+    }
     Ok(())
 }
 
@@ -541,6 +552,24 @@ pub fn load_workfile_sync(path: &Path) -> Result<Document> {
         tokio::runtime::Handle::current().block_on(load_workfile(path))
     })?;
     Ok(loaded.document)
+}
+
+/// Synchronous variant of [`load_workfile`] that also returns the migration
+/// version, for callers that drive a synchronous loader closure (e.g. the
+/// GraphQL `openSession` resolver) but still need to force-persist + back up a
+/// migrated workfile.
+///
+/// Like [`load_workfile_sync`], requires the multi-threaded tokio runtime
+/// because it uses [`tokio::task::block_in_place`].
+///
+/// # Errors
+///
+/// Returns an error if the workfile cannot be loaded (see [`load_workfile`]).
+pub fn load_workfile_sync_migrated(path: &Path) -> Result<(Document, Option<u32>)> {
+    let loaded = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current().block_on(load_workfile(path))
+    })?;
+    Ok((loaded.document, loaded.migrated_from))
 }
 
 /// Reconstructs a page and its nodes from a [`SerializedPage`] into the document.
@@ -1281,6 +1310,44 @@ mod tests {
         assert_eq!(loaded.document.metadata.name, "Legacy Doc");
     }
 
+    /// `load_workfile_sync_migrated` returns the same document as the async loader
+    /// AND surfaces the migration version that `load_workfile_sync` drops.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_load_workfile_sync_migrated_surfaces_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let workfile_path = dir.path().join("v1.sigil");
+        let page_uuid = Uuid::new_v4();
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir).await.unwrap();
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            serde_json::json!({
+                "schema_version": 1, "name": "Legacy", "page_order": [page_uuid.to_string()]
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(
+            pages_dir.join(format!("{page_uuid}.json")),
+            serde_json::json!({
+                "schema_version": 1, "id": page_uuid.to_string(),
+                "name": "P", "nodes": [], "transitions": []
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+
+        let (doc, migrated_from) = load_workfile_sync_migrated(&workfile_path).unwrap();
+        assert_eq!(
+            migrated_from,
+            Some(1),
+            "v1 workfile must report migrated_from = Some(1)"
+        );
+        assert_eq!(doc.pages.len(), 1);
+    }
+
     /// RF-010: when `prepared.migrated_from` is set, the writer copies the
     /// existing `manifest.json` and `pages/*.json` files to `.backup-v1/`
     /// before overwriting them.
@@ -1387,6 +1454,51 @@ mod tests {
             backup_manifest, "ORIGINAL_BACKUP",
             "existing backup must not be overwritten"
         );
+    }
+
+    /// Spec 22a §4 + rust-defensive "Filesystem Writes Must Be Atomic": N concurrent
+    /// writers to the same path must leave exactly one writer's content on disk —
+    /// never partial bytes, never ENOENT. A fixed temp suffix fails this (the temp
+    /// path collides and one rename races ahead of another writer's write).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_atomic_write_concurrent_writers_no_corruption() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("contended.json");
+
+        let payloads: Vec<String> = (0..16).map(|i| format!("{{\"writer\":{i}}}")).collect();
+
+        let mut handles = Vec::new();
+        for content in payloads.clone() {
+            let target = target.clone();
+            handles.push(tokio::spawn(async move {
+                // Run many times to widen the race window.
+                for _ in 0..8 {
+                    super::atomic_write(&target, &content)
+                        .await
+                        .expect("atomic_write");
+                }
+            }));
+        }
+        for h in handles {
+            h.await.expect("writer task");
+        }
+
+        let final_content = tokio::fs::read_to_string(&target)
+            .await
+            .expect("read target");
+        assert!(
+            payloads.contains(&final_content),
+            "final on-disk content must equal exactly one writer's payload, got: {final_content}"
+        );
+        // No stray temp files left behind.
+        let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains(".json.tmp"),
+                "no temp files should remain after writes, found: {name}"
+            );
+        }
     }
 
     /// RF-010: when `migrated_from` is `None`, the writer must NOT create a

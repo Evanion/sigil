@@ -7,14 +7,34 @@ use anyhow::Context as _;
 use clap::Parser;
 
 use sigil_server::{build_app, state::ServerState};
+use tokio::sync::oneshot;
 use tracing_subscriber::EnvFilter;
 
-/// Maximum time to wait for the persistence task to complete a final flush
-/// during shutdown.
-const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Docker's default `--stop-timeout` grace before SIGKILL. The aggregate of all
+/// shutdown phase timeouts MUST stay under this so a graceful flush is never cut
+/// off by SIGKILL (RF-001).
+const DOCKER_STOP_GRACE: Duration = Duration::from_secs(10);
+
+/// Max time to wait for in-flight HTTP/WebSocket connections to drain AFTER the
+/// shutdown signal fires.
+const HTTP_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Maximum time to wait for the MCP stdio task to drain on shutdown.
-const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Maximum time to wait for the per-session persistence tasks to flush on shutdown.
+const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+// Compile-time guarantee: the worst-case aggregate shutdown duration stays under
+// the container stop grace, so the persistence flush (which runs last, after MCP,
+// to capture any final MCP-originated mutation) is never interrupted by SIGKILL.
+const _: () = assert!(
+    HTTP_DRAIN_TIMEOUT.as_secs()
+        + MCP_SHUTDOWN_TIMEOUT.as_secs()
+        + PERSISTENCE_SHUTDOWN_TIMEOUT.as_secs()
+        < DOCKER_STOP_GRACE.as_secs(),
+    "aggregate shutdown budget must stay under Docker's default stop grace"
+);
 
 /// Sigil server. Runs the axum HTTP+WebSocket+MCP stack.
 ///
@@ -82,16 +102,14 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    let mut state = if let Some(ref workfile_path) = workfile_path {
+    let state = if let Some(ref workfile_path) = workfile_path {
         load_workfile_into_state(workfile_path).await?
     } else {
         new_in_memory_state()
     };
 
-    // Take the persistence handle and dirty_tx before moving state into the app.
-    // We need these for graceful shutdown after the server stops.
-    let persistence_handle = state.app.take_persistence_handle();
-    let dirty_tx = state.app.take_dirty_tx();
+    // Clone the persistence manager handle for graceful shutdown after serve.
+    let persistence = state.persistence.clone();
 
     // Spawn MCP server on stdio if requested.
     // This allows agents to connect via stdin/stdout while the HTTP server
@@ -115,12 +133,35 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     tracing::info!("listening on {host}:{port}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
 
-    // Graceful shutdown: drain the MCP task first so any final dirty signal
-    // it might send is captured before we drop dirty_tx.
+    // Bound the HTTP graceful drain (RF-001). Spawn serve so we can time only the
+    // post-signal drain: the signal handler notifies via a oneshot the moment the
+    // signal arrives, then we bound the remaining connection drain.
+    let (signal_tx, signal_rx) = oneshot::channel::<()>();
+    let serve_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal().await;
+                let _ = signal_tx.send(());
+            })
+            .await
+    });
+
+    // Block until the shutdown signal fires (or serve ends on its own).
+    let _ = signal_rx.await;
+
+    match tokio::time::timeout(HTTP_DRAIN_TIMEOUT, serve_task).await {
+        Ok(Ok(Ok(()))) => tracing::info!("HTTP server drained cleanly"),
+        Ok(Ok(Err(e))) => tracing::error!("HTTP server error during shutdown: {e}"),
+        Ok(Err(join_err)) => tracing::error!("HTTP serve task panicked: {join_err}"),
+        Err(_) => tracing::warn!(
+            "HTTP drain exceeded {HTTP_DRAIN_TIMEOUT:?}; abandoning in-flight \
+             connections to guarantee the persistence flush completes"
+        ),
+    }
+
+    // Drain the MCP task before the persistence tasks so any final mutation the
+    // MCP stdio task broadcasts is captured by the per-session persistence loops.
     if let Some(handle) = mcp_handle {
         tracing::info!("waiting for MCP task to drain...");
         match tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, handle).await {
@@ -135,32 +176,24 @@ async fn main() -> anyhow::Result<()> {
         }
     }
 
-    // Drop the dirty sender to signal the persistence task to perform a final
-    // save, then await the task with a timeout.
-    drop(dirty_tx);
-    if let Some(handle) = persistence_handle {
-        tracing::info!("waiting for persistence task to flush...");
-        match tokio::time::timeout(PERSISTENCE_SHUTDOWN_TIMEOUT, handle).await {
-            Ok(Ok(())) => tracing::info!("persistence task completed"),
-            Ok(Err(e)) => tracing::error!("persistence task panicked: {e}"),
-            Err(_) => tracing::warn!(
-                "persistence task did not complete within {:?} — giving up",
-                PERSISTENCE_SHUTDOWN_TIMEOUT
-            ),
-        }
-    }
+    // Graceful shutdown: drain every per-session persistence task within one
+    // bounded total budget (Spec 22a §3.3). Each task does a final flush of its
+    // session store before exiting.
+    tracing::info!("draining persistence tasks...");
+    persistence.shutdown_all(PERSISTENCE_SHUTDOWN_TIMEOUT).await;
+    tracing::info!("persistence drain complete");
 
     Ok(())
 }
 
-/// Loads the workfile at `workfile_path` into a fresh `ServerState` and
-/// registers it as the default session in the `Sessions` registry.
+/// Loads the workfile at `workfile_path` into a fresh `ServerState`, registers
+/// it as the default session in the `Sessions` registry, and registers its
+/// per-session persistence task.
 ///
-/// The legacy `AppState.document` continues to hold the authoritative
-/// document for the single-document deployment; the `Sessions` registry
-/// gets a clone so future per-session handlers (Tasks 5–10) can resolve the
-/// default `SessionId` once they are migrated. Until then the per-session
-/// store is dead — no code reads from it.
+/// Spec 22a §3.3 invariant: no disk-backed session exists without a persistence
+/// entry. The session registration and the persistence registration therefore
+/// happen in the same function. The legacy `AppState.document` still mirrors the
+/// document (removed in 22c); the session store is the persistence source.
 async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<ServerState> {
     tracing::info!("loading workfile from {}", workfile_path.display());
 
@@ -169,10 +202,8 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
         .context("failed to load workfile")?;
 
     let migrated_from = loaded.migrated_from;
-    // The legacy `AppState` continues to hold the authoritative document
-    // for the single-document deployment. We clone the loaded document
-    // into the `Sessions` registry so future per-session handlers can
-    // resolve the default `SessionId` once Tasks 5–10 migrate them.
+    // The legacy `AppState` still mirrors the document (removed in 22c). The
+    // session store is the persistence source as of Spec 22a.
     let doc_for_session = loaded.document.clone();
     let state = ServerState::new_with_document_and_workfile_migrated(
         loaded.document,
@@ -180,30 +211,34 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
         migrated_from,
     );
 
-    // Register the loaded workfile as the default session. The loader
-    // closure returns the pre-loaded document (we already paid for the
-    // async load above), so this is a cheap registry insertion.
+    // Register the loaded workfile as the default session, then register its
+    // per-session persistence task IN THE SAME FUNCTION (Spec 22a §3.3
+    // invariant: no disk-backed session exists without a persistence entry).
     match state.app.open_session_with(workfile_path, |_path| {
         Ok::<_, std::convert::Infallible>(doc_for_session)
     }) {
-        Ok(session_id) => tracing::info!(
-            "registered default session {session_id} for workfile {}",
-            workfile_path.display()
-        ),
+        Ok(session_id) => {
+            if let Some(session) = state.app.sessions.get(session_id) {
+                // Passing `migrated_from` forces the first save + `.backup-v(N-1)/`
+                // for a workfile that was migrated on load.
+                state.persistence.register(session, migrated_from);
+                tracing::info!(
+                    "registered default session {session_id} + persistence for workfile {}",
+                    workfile_path.display()
+                );
+            } else {
+                tracing::error!(
+                    "session {session_id} missing from registry immediately after open"
+                );
+            }
+        }
         Err(e) => {
             tracing::warn!(
                 "failed to register default session for workfile {}: {e}. \
-                 Multi-session features will be unavailable.",
+                 Persistence will be unavailable.",
                 workfile_path.display()
             );
         }
-    }
-
-    // RF-009: if the document was migrated on load, signal the persistence
-    // task that the document is dirty so the v2 form is flushed back to disk.
-    if migrated_from.is_some() {
-        tracing::info!("triggering migrated-form save after workfile load");
-        state.app.signal_dirty();
     }
 
     Ok(state)

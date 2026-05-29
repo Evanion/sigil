@@ -120,6 +120,62 @@ Sleeps remain acceptable only when there is no liveness signal to poll — in wh
 
 Precedent: PR #74 (RF-013) — `handle_crash` slept 500ms after respawning sigil-server before issuing the first `openSession` replay call. The first replay failed on slow CI runners because the new server hadn't bound port 4680 yet. The fix added `wait_for_server_ready` that polls `/heartbeat` every 100ms with a 5s timeout.
 
+### Sequential Shutdown Phases Must Fit Within the Container Stop Grace
+
+When graceful shutdown runs multiple phases sequentially (HTTP drain, then MCP drain, then persistence flush, etc.), each phase MUST have a named timeout constant AND the sum of those constants MUST be provably less than the orchestrator's stop grace (Docker's default `--stop-timeout`, the Kubernetes `terminationGracePeriodSeconds`, etc., captured as its own named constant). Enforce the aggregate with a compile-time assertion:
+
+```rust
+const DOCKER_STOP_GRACE: Duration = Duration::from_secs(10);
+const HTTP_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
+const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+const _: () = assert!(
+    HTTP_DRAIN_TIMEOUT.as_secs()
+        + MCP_SHUTDOWN_TIMEOUT.as_secs()
+        + PERSISTENCE_SHUTDOWN_TIMEOUT.as_secs()
+        < DOCKER_STOP_GRACE.as_secs(),
+    "aggregate shutdown budget must stay under the container stop grace"
+);
+```
+
+A per-phase bound without an aggregate bound is insufficient: three independently-reasonable 5s phases sum to 15s and exceed a 10s grace, so the orchestrator SIGKILLs the process mid-shutdown. The data-loss-critical phase (the persistence flush) MUST run with its full slice guaranteed — either run it first, or (when ordering forces it last, e.g., persistence must capture a final MCP-originated mutation) ensure the per-phase bounds guarantee it always receives its full timeout regardless of how long earlier phases take. An unbounded phase (e.g., an un-timed `axum` graceful drain) ahead of the flush is a bug: it can consume the entire grace and starve the flush. To bound an `axum` graceful drain, spawn `serve(...)` and time only the post-signal drain (start the timer when the shutdown signal fires, not when serving begins).
+
+A new shutdown phase added in a later PR MUST be added to the aggregate assertion in the same commit. The assertion is the receipt — a phase that is not in the sum is not bounded.
+
+When a phase drains a set of background tasks under its timeout, on timeout it MUST `abort()` (or otherwise reclaim) every straggler rather than dropping their join handles. Dropping a `JoinHandle` detaches the task — it keeps running unsupervised and may still hold a lock (e.g., a session store read lock during a final save), corrupting or deadlocking the very flush the shutdown is trying to complete. Capture the `abort_handle()` for each task before moving the joins into the timeout future. The timeout log line MUST state that work was abandoned and name the count (e.g., "aborted N task(s) that did not flush in time; their unsaved changes may be lost") — never a message that implies a clean drain.
+
+Precedent: spec-22a (RF-001, RF-003) — shutdown ran an unbounded axum drain, then `MCP_SHUTDOWN_TIMEOUT` (5s), then `PERSISTENCE_SHUTDOWN_TIMEOUT` (5s), flush last. Worst-case exceeded Docker's 10s grace; the orchestrator could SIGKILL mid-flush and lose dirty session documents — the most important data gated behind the two least-important drains. The fix bounded every phase (3s+2s+3s=8s) and added the compile-time aggregate assertion above. Separately (RF-003), `shutdown_all` dropped its join handles on timeout (detach) and logged a clean-shutdown message; the fix captures `abort_handle()` per task, aborts stragglers on timeout, and the warn log names the count of sessions that may have lost unsaved changes.
+
+### `select!` Cancellation Arms Must Drain Data-Carrying Channels Before Exiting
+
+`tokio::select!` is unbiased: when two arms are simultaneously ready, it picks one at random. When a `select!` races a shutdown/cancellation signal (a `oneshot`, a `watch` flip, a `CancellationToken`) against a data-carrying channel (`broadcast`, `mpsc`, `watch` of work items), the cancellation arm can win while an item sits unprocessed in the channel buffer. If that item would have triggered a final action (arm a flush deadline, enqueue a last write, ack a request), the action is silently lost.
+
+The cancellation arm MUST drain the data channel via a `try_recv` loop and account for every buffered item before it makes its terminating decision. Treat a buffered data event — and a `Lagged`/overflow indicator — as pending work.
+
+Pattern:
+```rust
+tokio::select! {
+    _ = &mut shutdown_rx => {
+        // Unbiased select! may have skipped a ready data event. Drain it.
+        loop {
+            match rx.try_recv() {
+                Ok(DataEvent(_)) | Err(TryRecvError::Lagged(_)) => mark_pending(),
+                Err(TryRecvError::Empty | TryRecvError::Closed) => break,
+                Ok(Terminal { .. }) => break,
+            }
+        }
+        if pending { do_final_flush().await; }
+        break;
+    }
+    ev = rx.recv() => { /* normal path */ }
+}
+```
+Anti-pattern: a shutdown arm that decides whether to flush based only on state accumulated before the `select!`, ignoring items still in the receiver buffer.
+
+A test for this race MUST be deterministic: make both arms ready (push a data event AND fire the shutdown signal) and assert the buffered item's effect survived, repeated enough times to prove determinism (the project standard is 30/30). A test that passes intermittently (e.g., 11/20) has not proven the fix — it has observed the lucky branch.
+
+Precedent: spec-22a (RF-013) — `persist_loop`'s `select!` raced the shutdown `oneshot` against the session `broadcast`. When both were ready, the shutdown branch could win and a final mutation — unprocessed in the broadcast buffer, so its deadline was never armed — was lost on the final flush. The fix drains the receiver via `try_recv` (arming the deadline for any buffered `DocumentEvent`/`Lagged`) before the flush decision; verified 30/30.
+
 ### Discriminated-Union Dispatch Must Be Exhaustive Across All Crates
 
 When a new variant is added to a discriminated enum used as a dispatch discriminant — `NodeKind`, `Corner`, `Fill`, `Effect`, or any future enum whose variants drive `match` arms in business logic — the same PR MUST add a corresponding arm to **every dispatch site that branches on that enum in the entire workspace**, not just in `crates/core/`. The mandatory sites for a `NodeKind`-class enum are:

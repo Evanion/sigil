@@ -13,7 +13,6 @@ use std::sync::{Arc, Mutex, RwLock};
 
 use sigil_core::Document;
 use tokio::sync::{broadcast, mpsc};
-use tokio::task::JoinHandle;
 
 pub mod sessions;
 
@@ -165,12 +164,13 @@ pub struct AppState {
     pub workfile_path: Option<PathBuf>,
     /// Sender to signal the persistence task that the document has changed.
     /// `None` when persistence is not configured (in-memory mode).
+    ///
+    /// As of Spec 22a persistence is owned per-session by
+    /// `SessionPersistence` (in the server crate), so this is always `None`
+    /// on instances the server constructs and `signal_dirty` is a silent
+    /// no-op. The field and `signal_dirty` are retained because MCP/GraphQL
+    /// handlers still call `signal_dirty`; it is removed in 22c.
     dirty_tx: Option<mpsc::Sender<()>>,
-    /// Handle for the background persistence task, used for graceful shutdown.
-    /// Wrapped in `Arc<Mutex<Option<...>>>` so `AppState` can derive `Clone`
-    /// while only one caller can take the handle.
-    /// `None` when persistence is not configured (in-memory mode).
-    persistence_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
     /// Optional broadcast sender for mutation events.
     ///
     /// When set, `broadcast_internal` sends events to all subscribers (e.g. GraphQL
@@ -195,28 +195,25 @@ impl AppState {
             )))),
             workfile_path: None,
             dirty_tx: None,
-            persistence_handle: Arc::new(Mutex::new(None)),
             event_tx: None,
             seq_counter: Arc::new(AtomicU64::new(1)),
         }
     }
 
-    /// Creates a new `AppState` with persistence support.
+    /// Creates an `AppState` holding a pre-loaded document at `workfile_path`
+    /// **without** a persistence task.
     ///
-    /// The caller provides a pre-spawned persistence task's sender and handle.
-    /// This keeps file I/O concerns out of this crate.
+    /// Used by the server when per-session persistence (Spec 22a) owns writing
+    /// the document to disk. The legacy `AppState` still mirrors the document
+    /// (removed in 22c), but it is no longer a persistence source, so it carries
+    /// no `dirty_tx` and no task handle. `signal_dirty()` is a no-op on instances
+    /// built this way.
     #[must_use]
-    pub fn new_with_persistence(
-        document: Arc<Mutex<SendDocument>>,
-        workfile_path: PathBuf,
-        dirty_tx: mpsc::Sender<()>,
-        persistence_handle: JoinHandle<()>,
-    ) -> Self {
+    pub fn new_with_document(document: Arc<Mutex<SendDocument>>, workfile_path: PathBuf) -> Self {
         Self {
             document,
             workfile_path: Some(workfile_path),
-            dirty_tx: Some(dirty_tx),
-            persistence_handle: Arc::new(Mutex::new(Some(persistence_handle))),
+            dirty_tx: None,
             event_tx: None,
             seq_counter: Arc::new(AtomicU64::new(1)),
         }
@@ -295,27 +292,6 @@ impl AppState {
                 tracing::trace!("dirty signal dropped — save already pending");
             }
         }
-    }
-
-    /// Takes the persistence `JoinHandle` out of this state, if present.
-    ///
-    /// Used during shutdown to await the persistence task after dropping
-    /// the dirty sender. Only the first caller gets the handle; subsequent
-    /// calls return `None`.
-    #[must_use]
-    pub fn take_persistence_handle(&self) -> Option<JoinHandle<()>> {
-        self.persistence_handle
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-    }
-
-    /// Takes the dirty sender out of this state, if present.
-    ///
-    /// Dropping the returned sender signals the persistence task to perform
-    /// a final save and shut down.
-    pub fn take_dirty_tx(&mut self) -> Option<mpsc::Sender<()>> {
-        self.dirty_tx.take()
     }
 }
 
@@ -542,6 +518,19 @@ mod tests {
         assert_eq!(doc.metadata.name, "Untitled");
         assert_eq!(doc.pages.len(), 0);
         assert_eq!(doc.arena.len(), 0);
+    }
+
+    #[test]
+    fn test_new_with_document_holds_doc_and_path_without_persistence() {
+        use std::path::PathBuf;
+        let doc = Document::new("Loaded".to_string());
+        let path = PathBuf::from("/tmp/example.sigil");
+        let state =
+            AppState::new_with_document(Arc::new(Mutex::new(SendDocument(doc))), path.clone());
+        assert_eq!(state.workfile_path.as_deref(), Some(path.as_path()));
+        assert_eq!(state.document.lock().unwrap().metadata.name, "Loaded");
+        // No persistence task is configured: signal_dirty is a silent no-op.
+        state.signal_dirty();
     }
 
     #[test]

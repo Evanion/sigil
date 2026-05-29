@@ -10,6 +10,7 @@ pub mod heartbeat;
 pub mod persistence;
 pub mod routes;
 pub mod session_header;
+pub mod session_persistence;
 pub mod state;
 pub mod workfile;
 

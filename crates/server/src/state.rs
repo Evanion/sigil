@@ -12,6 +12,8 @@ use std::sync::{Arc, Mutex};
 use sigil_core::Document;
 use tokio::sync::broadcast;
 
+use crate::session_persistence::SessionPersistence;
+
 // Re-export the core state types so existing code can use `crate::state::AppState`.
 pub use sigil_state::{
     App, AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
@@ -43,6 +45,10 @@ pub struct ServerState {
     /// High-level application state: legacy single-document `AppState` plus
     /// [`Sessions`] registry. Shared with MCP via `state.app.clone()`.
     pub app: App,
+    /// Per-session persistence manager (Spec 22a). Owns one debounced save task
+    /// per disk-backed session. Shared (`Arc`) so clones for Axum/MCP observe
+    /// the same task set; graceful shutdown drains it via `shutdown_all`.
+    pub persistence: Arc<SessionPersistence>,
 }
 
 impl ServerState {
@@ -76,65 +82,37 @@ impl ServerState {
         let id = app.sessions.register_in_memory(default_doc);
         app.set_default_session_id(Some(id));
 
-        Self { app }
-    }
-
-    /// Creates a `ServerState` backed by a workfile on disk.
-    ///
-    /// Spawns a background persistence task that debounces dirty signals and
-    /// writes the document to `workfile_path` after a quiet period.
-    #[must_use]
-    pub fn new_with_workfile(workfile_path: PathBuf) -> Self {
-        let document = Arc::new(Mutex::new(SendDocument(Document::new(
-            "Untitled".to_string(),
-        ))));
-        let (dirty_tx, persistence_handle) = crate::persistence::spawn_persistence_task(
-            Arc::clone(&document),
-            workfile_path.clone(),
-        );
-        let mut legacy =
-            AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
-        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        legacy.set_event_tx(tx);
         Self {
-            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+            app,
+            persistence: Arc::new(SessionPersistence::new()),
         }
     }
 
-    /// Creates a `ServerState` with a pre-loaded document and workfile persistence.
+    /// Creates a `ServerState` holding a pre-loaded document for `workfile_path`.
     ///
-    /// Used on startup when loading an existing workfile from disk.
-    #[must_use]
-    pub fn new_with_document_and_workfile(doc: Document, workfile_path: PathBuf) -> Self {
-        Self::new_with_document_and_workfile_migrated(doc, workfile_path, None)
-    }
-
-    /// Creates a `ServerState` with a pre-loaded document, workfile persistence,
-    /// and a migration flag.
+    /// Spec 22a: this no longer spawns a persistence task. The legacy `AppState`
+    /// holds the document for the still-present mirror (removed in 22c), but
+    /// persistence is owned per-session by [`SessionPersistence`]. The caller is
+    /// responsible for registering the session in `app.sessions` AND registering
+    /// it with `persistence` (passing the migration flag) — see
+    /// `main.rs::load_workfile_into_state`.
     ///
-    /// When `migrated_from` is `Some(v)`, the next save will populate
-    /// [`workfile::PreparedSave::migrated_from`] so the writer can apply
-    /// migration-specific behavior on the first save after load (RF-009).
+    /// `_migrated_from` is accepted for call-site compatibility but is now
+    /// threaded by the caller into `SessionPersistence::register`; it is not used
+    /// here.
     #[must_use]
     pub fn new_with_document_and_workfile_migrated(
         doc: Document,
         workfile_path: PathBuf,
-        migrated_from: Option<u32>,
+        _migrated_from: Option<u32>,
     ) -> Self {
         let document = Arc::new(Mutex::new(SendDocument(doc)));
-        let migration_flag = Arc::new(Mutex::new(migrated_from));
-        let (dirty_tx, persistence_handle) =
-            crate::persistence::spawn_persistence_task_with_migration_flag(
-                Arc::clone(&document),
-                workfile_path.clone(),
-                Arc::clone(&migration_flag),
-            );
-        let mut legacy =
-            AppState::new_with_persistence(document, workfile_path, dirty_tx, persistence_handle);
+        let mut legacy = AppState::new_with_document(document, workfile_path);
         let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
         legacy.set_event_tx(tx);
         Self {
             app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+            persistence: Arc::new(SessionPersistence::new()),
         }
     }
 }
@@ -172,6 +150,14 @@ mod tests {
             state.app.event_tx().is_some(),
             "ServerState should configure the event broadcast channel"
         );
+    }
+
+    #[tokio::test]
+    async fn test_server_state_exposes_empty_persistence_manager() {
+        let state = ServerState::new();
+        // A fresh in-memory state has no disk-backed sessions, so no persistence
+        // tasks are registered.
+        assert_eq!(state.persistence.len(), 0);
     }
 
     #[test]

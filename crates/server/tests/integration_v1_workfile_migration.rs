@@ -7,20 +7,23 @@
 //! 1. `load_workfile` reads the on-disk workfile and migrates v1 page JSON
 //!    to v2 in memory, returning `LoadedWorkfile { migrated_from: Some(1) }`
 //!    when any page was migrated.
-//! 2. `ServerState::new_with_document_and_workfile_migrated` stores the
-//!    migration flag in the persistence task's shared state.
-//! 3. `main.rs` calls `signal_dirty()` after load when `migrated_from` is set,
-//!    triggering the persistence task to write the migrated v2 form back to
-//!    disk on its next debounce flush.
+//! 2. `ServerState::new_with_document_and_workfile_migrated` builds the
+//!    disk-backed state without spawning persistence.
+//! 3. Spec 22a: the session is registered via `App::open_session_with`, and
+//!    its persistence task is registered via `SessionPersistence::register`
+//!    with the `migrated_from` flag. Registration with `migrated_from =
+//!    Some(_)` arms the first forced save automatically — no `signal_dirty()`
+//!    is needed. The persistence task writes the migrated v2 form back to disk
+//!    on its next debounce flush.
 //! 4. On that first migrated save, `write_prepared_save` copies the original
 //!    v1 manifest + pages to `.backup-v1/` before overwriting them with v2.
 //!
 //! Each step is exercised in isolation by unit tests in `workfile.rs` and
-//! `persistence.rs`. This integration test wires the whole pipeline together
-//! and asserts the end-to-end behavior:
+//! `session_persistence.rs`. This integration test wires the whole pipeline
+//! together and asserts the end-to-end behavior:
 //! - Lay down a v1 workfile on disk.
-//! - Construct a `ServerState` via the same path `main.rs` uses.
-//! - Signal dirty (mirroring `main.rs` line 67).
+//! - Construct a `ServerState` via the same path the startup/resolver path uses.
+//! - Register the session + persistence (which arms the migrated save).
 //! - Wait for the persistence task to debounce + flush.
 //! - Assert that the on-disk workfile is now v2 AND `.backup-v1/` contains
 //!   the original v1 contents.
@@ -70,8 +73,9 @@ async fn write_v1_workfile_fixture(workfile_path: &std::path::Path, page_uuid: u
 
 /// RF-029: end-to-end pipeline test.
 ///
-/// Loads a v1 workfile, constructs a ServerState the same way `main.rs` does,
-/// signals dirty, waits for the debounced flush, and asserts:
+/// Loads a v1 workfile, constructs a ServerState, registers the session +
+/// per-session persistence (which arms the migrated save), waits for the
+/// debounced flush, and asserts:
 /// - `LoadedWorkfile.migrated_from == Some(1)`.
 /// - The on-disk manifest is now v2 (schema_version = 2).
 /// - The on-disk page is now v2 (schema_version = 2).
@@ -104,16 +108,24 @@ async fn test_v1_workfile_full_migration_pipeline() {
 
     // (3) Construct a ServerState via the migration-aware entry point.
     let migrated_from = loaded.migrated_from;
+    let doc_for_session = loaded.document.clone();
     let state = ServerState::new_with_document_and_workfile_migrated(
         loaded.document,
         workfile_path.clone(),
         migrated_from,
     );
 
-    // (4) Mirror `main.rs` line 67: signal dirty so the migrated form is
-    //     flushed to disk.
-    assert!(migrated_from.is_some());
-    state.app.signal_dirty();
+    // (4) Spec 22a: register the session + its persistence task with the
+    //     migration flag. Registration with `migrated_from = Some(1)` arms the
+    //     first save automatically — no signal_dirty() needed.
+    let session_id = state
+        .app
+        .open_session_with(&workfile_path, |_p| {
+            Ok::<_, std::convert::Infallible>(doc_for_session)
+        })
+        .expect("register session");
+    let session = state.app.sessions.get(session_id).expect("session present");
+    state.persistence.register(session, migrated_from);
 
     // (5) Wait for the debounce window to elapse + a margin for the write.
     //     SAVE_DEBOUNCE_MS = 500ms.
@@ -179,7 +191,8 @@ async fn test_v1_workfile_full_migration_pipeline() {
 }
 
 /// RF-029: a v2-only workfile must NOT trigger migration behavior — no
-/// `migrated_from` flag, no signal_dirty, no `.backup-v1/` directory created.
+/// `migrated_from` flag, persistence registered with `migrated_from = None`
+/// (which does NOT arm a save), and no `.backup-v1/` directory created.
 #[tokio::test]
 async fn test_v2_workfile_does_not_trigger_migration() {
     let dir = tempfile::tempdir().expect("create temp dir");
@@ -227,12 +240,22 @@ async fn test_v2_workfile_does_not_trigger_migration() {
         "v2 workfile must not signal migration"
     );
 
-    // Construct ServerState; do NOT signal dirty.
-    let _state = ServerState::new_with_document_and_workfile_migrated(
+    // Construct ServerState; register session + persistence with no migration
+    // flag — this must NOT arm any save (no mutation broadcast fired).
+    let doc_for_session = loaded.document.clone();
+    let state = ServerState::new_with_document_and_workfile_migrated(
         loaded.document,
         workfile_path.clone(),
         loaded.migrated_from,
     );
+    let session_id = state
+        .app
+        .open_session_with(&workfile_path, |_p| {
+            Ok::<_, std::convert::Infallible>(doc_for_session)
+        })
+        .expect("register session");
+    let session = state.app.sessions.get(session_id).expect("session present");
+    state.persistence.register(session, loaded.migrated_from);
 
     // Wait past the debounce window; no save should have occurred.
     sleep(Duration::from_millis(500 + 200)).await;
