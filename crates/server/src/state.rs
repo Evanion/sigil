@@ -6,7 +6,6 @@
 //! and provides convenience constructors that register the default session and
 //! wire up per-session persistence.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use sigil_core::Document;
@@ -63,25 +62,20 @@ impl ServerState {
         }
     }
 
-    /// Creates a `ServerState` for a workfile-backed deployment.
+    /// Creates an empty `ServerState` with NO sessions registered and no
+    /// persistence tasks.
     ///
-    /// The session store is the single source of truth for reads, writes, and
-    /// persistence (Spec 22a/22b). The disk-backed session itself is registered
-    /// by the caller (`main.rs::load_workfile_into_state`) via
-    /// [`App::open_session_with`], which also registers the per-session
-    /// persistence task (passing `migrated_from`). This constructor therefore
-    /// only builds the empty `App` + persistence manager; the document, path,
-    /// and migration flag are threaded by the caller into the session and
-    /// persistence registration.
-    ///
-    /// The parameters are retained for call-site compatibility with
-    /// `load_workfile_into_state` and are intentionally unused here.
+    /// Used by the workfile-backed deployment path
+    /// (`main.rs::load_workfile_into_state`). The disk-backed session itself is
+    /// registered by the caller via [`App::open_session_with`] — which moves
+    /// the loaded document directly into the session store (no clone) and
+    /// repoints `default_session_id` — and the caller then registers the
+    /// per-session persistence task (passing `migrated_from`). This constructor
+    /// therefore only builds the empty `App` + persistence manager; the
+    /// document, path, and migration flag are threaded by the caller into the
+    /// session and persistence registration.
     #[must_use]
-    pub fn new_with_document_and_workfile_migrated(
-        _doc: Document,
-        _workfile_path: PathBuf,
-        _migrated_from: Option<u32>,
-    ) -> Self {
+    pub fn new_empty() -> Self {
         Self {
             app: App::new(MUTATION_BROADCAST_CAPACITY),
             persistence: Arc::new(SessionPersistence::new()),

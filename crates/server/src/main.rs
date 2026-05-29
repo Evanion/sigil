@@ -198,20 +198,18 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
         .context("failed to load workfile")?;
 
     let migrated_from = loaded.migrated_from;
-    // The session store is the read + persistence source (Spec 22a/22b). The
-    // loaded document is moved into the session below via `open_session_with`.
-    let doc_for_session = loaded.document.clone();
-    let state = ServerState::new_with_document_and_workfile_migrated(
-        loaded.document,
-        workfile_path.to_path_buf(),
-        migrated_from,
-    );
+    let state = ServerState::new_empty();
+
+    // RF-001: the loaded document is the single source of truth (Spec 22a/22b).
+    // Move it directly into the session store via the `open_session_with`
+    // loader closure — no full-Document clone.
+    let document = loaded.document;
 
     // Register the loaded workfile as the default session, then register its
     // per-session persistence task IN THE SAME FUNCTION (Spec 22a §3.3
     // invariant: no disk-backed session exists without a persistence entry).
-    match state.app.open_session_with(workfile_path, |_path| {
-        Ok::<_, std::convert::Infallible>(doc_for_session)
+    match state.app.open_session_with(workfile_path, move |_path| {
+        Ok::<_, std::convert::Infallible>(document)
     }) {
         Ok(session_id) => {
             if let Some(session) = state.app.sessions.get(session_id) {
