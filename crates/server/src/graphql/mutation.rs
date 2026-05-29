@@ -1623,6 +1623,13 @@ impl MutationRoot {
                 "INVALID_SESSION_ID",
             )
         })?;
+
+        // Spec 22a §3.3: flush + join the persistence task BEFORE closing the
+        // session in the registry, so the session `Arc` (and its store) is
+        // still alive for the final save. `close` is a no-op for unregistered
+        // ids (e.g. memory:// sessions), so a registry close still proceeds.
+        state.persistence.close(session_id).await;
+
         state.app.sessions.close(session_id).map_err(|e| {
             let code = match &e {
                 sigil_state::SessionsError::SessionNotFound(_) => "SESSION_NOT_FOUND",
@@ -3285,5 +3292,70 @@ mod tests {
             1,
             "synthetic session should be closed after open"
         );
+    }
+
+    /// Spec 22a §3.3: `closeSession` MUST flush + join the per-session
+    /// persistence task BEFORE closing the session in the registry, so the
+    /// final save runs while the session `Arc` (and its store) is still alive.
+    /// Uses the multi-thread runtime because the persistence task's final
+    /// save may use blocking I/O.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_close_session_flushes_and_deregisters_persistence() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let workfile_path = dir.path().join("toclose.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create pages dir");
+        tokio::fs::write(
+            workfile_path.join("manifest.json"),
+            serde_json::json!({"schema_version": 2, "name": "ToClose", "page_order": []})
+                .to_string(),
+        )
+        .await
+        .expect("write manifest");
+
+        let state = ServerState::new();
+        let persistence = state.persistence.clone();
+        let schema = test_schema(state);
+
+        let open = schema
+            .execute(&format!(
+                r#"mutation {{ openSession(path: "{}") {{ id }} }}"#,
+                workfile_path.display()
+            ))
+            .await;
+        assert!(
+            open.errors.is_empty(),
+            "openSession errored: {:?}",
+            open.errors
+        );
+        let id = open.data.into_json().expect("openSession data")["openSession"]["id"]
+            .as_str()
+            .expect("session id string")
+            .to_string();
+        assert_eq!(persistence.len(), 1);
+
+        // Remove the live manifest so we can prove close() flushes a fresh one.
+        tokio::fs::remove_file(workfile_path.join("manifest.json"))
+            .await
+            .expect("remove manifest");
+
+        let close = schema
+            .execute(&format!(r#"mutation {{ closeSession(id: "{id}") }}"#))
+            .await;
+        assert!(
+            close.errors.is_empty(),
+            "closeSession errored: {:?}",
+            close.errors
+        );
+
+        // close() flushed before returning — manifest written again — and the
+        // persistence entry is gone.
+        assert!(
+            workfile_path.join("manifest.json").exists(),
+            "closeSession must flush the session store before Sessions::close"
+        );
+        assert_eq!(persistence.len(), 0, "persistence entry removed on close");
     }
 }
