@@ -10,11 +10,10 @@ use sigil_core::{
     commands::text_style_commands::{SetTextStyleField, TextStyleField},
     validate_style_value_expression, validate_text_content, validate_token_name,
 };
-use sigil_state::{AppState, MutationEventKind, OperationPayload};
+use sigil_state::OperationPayload;
 use uuid::Uuid;
 
 use crate::error::McpToolError;
-use crate::server::acquire_document_lock;
 use crate::tools::nodes::build_node_info;
 use crate::types::{
     ColorInput, MutationResult, NodeInfo, PartialTextStyle, StyleValueInput, TextShadowInput,
@@ -191,45 +190,29 @@ fn convert_text_shadow(input: &TextShadowInput) -> Result<TextShadow, McpToolErr
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` if the node is not a text node or validation fails.
 pub fn set_text_content_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     content: &str,
 ) -> Result<NodeInfo, McpToolError> {
-    // RF-033: Validate content length before acquiring the lock to avoid
-    // holding the lock while doing cheap input validation.
     validate_text_content(content).map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
 
     let node_uuid: Uuid = uuid_str
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let cmd = SetTextContent {
-            node_id,
-            new_content: content.to_string(),
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    let cmd = SetTextContent {
+        node_id,
+        new_content: content.to_string(),
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "kind.content",
-        Some(serde_json::json!(content)),
-    );
-
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 // ── set_text_style ───────────────────────────────────────────────────────────
@@ -387,6 +370,15 @@ fn capture_old_field(
 
 /// Sets one or more text style properties on a text node.
 ///
+/// Returns the `MutationResult` plus the per-field `OperationPayload`s so the
+/// envelope can publish a single multi-op transaction. Each op uses
+/// `op_type = "set_field"`, the field path, and the serialized field value.
+///
+/// Per CLAUDE.md §rust-defensive "Multi-Item Mutations Must Roll Back": all
+/// fields are validated first, ALL old values are captured in a single pass
+/// before any mutation, and a partial apply failure rolls back the
+/// already-applied fields in reverse order before propagating the error.
+///
 /// # Errors
 ///
 /// - `McpToolError::InvalidInput` if the style is empty or contains invalid values.
@@ -394,107 +386,94 @@ fn capture_old_field(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` if the node is not a text node or validation fails.
 pub fn set_text_style_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     style: &PartialTextStyle,
-) -> Result<MutationResult, McpToolError> {
-    // Parse and validate all fields before acquiring the lock.
+) -> Result<(MutationResult, Vec<OperationPayload>), McpToolError> {
+    // Parse and validate all fields up front.
     let fields = collect_style_fields(style)?;
 
     let node_uuid: Uuid = uuid_str
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    // RF-010: Build broadcast_ops inside the lock scope, after successful apply,
-    // before the lock drops. This ensures broadcast payloads are only constructed
-    // when the mutation actually succeeded.
-    let broadcast_ops: Vec<OperationPayload>;
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        // Validate ALL fields first, then apply ALL.
-        // Per CLAUDE.md section 11: multi-item mutations must roll back on partial failure.
-        for (field, _, _) in &fields {
-            let cmd = SetTextStyleField {
-                node_id,
-                field: field.clone(),
-            };
-            cmd.validate(&doc)?;
-        }
-
-        // Capture ALL old values in a single pass before any mutations.
-        // Per CLAUDE.md: capture snapshots before mutations, not after.
-        let old_fields: Vec<TextStyleField> = fields
-            .iter()
-            .map(|(field, _, _)| capture_old_field(&doc, node_id, field))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        // Apply with rollback tracking.
-        let mut applied: Vec<TextStyleField> = Vec::with_capacity(fields.len());
-
-        for (i, (field, _, _)) in fields.iter().enumerate() {
-            let cmd = SetTextStyleField {
-                node_id,
-                field: field.clone(),
-            };
-            if let Err(apply_err) = cmd.apply(&mut doc) {
-                // Roll back all previously applied fields in reverse order.
-                let mut rollback_errors: Vec<String> = Vec::new();
-                for old in applied.into_iter().rev() {
-                    let rollback_cmd = SetTextStyleField {
-                        node_id,
-                        field: old,
-                    };
-                    if let Err(rb_err) = rollback_cmd.apply(&mut doc) {
-                        rollback_errors.push(rb_err.to_string());
-                    }
-                }
-
-                if rollback_errors.is_empty() {
-                    return Err(McpToolError::CoreError(apply_err));
-                }
-                return Err(McpToolError::InvalidInput(format!(
-                    "apply failed ({apply_err}) and rollback also failed: {}",
-                    rollback_errors.join("; ")
-                )));
-            }
-            // old_fields[i] is safe — old_fields has the same length as fields.
-            applied.push(old_fields[i].clone());
-        }
-
-        // Build broadcast payloads after successful apply, still inside the lock.
-        broadcast_ops = fields
-            .iter()
-            .map(|(_, path, value)| OperationPayload {
-                id: Uuid::new_v4().to_string(),
-                node_uuid: node_uuid.to_string(),
-                op_type: "set_field".to_string(),
-                path: (*path).to_string(),
-                value: Some(value.clone()),
-            })
-            .collect();
+    // Validate ALL fields first, then apply ALL.
+    // Per CLAUDE.md section 11: multi-item mutations must roll back on partial failure.
+    for (field, _, _) in &fields {
+        let cmd = SetTextStyleField {
+            node_id,
+            field: field.clone(),
+        };
+        cmd.validate(doc)?;
     }
 
-    // Broadcast all operations as a single transaction.
-    state.signal_dirty();
-    state.publish_transaction(
-        MutationEventKind::NodeUpdated,
-        Some(node_uuid.to_string()),
-        super::broadcast::multi_op_transaction(broadcast_ops),
-    );
+    // Capture ALL old values in a single pass before any mutations.
+    // Per CLAUDE.md: capture snapshots before mutations, not after.
+    let old_fields: Vec<TextStyleField> = fields
+        .iter()
+        .map(|(field, _, _)| capture_old_field(doc, node_id, field))
+        .collect::<Result<Vec<_>, _>>()?;
 
-    Ok(MutationResult {
-        success: true,
-        message: format!(
-            "updated {} text style field(s) on node {uuid_str}",
-            fields.len()
-        ),
-    })
+    // Apply with rollback tracking.
+    let mut applied: Vec<TextStyleField> = Vec::with_capacity(fields.len());
+
+    for (i, (field, _, _)) in fields.iter().enumerate() {
+        let cmd = SetTextStyleField {
+            node_id,
+            field: field.clone(),
+        };
+        if let Err(apply_err) = cmd.apply(doc) {
+            // Roll back all previously applied fields in reverse order.
+            let mut rollback_errors: Vec<String> = Vec::new();
+            for old in applied.into_iter().rev() {
+                let rollback_cmd = SetTextStyleField {
+                    node_id,
+                    field: old,
+                };
+                if let Err(rb_err) = rollback_cmd.apply(doc) {
+                    rollback_errors.push(rb_err.to_string());
+                }
+            }
+
+            if rollback_errors.is_empty() {
+                return Err(McpToolError::CoreError(apply_err));
+            }
+            return Err(McpToolError::InvalidInput(format!(
+                "apply failed ({apply_err}) and rollback also failed: {}",
+                rollback_errors.join("; ")
+            )));
+        }
+        // old_fields[i] is safe — old_fields has the same length as fields.
+        applied.push(old_fields[i].clone());
+    }
+
+    // Build broadcast payloads after successful apply.
+    let broadcast_ops: Vec<OperationPayload> = fields
+        .iter()
+        .map(|(_, path, value)| OperationPayload {
+            id: Uuid::new_v4().to_string(),
+            node_uuid: node_uuid.to_string(),
+            op_type: "set_field".to_string(),
+            path: (*path).to_string(),
+            value: Some(value.clone()),
+        })
+        .collect();
+
+    Ok((
+        MutationResult {
+            success: true,
+            message: format!(
+                "updated {} text style field(s) on node {uuid_str}",
+                fields.len()
+            ),
+        },
+        broadcast_ops,
+    ))
 }
 
 #[cfg(test)]
@@ -818,27 +797,28 @@ mod tests {
 
     // ── RF-027: Integration tests ───────────────────────────────────────
 
+    use sigil_core::Document;
+
     use crate::tools::nodes::create_node_impl;
     use crate::tools::pages::create_page_impl;
 
-    fn make_state_with_text_node() -> (sigil_state::AppState, String) {
-        let state = sigil_state::AppState::new();
-        let page = create_page_impl(&state, "Page 1").expect("create page");
-        let created = create_node_impl(&state, "text", "Test Text", Some(&page.id), None, None)
+    fn make_doc_with_text_node() -> (Document, String) {
+        let mut doc = Document::new("Untitled".to_string());
+        let page = create_page_impl(&mut doc, "Page 1").expect("create page");
+        let created = create_node_impl(&mut doc, "text", "Test Text", Some(&page.id), None, None)
             .expect("create text node");
-        (state, created.uuid)
+        (doc, created.uuid)
     }
 
     #[test]
     fn test_set_text_content_impl_updates_content() {
-        let (state, uuid) = make_state_with_text_node();
-        let result = set_text_content_impl(&state, &uuid, "Hello, world!");
+        let (mut doc, uuid) = make_doc_with_text_node();
+        let result = set_text_content_impl(&mut doc, &uuid, "Hello, world!");
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let info = result.unwrap();
         assert_eq!(info.name, "Test Text");
 
         // Verify content was actually set by reading from the document.
-        let doc = crate::server::acquire_document_lock(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
         let node = doc.arena.get(node_id).unwrap();
@@ -851,26 +831,27 @@ mod tests {
 
     #[test]
     fn test_set_text_content_impl_rejects_invalid_uuid() {
-        let state = sigil_state::AppState::new();
-        let result = set_text_content_impl(&state, "not-a-uuid", "text");
+        let mut doc = Document::new("Untitled".to_string());
+        let result = set_text_content_impl(&mut doc, "not-a-uuid", "text");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
     }
 
     #[test]
     fn test_set_text_style_impl_updates_font_family() {
-        let (state, uuid) = make_state_with_text_node();
+        let (mut doc, uuid) = make_doc_with_text_node();
         let style = PartialTextStyle {
             font_family: Some("Roboto".to_string()),
             ..Default::default()
         };
-        let result = set_text_style_impl(&state, &uuid, &style);
+        let result = set_text_style_impl(&mut doc, &uuid, &style);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
-        let mutation = result.unwrap();
+        let (mutation, broadcast_ops) = result.unwrap();
         assert!(mutation.success);
+        assert_eq!(broadcast_ops.len(), 1);
+        assert_eq!(broadcast_ops[0].path, "kind.text_style.font_family");
 
         // Verify the font family was actually set.
-        let doc = crate::server::acquire_document_lock(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
         let node = doc.arena.get(node_id).unwrap();
@@ -883,9 +864,9 @@ mod tests {
 
     #[test]
     fn test_set_text_style_impl_rejects_empty_style() {
-        let (state, uuid) = make_state_with_text_node();
+        let (mut doc, uuid) = make_doc_with_text_node();
         let style = PartialTextStyle::default();
-        let result = set_text_style_impl(&state, &uuid, &style);
+        let result = set_text_style_impl(&mut doc, &uuid, &style);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
