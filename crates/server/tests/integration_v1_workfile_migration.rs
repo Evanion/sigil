@@ -7,8 +7,8 @@
 //! 1. `load_workfile` reads the on-disk workfile and migrates v1 page JSON
 //!    to v2 in memory, returning `LoadedWorkfile { migrated_from: Some(1) }`
 //!    when any page was migrated.
-//! 2. `ServerState::new_with_document_and_workfile_migrated` builds the
-//!    disk-backed state without spawning persistence.
+//! 2. `ServerState::new_empty` builds an empty state; the loaded document is
+//!    moved into the session store via `App::open_session_with` (no clone).
 //! 3. Spec 22a: the session is registered via `App::open_session_with`, and
 //!    its persistence task is registered via `SessionPersistence::register`
 //!    with the `migrated_from` flag. Registration with `migrated_from =
@@ -106,22 +106,19 @@ async fn test_v1_workfile_full_migration_pipeline() {
         "v1 page must produce migrated_from = Some(1) on load"
     );
 
-    // (3) Construct a ServerState via the migration-aware entry point.
+    // (3) Construct an empty ServerState and move the loaded document into the
+    //     session store via `open_session_with` (RF-001: no full-Document clone).
     let migrated_from = loaded.migrated_from;
-    let doc_for_session = loaded.document.clone();
-    let state = ServerState::new_with_document_and_workfile_migrated(
-        loaded.document,
-        workfile_path.clone(),
-        migrated_from,
-    );
+    let document = loaded.document;
+    let state = ServerState::new_empty();
 
     // (4) Spec 22a: register the session + its persistence task with the
     //     migration flag. Registration with `migrated_from = Some(1)` arms the
     //     first save automatically — no signal_dirty() needed.
     let session_id = state
         .app
-        .open_session_with(&workfile_path, |_p| {
-            Ok::<_, std::convert::Infallible>(doc_for_session)
+        .open_session_with(&workfile_path, move |_p| {
+            Ok::<_, std::convert::Infallible>(document)
         })
         .expect("register session");
     let session = state.app.sessions.get(session_id).expect("session present");
@@ -240,22 +237,21 @@ async fn test_v2_workfile_does_not_trigger_migration() {
         "v2 workfile must not signal migration"
     );
 
-    // Construct ServerState; register session + persistence with no migration
-    // flag — this must NOT arm any save (no mutation broadcast fired).
-    let doc_for_session = loaded.document.clone();
-    let state = ServerState::new_with_document_and_workfile_migrated(
-        loaded.document,
-        workfile_path.clone(),
-        loaded.migrated_from,
-    );
+    // Construct an empty ServerState and move the loaded document into the
+    // session store via `open_session_with` (RF-001: no full-Document clone);
+    // register session + persistence with no migration flag — this must NOT arm
+    // any save (no mutation broadcast fired).
+    let migrated_from = loaded.migrated_from;
+    let document = loaded.document;
+    let state = ServerState::new_empty();
     let session_id = state
         .app
-        .open_session_with(&workfile_path, |_p| {
-            Ok::<_, std::convert::Infallible>(doc_for_session)
+        .open_session_with(&workfile_path, move |_p| {
+            Ok::<_, std::convert::Infallible>(document)
         })
         .expect("register session");
     let session = state.app.sessions.get(session_id).expect("session present");
-    state.persistence.register(session, loaded.migrated_from);
+    state.persistence.register(session, migrated_from);
 
     // Wait past the debounce window; no save should have occurred.
     sleep(Duration::from_millis(500 + 200)).await;

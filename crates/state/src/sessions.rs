@@ -7,13 +7,14 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
 use sigil_core::Document;
 use tokio::sync::{RwLock, broadcast};
 use uuid::Uuid;
 
-use crate::{MutationEvent, SendDocument};
+use crate::{MutationEvent, MutationEventKind, SendDocument, TransactionPayload};
 
 /// Opaque session identifier. Wraps `UUIDv4`. Not persisted; safe to expose
 /// to clients (frontend, MCP agents).
@@ -117,6 +118,11 @@ pub struct DocumentSession {
     /// Lifecycle state. Held under a `std::sync::Mutex` because state checks
     /// are short and never cross `.await` points.
     pub state: std::sync::Mutex<SessionState>,
+    /// Per-session monotonic sequence counter for transaction ordering.
+    /// Starts at 1 (0 is reserved as "unconfirmed" on the client). Ordering is
+    /// only meaningful within a single session — the frontend orders/dedups
+    /// within one session's broadcast stream.
+    pub seq_counter: AtomicU64,
 }
 
 impl DocumentSession {
@@ -137,6 +143,34 @@ impl DocumentSession {
             opened_at,
             state,
         }
+    }
+
+    /// Returns the next sequence number, incrementing the counter atomically.
+    /// Sequence numbers start at 1 (0 is reserved as "unconfirmed" on the client).
+    #[must_use]
+    pub fn next_seq(&self) -> u64 {
+        self.seq_counter.fetch_add(1, Ordering::AcqRel)
+    }
+
+    /// Stamp `transaction.seq` with the next per-session sequence number, wrap
+    /// it in a [`MutationEvent`], and broadcast it on this session's channel as
+    /// a [`SessionEvent::DocumentEvent`].
+    ///
+    /// Fire-and-forget: no subscribers is not an error.
+    pub fn publish(
+        &self,
+        kind: MutationEventKind,
+        uuid: Option<String>,
+        mut transaction: TransactionPayload,
+    ) {
+        transaction.seq = self.next_seq();
+        let event = MutationEvent {
+            kind,
+            uuid,
+            data: None,
+            transaction: Some(transaction),
+        };
+        let _ = self.broadcast.send(SessionEvent::DocumentEvent(event));
     }
 }
 
@@ -272,6 +306,7 @@ impl Sessions {
             store: RwLock::new(SendDocument(document)),
             broadcast: tx,
             state: std::sync::Mutex::new(SessionState::Live),
+            seq_counter: AtomicU64::new(1),
         });
 
         by_id.insert(id, session);
@@ -292,6 +327,21 @@ impl Sessions {
     ///
     /// Returns the new [`SessionId`]. The session starts in
     /// [`SessionState::Live`].
+    ///
+    /// # `MAX_SESSIONS` exemption (RF-004)
+    ///
+    /// This method intentionally does NOT enforce the [`MAX_SESSIONS`] cap, and
+    /// is infallible by design. It is the controlled single startup/synthetic-
+    /// session path: the server registers exactly one in-memory default session
+    /// at boot, and tests register a small fixed number. There is no untrusted
+    /// or unbounded caller. The cap is enforced at the public multi-session
+    /// entry point, [`Sessions::open`], which IS fallible and rejects with
+    /// [`SessionsError::TooManySessions`] once `by_id.len() >= MAX_SESSIONS`.
+    ///
+    /// Any future caller that registers in-memory sessions in bulk (or in
+    /// response to external input) MUST route through the fallible
+    /// [`Sessions::open`] instead, so the cap is enforced at that insertion
+    /// point.
     #[must_use]
     pub fn register_in_memory(&self, document: Document) -> SessionId {
         let id = SessionId::new();
@@ -306,6 +356,7 @@ impl Sessions {
             store: RwLock::new(SendDocument(document)),
             broadcast: tx,
             state: std::sync::Mutex::new(SessionState::Live),
+            seq_counter: AtomicU64::new(1),
         });
 
         let mut by_id = self
@@ -759,6 +810,74 @@ mod registry_tests {
 
         let result = sessions.with_session(b, |_| 42);
         assert_eq!(result, Some(Ok(42)));
+    }
+
+    #[test]
+    fn test_session_next_seq_starts_at_one_and_increases() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "seq");
+        let sessions = Sessions::new(64);
+        let id = sessions.open(&path, stub_loader).expect("open");
+        let session = sessions.get(id).expect("session");
+        assert_eq!(session.next_seq(), 1);
+        assert_eq!(session.next_seq(), 2);
+        assert_eq!(session.next_seq(), 3);
+    }
+
+    #[test]
+    fn test_session_publish_stamps_seq_and_delivers_to_subscriber() {
+        use crate::{MutationEventKind, OperationPayload, TransactionPayload};
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "publish");
+        let sessions = Sessions::new(64);
+        let id = sessions.open(&path, stub_loader).expect("open");
+        let session = sessions.get(id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        session.publish(
+            MutationEventKind::NodeUpdated,
+            Some("node-abc".to_string()),
+            TransactionPayload {
+                transaction_id: "tx-1".to_string(),
+                user_id: "user-1".to_string(),
+                seq: 0,
+                operations: vec![OperationPayload {
+                    id: "op-1".to_string(),
+                    node_uuid: "node-abc".to_string(),
+                    op_type: "set_field".to_string(),
+                    path: "transform".to_string(),
+                    value: Some(serde_json::json!({"x": 10})),
+                }],
+            },
+        );
+
+        match rx.try_recv().expect("event delivered") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, MutationEventKind::NodeUpdated);
+                assert_eq!(me.uuid.as_deref(), Some("node-abc"));
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.seq, 1, "first publish gets seq 1");
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
+
+        // Second publish gets the next seq.
+        session.publish(
+            MutationEventKind::NodeUpdated,
+            None,
+            TransactionPayload {
+                transaction_id: "tx-2".to_string(),
+                user_id: "user-1".to_string(),
+                seq: 0,
+                operations: vec![],
+            },
+        );
+        match rx.try_recv().expect("second event") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.transaction.expect("tx").seq, 2);
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
     }
 
     #[test]

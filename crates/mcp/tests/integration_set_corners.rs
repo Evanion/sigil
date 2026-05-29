@@ -1,11 +1,17 @@
 //! Integration tests verifying that `set_corners_impl` produces the correct
-//! MCP broadcast payload shape.
+//! MCP broadcast `value` shape.
+//!
+//! Spec 22b: `set_corners_impl` is a pure mutation over `&mut Document` that
+//! returns the canonical post-mutation `NodeKind` JSON. The session-scoped
+//! envelope (`SigilMcpServer::run_session_scoped`) wraps that JSON as the
+//! broadcast `value` with `op_type = "set_field"`, `path = "kind"`.
 //!
 //! The frontend `applyRemoteTransaction` dispatcher (in
 //! `frontend/src/operations/apply-remote.ts`) consumes events with
-//! `op_type = "set_field"`, `path = "kind"`, and `value` shaped as the
-//! full serialised `NodeKind`. These tests assert that the Rust broadcast
-//! side emits exactly that shape.
+//! `op_type = "set_field"`, `path = "kind"`, and `value` shaped as the full
+//! serialised `NodeKind`. These tests assert that the `value` the Rust side
+//! produces (the `kind_json` returned by `set_corners_impl`) is exactly that
+//! shape, sourced from post-mutation document state.
 //!
 //! See also: `frontend/src/__tests__/integration-corners.test.ts` which
 //! replays the payload asserted here through the frontend dispatcher.
@@ -13,77 +19,33 @@
 //! (CLAUDE.md §4) is broken.
 
 use serde_json::json;
+use sigil_core::Document;
 use sigil_mcp::tools::nodes::{create_node_impl, set_corners_impl};
 use sigil_mcp::tools::pages::create_page_impl;
-use sigil_state::{AppState, MUTATION_BROADCAST_CAPACITY, MutationEventKind};
-use tokio::sync::broadcast;
 
-/// Seed state: one page, one rectangle, broadcast channel wired up.
-///
-/// Drains the two setup events (create_page + create_node) so the first
-/// `rx.try_recv()` in the test body receives the event under test.
-fn make_state_with_rect() -> (
-    AppState,
-    broadcast::Receiver<sigil_state::MutationEvent>,
-    String,
-) {
-    let mut state = AppState::new();
-    let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-    let rx = tx.subscribe();
-    state.set_event_tx(tx);
-
-    let page = create_page_impl(&state, "Page 1").expect("create page");
-    let rect = create_node_impl(&state, "rectangle", "Rect", Some(&page.id), None, None)
+/// Seed a bare document with one page and one rectangle; return the doc and the
+/// rectangle's UUID.
+fn make_doc_with_rect() -> (Document, String) {
+    let mut doc = Document::new("Untitled".to_string());
+    let page = create_page_impl(&mut doc, "Page 1").expect("create page");
+    let rect = create_node_impl(&mut doc, "rectangle", "Rect", Some(&page.id), None, None)
         .expect("create rect");
-
-    // Drain the two setup events so the test body sees only its own event.
-    // Bind to named results to satisfy the no-`let _` rule (CLAUDE.md §11);
-    // a `TryRecvError::Empty` here would mean the publish was synchronous and
-    // already drained, both states are acceptable for setup.
-    let mut rx = rx;
-    let _page_event = rx.try_recv();
-    let _node_event = rx.try_recv();
-
-    (state, rx, rect.uuid)
+    (doc, rect.uuid)
 }
 
-/// Verifies that a uniform-round shorthand broadcast produces:
-///   op_type = "set_field", path = "kind",
+/// Verifies that a uniform-round shorthand produces the post-mutation broadcast
+/// `value`:
 ///   value = { "type": "rectangle", "corners": [4 × {type:"round", radii:{x:16,y:16}}] }
 #[test]
 fn test_set_corners_uniform_round_broadcasts_full_kind() {
-    let (state, mut rx, rect_uuid) = make_state_with_rect();
+    let (mut doc, rect_uuid) = make_doc_with_rect();
 
-    set_corners_impl(
-        &state,
+    let (_result, value) = set_corners_impl(
+        &mut doc,
         &rect_uuid,
         &json!({ "shape": "round", "radius": 16.0 }),
     )
     .expect("set_corners_impl must succeed");
-
-    let event = rx.try_recv().expect("should receive broadcast event");
-    assert_eq!(
-        event.kind,
-        MutationEventKind::NodeUpdated,
-        "event kind must be NodeUpdated"
-    );
-
-    let tx_payload = event
-        .transaction
-        .as_ref()
-        .expect("event must carry a transaction payload");
-
-    assert_eq!(
-        tx_payload.operations.len(),
-        1,
-        "transaction must contain exactly one operation"
-    );
-
-    let op = &tx_payload.operations[0];
-    assert_eq!(op.op_type, "set_field", "op_type must be 'set_field'");
-    assert_eq!(op.path, "kind", "path must be 'kind'");
-
-    let value = op.value.as_ref().expect("operation must have a value");
 
     assert_eq!(
         value["type"], "rectangle",
@@ -112,44 +74,20 @@ fn test_set_corners_uniform_round_broadcasts_full_kind() {
     }
 }
 
-/// Verifies that a superellipse shape-level shorthand broadcast produces:
-///   op_type = "set_field", path = "kind",
+/// Verifies that a superellipse shape-level shorthand produces the
+/// post-mutation broadcast `value`:
 ///   value = { "type": "rectangle",
 ///             "corners": [4 × {type:"superellipse", radii:{x:20,y:20}, smoothing:0.7}] }
 #[test]
 fn test_set_corners_superellipse_broadcasts_shape_level_payload() {
-    let (state, mut rx, rect_uuid) = make_state_with_rect();
+    let (mut doc, rect_uuid) = make_doc_with_rect();
 
-    set_corners_impl(
-        &state,
+    let (_result, value) = set_corners_impl(
+        &mut doc,
         &rect_uuid,
         &json!({ "shape": "superellipse", "radius": 20.0, "smoothing": 0.7 }),
     )
     .expect("set_corners_impl must succeed");
-
-    let event = rx.try_recv().expect("should receive broadcast event");
-    assert_eq!(
-        event.kind,
-        MutationEventKind::NodeUpdated,
-        "event kind must be NodeUpdated"
-    );
-
-    let tx_payload = event
-        .transaction
-        .as_ref()
-        .expect("event must carry a transaction payload");
-
-    assert_eq!(
-        tx_payload.operations.len(),
-        1,
-        "transaction must contain exactly one operation"
-    );
-
-    let op = &tx_payload.operations[0];
-    assert_eq!(op.op_type, "set_field", "op_type must be 'set_field'");
-    assert_eq!(op.path, "kind", "path must be 'kind'");
-
-    let value = op.value.as_ref().expect("operation must have a value");
 
     assert_eq!(
         value["type"], "rectangle",

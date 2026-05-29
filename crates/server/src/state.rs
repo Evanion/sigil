@@ -2,48 +2,34 @@
 
 //! Server-specific application state.
 //!
-//! Re-exports the core `AppState` and `SendDocument` from the `state` crate
-//! and provides convenience constructors that wire up persistence and the
-//! mutation event broadcast channel.
+//! Re-exports the shared [`App`] and supporting types from the `state` crate
+//! and provides convenience constructors that register the default session and
+//! wire up per-session persistence.
 
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use sigil_core::Document;
-use tokio::sync::broadcast;
 
 use crate::session_persistence::SessionPersistence;
 
-// Re-export the core state types so existing code can use `crate::state::AppState`.
+// Re-export the shared state types so existing code can use `crate::state::*`.
 pub use sigil_state::{
-    App, AppState, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument,
-    SessionId, Sessions, SessionsError,
+    App, MUTATION_BROADCAST_CAPACITY, MutationEvent, MutationEventKind, SendDocument, SessionId,
+    Sessions, SessionsError,
 };
 
 /// Server-level state that wraps the shared [`App`].
 ///
 /// `ServerState` is the value passed through Axum's state extractor and into
-/// GraphQL schema `Data`. `App` (from `sigil-state`) owns:
-///
-/// - the legacy single-document [`AppState`] (the current source of truth
-///   for mutations), reachable via `state.app.legacy.*` or through the
-///   `Deref` impl on `App` as `state.app.*` (which is what existing
-///   resolvers/tools use unchanged), and
-/// - the [`Sessions`] registry (multi-session), reachable via
-///   `state.app.sessions.*`. The CLI startup path opens the `--workfile`
-///   directory as the **default session** so multi-session-aware code
-///   (Tasks 5–10) can look up the session by id without forcing the
-///   single-document deployment to break.
-///
-/// Until Tasks 5–10 land, the legacy `AppState.document` is the authoritative
-/// store and the per-session `store` field on `DocumentSession` is unused.
-/// This duplication is intentional and scoped: it lets us wire the
-/// [`Sessions`] registry into the application boundary now without forcing
-/// a 75-callsite mechanical refactor in a single commit.
+/// GraphQL schema `Data`. As of Spec 22b the [`Sessions`] registry is the
+/// single source of truth for every document read, write, and broadcast
+/// across all transports (GraphQL queries/mutations, MCP tools). A session is
+/// resolved via the `X-Sigil-Session` header or the `default_session_id`
+/// anchor, then `session.store` is read/written directly.
 #[derive(Clone)]
 pub struct ServerState {
-    /// High-level application state: legacy single-document `AppState` plus
-    /// [`Sessions`] registry. Shared with MCP via `state.app.clone()`.
+    /// High-level application state: the [`Sessions`] registry. Shared with
+    /// MCP via `state.app.clone()`.
     pub app: App,
     /// Per-session persistence manager (Spec 22a). Owns one debounced save task
     /// per disk-backed session. Shared (`Arc`) so clones for Axum/MCP observe
@@ -52,34 +38,22 @@ pub struct ServerState {
 }
 
 impl ServerState {
-    /// Creates a new `ServerState` with an empty document, no persistence,
-    /// and a default in-memory session registered in the [`Sessions`]
-    /// registry.
+    /// Creates a new `ServerState` with no persistence and a default in-memory
+    /// session registered in the [`Sessions`] registry.
     ///
     /// Suitable for tests and in-memory-only operation. The default session
     /// id is set so GraphQL resolvers can resolve a session without an
     /// `X-Sigil-Session` header.
     #[must_use]
     pub fn new() -> Self {
-        let mut legacy = AppState::new();
-        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        legacy.set_event_tx(tx);
-        let app = App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY);
+        let app = App::new(MUTATION_BROADCAST_CAPACITY);
 
-        // Register an in-memory default session so mutations in tests /
-        // in-memory mode have a resolvable session id. The session's
-        // initial document is a clone of the legacy document so the two
-        // start consistent (the mutation handlers mirror legacy after each
-        // apply to maintain that consistency).
-        let default_doc = {
-            let guard = app
-                .legacy
-                .document
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.0.clone()
-        };
-        let id = app.sessions.register_in_memory(default_doc);
+        // Register an in-memory default session seeded with a fresh empty
+        // document. The session store is the single source of truth for all
+        // reads, writes, and broadcasts (Spec 22b).
+        let id = app
+            .sessions
+            .register_in_memory(Document::new("Untitled".to_string()));
         app.set_default_session_id(Some(id));
 
         Self {
@@ -88,30 +62,22 @@ impl ServerState {
         }
     }
 
-    /// Creates a `ServerState` holding a pre-loaded document for `workfile_path`.
+    /// Creates an empty `ServerState` with NO sessions registered and no
+    /// persistence tasks.
     ///
-    /// Spec 22a: this no longer spawns a persistence task. The legacy `AppState`
-    /// holds the document for the still-present mirror (removed in 22c), but
-    /// persistence is owned per-session by [`SessionPersistence`]. The caller is
-    /// responsible for registering the session in `app.sessions` AND registering
-    /// it with `persistence` (passing the migration flag) — see
-    /// `main.rs::load_workfile_into_state`.
-    ///
-    /// `_migrated_from` is accepted for call-site compatibility but is now
-    /// threaded by the caller into `SessionPersistence::register`; it is not used
-    /// here.
+    /// Used by the workfile-backed deployment path
+    /// (`main.rs::load_workfile_into_state`). The disk-backed session itself is
+    /// registered by the caller via [`App::open_session_with`] — which moves
+    /// the loaded document directly into the session store (no clone) and
+    /// repoints `default_session_id` — and the caller then registers the
+    /// per-session persistence task (passing `migrated_from`). This constructor
+    /// therefore only builds the empty `App` + persistence manager; the
+    /// document, path, and migration flag are threaded by the caller into the
+    /// session and persistence registration.
     #[must_use]
-    pub fn new_with_document_and_workfile_migrated(
-        doc: Document,
-        workfile_path: PathBuf,
-        _migrated_from: Option<u32>,
-    ) -> Self {
-        let document = Arc::new(Mutex::new(SendDocument(doc)));
-        let mut legacy = AppState::new_with_document(document, workfile_path);
-        let (tx, _) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-        legacy.set_event_tx(tx);
+    pub fn new_empty() -> Self {
         Self {
-            app: App::from_legacy(legacy, MUTATION_BROADCAST_CAPACITY),
+            app: App::new(MUTATION_BROADCAST_CAPACITY),
             persistence: Arc::new(SessionPersistence::new()),
         }
     }
@@ -127,29 +93,23 @@ impl Default for ServerState {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_server_state_new_creates_empty_document() {
+    #[tokio::test]
+    async fn test_server_state_new_creates_empty_document() {
         let state = ServerState::new();
-        let doc = state.app.document.lock().unwrap();
+        let id = state
+            .app
+            .default_session_id()
+            .expect("default session id should be set");
+        let session = state
+            .app
+            .sessions
+            .get(id)
+            .expect("default session must be present");
+        let guard = session.store.read().await;
+        let doc = &guard.0;
         assert_eq!(doc.metadata.name, "Untitled");
         assert_eq!(doc.pages.len(), 0);
         assert_eq!(doc.arena.len(), 0);
-    }
-
-    #[test]
-    fn test_signal_dirty_without_persistence_is_noop() {
-        let state = ServerState::new();
-        // Should not panic — no persistence configured
-        state.app.signal_dirty();
-    }
-
-    #[test]
-    fn test_server_state_has_event_tx_configured() {
-        let state = ServerState::new();
-        assert!(
-            state.app.event_tx().is_some(),
-            "ServerState should configure the event broadcast channel"
-        );
     }
 
     #[tokio::test]

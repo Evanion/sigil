@@ -1,8 +1,9 @@
 //! Node operation tools — create, delete, rename, `set_transform`, `set_visible`, `set_locked`.
 //!
-//! All mutations follow the pattern:
-//!   lock → resolve UUID → construct operation →
-//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
+//! Write `_impl`s are pure functions over `&mut Document`; the session-scoped
+//! envelope in `crate::server` holds the session store write lock, runs the
+//! `_impl`, builds the broadcast `value` from post-mutation state, and publishes
+//! on the session's broadcast channel.
 
 use sigil_core::{
     BlendMode, Effect, FieldOperation, Fill, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE,
@@ -14,11 +15,9 @@ use sigil_core::{
     commands::tree_commands::{ReorderChildren, ReparentNode},
     validate_floats_in_value,
 };
-use sigil_state::{AppState, MutationEventKind};
 use uuid::Uuid;
 
 use crate::error::McpToolError;
-use crate::server::acquire_document_lock;
 use crate::tools::document::node_kind_to_string;
 use crate::types::{CreateNodeResult, MutationResult, NodeInfo, TransformInfo, TransformInput};
 
@@ -154,7 +153,7 @@ pub fn build_node_info(
 /// - `McpToolError::NodeNotFound` if the given `parent_uuid` does not exist.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn create_node_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     kind_str: &str,
     name: &str,
     page_id_str: Option<&str>,
@@ -164,7 +163,7 @@ pub fn create_node_impl(
     let kind = parse_node_kind(kind_str)?;
     let node_uuid = Uuid::new_v4();
 
-    // Validate transform before entering the lock.
+    // Validate transform before mutating.
     if let Some(t) = transform {
         validate_transform_input(t)?;
     }
@@ -188,94 +187,72 @@ pub fn create_node_impl(
 
     let initial_transform = transform.map(transform_input_to_core);
 
-    let (node_id, node_info) = {
-        let mut doc = acquire_document_lock(state);
+    // Verify page exists if provided.
+    if let Some(pid) = page_id {
+        doc.page(pid)
+            .map_err(|_| McpToolError::PageNotFound(page_id_str.unwrap_or("").to_string()))?;
+    }
 
-        // Verify page exists if provided.
-        if let Some(pid) = page_id {
-            doc.page(pid)
-                .map_err(|_| McpToolError::PageNotFound(page_id_str.unwrap_or("").to_string()))?;
-        }
+    // Resolve parent uuid to NodeId if provided.
+    let parent_node_id = parent_uuid
+        .map(|u| {
+            doc.arena
+                .id_by_uuid(&u)
+                .ok_or_else(|| McpToolError::NodeNotFound(u.to_string()))
+        })
+        .transpose()?;
 
-        // Resolve parent uuid to NodeId if provided.
-        let parent_node_id = parent_uuid
-            .map(|u| {
-                doc.arena
-                    .id_by_uuid(&u)
-                    .ok_or_else(|| McpToolError::NodeNotFound(u.to_string()))
-            })
-            .transpose()?;
-
-        let cmd = CreateNode {
-            uuid: node_uuid,
-            kind,
-            name: name.to_string(),
-            page_id,
-            initial_transform,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        // Resolve the actual NodeId from the UUID.
-        let actual_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(node_uuid.to_string()))?;
-
-        // If a parent was requested, reparent the node.
-        // RF-007/RF-008: If reparent fails, delete the created node to maintain
-        // atomicity. Without undo, we must manually clean up.
-        if let Some(parent_id) = parent_node_id {
-            let new_position = doc.arena.get(parent_id)?.children.len();
-
-            let reparent_cmd = ReparentNode {
-                node_id: actual_id,
-                new_parent_id: parent_id,
-                new_position,
-            };
-            if let Err(reparent_err) = reparent_cmd
-                .validate(&doc)
-                .and_then(|()| reparent_cmd.apply(&mut doc))
-            {
-                // Restore state before propagating error (CLAUDE.md section 11).
-                // Delete the node we just created to roll back. Uses the
-                // plural `DeleteNodes` with a one-element batch — the only
-                // delete path in the core crate after Spec 19 Task 16.
-                let rollback = DeleteNodes {
-                    targets: vec![(actual_id, page_id)],
-                };
-                if let Err(rollback_err) = rollback
-                    .validate(&doc)
-                    .and_then(|()| rollback.apply(&mut doc))
-                {
-                    tracing::error!(
-                        "failed to delete CreateNode after reparent failure: {rollback_err}"
-                    );
-                    return Err(McpToolError::InvalidInput(format!(
-                        "reparent failed ({reparent_err}) and rollback also failed ({rollback_err})"
-                    )));
-                }
-                return Err(McpToolError::CoreError(reparent_err));
-            }
-        }
-
-        let info = build_node_info(&doc, actual_id, node_uuid)?;
-        (actual_id, info)
+    let cmd = CreateNode {
+        uuid: node_uuid,
+        kind,
+        name: name.to_string(),
+        page_id,
+        initial_transform,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    let _ = node_id; // node_id is not used after lock drop; uuid is returned
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeCreated,
-        &node_uuid.to_string(),
-        "create_node",
-        "",
-        Some(serde_json::json!({
-            "uuid": node_uuid.to_string(),
-            "kind": kind_str,
-            "name": name,
-        })),
-    );
+    // Resolve the actual NodeId from the UUID.
+    let actual_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(node_uuid.to_string()))?;
+
+    // If a parent was requested, reparent the node.
+    // RF-007/RF-008: If reparent fails, delete the created node to maintain
+    // atomicity. Without undo, we must manually clean up.
+    if let Some(parent_id) = parent_node_id {
+        let new_position = doc.arena.get(parent_id)?.children.len();
+
+        let reparent_cmd = ReparentNode {
+            node_id: actual_id,
+            new_parent_id: parent_id,
+            new_position,
+        };
+        if let Err(reparent_err) = reparent_cmd
+            .validate(doc)
+            .and_then(|()| reparent_cmd.apply(doc))
+        {
+            // Restore state before propagating error (CLAUDE.md section 11).
+            // Delete the node we just created to roll back. Uses the
+            // plural `DeleteNodes` with a one-element batch — the only
+            // delete path in the core crate after Spec 19 Task 16.
+            let rollback = DeleteNodes {
+                targets: vec![(actual_id, page_id)],
+            };
+            if let Err(rollback_err) = rollback.validate(doc).and_then(|()| rollback.apply(doc)) {
+                tracing::error!(
+                    "failed to delete CreateNode after reparent failure: {rollback_err}"
+                );
+                return Err(McpToolError::InvalidInput(format!(
+                    "reparent failed ({reparent_err}) and rollback also failed ({rollback_err})"
+                )));
+            }
+            return Err(McpToolError::CoreError(reparent_err));
+        }
+    }
+
+    let node_info = build_node_info(doc, actual_id, node_uuid)?;
 
     Ok(CreateNodeResult {
         uuid: node_uuid.to_string(),
@@ -295,9 +272,9 @@ pub fn create_node_impl(
 /// - `McpToolError::NodeNotFound` if any UUID does not resolve.
 /// - `McpToolError::CoreError` on engine-level failures (validate or apply).
 pub fn delete_nodes_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_strs: &[String],
-) -> Result<MutationResult, McpToolError> {
+) -> Result<(MutationResult, Vec<String>), McpToolError> {
     // RF-005: Reject empty/oversize batches BEFORE allocating the
     // parsed-UUIDs vec. Prevents memory amplification from giant tool
     // inputs that would otherwise allocate proportional to the input
@@ -317,7 +294,7 @@ pub fn delete_nodes_impl(
         )));
     }
 
-    // Pre-parse UUIDs before acquiring the lock. Fail-fast on invalid input.
+    // Pre-parse UUIDs. Fail-fast on invalid input.
     let parsed: Vec<Uuid> = uuid_strs
         .iter()
         .map(|s| {
@@ -326,36 +303,32 @@ pub fn delete_nodes_impl(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    {
-        let mut doc = acquire_document_lock(state);
-
-        // RF-022: Pre-build a NodeId -> PageId map once, then look up
-        // each target in O(1). Previous code did O(P * R) per target.
-        let mut node_to_page: std::collections::HashMap<
-            sigil_core::id::NodeId,
-            sigil_core::id::PageId,
-        > = std::collections::HashMap::new();
-        for page in &doc.pages {
-            for nid in &page.root_nodes {
-                node_to_page.insert(*nid, page.id);
-            }
+    // RF-022: Pre-build a NodeId -> PageId map once, then look up
+    // each target in O(1). Previous code did O(P * R) per target.
+    let mut node_to_page: std::collections::HashMap<
+        sigil_core::id::NodeId,
+        sigil_core::id::PageId,
+    > = std::collections::HashMap::new();
+    for page in &doc.pages {
+        for nid in &page.root_nodes {
+            node_to_page.insert(*nid, page.id);
         }
-
-        let mut targets: Vec<(sigil_core::id::NodeId, Option<sigil_core::id::PageId>)> =
-            Vec::with_capacity(parsed.len());
-        for (idx, uuid) in parsed.iter().enumerate() {
-            let node_id = doc
-                .arena
-                .id_by_uuid(uuid)
-                .ok_or_else(|| McpToolError::NodeNotFound(uuid_strs[idx].clone()))?;
-            let page_id = node_to_page.get(&node_id).copied();
-            targets.push((node_id, page_id));
-        }
-
-        let cmd = DeleteNodes { targets };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
     }
+
+    let mut targets: Vec<(sigil_core::id::NodeId, Option<sigil_core::id::PageId>)> =
+        Vec::with_capacity(parsed.len());
+    for (idx, uuid) in parsed.iter().enumerate() {
+        let node_id = doc
+            .arena
+            .id_by_uuid(uuid)
+            .ok_or_else(|| McpToolError::NodeNotFound(uuid_strs[idx].clone()))?;
+        let page_id = node_to_page.get(&node_id).copied();
+        targets.push((node_id, page_id));
+    }
+
+    let cmd = DeleteNodes { targets };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     // RF-020/036: Build broadcast value with canonicalized UUID strings
     // (lowercase hyphenated form from `Uuid::to_string()`) regardless of
@@ -363,29 +336,17 @@ pub fn delete_nodes_impl(
     // dedup-retained set produced by core's `apply`) because the frontend
     // `applyDeleteNodes` walks the local subtree from each broadcast root
     // and is tolerant of "uuid already deleted" — descendants that core's
-    // dedup dropped are removed by the local walk anyway.
+    // dedup dropped are removed by the local walk anyway. Returned to the
+    // envelope's closure so the broadcast value carries them.
     let canonicalized_uuids: Vec<String> = parsed.iter().map(Uuid::to_string).collect();
 
-    // Broadcast: single delete_nodes op carrying the canonicalized UUID list.
-    // The OperationPayload's node_uuid is empty (batch op has no single
-    // target); UUIDs are in the value payload, matching the GraphQL
-    // contract (mutation.rs::parse_delete_nodes).
-    state.signal_dirty();
-    state.publish_transaction(
-        MutationEventKind::NodeDeleted,
-        None,
-        super::broadcast::single_op_transaction(
-            "",
-            "delete_nodes",
-            "",
-            Some(serde_json::json!({ "node_uuids": canonicalized_uuids })),
-        ),
-    );
-
-    Ok(MutationResult {
-        success: true,
-        message: format!("Deleted {} node(s)", uuid_strs.len()),
-    })
+    Ok((
+        MutationResult {
+            success: true,
+            message: format!("Deleted {} node(s)", uuid_strs.len()),
+        },
+        canonicalized_uuids,
+    ))
 }
 
 /// Renames a node identified by UUID.
@@ -396,7 +357,7 @@ pub fn delete_nodes_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures (e.g. name too long).
 pub fn rename_node_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     new_name: &str,
 ) -> Result<NodeInfo, McpToolError> {
@@ -404,33 +365,19 @@ pub fn rename_node_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = RenameNode {
-            node_id,
-            new_name: new_name.to_string(),
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    let cmd = RenameNode {
+        node_id,
+        new_name: new_name.to_string(),
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "name",
-        Some(serde_json::json!(new_name)),
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 /// Sets a node's transform.
@@ -445,7 +392,7 @@ pub fn rename_node_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_transform_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     transform: &TransformInput,
 ) -> Result<NodeInfo, McpToolError> {
@@ -457,39 +404,19 @@ pub fn set_transform_impl(
 
     let new_transform = transform_input_to_core(transform);
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetTransform {
-            node_id,
-            new_transform,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    let cmd = SetTransform {
+        node_id,
+        new_transform,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "transform",
-        match serde_json::to_value(new_transform) {
-            Ok(v) => Some(v),
-            Err(e) => {
-                tracing::error!("failed to serialize transform for broadcast: {e}");
-                None
-            }
-        },
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 /// Sets a node's visibility.
@@ -500,7 +427,7 @@ pub fn set_transform_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_visible_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     visible: bool,
 ) -> Result<NodeInfo, McpToolError> {
@@ -508,33 +435,19 @@ pub fn set_visible_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetVisible {
-            node_id,
-            new_visible: visible,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    let cmd = SetVisible {
+        node_id,
+        new_visible: visible,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "visible",
-        Some(serde_json::json!(visible)),
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 /// Sets a node's locked state.
@@ -545,7 +458,7 @@ pub fn set_visible_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_locked_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     locked: bool,
 ) -> Result<NodeInfo, McpToolError> {
@@ -553,33 +466,19 @@ pub fn set_locked_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetLocked {
-            node_id,
-            new_locked: locked,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    let cmd = SetLocked {
+        node_id,
+        new_locked: locked,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "locked",
-        Some(serde_json::json!(locked)),
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 /// Moves a node to a new parent at a specific position.
@@ -590,7 +489,7 @@ pub fn set_locked_impl(
 /// - `McpToolError::NodeNotFound` if either node does not exist.
 /// - `McpToolError::CoreError` on engine-level failures (e.g. cycle detection).
 pub fn reparent_node_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     new_parent_uuid_str: &str,
     position: u32,
@@ -602,42 +501,25 @@ pub fn reparent_node_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(new_parent_uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
+    let parent_id = doc
+        .arena
+        .id_by_uuid(&parent_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(new_parent_uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-        let parent_id = doc
-            .arena
-            .id_by_uuid(&parent_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(new_parent_uuid_str.to_string()))?;
-
-        // Positions beyond children count are clamped by the core engine (append semantics).
-        let cmd = ReparentNode {
-            node_id,
-            new_parent_id: parent_id,
-            new_position: position as usize,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    // Positions beyond children count are clamped by the core engine (append semantics).
+    let cmd = ReparentNode {
+        node_id,
+        new_parent_id: parent_id,
+        new_position: position as usize,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "reparent",
-        "",
-        Some(serde_json::json!({
-            "parentUuid": new_parent_uuid_str,
-            "position": position,
-        })),
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 /// Reorders a node within its parent's children list.
@@ -648,7 +530,7 @@ pub fn reparent_node_impl(
 /// - `McpToolError::NodeNotFound` if the node does not exist.
 /// - `McpToolError::CoreError` on engine-level failures (e.g. node has no parent).
 pub fn reorder_children_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     new_position: u32,
 ) -> Result<NodeInfo, McpToolError> {
@@ -656,36 +538,20 @@ pub fn reorder_children_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let node_info = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        // Positions beyond children count are clamped by the core engine.
-        let cmd = ReorderChildren {
-            node_id,
-            new_position: new_position as usize,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        build_node_info(&doc, node_id, node_uuid)?
+    // Positions beyond children count are clamped by the core engine.
+    let cmd = ReorderChildren {
+        node_id,
+        new_position: new_position as usize,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "reorder",
-        "",
-        Some(serde_json::json!({
-            "newPosition": new_position,
-        })),
-    );
-    Ok(node_info)
+    build_node_info(doc, node_id, node_uuid)
 }
 
 // ── Style tool implementations ────────────────────────────────────────────────
@@ -699,7 +565,7 @@ pub fn reorder_children_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_opacity_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     opacity: f64,
 ) -> Result<MutationResult, McpToolError> {
@@ -718,30 +584,17 @@ pub fn set_opacity_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetOpacity {
-            node_id,
-            new_opacity: StyleValue::Literal { value: opacity },
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "style.opacity",
-        Some(serde_json::json!({"type": "literal", "value": opacity})),
-    );
+    let cmd = SetOpacity {
+        node_id,
+        new_opacity: StyleValue::Literal { value: opacity },
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     Ok(MutationResult {
         success: true,
@@ -760,7 +613,7 @@ pub fn set_opacity_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_blend_mode_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     blend_mode_str: &str,
 ) -> Result<MutationResult, McpToolError> {
@@ -779,30 +632,17 @@ pub fn set_blend_mode_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetBlendMode {
-            node_id,
-            new_blend_mode,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "style.blend_mode",
-        Some(serde_json::json!(blend_mode_str)),
-    );
+    let cmd = SetBlendMode {
+        node_id,
+        new_blend_mode,
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     Ok(MutationResult {
         success: true,
@@ -821,7 +661,7 @@ pub fn set_blend_mode_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_fills_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     fills_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
@@ -845,27 +685,14 @@ pub fn set_fills_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetFills { node_id, new_fills };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "style.fills",
-        Some(fills_value.clone()),
-    );
+    let cmd = SetFills { node_id, new_fills };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     Ok(MutationResult {
         success: true,
@@ -884,7 +711,7 @@ pub fn set_fills_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_strokes_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     strokes_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
@@ -908,30 +735,17 @@ pub fn set_strokes_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetStrokes {
-            node_id,
-            new_strokes,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "style.strokes",
-        Some(strokes_value.clone()),
-    );
+    let cmd = SetStrokes {
+        node_id,
+        new_strokes,
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     Ok(MutationResult {
         success: true,
@@ -950,7 +764,7 @@ pub fn set_strokes_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn set_effects_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     effects_value: &serde_json::Value,
 ) -> Result<MutationResult, McpToolError> {
@@ -974,30 +788,17 @@ pub fn set_effects_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetEffects {
-            node_id,
-            new_effects,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
-
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "style.effects",
-        Some(effects_value.clone()),
-    );
+    let cmd = SetEffects {
+        node_id,
+        new_effects,
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
     Ok(MutationResult {
         success: true,
@@ -1012,6 +813,12 @@ pub fn set_effects_impl(
 /// per-corner array) into `[Corner; 4]`. The per-corner array form rejects
 /// `Corner::Superellipse` variants — superellipse must arrive through the shape-level shorthand.
 ///
+/// Returns the `MutationResult` plus the canonical post-mutation `NodeKind` JSON
+/// so the envelope can source the broadcast `value` from post-mutation state
+/// (CLAUDE.md "Broadcast value must be sourced from post-mutation document
+/// state"). The envelope broadcasts it with `op_type = "set_field"` and
+/// `path = "kind"`.
+///
 /// # Errors
 ///
 /// - `McpToolError::InvalidInput` if the shorthand is malformed, any numeric is non-finite or
@@ -1020,10 +827,10 @@ pub fn set_effects_impl(
 /// - `McpToolError::NodeNotFound` if no node with the given UUID exists.
 /// - `McpToolError::CoreError` on engine-level failures (e.g. node is not a corner-bearing kind).
 pub fn set_corners_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     uuid_str: &str,
     corners_value: &serde_json::Value,
-) -> Result<MutationResult, McpToolError> {
+) -> Result<(MutationResult, serde_json::Value), McpToolError> {
     let new_corners = sigil_core::corners_input::parse_corners_input(corners_value)
         .map_err(|e| McpToolError::InvalidInput(e.to_string()))?;
 
@@ -1031,59 +838,51 @@ pub fn set_corners_impl(
         .parse()
         .map_err(|_| McpToolError::InvalidUuid(uuid_str.to_string()))?;
 
-    let kind_json = {
-        let mut doc = acquire_document_lock(state);
+    let node_id = doc
+        .arena
+        .id_by_uuid(&node_uuid)
+        .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
 
-        let node_id = doc
-            .arena
-            .id_by_uuid(&node_uuid)
-            .ok_or_else(|| McpToolError::NodeNotFound(uuid_str.to_string()))?;
-
-        let cmd = SetCorners {
-            node_id,
-            new_corners,
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        let node = doc.arena.get(node_id)?;
-        serde_json::to_value(&node.kind)?
+    let cmd = SetCorners {
+        node_id,
+        new_corners,
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_and_persist(
-        state,
-        MutationEventKind::NodeUpdated,
-        &node_uuid.to_string(),
-        "set_field",
-        "kind",
-        Some(kind_json),
-    );
+    // Read the canonical post-mutation kind back from the document so the
+    // broadcast value reflects the applied state, not the raw shorthand input.
+    let node = doc.arena.get(node_id)?;
+    let kind_json = serde_json::to_value(&node.kind)?;
 
-    Ok(MutationResult {
-        success: true,
-        message: format!("Corners set on node {uuid_str}"),
-    })
+    Ok((
+        MutationResult {
+            success: true,
+            message: format!("Corners set on node {uuid_str}"),
+        },
+        kind_json,
+    ))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
-    use sigil_state::AppState;
+    use sigil_core::Document;
 
     use super::*;
     use crate::tools::pages::create_page_impl;
 
-    fn make_state_with_page() -> (AppState, String) {
-        let state = AppState::new();
-        let page = create_page_impl(&state, "Page 1").expect("create page");
-        (state, page.id)
+    fn make_doc_with_page() -> (Document, String) {
+        let mut doc = Document::new("Untitled".to_string());
+        let page = create_page_impl(&mut doc, "Page 1").expect("create page");
+        (doc, page.id)
     }
 
     #[test]
     fn test_create_node_returns_uuid_and_info() {
-        let (state, page_id) = make_state_with_page();
-        let result = create_node_impl(&state, "frame", "My Frame", Some(&page_id), None, None);
+        let (mut doc, page_id) = make_doc_with_page();
+        let result = create_node_impl(&mut doc, "frame", "My Frame", Some(&page_id), None, None);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let created = result.unwrap();
         assert!(!created.uuid.is_empty());
@@ -1098,7 +897,7 @@ mod tests {
 
     #[test]
     fn test_create_node_with_transform() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let transform = TransformInput {
             x: 10.0,
             y: 20.0,
@@ -1109,7 +908,7 @@ mod tests {
             scale_y: 1.0,
         };
         let result = create_node_impl(
-            &state,
+            &mut doc,
             "rectangle",
             "Rect",
             Some(&page_id),
@@ -1127,11 +926,11 @@ mod tests {
 
     #[test]
     fn test_rename_node_updates_name() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Old Name", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Old Name", Some(&page_id), None, None).unwrap();
 
-        let result = rename_node_impl(&state, &created.uuid, "New Name");
+        let result = rename_node_impl(&mut doc, &created.uuid, "New Name");
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let info = result.unwrap();
         assert_eq!(info.name, "New Name");
@@ -1140,42 +939,42 @@ mod tests {
 
     #[test]
     fn test_set_visible_toggles_visibility() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         // Default is visible=true; hide it.
-        let result = set_visible_impl(&state, &created.uuid, false);
+        let result = set_visible_impl(&mut doc, &created.uuid, false);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         assert!(!result.unwrap().visible);
 
         // Show it again.
-        let result2 = set_visible_impl(&state, &created.uuid, true);
+        let result2 = set_visible_impl(&mut doc, &created.uuid, true);
         assert!(result2.is_ok());
         assert!(result2.unwrap().visible);
     }
 
     #[test]
     fn test_set_locked_toggles_lock() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         // Default is locked=false; lock it.
-        let result = set_locked_impl(&state, &created.uuid, true);
+        let result = set_locked_impl(&mut doc, &created.uuid, true);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         assert!(result.unwrap().locked);
 
         // Unlock it.
-        let result2 = set_locked_impl(&state, &created.uuid, false);
+        let result2 = set_locked_impl(&mut doc, &created.uuid, false);
         assert!(result2.is_ok());
         assert!(!result2.unwrap().locked);
     }
 
     #[test]
     fn test_invalid_node_kind_returns_error() {
-        let (state, page_id) = make_state_with_page();
-        let result = create_node_impl(&state, "banana", "Bad Node", Some(&page_id), None, None);
+        let (mut doc, page_id) = make_doc_with_page();
+        let result = create_node_impl(&mut doc, "banana", "Bad Node", Some(&page_id), None, None);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
@@ -1184,9 +983,9 @@ mod tests {
 
     #[test]
     fn test_set_transform_rejects_nan() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let transform = TransformInput {
             x: f64::NAN,
@@ -1197,7 +996,7 @@ mod tests {
             scale_x: 1.0,
             scale_y: 1.0,
         };
-        let result = set_transform_impl(&state, &created.uuid, &transform);
+        let result = set_transform_impl(&mut doc, &created.uuid, &transform);
         assert!(result.is_err(), "NaN should be rejected");
         assert!(
             matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
@@ -1207,9 +1006,9 @@ mod tests {
 
     #[test]
     fn test_set_transform_rejects_infinity() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let transform = TransformInput {
             x: 0.0,
@@ -1220,7 +1019,7 @@ mod tests {
             scale_x: 1.0,
             scale_y: 1.0,
         };
-        let result = set_transform_impl(&state, &created.uuid, &transform);
+        let result = set_transform_impl(&mut doc, &created.uuid, &transform);
         assert!(result.is_err(), "infinity should be rejected");
         assert!(
             matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("finite")),
@@ -1230,7 +1029,7 @@ mod tests {
 
     #[test]
     fn test_create_node_rejects_negative_dimensions() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let transform = TransformInput {
             x: 0.0,
             y: 0.0,
@@ -1241,7 +1040,7 @@ mod tests {
             scale_y: 1.0,
         };
         let result = create_node_impl(
-            &state,
+            &mut doc,
             "frame",
             "Frame",
             Some(&page_id),
@@ -1259,8 +1058,8 @@ mod tests {
 
     #[test]
     fn test_create_image_node_returns_error() {
-        let (state, page_id) = make_state_with_page();
-        let result = create_node_impl(&state, "image", "My Image", Some(&page_id), None, None);
+        let (mut doc, page_id) = make_doc_with_page();
+        let result = create_node_impl(&mut doc, "image", "My Image", Some(&page_id), None, None);
         assert!(result.is_err(), "image node creation should be rejected");
         assert!(
             matches!(result.unwrap_err(), McpToolError::InvalidInput(msg) if msg.contains("asset_ref")),
@@ -1272,14 +1071,14 @@ mod tests {
 
     #[test]
     fn test_create_node_with_invalid_parent_rolls_back() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let fake_parent = Uuid::new_v4().to_string();
 
         // Attempt to create a node with a nonexistent parent. The parent UUID
         // is resolved before CreateNode executes, so this should fail without
         // leaving a dangling node.
         let result = create_node_impl(
-            &state,
+            &mut doc,
             "frame",
             "Orphan",
             Some(&page_id),
@@ -1289,7 +1088,6 @@ mod tests {
         assert!(result.is_err());
 
         // Verify no nodes were left in the document.
-        let doc = crate::server::acquire_document_lock(&state);
         let page = doc
             .page(
                 page_id
@@ -1308,18 +1106,18 @@ mod tests {
 
     #[test]
     fn test_reparent_node_moves_node_to_new_parent() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let parent =
-            create_node_impl(&state, "frame", "Parent", Some(&page_id), None, None).unwrap();
-        let child = create_node_impl(&state, "frame", "Child", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Parent", Some(&page_id), None, None).unwrap();
+        let child =
+            create_node_impl(&mut doc, "frame", "Child", Some(&page_id), None, None).unwrap();
 
-        let result = reparent_node_impl(&state, &child.uuid, &parent.uuid, 0);
+        let result = reparent_node_impl(&mut doc, &child.uuid, &parent.uuid, 0);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let info = result.unwrap();
         assert_eq!(info.uuid, child.uuid);
 
-        // Verify parent now has child — single lock acquisition to avoid deadlock
-        let doc = crate::server::acquire_document_lock(&state);
+        // Verify parent now has child.
         let parent_id = doc
             .arena
             .id_by_uuid(&parent.uuid.parse::<Uuid>().unwrap())
@@ -1330,8 +1128,8 @@ mod tests {
 
     #[test]
     fn test_reparent_node_with_invalid_uuid_returns_error() {
-        let state = AppState::new();
-        let result = reparent_node_impl(&state, "bad-uuid", "also-bad", 0);
+        let mut doc = Document::new("Untitled".to_string());
+        let result = reparent_node_impl(&mut doc, "bad-uuid", "also-bad", 0);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
     }
@@ -1340,24 +1138,23 @@ mod tests {
 
     #[test]
     fn test_reorder_children_changes_position() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let parent =
-            create_node_impl(&state, "frame", "Parent", Some(&page_id), None, None).unwrap();
-        let child_a = create_node_impl(&state, "frame", "A", Some(&page_id), None, None).unwrap();
-        let child_b = create_node_impl(&state, "frame", "B", Some(&page_id), None, None).unwrap();
-        let child_c = create_node_impl(&state, "frame", "C", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Parent", Some(&page_id), None, None).unwrap();
+        let child_a = create_node_impl(&mut doc, "frame", "A", Some(&page_id), None, None).unwrap();
+        let child_b = create_node_impl(&mut doc, "frame", "B", Some(&page_id), None, None).unwrap();
+        let child_c = create_node_impl(&mut doc, "frame", "C", Some(&page_id), None, None).unwrap();
 
         // Reparent children under parent
-        reparent_node_impl(&state, &child_a.uuid, &parent.uuid, 0).unwrap();
-        reparent_node_impl(&state, &child_b.uuid, &parent.uuid, 1).unwrap();
-        reparent_node_impl(&state, &child_c.uuid, &parent.uuid, 2).unwrap();
+        reparent_node_impl(&mut doc, &child_a.uuid, &parent.uuid, 0).unwrap();
+        reparent_node_impl(&mut doc, &child_b.uuid, &parent.uuid, 1).unwrap();
+        reparent_node_impl(&mut doc, &child_c.uuid, &parent.uuid, 2).unwrap();
 
         // Move A from position 0 to position 2
-        let result = reorder_children_impl(&state, &child_a.uuid, 2);
+        let result = reorder_children_impl(&mut doc, &child_a.uuid, 2);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
 
         // Verify new order: B, C, A
-        let doc = crate::server::acquire_document_lock(&state);
         let parent_id = doc
             .arena
             .id_by_uuid(&parent.uuid.parse::<Uuid>().unwrap())
@@ -1378,10 +1175,10 @@ mod tests {
 
     #[test]
     fn test_reorder_children_on_root_node_returns_error() {
-        let (state, page_id) = make_state_with_page();
-        let root = create_node_impl(&state, "frame", "Root", Some(&page_id), None, None).unwrap();
+        let (mut doc, page_id) = make_doc_with_page();
+        let root = create_node_impl(&mut doc, "frame", "Root", Some(&page_id), None, None).unwrap();
 
-        let result = reorder_children_impl(&state, &root.uuid, 0);
+        let result = reorder_children_impl(&mut doc, &root.uuid, 0);
         assert!(result.is_err(), "root node has no parent, should fail");
     }
 
@@ -1389,18 +1186,17 @@ mod tests {
 
     #[test]
     fn test_set_opacity_impl_updates_opacity() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
-        let result = set_opacity_impl(&state, &created.uuid, 0.5);
+        let result = set_opacity_impl(&mut doc, &created.uuid, 0.5);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
         let mutation = result.unwrap();
         assert!(mutation.success);
         assert!(mutation.message.contains("0.5"));
 
         // Verify the opacity was actually applied.
-        let doc = crate::server::acquire_document_lock(&state);
         let node_id = doc
             .arena
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
@@ -1414,26 +1210,26 @@ mod tests {
 
     #[test]
     fn test_set_opacity_impl_rejects_nan() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
-        let result = set_opacity_impl(&state, &created.uuid, f64::NAN);
+        let result = set_opacity_impl(&mut doc, &created.uuid, f64::NAN);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
     #[test]
     fn test_set_opacity_impl_rejects_out_of_range() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
-        let result = set_opacity_impl(&state, &created.uuid, 1.5);
+        let result = set_opacity_impl(&mut doc, &created.uuid, 1.5);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
 
-        let result2 = set_opacity_impl(&state, &created.uuid, -0.1);
+        let result2 = set_opacity_impl(&mut doc, &created.uuid, -0.1);
         assert!(result2.is_err());
         assert!(matches!(
             result2.unwrap_err(),
@@ -1445,14 +1241,13 @@ mod tests {
 
     #[test]
     fn test_set_blend_mode_impl_updates_blend_mode() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
-        let result = set_blend_mode_impl(&state, &created.uuid, "multiply");
+        let result = set_blend_mode_impl(&mut doc, &created.uuid, "multiply");
         assert!(result.is_ok(), "expected ok, got: {result:?}");
 
-        let doc = crate::server::acquire_document_lock(&state);
         let node_id = doc
             .arena
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
@@ -1463,11 +1258,11 @@ mod tests {
 
     #[test]
     fn test_set_blend_mode_impl_rejects_invalid() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
-        let result = set_blend_mode_impl(&state, &created.uuid, "banana");
+        let result = set_blend_mode_impl(&mut doc, &created.uuid, "banana");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
@@ -1476,21 +1271,21 @@ mod tests {
 
     #[test]
     fn test_set_fills_impl_rejects_invalid_json() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let bad_json = serde_json::json!("not an array");
-        let result = set_fills_impl(&state, &created.uuid, &bad_json);
+        let result = set_fills_impl(&mut doc, &created.uuid, &bad_json);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
     #[test]
     fn test_set_fills_impl_updates_fills() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let fills_json = serde_json::json!([
             {
@@ -1501,7 +1296,7 @@ mod tests {
                 }
             }
         ]);
-        let result = set_fills_impl(&state, &created.uuid, &fills_json);
+        let result = set_fills_impl(&mut doc, &created.uuid, &fills_json);
         assert!(result.is_ok());
         assert!(result.unwrap().success);
     }
@@ -1510,21 +1305,21 @@ mod tests {
 
     #[test]
     fn test_set_strokes_impl_rejects_invalid_json() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let bad_json = serde_json::json!(42);
-        let result = set_strokes_impl(&state, &created.uuid, &bad_json);
+        let result = set_strokes_impl(&mut doc, &created.uuid, &bad_json);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
     #[test]
     fn test_set_strokes_impl_updates_strokes() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let strokes_json = serde_json::json!([
             {
@@ -1538,7 +1333,7 @@ mod tests {
                 "join": "miter"
             }
         ]);
-        let result = set_strokes_impl(&state, &created.uuid, &strokes_json);
+        let result = set_strokes_impl(&mut doc, &created.uuid, &strokes_json);
         assert!(result.is_ok());
         assert!(result.unwrap().success);
     }
@@ -1547,21 +1342,21 @@ mod tests {
 
     #[test]
     fn test_set_effects_impl_rejects_invalid_json() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let bad_json = serde_json::json!({"not": "an array"});
-        let result = set_effects_impl(&state, &created.uuid, &bad_json);
+        let result = set_effects_impl(&mut doc, &created.uuid, &bad_json);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidInput(_)));
     }
 
     #[test]
     fn test_set_effects_impl_updates_effects() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "frame", "Frame", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "frame", "Frame", Some(&page_id), None, None).unwrap();
 
         let effects_json = serde_json::json!([
             {
@@ -1575,7 +1370,7 @@ mod tests {
                 "spread": { "type": "literal", "value": 0.0 }
             }
         ]);
-        let result = set_effects_impl(&state, &created.uuid, &effects_json);
+        let result = set_effects_impl(&mut doc, &created.uuid, &effects_json);
         assert!(result.is_ok());
         assert!(result.unwrap().success);
     }
@@ -1584,17 +1379,17 @@ mod tests {
 
     #[test]
     fn test_set_corners_uniform_shorthand() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
 
         // Uniform shorthand: object form with shape + radius
         let corners_json = serde_json::json!({ "shape": "round", "radius": 12.0 });
-        let result = set_corners_impl(&state, &created.uuid, &corners_json);
+        let result = set_corners_impl(&mut doc, &created.uuid, &corners_json);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
-        assert!(result.unwrap().success);
+        let (mutation, _kind_json) = result.unwrap();
+        assert!(mutation.success);
 
-        let doc = crate::server::acquire_document_lock(&state);
         let node_id = doc
             .arena
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
@@ -1615,19 +1410,18 @@ mod tests {
 
     #[test]
     fn test_set_corners_superellipse_shorthand() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
 
         let corners_json = serde_json::json!({
             "shape": "superellipse",
             "radius": 20.0,
             "smoothing": 0.6
         });
-        let result = set_corners_impl(&state, &created.uuid, &corners_json);
+        let result = set_corners_impl(&mut doc, &created.uuid, &corners_json);
         assert!(result.is_ok(), "expected ok, got: {result:?}");
 
-        let doc = crate::server::acquire_document_lock(&state);
         let node_id = doc
             .arena
             .id_by_uuid(&created.uuid.parse::<Uuid>().unwrap())
@@ -1649,9 +1443,9 @@ mod tests {
 
     #[test]
     fn test_set_corners_per_corner_array_rejects_superellipse() {
-        let (state, page_id) = make_state_with_page();
+        let (mut doc, page_id) = make_doc_with_page();
         let created =
-            create_node_impl(&state, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "rectangle", "Rect", Some(&page_id), None, None).unwrap();
 
         let corners_json = serde_json::json!([
             { "shape": "superellipse", "radii": { "x": 8.0, "y": 8.0 }, "smoothing": 0.5 },
@@ -1659,7 +1453,7 @@ mod tests {
             { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } },
             { "shape": "round", "radii": { "x": 8.0, "y": 8.0 } }
         ]);
-        let err = set_corners_impl(&state, &created.uuid, &corners_json).unwrap_err();
+        let err = set_corners_impl(&mut doc, &created.uuid, &corners_json).unwrap_err();
         match err {
             McpToolError::InvalidInput(msg) => {
                 assert!(
@@ -1673,46 +1467,49 @@ mod tests {
 
     #[test]
     fn test_set_corners_invalid_uuid() {
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
         let corners_json = serde_json::json!({ "shape": "round", "radius": 4.0 });
-        let err = set_corners_impl(&state, "not-a-uuid", &corners_json).unwrap_err();
+        let err = set_corners_impl(&mut doc, "not-a-uuid", &corners_json).unwrap_err();
         assert!(matches!(err, McpToolError::InvalidUuid(_)));
     }
 
     #[test]
     fn test_set_corners_node_not_found() {
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
         let missing = Uuid::new_v4().to_string();
         let corners_json = serde_json::json!({ "shape": "round", "radius": 4.0 });
-        let err = set_corners_impl(&state, &missing, &corners_json).unwrap_err();
+        let err = set_corners_impl(&mut doc, &missing, &corners_json).unwrap_err();
         assert!(matches!(err, McpToolError::NodeNotFound(_)));
     }
 
     #[test]
     fn test_delete_nodes_removes_multiple() {
-        let (state, page_id) = make_state_with_page();
-        let first = create_node_impl(&state, "frame", "First", Some(&page_id), None, None).unwrap();
+        let (mut doc, page_id) = make_doc_with_page();
+        let first =
+            create_node_impl(&mut doc, "frame", "First", Some(&page_id), None, None).unwrap();
         let second =
-            create_node_impl(&state, "rectangle", "Second", Some(&page_id), None, None).unwrap();
+            create_node_impl(&mut doc, "rectangle", "Second", Some(&page_id), None, None).unwrap();
 
         let uuids = vec![first.uuid.clone(), second.uuid.clone()];
-        let result = delete_nodes_impl(&state, &uuids);
+        let result = delete_nodes_impl(&mut doc, &uuids);
         assert!(
             result.is_ok(),
             "expected delete_nodes to succeed: {result:?}"
         );
-        assert!(result.unwrap().success);
+        let (mutation, broadcast_uuids) = result.unwrap();
+        assert!(mutation.success);
+        assert_eq!(broadcast_uuids.len(), 2);
 
         // Re-deletion now fails because both are gone.
-        let again = delete_nodes_impl(&state, &uuids);
+        let again = delete_nodes_impl(&mut doc, &uuids);
         assert!(again.is_err(), "expected re-delete to error");
         assert!(matches!(again.unwrap_err(), McpToolError::NodeNotFound(_)));
     }
 
     #[test]
     fn test_delete_nodes_rejects_invalid_uuid() {
-        let state = AppState::new();
-        let result = delete_nodes_impl(&state, &["not-a-uuid".to_string()]);
+        let mut doc = Document::new("Untitled".to_string());
+        let result = delete_nodes_impl(&mut doc, &["not-a-uuid".to_string()]);
         assert!(matches!(result, Err(McpToolError::InvalidUuid(_))));
     }
 }

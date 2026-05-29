@@ -29,31 +29,21 @@ use sigil_server::graphql::mutation::MutationRoot;
 use sigil_server::graphql::query::QueryRoot;
 use sigil_server::session_header::RequestSession;
 use sigil_server::state::ServerState;
-use sigil_state::{MUTATION_BROADCAST_CAPACITY, MutationEventKind};
+use sigil_state::MutationEventKind;
+use sigil_state::sessions::SessionEvent;
 use tokio::sync::broadcast;
 
-/// Builds a `ServerState` whose broadcast channel we control, plus a
-/// receiver to assert against. Returns `(state, rx, rect_uuid)`.
+/// Builds a `ServerState` whose default session broadcast channel we
+/// subscribe to, plus a receiver to assert against. Returns
+/// `(state, rx, rect_uuid)`.
 ///
-/// Spec 20: `apply_operations` now mutates `session.store` directly and
-/// mirrors back to the legacy store. The seed below writes to the default
-/// session's store (so the mutation can find the node) AND mirrors to
-/// legacy so any other readers see consistent state.
-fn make_state_with_rect() -> (
-    ServerState,
-    broadcast::Receiver<sigil_state::MutationEvent>,
-    String,
-) {
-    // Create a state and wire up a fresh broadcast channel that we own a
-    // receiver for. ServerState::new() also installs a tx, but we replace it
-    // here so the test owns the rx end.
-    let mut state = ServerState::new();
-    let (tx, rx) = broadcast::channel(MUTATION_BROADCAST_CAPACITY);
-    state.app.set_event_tx(tx);
+/// Spec 22b: `apply_operations` mutates `session.store` directly and
+/// broadcasts on `session.broadcast` only (no legacy mirror, no second
+/// broadcast). The seed below writes to the default session's store so the
+/// mutation can find the node.
+fn make_state_with_rect() -> (ServerState, broadcast::Receiver<SessionEvent>, String) {
+    let state = ServerState::new();
 
-    // Seed: one page + one rectangle, applied directly to the default
-    // session's store (and mirrored to legacy.document so other readers
-    // remain consistent during the Spec 20 migration window).
     let page_id = PageId::new(uuid::Uuid::new_v4());
     let rect_uuid = uuid::Uuid::new_v4();
 
@@ -66,6 +56,10 @@ fn make_state_with_rect() -> (
         .sessions
         .get(session_id)
         .expect("default session present");
+
+    // Subscribe to the session broadcast channel that the production
+    // resolver publishes on.
+    let rx = session.broadcast.subscribe();
 
     {
         let mut session_doc = session.store.try_write().expect("uncontested test lock");
@@ -89,11 +83,6 @@ fn make_state_with_rect() -> (
         };
         create_rect.validate(doc).expect("create_node validate");
         create_rect.apply(doc).expect("create_node apply");
-
-        // Mirror the seeded state into the legacy document so the rest of
-        // the system (persistence, un-migrated MCP) sees the same view.
-        let mut legacy = state.app.legacy.document.lock().expect("legacy lock");
-        legacy.0 = doc.clone();
     }
 
     (state, rx, rect_uuid.to_string())
@@ -148,7 +137,12 @@ async fn test_apply_operations_set_field_kind_broadcasts_canonical_corners() {
         res.errors
     );
 
-    let event = rx.try_recv().expect("should receive a broadcast event");
+    let event = match rx.try_recv().expect("should receive a broadcast event") {
+        SessionEvent::DocumentEvent(me) => me,
+        SessionEvent::SessionFatal { reason } => {
+            panic!("expected DocumentEvent, got SessionFatal: {reason}")
+        }
+    };
     assert_eq!(
         event.kind,
         MutationEventKind::NodeUpdated,

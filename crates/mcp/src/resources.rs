@@ -13,8 +13,6 @@
 use rmcp::ErrorData;
 use rmcp::model::{AnnotateAble as _, RawResource, Resource, ResourceContents};
 
-use sigil_state::AppState;
-
 use crate::types::{ComponentListResult, TokenListResult};
 
 // ── URI constants ─────────────────────────────────────────────────────────────
@@ -68,10 +66,13 @@ pub fn list_resources() -> Vec<Resource> {
 ///
 /// - `INVALID_PARAMS` if `uri` does not match any known Sigil resource URI.
 /// - `INTERNAL_ERROR` if JSON serialization of the document state fails.
-pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents>, ErrorData> {
+pub fn read_resource(
+    doc: &sigil_core::Document,
+    uri: &str,
+) -> Result<Vec<ResourceContents>, ErrorData> {
     match uri {
         URI_DOCUMENT_TREE => {
-            let tree = crate::tools::document::get_document_tree_impl(state);
+            let tree = crate::tools::document::get_document_tree_impl(doc);
             let json = serde_json::to_string(&tree).map_err(|e| {
                 ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
@@ -84,7 +85,7 @@ pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents
             ])
         }
         URI_DOCUMENT_TOKENS => {
-            let tokens = crate::tools::tokens::list_tokens_impl(state).map_err(|e| {
+            let tokens = crate::tools::tokens::list_tokens_impl(doc).map_err(|e| {
                 ErrorData::new(
                     rmcp::model::ErrorCode::INTERNAL_ERROR,
                     format!("token serialization error: {e}"),
@@ -104,7 +105,7 @@ pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents
             ])
         }
         URI_DOCUMENT_COMPONENTS => {
-            let components = crate::tools::components::list_components_impl(state);
+            let components = crate::tools::components::list_components_impl(doc);
             let result = ComponentListResult { components };
             let json = serde_json::to_string(&result).map_err(|e| {
                 ErrorData::new(
@@ -129,7 +130,7 @@ pub fn read_resource(state: &AppState, uri: &str) -> Result<Vec<ResourceContents
 
 #[cfg(test)]
 mod tests {
-    use sigil_state::AppState;
+    use sigil_core::Document;
 
     use super::*;
 
@@ -167,8 +168,8 @@ mod tests {
 
     #[test]
     fn test_read_resource_tree_returns_json() {
-        let state = AppState::new();
-        let result = read_resource(&state, URI_DOCUMENT_TREE);
+        let doc = Document::new("Untitled".to_string());
+        let result = read_resource(&doc, URI_DOCUMENT_TREE);
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
         let contents = result.unwrap();
         assert_eq!(contents.len(), 1);
@@ -184,8 +185,8 @@ mod tests {
 
     #[test]
     fn test_read_resource_tokens_returns_json() {
-        let state = AppState::new();
-        let result = read_resource(&state, URI_DOCUMENT_TOKENS);
+        let doc = Document::new("Untitled".to_string());
+        let result = read_resource(&doc, URI_DOCUMENT_TOKENS);
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
         let contents = result.unwrap();
         assert_eq!(contents.len(), 1);
@@ -204,8 +205,8 @@ mod tests {
 
     #[test]
     fn test_read_resource_components_returns_json() {
-        let state = AppState::new();
-        let result = read_resource(&state, URI_DOCUMENT_COMPONENTS);
+        let doc = Document::new("Untitled".to_string());
+        let result = read_resource(&doc, URI_DOCUMENT_COMPONENTS);
         assert!(result.is_ok(), "expected Ok, got: {result:?}");
         let contents = result.unwrap();
         assert_eq!(contents.len(), 1);
@@ -224,8 +225,8 @@ mod tests {
 
     #[test]
     fn test_read_resource_unknown_uri_returns_invalid_params_error() {
-        let state = AppState::new();
-        let result = read_resource(&state, "sigil://document/unknown");
+        let doc = Document::new("Untitled".to_string());
+        let result = read_resource(&doc, "sigil://document/unknown");
         assert!(result.is_err(), "expected Err for unknown URI");
         let err = result.unwrap_err();
         assert_eq!(
@@ -238,9 +239,9 @@ mod tests {
     #[test]
     fn test_read_resource_uri_matches_listed_uris() {
         // All listed resource URIs must be readable without error.
-        let state = AppState::new();
+        let doc = Document::new("Untitled".to_string());
         for resource in list_resources() {
-            let result = read_resource(&state, &resource.uri);
+            let result = read_resource(&doc, &resource.uri);
             assert!(
                 result.is_ok(),
                 "read_resource({}) failed: {:?}",

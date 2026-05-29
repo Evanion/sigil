@@ -1,8 +1,8 @@
 //! Token operation tools — list, create, update, delete.
 //!
 //! All mutations follow the pattern:
-//!   lock → construct operation →
-//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → drop lock → `signal_dirty`
+//!   acquire session store → construct operation →
+//!   `op.validate(&doc)?; op.apply(&mut doc)?;` → build response → `session.publish` (broadcast)
 //!
 //! The `TokenValue` for create/update is passed in as a raw `serde_json::Value`
 //! and deserialized into `TokenValue` inside the tool. Validation is performed
@@ -12,10 +12,8 @@ use sigil_core::{
     FieldOperation, Token, TokenId, TokenType, TokenValue,
     commands::token_commands::{AddToken, RemoveToken, RenameToken, UpdateToken},
 };
-use sigil_state::{AppState, MutationEventKind};
 
 use crate::error::McpToolError;
-use crate::server::acquire_document_lock;
 use crate::types::{CreateTokenInput, MutationResult, TokenInfo, UpdateTokenInput};
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -84,8 +82,7 @@ pub fn parse_token_type(s: &str) -> Result<TokenType, McpToolError> {
 ///
 /// Returns `McpToolError::SerializationError` if any token value cannot be
 /// serialized to JSON.
-pub fn list_tokens_impl(state: &AppState) -> Result<Vec<TokenInfo>, McpToolError> {
-    let doc = acquire_document_lock(state);
+pub fn list_tokens_impl(doc: &sigil_core::Document) -> Result<Vec<TokenInfo>, McpToolError> {
     // Collect into a Vec and sort by name for stable, deterministic output.
     let mut tokens: Vec<TokenInfo> = doc
         .token_context
@@ -110,7 +107,7 @@ pub fn list_tokens_impl(state: &AppState) -> Result<Vec<TokenInfo>, McpToolError
 /// - `McpToolError::CoreError` if `Token::new` validation fails or the token
 ///   context is at capacity.
 pub fn create_token_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     input: &CreateTokenInput,
 ) -> Result<TokenInfo, McpToolError> {
     let token_type = parse_token_type(&input.token_type)?;
@@ -126,20 +123,10 @@ pub fn create_token_impl(
 
     let info = token_to_info(&token)?;
 
-    {
-        let mut doc = acquire_document_lock(state);
-        let cmd = AddToken { token };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
+    let cmd = AddToken { token };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_token_and_persist(
-        state,
-        MutationEventKind::TokenCreated,
-        &input.name,
-        "create",
-        Some(serde_json::json!({"name": input.name})),
-    );
     Ok(info)
 }
 
@@ -155,49 +142,36 @@ pub fn create_token_impl(
 /// - `McpToolError::SerializationError` if the value JSON cannot be deserialized.
 /// - `McpToolError::CoreError` if `Token::new` validation fails.
 pub fn update_token_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     input: &UpdateTokenInput,
 ) -> Result<TokenInfo, McpToolError> {
     let token_type = parse_token_type(&input.token_type)?;
     let token_value: TokenValue = serde_json::from_value(input.value.clone())?;
 
-    // RF-004: Single lock scope — construct and execute atomically
-    // to prevent TOCTOU races where the token could be modified or deleted
-    // between the read and the execute call.
-    let info = {
-        let mut doc = acquire_document_lock(state);
-        let existing = doc
-            .token_context
-            .get(&input.name)
-            .ok_or_else(|| McpToolError::TokenNotFound(input.name.clone()))?;
+    // RF-004: Single write-lock scope (held by the envelope) — read the
+    // existing token id and apply atomically to prevent TOCTOU races.
+    let existing = doc
+        .token_context
+        .get(&input.name)
+        .ok_or_else(|| McpToolError::TokenNotFound(input.name.clone()))?;
 
-        let new_token = Token::new(
-            existing.id(),
-            input.name.clone(),
-            token_value,
-            token_type,
-            input.description.clone(),
-        )?;
+    let new_token = Token::new(
+        existing.id(),
+        input.name.clone(),
+        token_value,
+        token_type,
+        input.description.clone(),
+    )?;
 
-        let info = token_to_info(&new_token)?;
+    let info = token_to_info(&new_token)?;
 
-        let cmd = UpdateToken {
-            new_token,
-            token_name: input.name.clone(),
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-
-        info
+    let cmd = UpdateToken {
+        new_token,
+        token_name: input.name.clone(),
     };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_token_and_persist(
-        state,
-        MutationEventKind::TokenUpdated,
-        &input.name,
-        "update",
-        Some(serde_json::json!({"name": input.name})),
-    );
     Ok(info)
 }
 
@@ -210,25 +184,15 @@ pub fn update_token_impl(
 /// - `McpToolError::TokenNotFound` if no token with `token_name` exists.
 /// - `McpToolError::CoreError` on engine-level failures.
 pub fn delete_token_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     token_name: &str,
 ) -> Result<MutationResult, McpToolError> {
-    {
-        let mut doc = acquire_document_lock(state);
-        let cmd = RemoveToken {
-            token_name: token_name.to_string(),
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
+    let cmd = RemoveToken {
+        token_name: token_name.to_string(),
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_token_and_persist(
-        state,
-        MutationEventKind::TokenDeleted,
-        token_name,
-        "delete",
-        Some(serde_json::json!({"name": token_name})),
-    );
     Ok(MutationResult {
         success: true,
         message: format!("Token '{token_name}' deleted"),
@@ -244,30 +208,17 @@ pub fn delete_token_impl(
 /// - `McpToolError::TokenNotFound` if no token with `old_name` exists.
 /// - `McpToolError::CoreError` if the new name is invalid or already taken.
 pub fn rename_token_impl(
-    state: &AppState,
+    doc: &mut sigil_core::Document,
     old_name: &str,
     new_name: &str,
 ) -> Result<MutationResult, McpToolError> {
-    {
-        let mut doc = acquire_document_lock(state);
-        let cmd = RenameToken {
-            old_name: old_name.to_string(),
-            new_name: new_name.to_string(),
-        };
-        cmd.validate(&doc)?;
-        cmd.apply(&mut doc)?;
-    }
+    let cmd = RenameToken {
+        old_name: old_name.to_string(),
+        new_name: new_name.to_string(),
+    };
+    cmd.validate(doc)?;
+    cmd.apply(doc)?;
 
-    super::broadcast::broadcast_token_and_persist(
-        state,
-        MutationEventKind::TokenUpdated,
-        old_name,
-        "rename_token",
-        Some(serde_json::json!({
-            "old_name": old_name,
-            "new_name": new_name,
-        })),
-    );
     Ok(MutationResult {
         success: true,
         message: format!("Token '{old_name}' renamed to '{new_name}'"),
@@ -278,9 +229,13 @@ pub fn rename_token_impl(
 
 #[cfg(test)]
 mod tests {
-    use sigil_state::AppState;
+    use sigil_core::Document;
 
     use super::*;
+
+    fn new_doc() -> Document {
+        Document::new("Untitled".to_string())
+    }
 
     /// Builds a minimal `CreateTokenInput` for a number token.
     fn make_number_input(name: &str, value: f64) -> CreateTokenInput {
@@ -295,29 +250,29 @@ mod tests {
 
     #[test]
     fn test_list_tokens_empty() {
-        let state = AppState::new();
-        let tokens = list_tokens_impl(&state).expect("list tokens");
+        let doc = new_doc();
+        let tokens = list_tokens_impl(&doc).expect("list tokens");
         assert!(tokens.is_empty(), "expected no tokens in fresh document");
     }
 
     #[test]
     fn test_create_and_list_tokens() {
-        let state = AppState::new();
+        let mut doc = new_doc();
         let input = make_number_input("spacing.md", 16.0);
-        let created = create_token_impl(&state, &input).expect("create token");
+        let created = create_token_impl(&mut doc, &input).expect("create token");
         assert_eq!(created.name, "spacing.md");
         assert_eq!(created.token_type, "number");
 
-        let tokens = list_tokens_impl(&state).expect("list tokens");
+        let tokens = list_tokens_impl(&doc).expect("list tokens");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].name, "spacing.md");
     }
 
     #[test]
     fn test_update_token() {
-        let state = AppState::new();
+        let mut doc = new_doc();
         let input = make_number_input("spacing.md", 16.0);
-        create_token_impl(&state, &input).expect("create token");
+        create_token_impl(&mut doc, &input).expect("create token");
 
         let update = UpdateTokenInput {
             name: "spacing.md".to_string(),
@@ -326,30 +281,30 @@ mod tests {
             description: Some("Updated spacing".to_string()),
             session_id: None,
         };
-        let updated = update_token_impl(&state, &update).expect("update token");
+        let updated = update_token_impl(&mut doc, &update).expect("update token");
         assert_eq!(updated.name, "spacing.md");
         assert_eq!(updated.description, Some("Updated spacing".to_string()));
 
         // Verify value changed in the live document.
-        let tokens = list_tokens_impl(&state).expect("list tokens");
+        let tokens = list_tokens_impl(&doc).expect("list tokens");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].description, Some("Updated spacing".to_string()));
     }
 
     #[test]
     fn test_delete_token() {
-        let state = AppState::new();
-        create_token_impl(&state, &make_number_input("spacing.sm", 8.0)).expect("create token");
+        let mut doc = new_doc();
+        create_token_impl(&mut doc, &make_number_input("spacing.sm", 8.0)).expect("create token");
 
-        let result = delete_token_impl(&state, "spacing.sm").expect("delete token");
+        let result = delete_token_impl(&mut doc, "spacing.sm").expect("delete token");
         assert!(result.success);
-        assert!(list_tokens_impl(&state).expect("list tokens").is_empty());
+        assert!(list_tokens_impl(&doc).expect("list tokens").is_empty());
     }
 
     #[test]
     fn test_delete_nonexistent_token_returns_error() {
-        let state = AppState::new();
-        let result = delete_token_impl(&state, "does.not.exist");
+        let mut doc = new_doc();
+        let result = delete_token_impl(&mut doc, "does.not.exist");
         assert!(result.is_err());
         // Token not found error comes from core's validate() via From<CoreError>
         let err = result.unwrap_err();
@@ -364,40 +319,40 @@ mod tests {
 
     #[test]
     fn test_rename_token() {
-        let state = AppState::new();
+        let mut doc = new_doc();
         let input = make_number_input("spacing.md", 16.0);
-        create_token_impl(&state, &input).expect("create token");
+        create_token_impl(&mut doc, &input).expect("create token");
 
         let result =
-            rename_token_impl(&state, "spacing.md", "spacing.medium").expect("rename token");
+            rename_token_impl(&mut doc, "spacing.md", "spacing.medium").expect("rename token");
         assert!(result.success);
 
         // Old name should be gone
-        let tokens = list_tokens_impl(&state).expect("list");
+        let tokens = list_tokens_impl(&doc).expect("list");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].name, "spacing.medium");
     }
 
     #[test]
     fn test_rename_nonexistent_token_returns_error() {
-        let state = AppState::new();
-        let result = rename_token_impl(&state, "does.not.exist", "new.name");
+        let mut doc = new_doc();
+        let result = rename_token_impl(&mut doc, "does.not.exist", "new.name");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_rename_token_to_existing_name_returns_error() {
-        let state = AppState::new();
-        create_token_impl(&state, &make_number_input("a.token", 1.0)).expect("create a");
-        create_token_impl(&state, &make_number_input("b.token", 2.0)).expect("create b");
+        let mut doc = new_doc();
+        create_token_impl(&mut doc, &make_number_input("a.token", 1.0)).expect("create a");
+        create_token_impl(&mut doc, &make_number_input("b.token", 2.0)).expect("create b");
 
-        let result = rename_token_impl(&state, "a.token", "b.token");
+        let result = rename_token_impl(&mut doc, "a.token", "b.token");
         assert!(result.is_err(), "should reject duplicate name");
     }
 
     #[test]
     fn test_invalid_token_type_returns_error() {
-        let state = AppState::new();
+        let mut doc = new_doc();
         let input = CreateTokenInput {
             name: "my.token".to_string(),
             token_type: "not_a_real_type".to_string(),
@@ -405,7 +360,7 @@ mod tests {
             description: None,
             session_id: None,
         };
-        let result = create_token_impl(&state, &input);
+        let result = create_token_impl(&mut doc, &input);
         assert!(result.is_err());
         assert!(
             matches!(result.unwrap_err(), McpToolError::InvalidInput(_)),

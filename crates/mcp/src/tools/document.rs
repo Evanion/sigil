@@ -1,12 +1,10 @@
 //! Document query tools — `get_document_info`, `get_document_tree`.
 //!
-//! These functions read document state through the shared `AppState` and
+//! These functions read document state from the resolved session store and
 //! return token-efficient summaries for MCP agent consumption.
 
 use sigil_core::NodeKind;
-use sigil_state::AppState;
 
-use crate::server::acquire_document_lock;
 use crate::types::{DocumentInfo, DocumentTree, NodeInfo, PageTree, TransformInfo};
 
 /// Maximum tree traversal depth to prevent stack overflow on cyclic references.
@@ -18,13 +16,11 @@ use crate::types::{DocumentInfo, DocumentTree, NodeInfo, PageTree, TransformInfo
 /// `>=` comparison and MUST have a corresponding test (`test_max_tree_depth_enforced`).
 pub const MAX_TREE_DEPTH: usize = 100;
 
-/// Builds a `DocumentInfo` from the current document state.
+/// Builds a `DocumentInfo` from the given document state.
 ///
-/// Acquires the document lock, reads metadata/arena/pages, then drops
-/// the lock before returning. The lock is never held across an await point.
+/// Pure read over `&Document`; the caller holds the session store read lock.
 #[must_use]
-pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {
-    let doc = acquire_document_lock(state);
+pub fn get_document_info_impl(doc: &sigil_core::Document) -> DocumentInfo {
     DocumentInfo {
         name: doc.metadata.name.clone(),
         page_count: doc.pages.len(),
@@ -32,14 +28,14 @@ pub fn get_document_info_impl(state: &AppState) -> DocumentInfo {
     }
 }
 
-/// Builds a full document tree from the current document state.
+/// Builds a full document tree from the given document state.
 ///
 /// Pages are returned in document order. Within each page, nodes are returned
 /// in a flattened depth-first list. Use the `children` field on each `NodeInfo`
-/// to reconstruct the hierarchy.
+/// to reconstruct the hierarchy. Pure read over `&Document`; the caller holds
+/// the session store read lock.
 #[must_use]
-pub fn get_document_tree_impl(state: &AppState) -> DocumentTree {
-    let doc = acquire_document_lock(state);
+pub fn get_document_tree_impl(doc: &sigil_core::Document) -> DocumentTree {
     let pages = doc
         .pages
         .iter()
@@ -47,7 +43,7 @@ pub fn get_document_tree_impl(state: &AppState) -> DocumentTree {
             let nodes: Vec<NodeInfo> = page
                 .root_nodes
                 .iter()
-                .flat_map(|&root_id| collect_node_tree(&doc, root_id))
+                .flat_map(|&root_id| collect_node_tree(doc, root_id))
                 .collect();
             PageTree {
                 id: page.id.uuid().to_string(),
@@ -142,20 +138,18 @@ pub fn node_kind_to_string(kind: &NodeKind) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use sigil_core::{Node, NodeId, NodeKind, Page, PageId};
-    use sigil_state::AppState;
+    use sigil_core::{Document, Node, NodeId, NodeKind, Page, PageId};
 
     use super::*;
 
     #[test]
     fn test_get_document_info_returns_correct_counts() {
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
         {
-            let mut doc = state.document.lock().unwrap();
             let page = Page::new(PageId::new(uuid::Uuid::new_v4()), "Page 1".to_string()).unwrap();
             doc.add_page(page).unwrap();
         }
-        let info = get_document_info_impl(&state);
+        let info = get_document_info_impl(&doc);
         assert_eq!(info.name, "Untitled");
         assert_eq!(info.page_count, 1);
         assert_eq!(info.node_count, 0);
@@ -163,10 +157,9 @@ mod tests {
 
     #[test]
     fn test_get_document_tree_returns_pages_and_nodes() {
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
         let page_uuid = uuid::Uuid::new_v4();
         {
-            let mut doc = state.document.lock().unwrap();
             let page = Page::new(PageId::new(page_uuid), "Home".to_string()).unwrap();
             doc.add_page(page).unwrap();
 
@@ -185,7 +178,7 @@ mod tests {
             doc.add_root_node_to_page(PageId::new(page_uuid), node_id)
                 .unwrap();
         }
-        let tree = get_document_tree_impl(&state);
+        let tree = get_document_tree_impl(&doc);
         assert_eq!(tree.pages.len(), 1);
         assert_eq!(tree.pages[0].name, "Home");
         assert_eq!(tree.pages[0].nodes.len(), 1);
@@ -199,10 +192,9 @@ mod tests {
     fn test_max_tree_depth_enforced() {
         // Build a chain of nodes deeper than MAX_TREE_DEPTH.
         // The collect should stop at MAX_TREE_DEPTH levels and not panic.
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
         let page_uuid = uuid::Uuid::new_v4();
         {
-            let mut doc = state.document.lock().unwrap();
             let page = Page::new(PageId::new(page_uuid), "Deep".to_string()).unwrap();
             doc.add_page(page).unwrap();
 
@@ -244,7 +236,7 @@ mod tests {
         }
 
         // Should not panic. The tree is truncated at MAX_TREE_DEPTH.
-        let tree = get_document_tree_impl(&state);
+        let tree = get_document_tree_impl(&doc);
         assert_eq!(tree.pages.len(), 1);
         // Nodes collected should be at most MAX_TREE_DEPTH (depth guard stops recursion).
         assert!(

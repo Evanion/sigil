@@ -175,6 +175,17 @@ pub struct SessionListResult {
 
 // ── Tool input types ──────────────────────────────────────────────────
 
+/// Input for read tools that target a session: `get_document_info`,
+/// `get_document_tree`, `list_pages`, `list_tokens`, `list_components`.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+pub struct SessionScopedInput {
+    /// Optional session id. When omitted and exactly one session is open it is
+    /// used; when multiple are open the call errors with the open-sessions list.
+    // RF-006: no `skip_serializing_if` — this type derives only `Deserialize`.
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
 /// Input for creating a new page.
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct CreatePageInput {

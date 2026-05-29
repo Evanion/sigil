@@ -1,18 +1,27 @@
 //! `SigilMcpServer` — the MCP `ServerHandler` implementation for Sigil.
 //!
-//! This module wires together the shared `AppState` (from `sigil-state`)
-//! and the rmcp `ToolRouter` so that MCP clients can discover and call Sigil's
-//! tools and resources.
+//! This module wires together the multi-session [`Sessions`] registry (from
+//! `sigil-state`) and the rmcp `ToolRouter` so that MCP clients can discover and
+//! call Sigil's tools and resources.
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
-//! let state = AppState::new();
-//! let server = SigilMcpServer::new(state);
+//! let sessions = Arc::new(Sessions::new(64));
+//! let server = SigilMcpServer::new(sessions);
 //! // Pass `server` to `rmcp::serve_server(…)`.
 //! ```
+//!
+//! Spec 22b: every tool is session-native. Write `_impl`s are pure functions
+//! over `&mut Document`; the [`SigilMcpServer::run_session_scoped`] envelope
+//! resolves the session, takes the session store write lock, runs the `_impl`,
+//! builds the broadcast `value` from post-mutation state, and publishes the
+//! transaction on the session's broadcast channel (which the 22a persistence
+//! task and the GraphQL `transactionApplied` subscription both consume). Read
+//! tools route through [`SigilMcpServer::run_session_read`] over the session
+//! store read lock.
 
-use std::sync::{Arc, MutexGuard};
+use std::sync::Arc;
 
 use rmcp::{
     ServerHandler,
@@ -27,33 +36,23 @@ use rmcp::{
     tool, tool_handler, tool_router,
 };
 
-use sigil_state::sessions::{SessionEvent, SessionId};
-use sigil_state::{AppState, SendDocument, Sessions};
+use sigil_state::Sessions;
+use sigil_state::sessions::SessionId;
 
 use crate::session_resolver::{SessionResolveError, resolve_session};
 
 /// The MCP server for Sigil.
 ///
-/// Holds shared application state and a `ToolRouter` that dispatches
-/// incoming `tools/call` requests to the appropriate handler.
-///
-/// During the Spec 20 migration (Tasks 9–10), the server carries **both** the
-/// legacy single-document [`AppState`] (used by the existing mutation tools)
-/// and the multi-session [`Sessions`] registry (used by the new session-
-/// discovery tools added in Task 9 and the session-scoped mutation tools
-/// added in Task 10). Once Task 10 migrates every mutation tool to route
-/// through `sessions.with_session(...)`, the legacy `state` field can be
-/// removed.
+/// Holds the multi-session [`Sessions`] registry and a `ToolRouter` that
+/// dispatches incoming `tools/call` requests to the appropriate handler. Every
+/// document read, write, and broadcast flows through a resolved session's
+/// store and broadcast channel — there is no legacy single-document store.
 #[derive(Clone)]
 pub struct SigilMcpServer {
-    /// Shared in-memory document state, owned by the server process. Used by
-    /// the legacy single-document mutation tools while Task 10 is in flight.
-    pub state: AppState,
-    /// Multi-session registry used by `list_open_sessions` and
-    /// `get_active_workfiles` (Task 9). In the running server this points at
-    /// the same `Sessions` instance the GraphQL resolvers and WebSocket
-    /// subscribers see, so the agent's view of which sessions are open is
-    /// identical to the frontend's.
+    /// Multi-session registry. In the running server this points at the same
+    /// `Sessions` instance the GraphQL resolvers and WebSocket subscribers see,
+    /// so the agent's view of which sessions are open — and the document state
+    /// it reads and mutates — is identical to the frontend's.
     pub sessions: Arc<Sessions>,
     /// Tool dispatch table, built at construction time via `#[tool_router]`.
     ///
@@ -64,68 +63,48 @@ pub struct SigilMcpServer {
 }
 
 impl SigilMcpServer {
-    /// Creates a new `SigilMcpServer` wrapping the given `AppState` and
-    /// [`Sessions`] registry.
-    ///
-    /// The two arguments are passed independently (rather than as a single
-    /// `App`) so existing test sites that construct an isolated `AppState`
-    /// can pair it with a fresh empty `Sessions` registry without depending
-    /// on the higher-level `App` wrapper. The server crate passes
-    /// `state.app.legacy.clone()` and `state.app.sessions.clone()` from a
-    /// single source of truth.
+    /// Creates a new `SigilMcpServer` wrapping the given [`Sessions`] registry.
     #[must_use]
-    pub fn new(state: AppState, sessions: Arc<Sessions>) -> Self {
+    pub fn new(sessions: Arc<Sessions>) -> Self {
         Self {
-            state,
             sessions,
             tool_router: Self::tool_router(),
         }
     }
 
-    /// Run a synchronous mutation `_impl` closure against the legacy
-    /// [`AppState`], then mirror the resulting state and events onto the
-    /// resolved session.
+    /// Session-scoped mutation envelope: resolve the session, take the session
+    /// store write lock, run the pure `_impl` closure, and publish the resulting
+    /// transaction on the session's broadcast channel (which the 22a persistence
+    /// task and the GraphQL `transactionApplied` subscription both consume).
     ///
-    /// This is the standard tool-handler envelope for every Spec 20
-    /// mutation tool:
-    ///
-    /// 1. Resolve `explicit_session_id` via the three-rule resolver
-    ///    ([`crate::session_resolver::resolve_session`]).
-    /// 2. Look up the session from the registry. The id was just resolved
-    ///    successfully, but the session could have been closed between the
-    ///    resolution and the lookup (TOCTOU); treat that race as
-    ///    [`SessionResolveError::NotFound`].
-    /// 3. Subscribe to `state.event_tx` before invoking the mutation, so
-    ///    every `MutationEvent` the impl publishes is captured.
-    /// 4. Run the `_impl` closure (synchronous; the impl uses
-    ///    [`acquire_document_lock`] internally).
-    /// 5. On success: mirror the post-mutation legacy document into
-    ///    `session.store` and forward the captured events to
-    ///    `session.broadcast` (see [`mirror_to_session`]).
-    /// 6. On failure: return the mapped `rmcp::ErrorData` without mirroring.
-    ///
-    /// Read-only tools do **not** use this helper — they read directly from
-    /// the legacy `state` and pay no broadcast cost.
+    /// The closure returns the tool's response value plus a fully-built
+    /// [`sigil_state::TransactionPayload`] (with `seq = 0`); `session.publish`
+    /// stamps the per-session seq before broadcasting. The broadcast `value`
+    /// MUST be sourced from post-mutation document state inside the closure.
     ///
     /// # Errors
-    ///
-    /// Returns `Err(rmcp::ErrorData)` when (a) the session resolver fails,
-    /// (b) the session is not found, or (c) the mutation impl returns an
-    /// error.
+    /// Returns `Err(rmcp::ErrorData)` when (a) session resolution fails, (b) the
+    /// session was closed between resolution and lookup (TOCTOU → `NotFound`), or
+    /// (c) the mutation closure returns a `McpToolError`.
     async fn run_session_scoped<T, F>(
         &self,
         explicit_session_id: Option<&str>,
         impl_fn: F,
     ) -> Result<Json<T>, rmcp::ErrorData>
     where
-        F: FnOnce(&AppState) -> Result<T, crate::error::McpToolError>,
+        F: FnOnce(
+            &mut sigil_core::Document,
+        ) -> Result<
+            (
+                T,
+                sigil_state::MutationEventKind,
+                Option<String>,
+                sigil_state::TransactionPayload,
+            ),
+            crate::error::McpToolError,
+        >,
     {
-        // 1. Resolve session id (or return a structured error).
         let session_id = resolve_session_or_error(&self.sessions, explicit_session_id)?;
-
-        // 2. Look up the session. The resolver returned an id that was
-        //    registered at the time, but a concurrent close() could have
-        //    removed it — treat that as NotFound.
         let session = self.sessions.get(session_id).ok_or_else(|| {
             SessionResolveError::NotFound {
                 id: session_id.to_string(),
@@ -134,49 +113,45 @@ impl SigilMcpServer {
             .to_rmcp_error()
         })?;
 
-        // 3. Subscribe BEFORE invoking the impl so every MutationEvent the
-        //    impl publishes lands in `event_rx`. If event_tx is not
-        //    configured (in-memory mode without a broadcaster), skip the
-        //    forwarding step.
-        let event_rx = self
-            .state
-            .event_tx()
-            .map(tokio::sync::broadcast::Sender::subscribe);
-
-        // 4. Run the impl. The impl owns its document lock and releases it
-        //    before returning, so the mirror step below does not nest locks.
-        let result = impl_fn(&self.state).map_err(|e| e.to_mcp_error())?;
-
-        // 5. Mirror legacy → session: forward events + clone document.
-        if let Some(rx) = event_rx {
-            mirror_to_session(&self.state, &session, rx).await;
-        } else {
-            // No event_tx — still need to mirror the document so per-session
-            // reads see the post-mutation state. Reuse mirror_to_session
-            // with an empty receiver by short-circuiting the forward loop.
-            // Create a dummy channel and drop the sender immediately so the
-            // receiver returns `Closed` on the first try_recv.
-            let (dummy_tx, dummy_rx) = tokio::sync::broadcast::channel(1);
-            drop(dummy_tx);
-            mirror_to_session(&self.state, &session, dummy_rx).await;
-        }
+        // RF-002: stamp the per-session seq and broadcast the transaction
+        // WHILE STILL HOLDING the store write lock, so apply/seq/broadcast are
+        // atomic per session. `session.publish` is synchronous (no `.await`),
+        // so holding the write lock across it does not block the runtime.
+        let result = {
+            let mut guard = session.store.write().await;
+            let (result, kind, uuid, transaction) =
+                impl_fn(&mut guard.0).map_err(|e| e.to_mcp_error())?;
+            session.publish(kind, uuid, transaction);
+            result
+        };
 
         Ok(Json(result))
     }
-}
 
-/// Acquires the document lock from an `AppState`, recovering from mutex poisoning.
-///
-/// This is a free function (not a method) so tool implementation modules can
-/// call it without needing a reference to the full `SigilMcpServer`.
-/// The lock must **never** be held across an `.await` point.
-pub fn acquire_document_lock(state: &AppState) -> MutexGuard<'_, SendDocument> {
-    match state.document.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => {
-            tracing::error!("document mutex poisoned in MCP handler, recovering");
-            poisoned.into_inner()
-        }
+    /// Resolve the session and run a read closure against the session store.
+    ///
+    /// # Errors
+    /// Returns `Err(rmcp::ErrorData)` when session resolution fails, the session
+    /// was closed between resolution and lookup, or the read closure errors.
+    async fn run_session_read<T, F>(
+        &self,
+        explicit_session_id: Option<&str>,
+        read_fn: F,
+    ) -> Result<Json<T>, rmcp::ErrorData>
+    where
+        F: FnOnce(&sigil_core::Document) -> Result<T, crate::error::McpToolError>,
+    {
+        let session_id = resolve_session_or_error(&self.sessions, explicit_session_id)?;
+        let session = self.sessions.get(session_id).ok_or_else(|| {
+            SessionResolveError::NotFound {
+                id: session_id.to_string(),
+                open_sessions: vec![],
+            }
+            .to_rmcp_error()
+        })?;
+        let guard = session.store.read().await;
+        let value = read_fn(&guard.0).map_err(|e| e.to_mcp_error())?;
+        Ok(Json(value))
     }
 }
 
@@ -185,13 +160,12 @@ pub fn acquire_document_lock(state: &AppState) -> MutexGuard<'_, SendDocument> {
 /// a structured `rmcp::ErrorData` (carrying `code` + `open_sessions`) on
 /// failure.
 ///
-/// This is the entry point every Spec 20 mutation tool uses to gate access
-/// to a specific session before calling the legacy `_impl` and mirroring the
-/// result.
+/// This is the entry point every session-scoped tool uses to gate access to a
+/// specific session before reading or mutating its store.
 ///
 /// # Errors
 ///
-/// Returns `Err(rmcp::ErrorData)` when the resolver returns any of the four
+/// Returns `Err(rmcp::ErrorData)` when the resolver returns any of the
 /// [`SessionResolveError`] variants. The error data carries the structured
 /// recovery payload from [`SessionResolveError::to_mcp_error_payload`].
 pub fn resolve_session_or_error(
@@ -201,94 +175,22 @@ pub fn resolve_session_or_error(
     resolve_session(sessions, explicit).map_err(|e| e.to_rmcp_error())
 }
 
-/// Mirror the legacy [`AppState`] document into the resolved session's store
-/// and broadcast a synthetic `DocumentEvent` on the session's broadcast
-/// channel.
-///
-/// **Transitional bridge.** During Spec 20 Task 10 the legacy `AppState`
-/// remains the source of truth that the existing `_impl` mutation functions
-/// mutate in place. To keep the per-session document and the per-session
-/// subscribers consistent with what the legacy store sees, this helper:
-///
-/// 1. Clones the post-mutation legacy document into `session.store` via
-///    [`tokio::sync::RwLock::write`]. The session's document is therefore
-///    always a snapshot of the legacy document immediately after each
-///    mutation.
-/// 2. Forwards every `MutationEvent` accumulated on `legacy.event_tx` during
-///    the mutation into the session's `broadcast` channel as a
-///    `SessionEvent::DocumentEvent`. Frontend WebSocket subscribers (per
-///    Task 7) listen to the per-session channel; without this forwarding,
-///    MCP-originated mutations would be invisible to the desktop UI.
-///
-/// The mirror is one-way (legacy → session) and is removed once every
-/// mutation tool is refactored to mutate `session.store` directly. Until
-/// that refactor lands, every Spec 20 mutation tool MUST call this helper
-/// after its `_impl` returns.
-///
-/// `pre_subscribe_rx` is a broadcast receiver that the caller subscribed to
-/// BEFORE invoking the `_impl`. The receiver captures any `MutationEvent`s
-/// produced by the mutation; this function drains it into the session
-/// channel.
-pub async fn mirror_to_session(
-    state: &AppState,
-    session: &Arc<sigil_state::sessions::DocumentSession>,
-    mut pre_subscribe_rx: tokio::sync::broadcast::Receiver<sigil_state::MutationEvent>,
-) {
-    // 1. Drain the legacy event receiver and forward each event onto the
-    //    session's per-session broadcast channel. Use try_recv in a loop —
-    //    by the time we arrive here, all events have already been published
-    //    synchronously inside the impl, so they're sitting in the buffer.
-    use tokio::sync::broadcast::error::TryRecvError;
-    loop {
-        match pre_subscribe_rx.try_recv() {
-            Ok(event) => {
-                // No subscribers on the per-session channel is not an error.
-                let _ = session.broadcast.send(SessionEvent::DocumentEvent(event));
-            }
-            // Empty / Closed both mean "no more events for us" — exit the
-            // drain loop. Merging the two arms is clippy::match_same_arms;
-            // the receiver is dropped on function exit either way.
-            Err(TryRecvError::Empty | TryRecvError::Closed) => break,
-            Err(TryRecvError::Lagged(skipped)) => {
-                tracing::warn!(
-                    skipped,
-                    "session broadcast mirror dropped legacy events due to backpressure"
-                );
-            }
-        }
-    }
-
-    // 2. Mirror the legacy document into the session's store so per-session
-    //    document reads (frontend, persistence, future direct-session paths)
-    //    see the post-mutation state.
-    //
-    //    Acquire the locks in a strict order: legacy mutex first (short,
-    //    sync, fully scoped), session.store write lock second (async). The
-    //    impl already released the legacy mutex before returning, so this
-    //    second acquisition is not nested with any caller-held lock.
-    let snapshot = {
-        let guard = match state.document.lock() {
-            Ok(g) => g,
-            Err(poison) => {
-                tracing::error!("legacy document mutex poisoned during session mirror, recovering");
-                poison.into_inner()
-            }
-        };
-        guard.0.clone()
-    };
-    let mut session_doc = session.store.write().await;
-    session_doc.0 = snapshot;
-}
-
 #[tool_router]
 impl SigilMcpServer {
     /// Returns a compact summary of the document: name, page count, node count.
     #[tool(
         name = "get_document_info",
-        description = "Get document summary: name, page count, node count"
+        description = "Get document summary: name, page count, node count. Accepts an optional \
+                        `session_id` when multiple sessions are open."
     )]
-    fn get_document_info(&self) -> Json<crate::types::DocumentInfo> {
-        Json(crate::tools::document::get_document_info_impl(&self.state))
+    async fn get_document_info(
+        &self,
+        Parameters(input): Parameters<crate::types::SessionScopedInput>,
+    ) -> Result<Json<crate::types::DocumentInfo>, rmcp::ErrorData> {
+        self.run_session_read(input.session_id.as_deref(), |doc| {
+            Ok(crate::tools::document::get_document_info_impl(doc))
+        })
+        .await
     }
 
     /// Returns the full document tree: all pages with their node hierarchies in
@@ -296,21 +198,35 @@ impl SigilMcpServer {
     /// hierarchy.
     #[tool(
         name = "get_document_tree",
-        description = "Get the full document tree: all pages with their node hierarchies"
+        description = "Get the full document tree: all pages with their node hierarchies. Accepts \
+                        an optional `session_id` when multiple sessions are open."
     )]
-    fn get_document_tree(&self) -> Json<crate::types::DocumentTree> {
-        Json(crate::tools::document::get_document_tree_impl(&self.state))
+    async fn get_document_tree(
+        &self,
+        Parameters(input): Parameters<crate::types::SessionScopedInput>,
+    ) -> Result<Json<crate::types::DocumentTree>, rmcp::ErrorData> {
+        self.run_session_read(input.session_id.as_deref(), |doc| {
+            Ok(crate::tools::document::get_document_tree_impl(doc))
+        })
+        .await
     }
 
     /// Lists all pages in the document with their root node UUIDs.
     #[tool(
         name = "list_pages",
-        description = "List all pages in the document with their root node UUIDs"
+        description = "List all pages in the document with their root node UUIDs. Accepts an \
+                        optional `session_id` when multiple sessions are open."
     )]
-    fn list_pages(&self) -> Json<crate::types::PageListResult> {
-        Json(crate::types::PageListResult {
-            pages: crate::tools::pages::list_pages_impl(&self.state),
+    async fn list_pages(
+        &self,
+        Parameters(input): Parameters<crate::types::SessionScopedInput>,
+    ) -> Result<Json<crate::types::PageListResult>, rmcp::ErrorData> {
+        self.run_session_read(input.session_id.as_deref(), |doc| {
+            Ok(crate::types::PageListResult {
+                pages: crate::tools::pages::list_pages_impl(doc),
+            })
         })
+        .await
     }
 
     /// Creates a new page in the document.
@@ -325,8 +241,15 @@ impl SigilMcpServer {
         Parameters(input): Parameters<crate::types::CreatePageInput>,
     ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
         let name = input.name.clone();
-        self.run_session_scoped(input.session_id.as_deref(), |state| {
-            crate::tools::pages::create_page_impl(state, &name)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let page = crate::tools::pages::create_page_impl(doc, &name)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &page.id,
+                "create_page",
+                "page",
+                Some(serde_json::json!({"id": page.id, "name": page.name})),
+            );
+            Ok((page, sigil_state::MutationEventKind::PageCreated, None, tx))
         })
         .await
     }
@@ -342,8 +265,20 @@ impl SigilMcpServer {
         Parameters(input): Parameters<crate::types::DeletePageInput>,
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let page_id = input.page_id.clone();
-        self.run_session_scoped(input.session_id.as_deref(), |state| {
-            crate::tools::pages::delete_page_impl(state, &page_id)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::pages::delete_page_impl(doc, &page_id)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &page_id,
+                "delete_page",
+                "page",
+                None,
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::PageDeleted,
+                Some(page_id.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -360,8 +295,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
         let page_id = input.page_id.clone();
         let new_name = input.new_name.clone();
-        self.run_session_scoped(input.session_id.as_deref(), |state| {
-            crate::tools::pages::rename_page_impl(state, &page_id, &new_name)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let page = crate::tools::pages::rename_page_impl(doc, &page_id, &new_name)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &page_id,
+                "rename_page",
+                "name",
+                Some(serde_json::json!({"name": new_name})),
+            );
+            Ok((
+                page,
+                sigil_state::MutationEventKind::PageUpdated,
+                Some(page_id.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -378,8 +325,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::PageInfo>, rmcp::ErrorData> {
         let page_id = input.page_id.clone();
         let new_position = input.new_position;
-        self.run_session_scoped(input.session_id.as_deref(), |state| {
-            crate::tools::pages::reorder_page_impl(state, &page_id, new_position)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let page = crate::tools::pages::reorder_page_impl(doc, &page_id, new_position)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &page_id,
+                "reorder_page",
+                "position",
+                Some(serde_json::json!({ "newPosition": new_position })),
+            );
+            Ok((
+                page,
+                sigil_state::MutationEventKind::PageUpdated,
+                Some(page_id.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -400,15 +359,37 @@ impl SigilMcpServer {
         let page_id = input.page_id.clone();
         let parent_uuid = input.parent_uuid.clone();
         let transform = input.transform;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::create_node_impl(
-                state,
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let created = crate::tools::nodes::create_node_impl(
+                doc,
                 &kind,
                 &name,
                 page_id.as_deref(),
                 parent_uuid.as_deref(),
                 transform.as_ref(),
-            )
+            )?;
+            // Entity-creation broadcasts MUST carry the entity UUID under `id`
+            // (CLAUDE.md §4). The frontend `applyCreateNode` reads `uuid`; we
+            // include both so the `id` rule is satisfied without breaking the
+            // existing `uuid` consumer.
+            let created_uuid = created.uuid.clone();
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &created_uuid,
+                "create_node",
+                "",
+                Some(serde_json::json!({
+                    "id": created_uuid,
+                    "uuid": created_uuid,
+                    "kind": kind,
+                    "name": name,
+                })),
+            );
+            Ok((
+                created,
+                sigil_state::MutationEventKind::NodeCreated,
+                Some(created_uuid),
+                tx,
+            ))
         })
         .await
     }
@@ -424,8 +405,23 @@ impl SigilMcpServer {
         Parameters(input): Parameters<crate::types::DeleteNodesInput>,
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let node_uuids = input.node_uuids.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::delete_nodes_impl(state, &node_uuids)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let (result, canonical_uuids) =
+                crate::tools::nodes::delete_nodes_impl(doc, &node_uuids)?;
+            // Batch op: node_uuid empty, uuids in the value payload, matching
+            // the GraphQL contract (mutation.rs::parse_delete_nodes).
+            let tx = crate::tools::broadcast::single_op_transaction(
+                "",
+                "delete_nodes",
+                "",
+                Some(serde_json::json!({ "node_uuids": canonical_uuids })),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeDeleted,
+                None,
+                tx,
+            ))
         })
         .await
     }
@@ -442,8 +438,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let new_name = input.new_name.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::rename_node_impl(state, &uuid, &new_name)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::nodes::rename_node_impl(doc, &uuid, &new_name)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "name",
+                Some(serde_json::json!(new_name)),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -460,8 +468,24 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let transform = input.transform;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_transform_impl(state, &uuid, &transform)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::nodes::set_transform_impl(doc, &uuid, &transform)?;
+            // Source the broadcast value from the canonical post-mutation
+            // transform on the node info (build_node_info reads the doc).
+            let transform_value = serde_json::to_value(&info.transform)
+                .map_err(crate::error::McpToolError::SerializationError)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "transform",
+                Some(transform_value),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -478,8 +502,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let visible = input.visible;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_visible_impl(state, &uuid, visible)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::nodes::set_visible_impl(doc, &uuid, visible)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "visible",
+                Some(serde_json::json!(visible)),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -498,8 +534,24 @@ impl SigilMcpServer {
         let uuid = input.uuid.clone();
         let new_parent_uuid = input.new_parent_uuid.clone();
         let position = input.position;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::reparent_node_impl(state, &uuid, &new_parent_uuid, position)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info =
+                crate::tools::nodes::reparent_node_impl(doc, &uuid, &new_parent_uuid, position)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "reparent",
+                "",
+                Some(serde_json::json!({
+                    "parentUuid": new_parent_uuid,
+                    "position": position,
+                })),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -517,8 +569,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let new_position = input.new_position;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::reorder_children_impl(state, &uuid, new_position)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::nodes::reorder_children_impl(doc, &uuid, new_position)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "reorder",
+                "",
+                Some(serde_json::json!({ "newPosition": new_position })),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -535,8 +599,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let locked = input.locked;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_locked_impl(state, &uuid, locked)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::nodes::set_locked_impl(doc, &uuid, locked)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "locked",
+                Some(serde_json::json!(locked)),
+            );
+            Ok((
+                info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -553,8 +629,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let opacity = input.opacity;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_opacity_impl(state, &uuid, opacity)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::nodes::set_opacity_impl(doc, &uuid, opacity)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "style.opacity",
+                Some(serde_json::json!({"type": "literal", "value": opacity})),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -573,8 +661,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let blend_mode = input.blend_mode.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_blend_mode_impl(state, &uuid, &blend_mode)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::nodes::set_blend_mode_impl(doc, &uuid, &blend_mode)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "style.blend_mode",
+                Some(serde_json::json!(blend_mode)),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -591,8 +691,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let fills = input.fills.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_fills_impl(state, &uuid, &fills)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::nodes::set_fills_impl(doc, &uuid, &fills)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "style.fills",
+                Some(fills.clone()),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -609,8 +721,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let strokes = input.strokes.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_strokes_impl(state, &uuid, &strokes)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::nodes::set_strokes_impl(doc, &uuid, &strokes)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "style.strokes",
+                Some(strokes.clone()),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -627,8 +751,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let effects = input.effects.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_effects_impl(state, &uuid, &effects)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::nodes::set_effects_impl(doc, &uuid, &effects)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "style.effects",
+                Some(effects.clone()),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -653,8 +789,22 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let corners = input.corners.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::nodes::set_corners_impl(state, &uuid, &corners)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            // `set_corners_impl` returns the canonical post-mutation `NodeKind`
+            // JSON so the broadcast value is sourced from post-mutation state.
+            let (result, kind_json) = crate::tools::nodes::set_corners_impl(doc, &uuid, &corners)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "kind",
+                Some(kind_json),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -662,12 +812,18 @@ impl SigilMcpServer {
     /// Lists all design tokens in the document.
     #[tool(
         name = "list_tokens",
-        description = "List all design tokens in the document, sorted by name"
+        description = "List all design tokens in the document, sorted by name. Accepts an \
+                        optional `session_id` when multiple sessions are open."
     )]
-    fn list_tokens(&self) -> Result<Json<crate::types::TokenListResult>, rmcp::ErrorData> {
-        let tokens =
-            crate::tools::tokens::list_tokens_impl(&self.state).map_err(|e| e.to_mcp_error())?;
-        Ok(Json(crate::types::TokenListResult { tokens }))
+    async fn list_tokens(
+        &self,
+        Parameters(input): Parameters<crate::types::SessionScopedInput>,
+    ) -> Result<Json<crate::types::TokenListResult>, rmcp::ErrorData> {
+        self.run_session_read(input.session_id.as_deref(), |doc| {
+            let tokens = crate::tools::tokens::list_tokens_impl(doc)?;
+            Ok(crate::types::TokenListResult { tokens })
+        })
+        .await
     }
 
     /// Creates a new design token.
@@ -692,8 +848,18 @@ impl SigilMcpServer {
             description: input.description.clone(),
             session_id: None,
         };
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::tokens::create_token_impl(state, &input_for_impl)
+        let token_name = input.name.clone();
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::tokens::create_token_impl(doc, &input_for_impl)?;
+            // Token events have empty node_uuid and uuid = None; path is the
+            // token name.
+            let tx = crate::tools::broadcast::single_op_transaction(
+                "",
+                "create",
+                &token_name,
+                Some(serde_json::json!({"name": token_name})),
+            );
+            Ok((info, sigil_state::MutationEventKind::TokenCreated, None, tx))
         })
         .await
     }
@@ -716,8 +882,16 @@ impl SigilMcpServer {
             description: input.description.clone(),
             session_id: None,
         };
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::tokens::update_token_impl(state, &input_for_impl)
+        let token_name = input.name.clone();
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let info = crate::tools::tokens::update_token_impl(doc, &input_for_impl)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                "",
+                "update",
+                &token_name,
+                Some(serde_json::json!({"name": token_name})),
+            );
+            Ok((info, sigil_state::MutationEventKind::TokenUpdated, None, tx))
         })
         .await
     }
@@ -735,8 +909,23 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let old_name = input.old_name.clone();
         let new_name = input.new_name.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::tokens::rename_token_impl(state, &old_name, &new_name)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::tokens::rename_token_impl(doc, &old_name, &new_name)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                "",
+                "rename_token",
+                &old_name,
+                Some(serde_json::json!({
+                    "old_name": old_name,
+                    "new_name": new_name,
+                })),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::TokenUpdated,
+                None,
+                tx,
+            ))
         })
         .await
     }
@@ -752,8 +941,20 @@ impl SigilMcpServer {
         Parameters(input): Parameters<crate::types::DeleteTokenInput>,
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let name = input.name.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::tokens::delete_token_impl(state, &name)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let result = crate::tools::tokens::delete_token_impl(doc, &name)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                "",
+                "delete",
+                &name,
+                Some(serde_json::json!({"name": name})),
+            );
+            Ok((
+                result,
+                sigil_state::MutationEventKind::TokenDeleted,
+                None,
+                tx,
+            ))
         })
         .await
     }
@@ -761,12 +962,19 @@ impl SigilMcpServer {
     /// Lists all component definitions in the document.
     #[tool(
         name = "list_components",
-        description = "List all component definitions in the document, sorted by name"
+        description = "List all component definitions in the document, sorted by name. Accepts \
+                        an optional `session_id` when multiple sessions are open."
     )]
-    fn list_components(&self) -> Json<crate::types::ComponentListResult> {
-        Json(crate::types::ComponentListResult {
-            components: crate::tools::components::list_components_impl(&self.state),
+    async fn list_components(
+        &self,
+        Parameters(input): Parameters<crate::types::SessionScopedInput>,
+    ) -> Result<Json<crate::types::ComponentListResult>, rmcp::ErrorData> {
+        self.run_session_read(input.session_id.as_deref(), |doc| {
+            Ok(crate::types::ComponentListResult {
+                components: crate::tools::components::list_components_impl(doc),
+            })
         })
+        .await
     }
 
     /// Sets the text content of a text node.
@@ -781,8 +989,20 @@ impl SigilMcpServer {
     ) -> Result<Json<crate::types::NodeInfo>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
         let content = input.content.clone();
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::text::set_text_content_impl(state, &uuid, &content)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            let node_info = crate::tools::text::set_text_content_impl(doc, &uuid, &content)?;
+            let tx = crate::tools::broadcast::single_op_transaction(
+                &uuid,
+                "set_field",
+                "kind.content",
+                Some(serde_json::json!(content)),
+            );
+            Ok((
+                node_info,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -802,13 +1022,21 @@ impl SigilMcpServer {
         Parameters(input): Parameters<crate::types::SetTextStyleInput>,
     ) -> Result<Json<crate::types::MutationResult>, rmcp::ErrorData> {
         let uuid = input.uuid.clone();
-        // `PartialTextStyle` is not `Clone`; build a fresh borrowed reference
-        // by moving `input.style` into the closure. The closure captures
-        // input.style by move, so the impl reads it by reference within the
-        // closure scope.
+        // `PartialTextStyle` is not `Clone`; move `input.style` into the closure.
         let style = input.style;
-        self.run_session_scoped(input.session_id.as_deref(), move |state| {
-            crate::tools::text::set_text_style_impl(state, &uuid, &style)
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            // `set_text_style_impl` returns the per-field ops (built from
+            // post-apply state under the write lock) for a single multi-op
+            // transaction, preserving the rollback discipline internally.
+            let (result, broadcast_ops) =
+                crate::tools::text::set_text_style_impl(doc, &uuid, &style)?;
+            let tx = crate::tools::broadcast::multi_op_transaction(broadcast_ops);
+            Ok((
+                result,
+                sigil_state::MutationEventKind::NodeUpdated,
+                Some(uuid.clone()),
+                tx,
+            ))
         })
         .await
     }
@@ -856,16 +1084,15 @@ impl SigilMcpServer {
 /// Spawns the MCP server on stdio in a background task.
 ///
 /// This is a convenience function for `main.rs` that encapsulates all MCP
-/// transport setup. The caller provides the shared `AppState` (for the
-/// legacy mutation tools) and the [`Sessions`] registry (for the
-/// session-discovery tools added in Task 9).
+/// transport setup. The caller provides the [`Sessions`] registry shared with
+/// the rest of the server process.
 ///
 /// Returns a `JoinHandle` that resolves when the MCP server exits (either
 /// because the stdio transport closed or an error occurred).
 #[must_use]
-pub fn start_stdio(state: AppState, sessions: Arc<Sessions>) -> tokio::task::JoinHandle<()> {
+pub fn start_stdio(sessions: Arc<Sessions>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let server = SigilMcpServer::new(state, sessions);
+        let server = SigilMcpServer::new(sessions);
         let (stdin, stdout) = rmcp::transport::io::stdio();
         match rmcp::serve_server(server, (stdin, stdout)).await {
             Ok(running) => {
@@ -923,21 +1150,39 @@ impl ServerHandler for SigilMcpServer {
     ) -> impl std::future::Future<Output = Result<ReadResourceResult, rmcp::ErrorData>>
     + rmcp::service::MaybeSendFuture
     + '_ {
-        std::future::ready(
-            crate::resources::read_resource(&self.state, &request.uri).map(ReadResourceResult::new),
-        )
+        let sessions = self.sessions.clone();
+        async move {
+            // RF-005: the rmcp `ReadResource` request (`ReadResourceRequestParams`)
+            // carries only a `uri` — there is no tool-argument slot to thread a
+            // `session_id` through, unlike the session-scoped read/mutate tools
+            // which accept `SessionScopedInput`. Resource reads therefore use
+            // the default / single-session rule (`None` → the same contract a
+            // mutation tool applies when `session_id` is omitted), then read the
+            // resolved session's store. Multi-session resource addressing is
+            // deferred until the protocol exposes a way to scope a resource read.
+            let session_id = resolve_session_or_error(&sessions, None)?;
+            let session = sessions.get(session_id).ok_or_else(|| {
+                SessionResolveError::NotFound {
+                    id: session_id.to_string(),
+                    open_sessions: vec![],
+                }
+                .to_rmcp_error()
+            })?;
+            let guard = session.store.read().await;
+            crate::resources::read_resource(&guard.0, &request.uri).map(ReadResourceResult::new)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sigil_state::sessions::SessionEvent;
 
     #[test]
     fn test_server_get_info_returns_sigil_info() {
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
-        let server = SigilMcpServer::new(state, sessions);
+        let server = SigilMcpServer::new(sessions);
         let info = server.get_info();
 
         assert_eq!(info.server_info.name, "sigil");
@@ -953,5 +1198,55 @@ mod tests {
             info.instructions.is_some(),
             "instructions must be present for agents"
         );
+    }
+
+    /// Envelope/integration test: a write tool routed through
+    /// `run_session_scoped` mutates the resolved session's store AND publishes
+    /// exactly one `DocumentEvent` on that session's broadcast channel, with the
+    /// per-session seq stamped (starts at 1) and the canonical `op_type`.
+    #[tokio::test]
+    async fn test_create_page_publishes_on_session_broadcast() {
+        let sessions = Arc::new(Sessions::new(64));
+        let id = sessions.register_in_memory(sigil_core::Document::new("Untitled".to_string()));
+        let server = SigilMcpServer::new(sessions.clone());
+
+        let session = sessions.get(id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        let input = crate::types::CreatePageInput {
+            name: "Home".to_string(),
+            session_id: Some(id.to_string()),
+        };
+        let result = server
+            .run_session_scoped(input.session_id.as_deref(), move |doc| {
+                let page = crate::tools::pages::create_page_impl(doc, &input.name)?;
+                let tx = crate::tools::broadcast::single_op_transaction(
+                    &page.id,
+                    "create_page",
+                    "page",
+                    Some(serde_json::json!({"id": page.id, "name": page.name})),
+                );
+                Ok((page, sigil_state::MutationEventKind::PageCreated, None, tx))
+            })
+            .await;
+        assert!(
+            result.is_ok(),
+            "tool should succeed (err: {:?})",
+            result.err().map(|e| e.message)
+        );
+
+        match rx.try_recv().expect("broadcast event") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, sigil_state::MutationEventKind::PageCreated);
+                let tx = me.transaction.expect("tx");
+                assert_eq!(tx.seq, 1);
+                assert_eq!(tx.operations[0].op_type, "create_page");
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
+
+        // Session store reflects the write.
+        let guard = session.store.read().await;
+        assert_eq!(guard.0.pages.len(), 1);
     }
 }

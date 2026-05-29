@@ -70,15 +70,23 @@ fn multi_op_transaction(
 /// Resolves the [`SessionId`] for the current GraphQL request.
 ///
 /// Reads the [`RequestSession`] populated by [`crate::session_header::middleware`]
-/// from the async-graphql request context. Falls back to
-/// [`crate::state::App::default_session_id`] when the request has no header,
-/// preserving compatibility with single-document deployments that have not yet
-/// adopted the multi-session client.
+/// from the async-graphql request context. When the request carries no header:
 ///
-/// Returns `SESSION_REQUIRED` when neither a header nor a default session id
-/// is available — this indicates the server was started without a workfile and
-/// the client did not open a session explicitly (Task 6 adds `openSession`).
-fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
+/// - exactly one session open → fall back to
+///   [`crate::state::App::default_session_id`], preserving compatibility with
+///   single-document deployments that have not yet adopted the multi-session
+///   client;
+/// - more than one session open → return `SESSION_REQUIRED` rather than
+///   silently routing to the last-opened (default) session. This matches the
+///   MCP `resolve_session` "Ambiguous" rule (RF-003: §11 "Validation Must Be
+///   Symmetric Across All Transports"); a header-less client with multiple
+///   sessions open must name its target explicitly;
+/// - zero sessions open / no default id → return `SESSION_REQUIRED`.
+///
+/// `SESSION_REQUIRED` indicates the server was started without a workfile and
+/// the client did not open a session explicitly (Task 6 adds `openSession`),
+/// OR multiple sessions are open and the request did not disambiguate.
+pub(crate) fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> {
     // `RequestSession` is only present for HTTP requests routed through the
     // middleware. WebSocket-originated mutations (none today) and tests that
     // bypass the router both fall through to `Ok(RequestSession(None))`.
@@ -87,6 +95,16 @@ fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> 
     if let Some(id) = header_session {
         return Ok(id);
     }
+
+    // RF-003: header-less resolution is only unambiguous when exactly one
+    // session is open. With multiple sessions the default-session fallback
+    // would silently route to the last-opened session.
+    if state.app.sessions.len() > 1 {
+        return Err(async_graphql::Error::new(
+            "SESSION_REQUIRED: multiple sessions open — provide X-Sigil-Session header",
+        ));
+    }
+
     state.app.default_session_id().ok_or_else(|| {
         async_graphql::Error::new(
             "SESSION_REQUIRED: provide X-Sigil-Session header or open a workfile session",
@@ -96,7 +114,7 @@ fn resolve_session(ctx: &Context<'_>, state: &ServerState) -> Result<SessionId> 
 
 /// Loads a session by id, returning a typed error if it is missing or in
 /// the `Errored` state.
-fn require_live_session(
+pub(crate) fn require_live_session(
     state: &ServerState,
     session_id: SessionId,
 ) -> Result<std::sync::Arc<DocumentSession>> {
@@ -1367,14 +1385,19 @@ impl MutationRoot {
         // their corresponding apply has succeeded, so a failed batch never
         // emits a partial broadcast.
         //
-        // Spec 20: Mutations route through the per-session document store
-        // (`session.store`) rather than the legacy `AppState.document`. We
-        // mirror the post-apply state back to the legacy store after the
-        // batch succeeds so that (a) the persistence task still reads the
-        // authoritative document, and (b) MCP tools that have not yet been
-        // migrated continue to see consistent state. The legacy mirror is
-        // dropped entirely once MCP migrates (Tasks 8–10).
-        let broadcast_ops: Vec<OperationPayload> = {
+        // Spec 22b: Mutations route through the per-session document store
+        // (`session.store`), which is the single source of truth for reads,
+        // writes, and broadcasts. The post-apply broadcast (below) drives both
+        // the 22a persistence task and the GraphQL `transactionApplied`
+        // subscription. There is no legacy mirror and no second broadcast.
+        // RF-002: stamp the per-session seq and broadcast the transaction
+        // WHILE STILL HOLDING the store write lock, so apply/seq/broadcast are
+        // atomic per session. Concurrent mutations on one session would
+        // otherwise serialize their applies under the lock but interleave their
+        // seq-stamp/broadcast order after the guard dropped. `next_seq()` and
+        // `broadcast.send()` are both synchronous (no `.await`), so holding the
+        // write lock across them does not block the runtime.
+        let seq: u64 = {
             let mut doc_guard = session.store.write().await;
 
             // Snapshot the document state for rollback on partial failure
@@ -1427,67 +1450,36 @@ impl MutationRoot {
                 collected.push(broadcast);
             }
 
-            // Mirror the post-apply session document to the legacy store so
-            // persistence (which reads `state.app.legacy.document`) and any
-            // un-migrated MCP tools observe the same state. This is a
-            // transitional bridge — Tasks 8–10 remove the legacy store and
-            // this mirror with it.
+            // Stamp the seq + build + broadcast the transaction under the lock.
+            // The 22a persistence task and the GraphQL `transactionApplied`
+            // subscription both consume this event. Seq is per-session and
+            // strictly increasing within a session.
             //
-            // We hold both locks in a strict order (session.store write
-            // already acquired above; legacy mutex acquired here) to avoid
-            // any future TOCTOU between the apply and the mirror.
-            {
-                let mut legacy = match state.app.legacy.document.lock() {
-                    Ok(g) => g,
-                    Err(p) => {
-                        tracing::error!("legacy document mutex poisoned during mirror, recovering");
-                        p.into_inner()
-                    }
-                };
-                legacy.0 = doc_guard.0.clone();
-            }
+            // We stamp via `session.next_seq()` rather than `session.publish`
+            // because `apply_operations` must return the assigned seq in
+            // `ApplyOperationsResult` (and `publish` consumes the transaction).
+            // The ordering domain is identical — both go through the session's
+            // `seq_counter`.
+            let mut transaction = multi_op_transaction(Some(user_id), collected);
+            transaction.seq = session.next_seq();
+            let stamped_seq = transaction.seq;
 
-            collected
+            let mutation_event = MutationEvent {
+                kind: event_kind,
+                uuid: None,
+                data: None,
+                transaction: Some(transaction),
+            };
+
+            // Per-session broadcast: fire-and-forget. No subscribers is not an
+            // error.
+            let _ = session
+                .broadcast
+                .send(SessionEvent::DocumentEvent(mutation_event));
+
+            stamped_seq
         };
 
-        // Signal dirty + broadcast.
-        //
-        // The transaction payload is assigned a sequence number from the
-        // (legacy) per-app counter and broadcast on TWO channels:
-        //
-        // 1. `session.broadcast` — the per-session channel that
-        //    `subscription.rs` migrates to in this task. New subscribers
-        //    receive `SessionEvent::DocumentEvent(...)` here.
-        // 2. `state.app.legacy.event_tx` via `publish_transaction` — kept
-        //    for any subscribers / tests still on the legacy channel during
-        //    the Spec 20 migration window. Dropped together with the legacy
-        //    store in Tasks 8–10.
-        state.app.signal_dirty();
-
-        let mut transaction = multi_op_transaction(Some(user_id), broadcast_ops);
-        transaction.seq = state.app.next_seq();
-
-        let mutation_event = MutationEvent {
-            kind: event_kind,
-            uuid: None,
-            data: None,
-            transaction: Some(transaction.clone()),
-        };
-
-        // Per-session broadcast: fire-and-forget. No subscribers is not an
-        // error.
-        let _ = session
-            .broadcast
-            .send(SessionEvent::DocumentEvent(mutation_event.clone()));
-
-        // Legacy broadcast: also fire-and-forget. `publish_transaction`
-        // would re-assign seq, so we use the lower-level `event_tx` path
-        // directly to preserve the seq we already assigned above.
-        if let Some(tx) = state.app.legacy.event_tx() {
-            let _ = tx.send(mutation_event);
-        }
-
-        let seq = transaction.seq;
         Ok(ApplyOperationsResult {
             seq: seq.to_string(),
         })
@@ -1683,12 +1675,10 @@ mod tests {
         .finish()
     }
 
-    /// Applies a closure to the document held in BOTH the session store
-    /// (mutated by GraphQL `apply_operations`) and the legacy
-    /// `AppState.document` (read by tests for verification and by
-    /// persistence). Keeps the two stores consistent for tests that
-    /// pre-seed data outside the GraphQL apply path.
-    fn apply_to_session_and_legacy<F, R>(state: &ServerState, f: F) -> R
+    /// Applies a closure to the document held in the default session store.
+    /// Used by tests that pre-seed data outside the GraphQL apply path
+    /// (Spec 22b — the session store is the single source of truth).
+    fn apply_to_session<F, R>(state: &ServerState, f: F) -> R
     where
         F: FnOnce(&mut sigil_core::Document) -> R,
     {
@@ -1699,25 +1689,32 @@ mod tests {
             .get(session_id)
             .expect("default session registered");
 
-        // Use blocking_write because tests run inside `tokio::test` but
-        // these helpers are sync. `RwLock::blocking_write` only works on
-        // a multi-threaded runtime — `#[tokio::test]` uses the
-        // single-threaded runtime by default, so we instead use a
-        // try-loop guarded by a never-contended invariant: tests do not
-        // run concurrent mutations on the same store. A single-attempt
-        // `try_write` is sufficient.
+        // `#[tokio::test]` uses the single-threaded runtime by default, so
+        // `blocking_write` would deadlock. Tests never run concurrent
+        // mutations on the same store, so a single-attempt `try_write` is
+        // sufficient.
         let mut session_doc = session
             .store
             .try_write()
             .expect("test session lock uncontended");
-        let result = f(&mut session_doc.0);
+        f(&mut session_doc.0)
+    }
 
-        // Mirror to legacy.document so reads via `state.app.document.lock()`
-        // see the same state.
-        let mut legacy_doc = state.app.document.lock().expect("legacy lock");
-        legacy_doc.0 = session_doc.0.clone();
-
-        result
+    /// Reads (a clone of) the default session store document for assertions in
+    /// sync test bodies (Spec 22b — the session store is the single source of
+    /// truth). Returns an owned `Document` so the caller holds no lock.
+    fn read_session_doc(state: &ServerState) -> sigil_core::Document {
+        let session_id = state.app.default_session_id().expect("default session id");
+        let session = state
+            .app
+            .sessions
+            .get(session_id)
+            .expect("default session registered");
+        let guard = session
+            .store
+            .try_read()
+            .expect("test session read lock uncontended");
+        guard.0.clone()
     }
 
     /// Helper: creates a frame node directly via the state and returns its UUID string.
@@ -1740,7 +1737,7 @@ mod tests {
             initial_transform: None,
         };
 
-        apply_to_session_and_legacy(state, |doc| {
+        apply_to_session(state, |doc| {
             cmd.validate(doc).expect("create node validate");
             cmd.apply(doc).expect("create node apply");
         });
@@ -2121,7 +2118,7 @@ mod tests {
             initial_transform: None,
         };
 
-        apply_to_session_and_legacy(state, |doc| {
+        apply_to_session(state, |doc| {
             cmd.validate(doc).expect("create text node validate");
             cmd.apply(doc).expect("create text node apply");
         });
@@ -2149,7 +2146,7 @@ mod tests {
         assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
 
         // Verify content was updated in the document
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
@@ -2207,7 +2204,7 @@ mod tests {
         assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
 
         // Verify font_size was updated
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
@@ -2271,7 +2268,7 @@ mod tests {
         assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
 
         // Verify the shadow was applied to the document.
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
@@ -2334,7 +2331,7 @@ mod tests {
         );
 
         // Verify shadow is gone.
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
@@ -2396,7 +2393,7 @@ mod tests {
         let res = schema.execute(&query).await;
         assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
 
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert_eq!(doc.pages.len(), 1, "document should have one page");
         assert_eq!(doc.pages[0].name, "Landing");
         assert_eq!(doc.pages[0].id.uuid().to_string(), page_uuid);
@@ -2464,7 +2461,7 @@ mod tests {
             rename_res.errors
         );
 
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert_eq!(doc.pages[0].name, "New Name");
     }
 
@@ -2515,7 +2512,7 @@ mod tests {
             reorder_res.errors
         );
 
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert_eq!(doc.pages[0].id.uuid().to_string(), page_c_uuid);
         assert_eq!(doc.pages[1].id.uuid().to_string(), page_a_uuid);
         assert_eq!(doc.pages[2].id.uuid().to_string(), page_b_uuid);
@@ -2549,7 +2546,7 @@ mod tests {
             "errors: {:?}",
             create_res.errors
         );
-        assert_eq!(state.app.document.lock().unwrap().pages.len(), 2);
+        assert_eq!(read_session_doc(&state).pages.len(), 2);
 
         // Delete the page
         let delete_query = format!(
@@ -2569,7 +2566,7 @@ mod tests {
             delete_res.errors
         );
 
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert_eq!(
             doc.pages.len(),
             1,
@@ -2689,7 +2686,7 @@ mod tests {
         assert!(res.errors.is_empty(), "add token errors: {:?}", res.errors);
 
         // Verify the token exists in the document.
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert!(
             doc.token_context.get("spacing.md").is_some(),
             "token 'spacing.md' should exist after addToken"
@@ -2707,7 +2704,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a color token directly.
-        apply_to_session_and_legacy(&state, |doc| {
+        apply_to_session(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.brand".to_string(),
@@ -2759,7 +2756,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a token.
-        apply_to_session_and_legacy(&state, |doc| {
+        apply_to_session(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.accent".to_string(),
@@ -2790,7 +2787,7 @@ mod tests {
             res.errors
         );
 
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         assert!(
             doc.token_context.get("color.accent").is_none(),
             "token 'color.accent' should be gone after removeToken"
@@ -2808,7 +2805,7 @@ mod tests {
         let schema = test_schema(state.clone());
 
         // Seed a token first.
-        apply_to_session_and_legacy(&state, |doc| {
+        apply_to_session(&state, |doc| {
             let token = Token::new(
                 TokenId::new(uuid::Uuid::new_v4()),
                 "color.primary".to_string(),
@@ -3011,7 +3008,7 @@ mod tests {
         assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
 
         // Verify corners were updated in the document.
-        let doc = state.app.document.lock().unwrap();
+        let doc = read_session_doc(&state);
         let node_uuid: uuid::Uuid = uuid.parse().unwrap();
         let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
         let node = doc.arena.get(node_id).expect("get node");
@@ -3246,6 +3243,132 @@ mod tests {
                 panic!("expected DocumentEvent, got SessionFatal: {reason}");
             }
         }
+    }
+
+    /// Spec 22b: a mutation on a fresh session gets per-session seq 1 (the
+    /// global counter is gone). Confirms `apply_operations` stamps the seq
+    /// from `session.next_seq()`.
+    #[tokio::test]
+    async fn test_apply_operations_uses_per_session_seq() {
+        let state = ServerState::new();
+        let schema = test_schema(state);
+        let mutation = format!(
+            r#"mutation {{ applyOperations(userId: "u", operations: [{{ createPage: {{ pageUuid: "{}", name: "X" }} }}]) {{ seq }} }}"#,
+            uuid::Uuid::new_v4()
+        );
+        let resp = schema.execute(&mutation).await;
+        assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
+        let seq = resp.data.into_json().expect("data")["applyOperations"]["seq"]
+            .as_str()
+            .expect("seq str")
+            .to_string();
+        assert_eq!(
+            seq, "1",
+            "first mutation on a fresh session gets per-session seq 1"
+        );
+    }
+
+    /// RF-002: the seq stamp + broadcast happen WHILE the store write lock is
+    /// held, so a fresh session's first mutation broadcasts seq 1 AND the apply
+    /// is reflected in the store atomically. This asserts both halves on the
+    /// same mutation: the broadcast event carries seq 1, and the post-mutation
+    /// store reflects the rename.
+    #[tokio::test]
+    async fn test_apply_operations_first_mutation_broadcasts_seq_one_and_applies() {
+        let state = ServerState::new();
+        let session_id = state.app.default_session_id().expect("default");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+
+        let uuid = create_test_frame_direct(&state, "Original");
+        let schema = test_schema(state.clone());
+
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{ setField: {{ nodeUuid: "{uuid}", path: "name", value: "\"Renamed\"" }} }}],
+                    userId: "test"
+                ) {{ seq }}
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(res.errors.is_empty(), "errors: {:?}", res.errors);
+
+        // Returned seq is 1 (first mutation on a fresh session).
+        let returned_seq = res.data.into_json().expect("data")["applyOperations"]["seq"]
+            .as_str()
+            .expect("seq str")
+            .to_string();
+        assert_eq!(returned_seq, "1", "returned seq must be 1");
+
+        // The broadcast event carries the same seq, stamped under the lock.
+        let event = rx.try_recv().expect("session channel must receive event");
+        match event {
+            sigil_state::sessions::SessionEvent::DocumentEvent(me) => {
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.seq, 1, "broadcast transaction seq must be 1");
+            }
+            sigil_state::sessions::SessionEvent::SessionFatal { reason } => {
+                panic!("expected DocumentEvent, got SessionFatal: {reason}");
+            }
+        }
+
+        // The apply is reflected in the post-mutation store.
+        let doc = read_session_doc(&state);
+        let renamed = doc.arena.iter().any(|node| node.name == "Renamed");
+        assert!(
+            renamed,
+            "renamed node must be present in the post-mutation store"
+        );
+    }
+
+    /// RF-003: header-less GraphQL resolution must match MCP on ambiguity.
+    /// With more than one session open and NO `X-Sigil-Session` header, a
+    /// mutation must error with `SESSION_REQUIRED` rather than silently routing
+    /// to the default (last-opened) session.
+    #[tokio::test]
+    async fn test_apply_operations_errors_when_multiple_sessions_and_no_header() {
+        let state = ServerState::new();
+        // `ServerState::new` registers one in-memory default session. Register a
+        // second so the registry holds two; now header-less resolution is
+        // ambiguous.
+        let second_doc = sigil_core::Document::new("Second".to_string());
+        let _second_id = state.app.sessions.register_in_memory(second_doc);
+        assert_eq!(state.app.sessions.len(), 2, "two sessions must be open");
+
+        // `test_schema` injects `RequestSession(None)` — no header.
+        let schema = test_schema(state);
+        let query = format!(
+            r#"mutation {{ applyOperations(userId: "u", operations: [{{ createPage: {{ pageUuid: "{}", name: "X" }} }}]) {{ seq }} }}"#,
+            uuid::Uuid::new_v4()
+        );
+        let res = schema.execute(&query).await;
+        assert_eq!(res.errors.len(), 1, "expected exactly one error");
+        assert!(
+            res.errors[0].message.starts_with("SESSION_REQUIRED"),
+            "expected SESSION_REQUIRED, got: {}",
+            res.errors[0].message
+        );
+    }
+
+    /// RF-003 back-compat: with exactly ONE session open and no header, the
+    /// default-session fallback still resolves (single-document deployments).
+    #[tokio::test]
+    async fn test_apply_operations_resolves_when_single_session_and_no_header() {
+        let state = ServerState::new();
+        assert_eq!(state.app.sessions.len(), 1, "exactly one session open");
+
+        let schema = test_schema(state);
+        let query = format!(
+            r#"mutation {{ applyOperations(userId: "u", operations: [{{ createPage: {{ pageUuid: "{}", name: "X" }} }}]) {{ seq }} }}"#,
+            uuid::Uuid::new_v4()
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "single-session header-less resolution must succeed, errors: {:?}",
+            res.errors
+        );
     }
 
     /// Spec 22a §3.3: `openSession` MUST register a per-session persistence

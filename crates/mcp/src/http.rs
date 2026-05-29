@@ -39,25 +39,22 @@ use std::sync::Arc;
 
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::{StreamableHttpServerConfig, StreamableHttpService};
-use sigil_state::{AppState, Sessions};
+use sigil_state::Sessions;
 
 use crate::server::SigilMcpServer;
 
 /// Builds the Streamable HTTP service for the MCP transport.
 ///
 /// Returns a Tower service that can be mounted with
-/// [`axum::Router::nest_service`] at `/mcp`. The service shares `state` and
-/// `sessions` with the rest of the server, so MCP tools see the same
-/// document mutations as GraphQL clients AND the same open-sessions list
-/// that the GraphQL `sessions` query returns.
+/// [`axum::Router::nest_service`] at `/mcp`. The service shares `sessions` with
+/// the rest of the server, so MCP tools see the same document mutations as
+/// GraphQL clients AND the same open-sessions list that the GraphQL `sessions`
+/// query returns.
 ///
-/// The factory closure clones `state` and `sessions` on every incoming
-/// request — `AppState` is internally `Arc`-backed (document mutex,
-/// persistence channel, event broadcaster) and `Sessions` is wrapped in
-/// `Arc` at the type level, so both clones are cheap.
+/// The factory closure clones `sessions` on every incoming request — `Sessions`
+/// is wrapped in `Arc` at the type level, so the clone is cheap.
 #[must_use]
 pub fn mcp_http_service(
-    state: AppState,
     sessions: Arc<Sessions>,
 ) -> StreamableHttpService<SigilMcpServer, LocalSessionManager> {
     // `StreamableHttpServerConfig` is `#[non_exhaustive]`; the builder methods
@@ -77,7 +74,7 @@ pub fn mcp_http_service(
     let config = StreamableHttpServerConfig::default();
 
     StreamableHttpService::new(
-        move || Ok(SigilMcpServer::new(state.clone(), sessions.clone())),
+        move || Ok(SigilMcpServer::new(sessions.clone())),
         Arc::new(LocalSessionManager::default()),
         config,
     )
@@ -87,7 +84,7 @@ pub fn mcp_http_service(
 mod tests {
     use super::*;
     use axum::Router;
-    use sigil_state::{AppState, Sessions};
+    use sigil_state::Sessions;
     use tokio::net::TcpListener;
 
     /// End-to-end smoke test: mount the MCP HTTP service in an Axum router,
@@ -107,9 +104,8 @@ mod tests {
     /// client does after seeing its response id.
     #[tokio::test]
     async fn mcp_http_endpoint_initialize_then_tools_list_returns_tools() {
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -223,7 +219,6 @@ mod tests {
     async fn list_open_sessions_via_http_returns_registered_sessions() {
         use sigil_core::Document;
 
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
         // Register two in-memory sessions BEFORE building the service — the
         // `Arc<Sessions>` is shared, so later additions would also be visible,
@@ -231,7 +226,7 @@ mod tests {
         let _id_a = sessions.register_in_memory(Document::new("alpha".into()));
         let _id_b = sessions.register_in_memory(Document::new("beta".into()));
 
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions.clone()));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -358,11 +353,10 @@ mod tests {
     async fn get_active_workfiles_via_http_returns_same_shape_as_list_open_sessions() {
         use sigil_core::Document;
 
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
         let _id = sessions.register_in_memory(Document::new("solo".into()));
 
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions.clone()));
 
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
@@ -466,12 +460,11 @@ mod tests {
     async fn create_page_with_explicit_session_id_routes_to_named_session() {
         use sigil_core::Document;
 
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
         let id_a = sessions.register_in_memory(Document::new("alpha".into()));
         let id_b = sessions.register_in_memory(Document::new("beta".into()));
 
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions.clone()));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {
@@ -573,12 +566,11 @@ mod tests {
     async fn create_page_without_session_id_errors_when_multiple_open() {
         use sigil_core::Document;
 
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
         let _a = sessions.register_in_memory(Document::new("alpha".into()));
         let _b = sessions.register_in_memory(Document::new("beta".into()));
 
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions.clone()));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {
@@ -678,11 +670,10 @@ mod tests {
     async fn create_page_without_session_id_succeeds_with_single_session() {
         use sigil_core::Document;
 
-        let state = AppState::new();
         let sessions = Arc::new(Sessions::new(64));
         let id = sessions.register_in_memory(Document::new("solo".into()));
 
-        let router = Router::new().nest_service("/mcp", mcp_http_service(state, sessions.clone()));
+        let router = Router::new().nest_service("/mcp", mcp_http_service(sessions.clone()));
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let addr = listener.local_addr().expect("local addr");
         tokio::spawn(async move {

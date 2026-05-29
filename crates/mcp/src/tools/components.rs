@@ -4,9 +4,6 @@
 //! Mutation commands (add, remove, update component) are out of scope for this
 //! plan and will be added in a later task.
 
-use sigil_state::AppState;
-
-use crate::server::acquire_document_lock;
 use crate::types::ComponentInfo;
 
 // ── Tool implementations ─────────────────────────────────────────────────────
@@ -14,9 +11,9 @@ use crate::types::ComponentInfo;
 /// Returns a summary of every component definition registered in the document.
 ///
 /// The list is sorted by component name for stable, deterministic output.
+/// Pure read over `&Document`; the caller holds the session store read lock.
 #[must_use]
-pub fn list_components_impl(state: &AppState) -> Vec<ComponentInfo> {
-    let doc = acquire_document_lock(state);
+pub fn list_components_impl(doc: &sigil_core::Document) -> Vec<ComponentInfo> {
     let mut components: Vec<ComponentInfo> = doc
         .components
         .values()
@@ -36,12 +33,10 @@ pub fn list_components_impl(state: &AppState) -> Vec<ComponentInfo> {
 #[cfg(test)]
 mod tests {
     use sigil_core::id::ComponentId;
-    use sigil_core::{ComponentDef, NodeId};
-    use sigil_state::AppState;
+    use sigil_core::{ComponentDef, Document, NodeId};
     use uuid::Uuid;
 
     use super::*;
-    use crate::server::acquire_document_lock;
 
     fn make_component_def(name: &str) -> ComponentDef {
         ComponentDef::new(
@@ -56,8 +51,8 @@ mod tests {
 
     #[test]
     fn test_list_components_empty() {
-        let state = AppState::new();
-        let components = list_components_impl(&state);
+        let doc = Document::new("Untitled".to_string());
+        let components = list_components_impl(&doc);
         assert!(
             components.is_empty(),
             "expected no components in fresh document"
@@ -66,17 +61,14 @@ mod tests {
 
     #[test]
     fn test_list_components_returns_registered_components() {
-        let state = AppState::new();
+        let mut doc = Document::new("Untitled".to_string());
 
-        {
-            let mut doc = acquire_document_lock(&state);
-            doc.add_component(make_component_def("Button"))
-                .expect("add Button");
-            doc.add_component(make_component_def("Card"))
-                .expect("add Card");
-        }
+        doc.add_component(make_component_def("Button"))
+            .expect("add Button");
+        doc.add_component(make_component_def("Card"))
+            .expect("add Card");
 
-        let components = list_components_impl(&state);
+        let components = list_components_impl(&doc);
         assert_eq!(components.len(), 2, "expected two components");
 
         // Sorted by name: Button before Card.

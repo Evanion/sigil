@@ -15,7 +15,7 @@
 //!
 //! ## Broadcast obligations
 //!
-//! These tools are **read-only** — they do not call `signal_dirty` and do not
+//! These tools are **read-only** — they do not mutate any session store and do not
 //! broadcast a `SessionEvent`. The CLAUDE.md §4 "all state-mutating MCP tool
 //! calls MUST trigger persistence AND broadcast" obligation does not apply.
 
