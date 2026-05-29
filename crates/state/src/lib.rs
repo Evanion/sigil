@@ -222,6 +222,26 @@ impl AppState {
         }
     }
 
+    /// Creates an `AppState` holding a pre-loaded document at `workfile_path`
+    /// **without** a persistence task.
+    ///
+    /// Used by the server when per-session persistence (Spec 22a) owns writing
+    /// the document to disk. The legacy `AppState` still mirrors the document
+    /// (removed in 22c), but it is no longer a persistence source, so it carries
+    /// no `dirty_tx` and no task handle. `signal_dirty()` is a no-op on instances
+    /// built this way.
+    #[must_use]
+    pub fn new_with_document(document: Arc<Mutex<SendDocument>>, workfile_path: PathBuf) -> Self {
+        Self {
+            document,
+            workfile_path: Some(workfile_path),
+            dirty_tx: None,
+            persistence_handle: Arc::new(Mutex::new(None)),
+            event_tx: None,
+            seq_counter: Arc::new(AtomicU64::new(1)),
+        }
+    }
+
     /// Sets the broadcast sender for mutation events.
     ///
     /// Called by the server crate after constructing the broadcast channel.
@@ -542,6 +562,19 @@ mod tests {
         assert_eq!(doc.metadata.name, "Untitled");
         assert_eq!(doc.pages.len(), 0);
         assert_eq!(doc.arena.len(), 0);
+    }
+
+    #[test]
+    fn test_new_with_document_holds_doc_and_path_without_persistence() {
+        use std::path::PathBuf;
+        let doc = Document::new("Loaded".to_string());
+        let path = PathBuf::from("/tmp/example.sigil");
+        let state =
+            AppState::new_with_document(Arc::new(Mutex::new(SendDocument(doc))), path.clone());
+        assert_eq!(state.workfile_path.as_deref(), Some(path.as_path()));
+        assert_eq!(state.document.lock().unwrap().metadata.name, "Loaded");
+        // No persistence task is configured: signal_dirty is a silent no-op.
+        state.signal_dirty();
     }
 
     #[test]
