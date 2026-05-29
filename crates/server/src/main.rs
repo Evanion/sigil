@@ -7,14 +7,34 @@ use anyhow::Context as _;
 use clap::Parser;
 
 use sigil_server::{build_app, state::ServerState};
+use tokio::sync::oneshot;
 use tracing_subscriber::EnvFilter;
 
-/// Maximum time to wait for the persistence task to complete a final flush
-/// during shutdown.
-const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Docker's default `--stop-timeout` grace before SIGKILL. The aggregate of all
+/// shutdown phase timeouts MUST stay under this so a graceful flush is never cut
+/// off by SIGKILL (RF-001).
+const DOCKER_STOP_GRACE: Duration = Duration::from_secs(10);
+
+/// Max time to wait for in-flight HTTP/WebSocket connections to drain AFTER the
+/// shutdown signal fires.
+const HTTP_DRAIN_TIMEOUT: Duration = Duration::from_secs(3);
 
 /// Maximum time to wait for the MCP stdio task to drain on shutdown.
-const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const MCP_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Maximum time to wait for the per-session persistence tasks to flush on shutdown.
+const PERSISTENCE_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
+
+// Compile-time guarantee: the worst-case aggregate shutdown duration stays under
+// the container stop grace, so the persistence flush (which runs last, after MCP,
+// to capture any final MCP-originated mutation) is never interrupted by SIGKILL.
+const _: () = assert!(
+    HTTP_DRAIN_TIMEOUT.as_secs()
+        + MCP_SHUTDOWN_TIMEOUT.as_secs()
+        + PERSISTENCE_SHUTDOWN_TIMEOUT.as_secs()
+        < DOCKER_STOP_GRACE.as_secs(),
+    "aggregate shutdown budget must stay under Docker's default stop grace"
+);
 
 /// Sigil server. Runs the axum HTTP+WebSocket+MCP stack.
 ///
@@ -113,12 +133,35 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind((host.as_str(), port)).await?;
     tracing::info!("listening on {host}:{port}");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
 
-    // Graceful shutdown: drain the MCP task first so any final dirty signal
-    // it might send is captured before we drop dirty_tx.
+    // Bound the HTTP graceful drain (RF-001). Spawn serve so we can time only the
+    // post-signal drain: the signal handler notifies via a oneshot the moment the
+    // signal arrives, then we bound the remaining connection drain.
+    let (signal_tx, signal_rx) = oneshot::channel::<()>();
+    let serve_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                shutdown_signal().await;
+                let _ = signal_tx.send(());
+            })
+            .await
+    });
+
+    // Block until the shutdown signal fires (or serve ends on its own).
+    let _ = signal_rx.await;
+
+    match tokio::time::timeout(HTTP_DRAIN_TIMEOUT, serve_task).await {
+        Ok(Ok(Ok(()))) => tracing::info!("HTTP server drained cleanly"),
+        Ok(Ok(Err(e))) => tracing::error!("HTTP server error during shutdown: {e}"),
+        Ok(Err(join_err)) => tracing::error!("HTTP serve task panicked: {join_err}"),
+        Err(_) => tracing::warn!(
+            "HTTP drain exceeded {HTTP_DRAIN_TIMEOUT:?}; abandoning in-flight \
+             connections to guarantee the persistence flush completes"
+        ),
+    }
+
+    // Drain the MCP task before the persistence tasks so any final mutation the
+    // MCP stdio task broadcasts is captured by the per-session persistence loops.
     if let Some(handle) = mcp_handle {
         tracing::info!("waiting for MCP task to drain...");
         match tokio::time::timeout(MCP_SHUTDOWN_TIMEOUT, handle).await {
