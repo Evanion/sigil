@@ -181,7 +181,8 @@ pub struct SessionListResult {
 pub struct SessionScopedInput {
     /// Optional session id. When omitted and exactly one session is open it is
     /// used; when multiple are open the call errors with the open-sessions list.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    // RF-006: no `skip_serializing_if` — this type derives only `Deserialize`.
+    #[serde(default)]
     pub session_id: Option<String>,
 }
 

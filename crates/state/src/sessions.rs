@@ -327,6 +327,21 @@ impl Sessions {
     ///
     /// Returns the new [`SessionId`]. The session starts in
     /// [`SessionState::Live`].
+    ///
+    /// # `MAX_SESSIONS` exemption (RF-004)
+    ///
+    /// This method intentionally does NOT enforce the [`MAX_SESSIONS`] cap, and
+    /// is infallible by design. It is the controlled single startup/synthetic-
+    /// session path: the server registers exactly one in-memory default session
+    /// at boot, and tests register a small fixed number. There is no untrusted
+    /// or unbounded caller. The cap is enforced at the public multi-session
+    /// entry point, [`Sessions::open`], which IS fallible and rejects with
+    /// [`SessionsError::TooManySessions`] once `by_id.len() >= MAX_SESSIONS`.
+    ///
+    /// Any future caller that registers in-memory sessions in bulk (or in
+    /// response to external input) MUST route through the fallible
+    /// [`Sessions::open`] instead, so the cap is enforced at that insertion
+    /// point.
     #[must_use]
     pub fn register_in_memory(&self, document: Document) -> SessionId {
         let id = SessionId::new();
