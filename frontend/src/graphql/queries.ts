@@ -65,3 +65,17 @@ export const NODE_QUERY = `
  * broadcast value (spec-fonts-1 Task 15a).
  */
 export const FONTS_QUERY = `query Fonts { fonts }`;
+
+/**
+ * Query the raw font bytes for a single font entry by its stable UUID.
+ *
+ * The server returns the bytes as a base64-encoded string (GraphQL has no
+ * binary scalar).  Returns `null` when the id refers to a non-Custom entry
+ * (system_reference, bundled, library) or when no bytes are stored for the
+ * id — both are non-error conditions.  An invalid UUID string produces a
+ * GraphQL error.
+ *
+ * Consumers decode with `atob` / a Uint8Array helper and pass to `loadFonts`
+ * via the `bytesById` map parameter (Task 17b font-loading orchestrator).
+ */
+export const FONT_BYTES_QUERY = `query FontBytes($id: String!) { fontBytes(id: $id) }`;

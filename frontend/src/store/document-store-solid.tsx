@@ -171,6 +171,27 @@ export interface DocumentStoreAPI {
    */
   getFontEntry(id: string): FontEntry | undefined;
 
+  /**
+   * The urql `Client` instance used for all GraphQL queries and mutations.
+   *
+   * Exposed so that call sites outside the store (e.g. the font-loading
+   * orchestrator in Canvas.tsx) can issue their own typed queries (e.g.
+   * `fontBytes`) without needing a second client instance.
+   *
+   * Typed as `ReturnType<typeof createClient>` to avoid importing `Client`
+   * from `@urql/core` (not a direct dependency) and to keep the type exact.
+   * Callers that need only a structural subset (e.g. `FontBytesClient`) can
+   * assign this to a narrower interface — the urql client satisfies any
+   * structural subtype because it implements the full `query()` contract.
+   *
+   * Optional so that test-only and Storybook mock store objects do not need
+   * to provide a real urql client.  Canvas.tsx guards with `??` before
+   * passing it to `installFontLoadingOrchestrator`.
+   *
+   * Read-only; the store owns the client's lifetime.
+   */
+  readonly urqlClient?: ReturnType<typeof createClient>;
+
   // Token mutations
   createToken(name: string, tokenType: TokenType, value: TokenValue, description?: string): void;
   updateToken(name: string, value: TokenValue, description?: string): void;
@@ -2942,6 +2963,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     renameToken,
     resolveToken: resolveTokenLocal,
     getFontEntry,
+    urqlClient: client,
     createPage,
     deletePage,
     renamePage,
