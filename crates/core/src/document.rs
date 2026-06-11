@@ -5,9 +5,7 @@ use std::collections::HashMap;
 
 use crate::arena::Arena;
 use crate::error::CoreError;
-use crate::font::{
-    DEFAULT_FONT_ENTRY_ID, EmbedDecision, FontEntry, FontMetrics, FontSource, FontTable,
-};
+use crate::font::FontTable;
 use crate::id::{ComponentId, NodeId, PageId};
 pub use crate::prototype::Transition;
 use crate::validate::CURRENT_SCHEMA_VERSION;
@@ -78,57 +76,6 @@ pub struct Document {
 }
 
 impl Document {
-    /// Builds a `FontTable` pre-seeded with the bundled "Inter" default entry.
-    ///
-    /// Both `new()` and `with_capacity()` call this helper so the seed logic
-    /// lives in one place (DRY). The seed uses approximate Inter metrics
-    /// (`units_per_em = 2048`) satisfying all `FontMetrics` invariants.
-    ///
-    /// This is an infallible private helper — all inputs are compile-time
-    /// constants that are known-valid. The `expect()` calls here are exempt
-    /// from the "no unwrap/expect in core" rule because:
-    /// (a) this is a controlled startup path with known-good literal inputs,
-    /// (b) the public `font_table_mut().add()` fallible boundary protects
-    ///     untrusted callers, per CLAUDE.md §11 "Constants Must Be Enforced"
-    ///     exemption documentation.
-    fn seed_default_font_table() -> FontTable {
-        // Approximate Inter metrics (units_per_em=2048). Exact fidelity is not
-        // required here; these values satisfy all FontMetrics invariants and
-        // give downstream layout reasonable defaults.
-        let metrics = FontMetrics::new(
-            2048,                           // units_per_em
-            1984.0,                         // ascent (positive, design units)
-            -494.0,                         // descent (negative by convention)
-            0.0,                            // line_gap
-            1456.0,                         // cap_height
-            1118.0,                         // x_height
-            0.0,                            // italic_angle (upright)
-            1024.0,                         // avg_advance
-            [2, 0, 0, 0, 0, 0, 0, 0, 0, 0], // PANOSE: panose[0]=2 → Latin Text
-            false,                          // is_serif: Inter is a sans-serif typeface
-        )
-        .expect("Inter seed metrics are compile-time constants and must be valid");
-
-        let entry = FontEntry::new(
-            DEFAULT_FONT_ENTRY_ID,
-            "Inter".to_string(),
-            "Inter-Regular".to_string(),
-            FontSource::Bundled,
-            metrics,
-            0,                              // fs_type: 0 = installable embedding
-            EmbedDecision::ReferenceSystem, // bundled app font: reference, do not embed
-            false,                          // is_variable: base Inter is not variable
-            vec![],                         // axes: none for a non-variable font
-        )
-        .expect("Inter seed entry uses compile-time constants and must be valid");
-
-        let mut table = FontTable::new();
-        table
-            .add(entry)
-            .expect("seeding a single entry into an empty table must succeed");
-        table
-    }
-
     /// Creates a new empty document with the given name.
     #[must_use]
     pub fn new(name: String) -> Self {
@@ -140,7 +87,7 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
-            font_table: Self::seed_default_font_table(),
+            font_table: FontTable::with_bundled_default(),
         }
     }
 
@@ -155,7 +102,7 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
-            font_table: Self::seed_default_font_table(),
+            font_table: FontTable::with_bundled_default(),
         }
     }
 

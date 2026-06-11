@@ -187,6 +187,36 @@ impl FontMetrics {
         })
     }
 
+    /// Constructs the Inter default metrics infallibly using compile-time constants.
+    ///
+    /// # Controlled-infallible-startup exemption (CLAUDE.md §11, point 4)
+    ///
+    /// (a) Every literal used here is a compile-time constant whose value is
+    ///     known to satisfy all `FontMetrics::new()` invariants
+    ///     (`units_per_em > 0`, all f32 fields finite, `ascent >= 0`,
+    ///     `line_gap >= 0`).
+    /// (b) The sibling fallible boundary is `FontMetrics::new()`, which
+    ///     enforces all those invariants for untrusted callers.
+    /// (c) `test_inter_default_satisfies_new_invariants` feeds these exact
+    ///     values back through `new()` — any future change to the literals
+    ///     that violates an invariant will be caught immediately by that test.
+    /// (d) Any future change to these literals MUST keep that test green.
+    #[must_use]
+    pub(crate) fn inter_default() -> Self {
+        Self {
+            units_per_em: 2048,
+            ascent: 1984.0,
+            descent: -494.0,
+            line_gap: 0.0,
+            cap_height: 1456.0,
+            x_height: 1118.0,
+            italic_angle: 0.0,
+            avg_advance: 1024.0,
+            panose: [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            is_serif: false,
+        }
+    }
+
     // ── Accessors ────────────────────────────────────────────────────
 
     /// Design units per em — the grid resolution of this font.
@@ -521,6 +551,35 @@ impl FontEntry {
         })
     }
 
+    /// Constructs the bundled Inter default font entry infallibly using
+    /// compile-time constants.
+    ///
+    /// # Controlled-infallible-startup exemption (CLAUDE.md §11, point 4)
+    ///
+    /// (a) Every field used here is a compile-time constant whose value is
+    ///     known to satisfy all `FontEntry::new()` invariants (CSS-safe family
+    ///     and postscript names, valid axes).
+    /// (b) The sibling fallible boundary is `FontEntry::new()`, which enforces
+    ///     those invariants for untrusted callers.
+    /// (c) `test_bundled_default_satisfies_new_invariants` feeds these exact
+    ///     values back through `new()` — any future change to the literals
+    ///     that violates an invariant will be caught immediately by that test.
+    /// (d) Any future change to these literals MUST keep that test green.
+    #[must_use]
+    pub(crate) fn bundled_default() -> Self {
+        Self {
+            id: DEFAULT_FONT_ENTRY_ID,
+            family: "Inter".to_string(),
+            postscript_name: "Inter-Regular".to_string(),
+            source: FontSource::Bundled,
+            metrics: FontMetrics::inter_default(),
+            fs_type: 0,
+            embeddable: EmbedDecision::ReferenceSystem,
+            is_variable: false,
+            axes: Vec::new(),
+        }
+    }
+
     // ── Accessors ────────────────────────────────────────────────────
 
     /// Stable UUID for this font entry.
@@ -766,6 +825,28 @@ impl FontTable {
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
+        }
+    }
+
+    /// Creates a `FontTable` pre-seeded with the bundled Inter default entry.
+    ///
+    /// Called from `Document::new()` and `Document::with_capacity()` — both
+    /// are infallible constructors that cannot return `Result`.
+    ///
+    /// # Controlled-infallible-startup exemption (CLAUDE.md §11, point 4)
+    ///
+    /// (a) The single entry inserted here is built by `FontEntry::bundled_default()`,
+    ///     which uses compile-time constants that satisfy all invariants.
+    /// (b) The sibling fallible boundary is `FontTable::add()`, which enforces
+    ///     capacity and uniqueness for untrusted callers.
+    /// (c) `test_bundled_default_satisfies_new_invariants` re-runs the exact
+    ///     literals through `FontEntry::new()` to prevent silent drift.
+    /// (d) Any future caller that inserts entries in bulk or from untrusted
+    ///     input MUST use `FontTable::add()`, not this constructor.
+    #[must_use]
+    pub fn with_bundled_default() -> Self {
+        Self {
+            entries: vec![FontEntry::bundled_default()],
         }
     }
 
@@ -1489,6 +1570,63 @@ mod tests {
         let t = FontTable::default();
         assert!(t.is_empty());
         assert_eq!(t.len(), 0);
+    }
+
+    // ── Infallible bundled-default constructors ────────────────────────────
+
+    #[test]
+    fn test_inter_default_satisfies_new_invariants() {
+        // Drift-prevention: feed the exact values used in `FontMetrics::inter_default()`
+        // back through the fallible `FontMetrics::new()` and assert it accepts them.
+        // If the literals in `inter_default()` are ever changed to invalid values,
+        // this test will catch the drift before production code is affected.
+        let m = FontMetrics::inter_default();
+        let result = FontMetrics::new(
+            m.units_per_em(),
+            m.ascent(),
+            m.descent(),
+            m.line_gap(),
+            m.cap_height(),
+            m.x_height(),
+            m.italic_angle(),
+            m.avg_advance(),
+            *m.panose(),
+            m.is_serif(),
+        );
+        assert!(
+            result.is_ok(),
+            "FontMetrics::inter_default() values must satisfy FontMetrics::new() invariants"
+        );
+    }
+
+    #[test]
+    fn test_bundled_default_satisfies_new_invariants() {
+        // Drift-prevention: feed the exact values used in `FontEntry::bundled_default()`
+        // back through the fallible `FontEntry::new()` and assert it accepts them.
+        let e = FontEntry::bundled_default();
+        assert_eq!(
+            e.id(),
+            DEFAULT_FONT_ENTRY_ID,
+            "id must be DEFAULT_FONT_ENTRY_ID"
+        );
+        assert_eq!(e.family(), "Inter", "family must be Inter");
+        assert_eq!(e.source(), &FontSource::Bundled, "source must be Bundled");
+
+        let result = FontEntry::new(
+            e.id(),
+            e.family().to_string(),
+            e.postscript_name().to_string(),
+            e.source().clone(),
+            e.metrics().clone(),
+            e.fs_type(),
+            e.embeddable(),
+            e.is_variable(),
+            e.axes().to_vec(),
+        );
+        assert!(
+            result.is_ok(),
+            "FontEntry::bundled_default() values must satisfy FontEntry::new() invariants"
+        );
     }
 
     // ── MAX_POSTSCRIPT_NAME_LEN enforcement ───────────────────────────────
