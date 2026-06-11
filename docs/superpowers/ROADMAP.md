@@ -21,7 +21,7 @@
 
 | # | Item | Status | Depends on | Spec | Plan |
 |---|------|--------|-----------|------|------|
-| 1 | **Fonts-1** — font model, embedding & FontFace loading (current renderer) | spec✅ plan✅ | — | `specs/2026-06-11-fonts-1-font-model-embedding.md` | `plans/2026-06-11-fonts-1-font-model-embedding.md` |
+| 1 | **Fonts-1** — font model, embedding & FontFace loading (current renderer) | impl… (Phases 1–2 ✅: core types + classification, Tasks 1–5; Phases 3–9 / Tasks 6–19 remain) | — | `specs/2026-06-11-fonts-1-font-model-embedding.md` | `plans/2026-06-11-fonts-1-font-model-embedding.md` |
 | 2 | **RC-1** — WebGL2 foundation + SceneRenderer seam + golden harness (+P3 probe) | spec✅ | — (Fonts-1 parallel-ok) | `specs/2026-06-11-rc-1-webgl2-foundation.md` | _next_ |
 | 3 | **RC-2** — shape rendering (fills/strokes/corners/gradients/images/clip/blend/P3) | spec✅ | RC-1 | `specs/2026-06-11-rc-2-shape-rendering.md` | — |
 | 4 | **RC-3** — text via hb-gpu (Emscripten build + WASM host + atlas) | spec✅ | RC-1, **Fonts-1** | `specs/2026-06-11-rc-3-hbgpu-text.md` | — |
