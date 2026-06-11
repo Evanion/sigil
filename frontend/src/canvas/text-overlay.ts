@@ -187,6 +187,9 @@ export function createTextOverlay(
   const lineHeight = fontSize * lineHeightMultiplier;
   const letterSpacing = resolveNumeric(textStyle.letter_spacing, 0);
 
+  // resolveFontFamily is the CSS output-boundary guard here: it returns either a
+  // family that passed validateCssIdentifier or the safe FALLBACK_FONT_FAMILY, so
+  // no CSS-significant string can reach el.style.fontFamily (CLAUDE.md §11).
   el.style.fontFamily = resolveFontFamily(fontTable, textStyle.font_entry);
   el.style.fontWeight = String(textStyle.font_weight);
   el.style.fontStyle = textStyle.font_style;

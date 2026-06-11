@@ -691,9 +691,17 @@ export const Canvas: Component = () => {
       const tokens = store.state.tokens;
 
       // Read font table for font-entry resolution in the renderer.
-      // state.fontTable is a Solid store field — reading it here subscribes
-      // the render effect to font table changes.
+      // state.fontTable is a Solid store field. Reading the parent proxy alone
+      // only tracks wholesale replacement (the `reconcile` on initial load).
+      // Touching the key set here ALSO subscribes the effect to incremental
+      // adds/removes — `apply-remote` add_font/remove_font and `store.addFont`
+      // (Task 17b) use `setState("fontTable", id, entry)`, which fires the
+      // per-key atom, not the parent. Without this read, a font that loads after
+      // first paint would never trigger a re-render. (Per-key value overwrites
+      // are additionally covered by the resolver's `fontTable[id]` read during
+      // render.)
       const fontTable = store.state.fontTable;
+      void Object.keys(fontTable).length;
 
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
