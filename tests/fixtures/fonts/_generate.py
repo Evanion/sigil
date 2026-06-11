@@ -12,10 +12,16 @@ fsType values produced (OS/2 version 4 → mutually-exclusive interpretation):
 
 Run:  python3 tests/fixtures/fonts/_generate.py
 """
+import os
+
+# Pin the font `head` table's created/modified timestamps so regeneration is
+# byte-for-byte deterministic (fontTools honors SOURCE_DATE_EPOCH). Must be set
+# before importing fontTools' time tooling.
+os.environ.setdefault("SOURCE_DATE_EPOCH", "0")
+
 from fontTools.fontBuilder import FontBuilder
 from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib.tables.O_S_2f_2 import Panose
-import os
 
 UPM = 1000
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
