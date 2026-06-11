@@ -12,6 +12,7 @@ pub mod corners_input;
 pub mod document;
 pub mod error;
 pub mod font;
+pub mod font_parse;
 pub mod id;
 pub mod migrations;
 pub mod node;
