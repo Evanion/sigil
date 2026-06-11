@@ -1,4 +1,5 @@
 pub mod component_commands;
+pub mod font_commands;
 pub mod node_commands;
 pub mod page_commands;
 pub mod style_commands;
