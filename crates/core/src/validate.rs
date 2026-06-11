@@ -532,6 +532,21 @@ pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\
 /// Maximum number of font entries in a `FontTable` per document.
 pub const MAX_FONTS_PER_DOCUMENT: usize = 256;
 
+/// Maximum byte length of an embedded font payload (32 MiB).
+///
+/// Applies to any inline font data accepted via API, MCP tool, or deserialization.
+/// Rejects over-limit payloads before buffering to prevent memory exhaustion.
+pub const MAX_EMBEDDED_FONT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Maximum byte length of a PostScript name (e.g., "Inter-Regular").
+///
+/// PostScript names feed PDF/SVG font references and may also be interpolated
+/// into `ctx.font` strings in the canvas renderer (CLAUDE.md §11
+/// "CSS-Rendered String Fields Must Reject CSS-Significant Characters").
+/// The cap is distinct from `MAX_FONT_FAMILY_LEN` so the two limits can
+/// diverge independently in a future spec without silent masking.
+pub const MAX_POSTSCRIPT_NAME_LEN: usize = 256;
+
 /// Validates a font family or PostScript name.
 ///
 /// Rules (shared with `TextStyle.font_family` and `FontEntry.postscript_name`):
@@ -566,6 +581,23 @@ pub(crate) fn validate_font_family_name(name: &str) -> Result<(), CoreError> {
     if let Some(pos) = name.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
         return Err(CoreError::ValidationError(format!(
             "font family name contains forbidden character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
+/// Rejects embedded font payloads larger than `MAX_EMBEDDED_FONT_BYTES`.
+///
+/// Call this before allocating a buffer for inline font data to prevent
+/// memory exhaustion from adversarially large payloads.
+///
+/// # Errors
+///
+/// Returns `CoreError::ValidationError` if `len > MAX_EMBEDDED_FONT_BYTES`.
+pub fn check_embedded_font_size(len: usize) -> Result<(), CoreError> {
+    if len > MAX_EMBEDDED_FONT_BYTES {
+        return Err(CoreError::ValidationError(format!(
+            "embedded font is {len} bytes, exceeds max {MAX_EMBEDDED_FONT_BYTES}"
         )));
     }
     Ok(())
@@ -1836,6 +1868,22 @@ mod tests {
     #[test]
     fn test_max_node_tree_depth_value() {
         assert_eq!(MAX_NODE_TREE_DEPTH, 64);
+    }
+
+    // ── MAX_EMBEDDED_FONT_BYTES enforcement ───────────────────────────────
+
+    #[test]
+    fn test_max_embedded_font_bytes_enforced() {
+        // At the limit: accepted.
+        assert!(
+            check_embedded_font_size(MAX_EMBEDDED_FONT_BYTES).is_ok(),
+            "payload exactly at MAX_EMBEDDED_FONT_BYTES must be accepted"
+        );
+        // One byte over: rejected.
+        assert!(
+            check_embedded_font_size(MAX_EMBEDDED_FONT_BYTES + 1).is_err(),
+            "payload one byte over MAX_EMBEDDED_FONT_BYTES must be rejected"
+        );
     }
 
     // ── MAX_FONTS_PER_DOCUMENT enforcement ────────────────────────────────

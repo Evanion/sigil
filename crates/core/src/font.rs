@@ -472,6 +472,15 @@ impl FontEntry {
         // Both family and postscript_name feed ctx.font — validate both.
         crate::validate::validate_font_family_name(&family)?;
         crate::validate::validate_font_family_name(&postscript_name)?;
+        // Postscript names have their own cap distinct from MAX_FONT_FAMILY_LEN
+        // so the two limits can diverge independently in a future spec.
+        if postscript_name.len() > crate::validate::MAX_POSTSCRIPT_NAME_LEN {
+            return Err(CoreError::ValidationError(format!(
+                "postscript_name length {} exceeds max {}",
+                postscript_name.len(),
+                crate::validate::MAX_POSTSCRIPT_NAME_LEN
+            )));
+        }
 
         // Validate each axis: all three bounds must be finite, and
         // min <= default <= max (cross-field invariant).
@@ -1468,5 +1477,58 @@ mod tests {
         let t = FontTable::default();
         assert!(t.is_empty());
         assert_eq!(t.len(), 0);
+    }
+
+    // ── MAX_POSTSCRIPT_NAME_LEN enforcement ───────────────────────────────
+    //
+    // Exercises the explicit postscript-name length cap in `FontEntry::new`.
+    // `MAX_POSTSCRIPT_NAME_LEN` = 256 and `MAX_FONT_FAMILY_LEN` = 256,
+    // so the `validate_font_family_name` call on `postscript_name` will
+    // reject a 257-char name first — the `is_err()` assertion still holds and
+    // verifies the constructor rejects the over-limit input. The "at limit"
+    // case (256 chars) passes both checks, confirming the boundary is reachable.
+
+    #[test]
+    fn test_max_postscript_name_len_enforced() {
+        let m = FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
+        )
+        .unwrap();
+
+        // At the limit: 256 ASCII chars — accepted by both validators.
+        let at = "a".repeat(crate::validate::MAX_POSTSCRIPT_NAME_LEN);
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Inter".into(),
+                at,
+                FontSource::SystemReference,
+                m.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .is_ok(),
+            "postscript_name at MAX_POSTSCRIPT_NAME_LEN must be accepted"
+        );
+
+        // One over the limit: rejected.
+        let over = "a".repeat(crate::validate::MAX_POSTSCRIPT_NAME_LEN + 1);
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Inter".into(),
+                over,
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .is_err(),
+            "postscript_name over MAX_POSTSCRIPT_NAME_LEN must be rejected"
+        );
     }
 }
