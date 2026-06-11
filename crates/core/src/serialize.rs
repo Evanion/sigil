@@ -344,11 +344,10 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 /// Validates a deserialized page against collection size limits.
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
     use crate::validate::{
-        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
-        MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
-        MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT,
-        validate_asset_ref, validate_collection_size, validate_floats_in_value, validate_node_name,
-        validate_page_name,
+        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_GRADIENT_STOPS,
+        MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH,
+        MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT, validate_asset_ref,
+        validate_collection_size, validate_floats_in_value, validate_node_name, validate_page_name,
     };
 
     // Validate page name
@@ -378,20 +377,6 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
 
         // Validate gradient stops counts in fills
         validate_gradient_stops_in_value(&node.style, MAX_GRADIENT_STOPS)?;
-
-        // Validate font_family length in text_style
-        if let Some(font_family) = node
-            .kind
-            .get("text_style")
-            .and_then(|ts| ts.get("font_family"))
-            .and_then(|v| v.as_str())
-            && font_family.len() > MAX_FONT_FAMILY_LEN
-        {
-            return Err(CoreError::ValidationError(format!(
-                "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-                font_family.len()
-            )));
-        }
 
         // Validate text content length
         if let Some(content) = node.kind.get("content").and_then(|v| v.as_str())

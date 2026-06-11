@@ -534,33 +534,6 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                 post_apply_value: None,
             })
         }
-        "kind.text_style.font_family" => {
-            let font_family: String = serde_json::from_value(value)
-                .map_err(|e| async_graphql::Error::new(format!("invalid font_family: {e}")))?;
-            if font_family.is_empty() {
-                return Err(async_graphql::Error::new("font_family must not be empty"));
-            }
-            if font_family.len() > sigil_core::validate::MAX_FONT_FAMILY_LEN {
-                return Err(async_graphql::Error::new(format!(
-                    "font_family exceeds max length of {}",
-                    sigil_core::validate::MAX_FONT_FAMILY_LEN
-                )));
-            }
-            Ok(ParsedOp {
-                builder: Box::new(move |doc| {
-                    let node_id = doc
-                        .arena
-                        .id_by_uuid(&parsed_uuid)
-                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
-                    Ok(Box::new(SetTextStyleField {
-                        node_id,
-                        field: TextStyleField::FontFamily(font_family),
-                    }) as Box<dyn FieldOperation + Send>)
-                }),
-                broadcast,
-                post_apply_value: None,
-            })
-        }
         "kind.text_style.font_size" => {
             validate_floats_in_value(&value).map_err(|e| {
                 async_graphql::Error::new(format!("font_size contains invalid floats: {e}"))

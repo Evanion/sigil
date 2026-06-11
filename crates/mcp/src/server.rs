@@ -1011,10 +1011,11 @@ impl SigilMcpServer {
     /// to change; omitted fields are left unchanged.
     #[tool(
         name = "set_text_style",
-        description = "Set text style properties. Pass only fields to change. Fields: font_family, \
-                        font_size, font_weight, font_style (normal|italic), line_height, \
-                        letter_spacing, text_align (left|center|right|justify), text_decoration \
+        description = "Set text style properties. Pass only fields to change. Fields: font_size, \
+                        font_weight, font_style (normal|italic), line_height, letter_spacing, \
+                        text_align (left|center|right|justify), text_decoration \
                         (none|underline|strikethrough), text_color, text_shadow (null to remove). \
+                        To change font, use set_node_font. \
                         Accepts an optional `session_id` when multiple sessions are open."
     )]
     async fn set_text_style(

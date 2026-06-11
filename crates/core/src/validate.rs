@@ -549,13 +549,13 @@ pub const MAX_POSTSCRIPT_NAME_LEN: usize = 256;
 
 /// Validates a font family or PostScript name.
 ///
-/// Rules (shared with `TextStyle.font_family` and `FontEntry.postscript_name`):
+/// Rules (used for `FontEntry.family` and `FontEntry.postscript_name`):
 /// - Non-empty.
 /// - Length ≤ `MAX_FONT_FAMILY_LEN`.
 /// - No C0 control characters (U+0000–U+001F).
 /// - No CSS-significant characters from `FONT_FAMILY_FORBIDDEN_CHARS`.
 ///
-/// Both `font_family` and `postscript_name` feed `ctx.font` in the canvas
+/// Both `family` and `postscript_name` feed `ctx.font` in the canvas
 /// renderer, so both must pass this check (CLAUDE.md §11 "CSS-Rendered String
 /// Fields Must Reject CSS-Significant Characters").
 ///
@@ -606,8 +606,8 @@ pub fn check_embedded_font_size(len: usize) -> Result<(), CoreError> {
 /// Validates a `TextStyle` struct.
 ///
 /// Checks:
-/// - `font_family`: non-empty, length <= `MAX_FONT_FAMILY_LEN`, no control chars,
-///   no CSS-significant chars (`'`, `"`, `;`, `{`, `}`, `\`).
+/// - `font_entry`: not validated here — entry-existence requires `&Document`
+///   context and is validated at the command layer in `SetNodeFont`.
 /// - `font_size` (if literal): finite, in `[MIN_FONT_SIZE, MAX_FONT_SIZE]`.
 /// - `font_weight`: in `[MIN_FONT_WEIGHT, MAX_FONT_WEIGHT]`.
 /// - `line_height` (if literal): finite, > 0.
@@ -617,7 +617,6 @@ pub fn check_embedded_font_size(len: usize) -> Result<(), CoreError> {
 /// # Errors
 /// Returns `CoreError::ValidationError` if any field fails validation.
 pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError> {
-    validate_text_style_font_family(&ts.font_family)?;
     validate_text_style_font_size(&ts.font_size)?;
 
     if ts.font_weight < MIN_FONT_WEIGHT || ts.font_weight > MAX_FONT_WEIGHT {
@@ -633,24 +632,6 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
     validate_text_style_text_shadow(ts.text_shadow.as_ref())?;
 
     Ok(())
-}
-
-fn validate_text_style_font_family(family: &str) -> Result<(), CoreError> {
-    // Delegate to the shared validator — same rules, same constants.
-    // The field-specific error prefix is preserved by wrapping the error if
-    // a caller needs "font_family" in the message; for now the shared message
-    // is sufficient because all callers already name the field.
-    validate_font_family_name(family).map_err(|e| {
-        // Re-wrap with the `font_family` prefix so existing callers and tests
-        // that pattern-match the original messages continue to work.
-        match e {
-            CoreError::ValidationError(msg) => {
-                let prefixed = msg.replace("font family name", "font_family");
-                CoreError::ValidationError(prefixed)
-            }
-            other => other,
-        }
-    })
 }
 
 /// Expression variants defer semantic validation to evaluation time.

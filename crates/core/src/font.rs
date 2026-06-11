@@ -1670,6 +1670,57 @@ mod tests {
         );
     }
 
+    // ── MAX_FONT_FAMILY_LEN enforcement ───────────────────────────────────────
+    //
+    // Exercises the family-name length cap in `FontEntry::new` via
+    // `validate_font_family_name`. This constant was previously enforced on
+    // `TextStyle.font_family`; after the font-entry refactor (fonts-1, Task 7)
+    // it is now enforced exclusively on `FontEntry.family`.
+
+    #[test]
+    fn test_max_font_family_len_enforced() {
+        let m = FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
+        )
+        .unwrap();
+
+        // At the limit: exactly MAX_FONT_FAMILY_LEN ASCII chars — accepted.
+        let at = "a".repeat(crate::validate::MAX_FONT_FAMILY_LEN);
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                at,
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .is_ok(),
+            "family at MAX_FONT_FAMILY_LEN must be accepted"
+        );
+
+        // One over the limit: rejected.
+        let over = "a".repeat(crate::validate::MAX_FONT_FAMILY_LEN + 1);
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                over,
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .is_err(),
+            "family over MAX_FONT_FAMILY_LEN must be rejected"
+        );
+    }
+
     // ── MAX_POSTSCRIPT_NAME_LEN enforcement ───────────────────────────────
     //
     // Exercises the explicit postscript-name length cap in `FontEntry::new`.
