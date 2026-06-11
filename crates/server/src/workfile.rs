@@ -602,14 +602,27 @@ async fn load_font_assets(
     let fonts_dir = workfile_path.join("fonts");
 
     // Fast-path: no fonts/ directory means nothing to load.
-    if tokio::fs::metadata(&fonts_dir).await.is_err() {
-        return Ok(HashMap::new());
+    // Distinguish NotFound (expected: workfile has no custom fonts) from hard
+    // errors such as PermissionDenied (unexpected: surface to the caller).
+    match tokio::fs::metadata(&fonts_dir).await {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(HashMap::new());
+        }
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("failed to access fonts/ directory: {}", fonts_dir.display())
+            });
+        }
     }
 
     // Build a set of UUIDs that are referenced by the manifest for O(1) lookup.
     let manifest_set: HashSet<Uuid> = manifest_font_assets.iter().copied().collect();
 
     let mut font_bytes: HashMap<Uuid, Vec<u8>> = HashMap::new();
+    // Track UUIDs that were present on disk but skipped (oversize, etc.) so the
+    // post-scan loop can distinguish "missing from disk" from "present but skipped".
+    let mut skipped_uuids: HashSet<Uuid> = HashSet::new();
     let mut entries = tokio::fs::read_dir(&fonts_dir)
         .await
         .with_context(|| format!("failed to read fonts/ directory: {}", fonts_dir.display()))?;
@@ -659,6 +672,7 @@ async fn load_font_assets(
                 meta.len(),
                 sigil_core::validate::MAX_EMBEDDED_FONT_BYTES
             );
+            skipped_uuids.insert(uuid);
             continue;
         }
 
@@ -666,12 +680,28 @@ async fn load_font_assets(
         let bytes = tokio::fs::read(&path)
             .await
             .with_context(|| format!("failed to read font file: {}", path.display()))?;
+
+        // Defense-in-depth: re-check size after read (stat→read TOCTOU race).
+        // A file could grow between the metadata check above and the read.
+        if bytes.len() > sigil_core::validate::MAX_EMBEDDED_FONT_BYTES {
+            tracing::warn!(
+                "fonts/{uuid}.ttf exceeds MAX_EMBEDDED_FONT_BYTES after read \
+                 ({} > {}); skipping — document will degrade",
+                bytes.len(),
+                sigil_core::validate::MAX_EMBEDDED_FONT_BYTES
+            );
+            skipped_uuids.insert(uuid);
+            continue;
+        }
+
         font_bytes.insert(uuid, bytes);
     }
 
-    // Warn for any manifest-referenced UUIDs that have no corresponding file.
+    // Warn for any manifest-referenced UUIDs that were neither loaded nor
+    // present-but-skipped. Files in `skipped_uuids` ARE on disk — calling
+    // them "missing" would be misleading.
     for uuid in manifest_font_assets {
-        if !font_bytes.contains_key(uuid) {
+        if !font_bytes.contains_key(uuid) && !skipped_uuids.contains(uuid) {
             tracing::warn!(
                 "manifest.font_assets references {uuid} but fonts/{uuid}.ttf is missing \
                  from disk; document will degrade (font unavailable)"
@@ -2318,6 +2348,44 @@ mod tests {
         );
     }
 
+    /// A `.ttf` file in `fonts/` whose stem is NOT a valid UUID must be skipped
+    /// gracefully (warned + ignored). `load_workfile` must succeed and
+    /// `loaded.font_bytes` must be empty.
+    #[tokio::test]
+    async fn test_load_workfile_ignores_non_uuid_font_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("non_uuid.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Save an empty document (no fonts in manifest).
+        let doc = Document::new("NonUuid".to_string());
+        let prepared = prepare_save(&doc, &HashMap::new()).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Plant a .ttf file with a non-UUID stem in the fonts/ directory.
+        let fonts_dir = workfile_path.join("fonts");
+        tokio::fs::create_dir_all(&fonts_dir)
+            .await
+            .expect("create fonts dir");
+        tokio::fs::write(fonts_dir.join("not-a-uuid.ttf"), b"some font bytes")
+            .await
+            .expect("write non-uuid ttf");
+
+        // Load must succeed; no UUID-keyed entries must appear in font_bytes.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile must succeed even with non-UUID font filename");
+
+        assert!(
+            loaded.font_bytes.is_empty(),
+            "non-UUID font filename must be skipped; loaded.font_bytes must be empty"
+        );
+    }
+
     /// When `manifest.font_assets` lists a UUID but the corresponding
     /// `fonts/<uuid>.ttf` file does not exist, `load_workfile` must succeed
     /// (degraded but non-fatal) and that UUID must be absent from
@@ -2418,14 +2486,16 @@ mod tests {
             .await
             .expect("write_prepared_save");
 
-        // Overwrite the font file with an oversized payload.
-        let oversize_bytes = vec![0u8; sigil_core::validate::MAX_EMBEDDED_FONT_BYTES + 1];
-        tokio::fs::write(
-            workfile_path.join("fonts").join(format!("{fat_uuid}.ttf")),
-            &oversize_bytes,
-        )
-        .await
-        .expect("write oversized font file");
+        // Overwrite the font file with a sparse file whose length exceeds the
+        // limit — this avoids allocating 32 MiB in the test runner while still
+        // making the metadata size-check (and the post-read guard) fire.
+        let fat_path = workfile_path.join("fonts").join(format!("{fat_uuid}.ttf"));
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&fat_path)
+            .expect("open font file for sparse write");
+        file.set_len(sigil_core::validate::MAX_EMBEDDED_FONT_BYTES as u64 + 1)
+            .expect("set_len to create sparse oversize file");
 
         // Load must succeed; the oversized UUID must be absent from font_bytes.
         let loaded = load_workfile(&workfile_path)

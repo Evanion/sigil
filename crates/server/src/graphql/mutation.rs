@@ -1533,23 +1533,15 @@ impl MutationRoot {
         if let Some(session) = state.app.sessions.get(id) {
             // Populate embedded font bytes into the session (Task 11).
             //
-            // NOTE: if the session already existed (idempotent open), the
-            // loader did not run and `font_bytes_cell` is empty — so we only
-            // overwrite when the loader actually ran (new session). Checking
-            // emptiness is a heuristic: a workfile with no custom fonts also
-            // produces an empty map, but overwriting with empty is a no-op.
+            // If the session already existed (idempotent re-open) the loader
+            // did not run, so `font_bytes_cell` is empty — skip the write.
+            // The session already carries its bytes from the first open.
+            // Skipping the write is also correct for new sessions with no
+            // custom fonts: the session starts as an empty HashMap, so not
+            // writing is equivalent.
             let loaded_bytes = font_bytes_cell.into_inner();
             if !loaded_bytes.is_empty() {
-                // Block-in-place so we can await the write lock on the font_bytes
-                // RwLock without requiring the mutation resolver to be async.
-                //
-                // SAFETY: this resolver runs on a tokio worker thread from the
-                // multi-thread runtime, so `block_in_place` is sound.
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        *session.font_bytes.write().await = loaded_bytes;
-                    });
-                });
+                *session.font_bytes.write().await = loaded_bytes;
             }
             state.persistence.register(session, migrated_from);
         } else {
