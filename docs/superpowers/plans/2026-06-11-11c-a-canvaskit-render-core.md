@@ -1,5 +1,7 @@
 # 11c-A CanvasKit Render Core — Implementation Plan
 
+> ⚠️ **SUPERSEDED (2026-06-11):** the render-core engine was changed from CanvasKit to a **custom WebGL2 + hb-gpu** renderer after spiking both (see `docs/superpowers/research/2026-06-11-hb-gpu-spike.md`). Do NOT execute this plan as-is. Reusable across the new design: the SceneRenderer seam, P3 framebuffer recipe, golden parity harness, memory discipline, chrome-overlay split, Canvas.tsx integration shape, and the Canvas-2D deletion. A new render-core plan replaces the CanvasKit-specific tasks.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace Sigil's Canvas-2D document renderer with a CanvasKit/Skia (WebGL2) render core behind a `SceneRenderer` seam, at visual parity, with the old renderer deleted.
