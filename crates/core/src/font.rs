@@ -3,11 +3,11 @@
 // Core font type definitions for the Sigil design engine.
 //
 // `FontSource`, `EmbedDecision`, and `FontAxis` are simple data carriers that
-// derive `Serialize`/`Deserialize` (no invariants to protect). `FontMetrics` is a
-// validated type — it has private fields, a validating constructor, manual
-// `Serialize` and `Deserialize` impls (the latter routes through `new()` and
-// rejects duplicate keys), and no `#[derive(Deserialize)]`. This follows the
-// canonical pattern established by `TextShadow` in `node.rs`.
+// derive `Serialize`/`Deserialize` (no invariants to protect). `FontMetrics` and
+// `FontEntry` are validated types — private fields, validating constructors,
+// manual `Serialize` and `Deserialize` impls (the latter routes through `new()`
+// and rejects duplicate keys). `FontTable` enforces capacity + uniqueness at
+// insertion time. Pattern mirrors `TextShadow` in `node.rs`.
 
 use serde::{Deserialize, Serialize};
 
@@ -417,11 +417,467 @@ impl<'de> Deserialize<'de> for FontMetrics {
     }
 }
 
+// ── FontEntry ──────────────────────────────────────────────────────────
+
+/// A single font entry in the document font catalogue.
+///
+/// # Validation
+///
+/// - `family` and `postscript_name` must pass `validate_font_family_name`:
+///   non-empty, ≤ `MAX_FONT_FAMILY_LEN`, no C0 control chars, no
+///   CSS-significant chars. Both fields feed `ctx.font` in the canvas
+///   renderer (CLAUDE.md §11 "CSS-Rendered String Fields Must Reject
+///   CSS-Significant Characters").
+/// - Each axis in `axes` must have `min`, `default`, and `max` all finite,
+///   and `min <= default <= max` (cross-field invariant per CLAUDE.md §11).
+///
+/// Follows the "No Derive Deserialize on Validated Types" rule: fields are
+/// private, `Deserialize` routes through `new()`, and duplicate JSON keys
+/// are rejected with `de::Error::duplicate_field`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FontEntry {
+    id: FontEntryId,
+    family: String,
+    postscript_name: String,
+    source: FontSource,
+    metrics: FontMetrics,
+    fs_type: u16,
+    embeddable: EmbedDecision,
+    is_variable: bool,
+    axes: Vec<FontAxis>,
+}
+
+impl FontEntry {
+    /// Creates a new `FontEntry`, validating all fields.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CoreError::ValidationError` if:
+    /// - `family` or `postscript_name` fails `validate_font_family_name`.
+    /// - Any axis has a non-finite `min`, `default`, or `max`.
+    /// - Any axis violates `min <= default <= max`.
+    // 9 arguments is unavoidable for a flat validated struct with 9 fields.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: FontEntryId,
+        family: String,
+        postscript_name: String,
+        source: FontSource,
+        metrics: FontMetrics,
+        fs_type: u16,
+        embeddable: EmbedDecision,
+        is_variable: bool,
+        axes: Vec<FontAxis>,
+    ) -> Result<Self, CoreError> {
+        // Both family and postscript_name feed ctx.font — validate both.
+        crate::validate::validate_font_family_name(&family)?;
+        crate::validate::validate_font_family_name(&postscript_name)?;
+
+        // Validate each axis: all three bounds must be finite, and
+        // min <= default <= max (cross-field invariant).
+        for (i, axis) in axes.iter().enumerate() {
+            validate_finite(&format!("axes[{i}].min"), f64::from(axis.min))?;
+            validate_finite(&format!("axes[{i}].default"), f64::from(axis.default))?;
+            validate_finite(&format!("axes[{i}].max"), f64::from(axis.max))?;
+            if axis.min > axis.default || axis.default > axis.max {
+                return Err(CoreError::ValidationError(format!(
+                    "axes[{i}]: min ({}) <= default ({}) <= max ({}) must hold",
+                    axis.min, axis.default, axis.max
+                )));
+            }
+        }
+
+        Ok(Self {
+            id,
+            family,
+            postscript_name,
+            source,
+            metrics,
+            fs_type,
+            embeddable,
+            is_variable,
+            axes,
+        })
+    }
+
+    // ── Accessors ────────────────────────────────────────────────────
+
+    /// Stable UUID for this font entry.
+    #[must_use]
+    pub fn id(&self) -> FontEntryId {
+        self.id
+    }
+
+    /// CSS-safe font family name (e.g., "Inter").
+    #[must_use]
+    pub fn family(&self) -> &str {
+        &self.family
+    }
+
+    /// PostScript name used in PDF/SVG font references (e.g., "Inter-Regular").
+    #[must_use]
+    pub fn postscript_name(&self) -> &str {
+        &self.postscript_name
+    }
+
+    /// Where this font's data originates.
+    #[must_use]
+    pub fn source(&self) -> &FontSource {
+        &self.source
+    }
+
+    /// Metrics extracted from this font's OS/2 and `hhea` tables.
+    #[must_use]
+    pub fn metrics(&self) -> &FontMetrics {
+        &self.metrics
+    }
+
+    /// OS/2 `fsType` embedding bits as a raw `u16`.
+    #[must_use]
+    pub fn fs_type(&self) -> u16 {
+        self.fs_type
+    }
+
+    /// How this font may be embedded in an exported document.
+    #[must_use]
+    pub fn embeddable(&self) -> EmbedDecision {
+        self.embeddable
+    }
+
+    /// `true` if the font is a variable font with at least one axis.
+    #[must_use]
+    pub fn is_variable(&self) -> bool {
+        self.is_variable
+    }
+
+    /// Variable-font axes declared by this font.
+    #[must_use]
+    pub fn axes(&self) -> &[FontAxis] {
+        &self.axes
+    }
+}
+
+// ── FontEntry Serialize ────────────────────────────────────────────────
+
+impl Serialize for FontEntry {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("FontEntry", 9)?;
+        state.serialize_field("id", &self.id)?;
+        state.serialize_field("family", &self.family)?;
+        state.serialize_field("postscript_name", &self.postscript_name)?;
+        state.serialize_field("source", &self.source)?;
+        state.serialize_field("metrics", &self.metrics)?;
+        state.serialize_field("fs_type", &self.fs_type)?;
+        state.serialize_field("embeddable", &self.embeddable)?;
+        state.serialize_field("is_variable", &self.is_variable)?;
+        state.serialize_field("axes", &self.axes)?;
+        state.end()
+    }
+}
+
+// ── FontEntry Deserialize ──────────────────────────────────────────────
+
+impl<'de> Deserialize<'de> for FontEntry {
+    // 9-field visitor — the line count is unavoidable given the duplicate-key
+    // guard pattern. Splitting the visitor would hide the per-field guards.
+    #[allow(clippy::too_many_lines)]
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct FontEntryVisitor;
+
+        /// Field discriminant for duplicate-key detection.
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Id,
+            Family,
+            PostscriptName,
+            Source,
+            Metrics,
+            FsType,
+            Embeddable,
+            IsVariable,
+            Axes,
+        }
+
+        impl<'de> Visitor<'de> for FontEntryVisitor {
+            type Value = FontEntry;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("struct FontEntry")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut id: Option<FontEntryId> = None;
+                let mut family: Option<String> = None;
+                let mut postscript_name: Option<String> = None;
+                let mut source: Option<FontSource> = None;
+                let mut metrics: Option<FontMetrics> = None;
+                let mut fs_type: Option<u16> = None;
+                let mut embeddable: Option<EmbedDecision> = None;
+                let mut is_variable: Option<bool> = None;
+                let mut axes: Option<Vec<FontAxis>> = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Id => {
+                            if id.is_some() {
+                                return Err(de::Error::duplicate_field("id"));
+                            }
+                            id = Some(map.next_value()?);
+                        }
+                        Field::Family => {
+                            if family.is_some() {
+                                return Err(de::Error::duplicate_field("family"));
+                            }
+                            family = Some(map.next_value()?);
+                        }
+                        Field::PostscriptName => {
+                            if postscript_name.is_some() {
+                                return Err(de::Error::duplicate_field("postscript_name"));
+                            }
+                            postscript_name = Some(map.next_value()?);
+                        }
+                        Field::Source => {
+                            if source.is_some() {
+                                return Err(de::Error::duplicate_field("source"));
+                            }
+                            source = Some(map.next_value()?);
+                        }
+                        Field::Metrics => {
+                            if metrics.is_some() {
+                                return Err(de::Error::duplicate_field("metrics"));
+                            }
+                            metrics = Some(map.next_value()?);
+                        }
+                        Field::FsType => {
+                            if fs_type.is_some() {
+                                return Err(de::Error::duplicate_field("fs_type"));
+                            }
+                            fs_type = Some(map.next_value()?);
+                        }
+                        Field::Embeddable => {
+                            if embeddable.is_some() {
+                                return Err(de::Error::duplicate_field("embeddable"));
+                            }
+                            embeddable = Some(map.next_value()?);
+                        }
+                        Field::IsVariable => {
+                            if is_variable.is_some() {
+                                return Err(de::Error::duplicate_field("is_variable"));
+                            }
+                            is_variable = Some(map.next_value()?);
+                        }
+                        Field::Axes => {
+                            if axes.is_some() {
+                                return Err(de::Error::duplicate_field("axes"));
+                            }
+                            axes = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let id = id.ok_or_else(|| de::Error::missing_field("id"))?;
+                let family = family.ok_or_else(|| de::Error::missing_field("family"))?;
+                let postscript_name =
+                    postscript_name.ok_or_else(|| de::Error::missing_field("postscript_name"))?;
+                let source = source.ok_or_else(|| de::Error::missing_field("source"))?;
+                let metrics = metrics.ok_or_else(|| de::Error::missing_field("metrics"))?;
+                let fs_type = fs_type.ok_or_else(|| de::Error::missing_field("fs_type"))?;
+                let embeddable =
+                    embeddable.ok_or_else(|| de::Error::missing_field("embeddable"))?;
+                let is_variable =
+                    is_variable.ok_or_else(|| de::Error::missing_field("is_variable"))?;
+                let axes = axes.ok_or_else(|| de::Error::missing_field("axes"))?;
+
+                FontEntry::new(
+                    id,
+                    family,
+                    postscript_name,
+                    source,
+                    metrics,
+                    fs_type,
+                    embeddable,
+                    is_variable,
+                    axes,
+                )
+                .map_err(de::Error::custom)
+            }
+        }
+
+        const FIELDS: &[&str] = &[
+            "id",
+            "family",
+            "postscript_name",
+            "source",
+            "metrics",
+            "fs_type",
+            "embeddable",
+            "is_variable",
+            "axes",
+        ];
+        deserializer.deserialize_struct("FontEntry", FIELDS, FontEntryVisitor)
+    }
+}
+
+// ── FontTable ──────────────────────────────────────────────────────────
+
+/// Ordered collection of font entries for a document.
+///
+/// # Invariants
+///
+/// - Capacity is bounded by `MAX_FONTS_PER_DOCUMENT` (enforced in `add`).
+/// - All entry IDs are unique (enforced in `add`).
+///
+/// The `Deserialize` implementation builds the table via `add()` so that both
+/// invariants are enforced at load time, not just at mutation time.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FontTable {
+    entries: Vec<FontEntry>,
+}
+
+impl FontTable {
+    /// Creates an empty `FontTable`.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
+
+    /// Adds a font entry to the table.
+    ///
+    /// # Errors
+    ///
+    /// Returns `CoreError::ValidationError` if:
+    /// - The table already contains `MAX_FONTS_PER_DOCUMENT` entries.
+    /// - An entry with the same `id` already exists.
+    pub fn add(&mut self, entry: FontEntry) -> Result<(), CoreError> {
+        if self.entries.len() >= crate::validate::MAX_FONTS_PER_DOCUMENT {
+            return Err(CoreError::ValidationError(format!(
+                "font table capacity exhausted: cannot add more than {} fonts per document",
+                crate::validate::MAX_FONTS_PER_DOCUMENT
+            )));
+        }
+        if self.entries.iter().any(|e| e.id == entry.id) {
+            return Err(CoreError::ValidationError(format!(
+                "font table already contains an entry with id {}",
+                entry.id
+            )));
+        }
+        self.entries.push(entry);
+        Ok(())
+    }
+
+    /// Removes and returns the entry with the given `id`, if present.
+    pub fn remove(&mut self, id: FontEntryId) -> Option<FontEntry> {
+        if let Some(pos) = self.entries.iter().position(|e| e.id == id) {
+            Some(self.entries.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// Returns a reference to the entry with the given `id`, if present.
+    #[must_use]
+    pub fn get(&self, id: FontEntryId) -> Option<&FontEntry> {
+        self.entries.iter().find(|e| e.id == id)
+    }
+
+    /// Iterates over all font entries in insertion order.
+    pub fn iter(&self) -> impl Iterator<Item = &FontEntry> {
+        self.entries.iter()
+    }
+
+    /// Returns the number of entries in the table.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns `true` if the table contains no entries.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+// ── FontTable Serialize ────────────────────────────────────────────────
+
+impl Serialize for FontTable {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut state = serializer.serialize_struct("FontTable", 1)?;
+        state.serialize_field("entries", &self.entries)?;
+        state.end()
+    }
+}
+
+// ── FontTable Deserialize ──────────────────────────────────────────────
+//
+// Builds the table via `add()` so capacity and uniqueness are enforced on
+// load — a corrupt workfile with duplicate IDs or too many fonts is rejected
+// at deserialize time rather than silently accepted.
+
+impl<'de> Deserialize<'de> for FontTable {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde::de::{self, MapAccess, Visitor};
+        use std::fmt;
+
+        struct FontTableVisitor;
+
+        #[derive(Deserialize)]
+        #[serde(field_identifier, rename_all = "snake_case")]
+        enum Field {
+            Entries,
+        }
+
+        impl<'de> Visitor<'de> for FontTableVisitor {
+            type Value = FontTable;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("struct FontTable")
+            }
+
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut entries: Option<Vec<FontEntry>> = None;
+
+                while let Some(key) = map.next_key::<Field>()? {
+                    match key {
+                        Field::Entries => {
+                            if entries.is_some() {
+                                return Err(de::Error::duplicate_field("entries"));
+                            }
+                            entries = Some(map.next_value()?);
+                        }
+                    }
+                }
+
+                let entries = entries.ok_or_else(|| de::Error::missing_field("entries"))?;
+
+                let mut table = FontTable::new();
+                for entry in entries {
+                    table.add(entry).map_err(de::Error::custom)?;
+                }
+                Ok(table)
+            }
+        }
+
+        const FIELDS: &[&str] = &["entries"];
+        deserializer.deserialize_struct("FontTable", FIELDS, FontTableVisitor)
+    }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── FontMetrics ────────────────────────────────────────────────────
 
     #[test]
     fn test_font_source_variants_construct() {
@@ -630,5 +1086,387 @@ mod tests {
         let json = serde_json::to_string(&axis).unwrap();
         let back: FontAxis = serde_json::from_str(&json).unwrap();
         assert_eq!(axis, back);
+    }
+
+    // ── FontEntry ──────────────────────────────────────────────────────
+
+    /// Helper that builds a valid `FontMetrics` for tests.
+    fn make_metrics() -> FontMetrics {
+        FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_font_entry_rejects_bad_family() {
+        let m = make_metrics();
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Bad;Family".into(),
+                "BadFamily".into(),
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_valid_construct() {
+        let m = make_metrics();
+        let e = FontEntry::new(
+            uuid::Uuid::nil(),
+            "Inter".into(),
+            "Inter-Regular".into(),
+            FontSource::SystemReference,
+            m,
+            0,
+            EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(e.embeddable(), EmbedDecision::ReferenceSystem);
+        assert_eq!(e.family(), "Inter");
+    }
+
+    #[test]
+    fn test_font_entry_rejects_bad_axis_range() {
+        let m = make_metrics();
+        // default < min and max < default — both cross-field invariants violated
+        let bad_axis = FontAxis {
+            tag: *b"wght",
+            min: 700.0,
+            default: 100.0,
+            max: 400.0,
+        };
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Inter".into(),
+                "Inter".into(),
+                FontSource::Custom {
+                    asset_uuid: uuid::Uuid::nil()
+                },
+                m,
+                0,
+                EmbedDecision::Embed,
+                true,
+                vec![bad_axis]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_serde_roundtrip() {
+        let m = make_metrics();
+        let e = FontEntry::new(
+            uuid::Uuid::from_u128(7),
+            "Inter".into(),
+            "Inter-Regular".into(),
+            FontSource::Custom {
+                asset_uuid: uuid::Uuid::from_u128(9),
+            },
+            m,
+            8,
+            EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .unwrap();
+        let json = serde_json::to_string(&e).unwrap();
+        let back: FontEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(e, back);
+    }
+
+    #[test]
+    fn test_font_entry_rejects_empty_family() {
+        let m = make_metrics();
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                String::new(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_rejects_css_char_in_postscript_name() {
+        let m = make_metrics();
+        // postscript_name containing a double-quote — CSS-significant character
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Inter".into(),
+                r#"Inter"Regular"#.into(),
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_rejects_axis_with_nan_default() {
+        let m = make_metrics();
+        let bad_axis = FontAxis {
+            tag: *b"wdth",
+            min: 75.0,
+            default: f32::NAN,
+            max: 125.0,
+        };
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "VarFont".into(),
+                "VarFont-Regular".into(),
+                FontSource::Bundled,
+                m,
+                0,
+                EmbedDecision::Embed,
+                true,
+                vec![bad_axis]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_accepts_valid_axis() {
+        let m = make_metrics();
+        let axis = FontAxis {
+            tag: *b"wght",
+            min: 100.0,
+            default: 400.0,
+            max: 900.0,
+        };
+        assert!(
+            FontEntry::new(
+                uuid::Uuid::nil(),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m,
+                0,
+                EmbedDecision::ReferenceSystem,
+                true,
+                vec![axis]
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn test_font_entry_deserialize_rejects_duplicate_family_key() {
+        // Build a valid FontEntry JSON, then insert a duplicate key.
+        let m = make_metrics();
+        let e = FontEntry::new(
+            uuid::Uuid::from_u128(42),
+            "Inter".into(),
+            "Inter-Regular".into(),
+            FontSource::SystemReference,
+            m,
+            0,
+            EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .unwrap();
+        // Serialize to canonical JSON and manually inject a duplicate key.
+        let json = serde_json::to_string(&e).unwrap();
+        // Insert a second "family" field by replacing the first occurrence.
+        let dup_json = json.replacen(
+            r#""family":"Inter""#,
+            r#""family":"Inter","family":"Roboto""#,
+            1,
+        );
+        let result: Result<FontEntry, _> = serde_json::from_str(&dup_json);
+        assert!(
+            result.is_err(),
+            "duplicate 'family' key must be rejected by FontEntry deserializer"
+        );
+    }
+
+    // ── FontTable ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_font_table_rejects_duplicate_id() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        let mk = |id| {
+            FontEntry::new(
+                id,
+                "Inter".into(),
+                "Inter".into(),
+                FontSource::SystemReference,
+                m.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .unwrap()
+        };
+        t.add(mk(uuid::Uuid::from_u128(1))).unwrap();
+        assert!(t.add(mk(uuid::Uuid::from_u128(1))).is_err());
+    }
+
+    #[test]
+    fn test_font_table_add_and_get() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        let id = uuid::Uuid::from_u128(99);
+        let e = FontEntry::new(
+            id,
+            "Roboto".into(),
+            "Roboto-Regular".into(),
+            FontSource::SystemReference,
+            m,
+            0,
+            EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .unwrap();
+        t.add(e).unwrap();
+        assert!(t.get(id).is_some());
+        assert_eq!(t.get(id).unwrap().family(), "Roboto");
+        assert_eq!(t.len(), 1);
+        assert!(!t.is_empty());
+    }
+
+    #[test]
+    fn test_font_table_remove() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        let id = uuid::Uuid::from_u128(7);
+        let e = FontEntry::new(
+            id,
+            "Inter".into(),
+            "Inter-Regular".into(),
+            FontSource::SystemReference,
+            m,
+            0,
+            EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .unwrap();
+        t.add(e).unwrap();
+        assert_eq!(t.len(), 1);
+        let removed = t.remove(id);
+        assert!(removed.is_some());
+        assert_eq!(t.len(), 0);
+        assert!(t.is_empty());
+        // Removing again returns None.
+        assert!(t.remove(id).is_none());
+    }
+
+    #[test]
+    fn test_font_table_iter() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        for i in 1_u128..=3 {
+            let e = FontEntry::new(
+                uuid::Uuid::from_u128(i),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .unwrap();
+            t.add(e).unwrap();
+        }
+        assert_eq!(t.iter().count(), 3);
+    }
+
+    #[test]
+    fn test_font_table_serde_roundtrip() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        for i in 1_u128..=3 {
+            let e = FontEntry::new(
+                uuid::Uuid::from_u128(i),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                m.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .unwrap();
+            t.add(e).unwrap();
+        }
+        let json = serde_json::to_string(&t).unwrap();
+        let back: FontTable = serde_json::from_str(&json).unwrap();
+        assert_eq!(t, back);
+    }
+
+    #[test]
+    fn test_font_table_deserialize_rejects_duplicate_id() {
+        let mut t = FontTable::new();
+        let m = make_metrics();
+        let e = FontEntry::new(
+            uuid::Uuid::from_u128(1),
+            "Inter".into(),
+            "Inter-Regular".into(),
+            FontSource::SystemReference,
+            m,
+            0,
+            EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .unwrap();
+        t.add(e).unwrap();
+
+        // Manually serialize with a duplicated entry (same id).
+        let json = serde_json::to_string(&t).unwrap();
+        // Patch: duplicate the single entry by replacing `[{...}]` with `[{...},{...}]`.
+        // The serialized entries array contains one object; we duplicate it.
+        let patched = {
+            // Find the inner array content and duplicate the entry.
+            let start = json.find('[').unwrap();
+            let end = json.rfind(']').unwrap();
+            let inner = &json[start + 1..end];
+            format!("{{\"entries\":[{inner},{inner}]}}")
+        };
+        let result: Result<FontTable, _> = serde_json::from_str(&patched);
+        assert!(
+            result.is_err(),
+            "FontTable deserialize must reject duplicate entry ids"
+        );
+    }
+
+    #[test]
+    fn test_font_table_default_is_empty() {
+        let t = FontTable::default();
+        assert!(t.is_empty());
+        assert_eq!(t.len(), 0);
     }
 }

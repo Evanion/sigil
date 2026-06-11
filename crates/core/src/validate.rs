@@ -529,6 +529,48 @@ pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreErr
 /// Characters forbidden in font family names (CSS-significant or injection-prone).
 pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\'];
 
+/// Maximum number of font entries in a `FontTable` per document.
+pub const MAX_FONTS_PER_DOCUMENT: usize = 256;
+
+/// Validates a font family or PostScript name.
+///
+/// Rules (shared with `TextStyle.font_family` and `FontEntry.postscript_name`):
+/// - Non-empty.
+/// - Length ≤ `MAX_FONT_FAMILY_LEN`.
+/// - No C0 control characters (U+0000–U+001F).
+/// - No CSS-significant characters from `FONT_FAMILY_FORBIDDEN_CHARS`.
+///
+/// Both `font_family` and `postscript_name` feed `ctx.font` in the canvas
+/// renderer, so both must pass this check (CLAUDE.md §11 "CSS-Rendered String
+/// Fields Must Reject CSS-Significant Characters").
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any rule is violated.
+pub(crate) fn validate_font_family_name(name: &str) -> Result<(), CoreError> {
+    if name.is_empty() {
+        return Err(CoreError::ValidationError(
+            "font family name must not be empty".to_string(),
+        ));
+    }
+    if name.len() > MAX_FONT_FAMILY_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "font family name exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+            name.len()
+        )));
+    }
+    if let Some(pos) = name.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "font family name contains control character at byte position {pos}"
+        )));
+    }
+    if let Some(pos) = name.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
+        return Err(CoreError::ValidationError(format!(
+            "font family name contains forbidden character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
 /// Validates a `TextStyle` struct.
 ///
 /// Checks:
@@ -562,28 +604,23 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
 }
 
 fn validate_text_style_font_family(family: &str) -> Result<(), CoreError> {
-    if family.is_empty() {
-        return Err(CoreError::ValidationError(
-            "font_family must not be empty".to_string(),
-        ));
-    }
-    if family.len() > MAX_FONT_FAMILY_LEN {
-        return Err(CoreError::ValidationError(format!(
-            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-            family.len()
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| c.is_control()) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains control character at byte position {pos}"
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains forbidden character at byte position {pos}"
-        )));
-    }
-    Ok(())
+    // Delegate to the shared validator — same rules, same constants.
+    // The field-specific error prefix is preserved by wrapping the error if
+    // a caller needs "font_family" in the message; for now the shared message
+    // is sufficient because all callers already name the field.
+    validate_font_family_name(family).map_err(|e| {
+        // Re-wrap with the `font_family` prefix so existing callers and tests
+        // that pattern-match the original messages continue to work.
+        match e {
+            CoreError::ValidationError(msg) => {
+                let prefixed = msg
+                    .replace("font family name", "font_family")
+                    .replace("font family name", "font_family");
+                CoreError::ValidationError(prefixed)
+            }
+            other => other,
+        }
+    })
 }
 
 /// Expression variants defer semantic validation to evaluation time.
@@ -1801,5 +1838,57 @@ mod tests {
     #[test]
     fn test_max_node_tree_depth_value() {
         assert_eq!(MAX_NODE_TREE_DEPTH, 64);
+    }
+
+    // ── MAX_FONTS_PER_DOCUMENT enforcement ────────────────────────────────
+    //
+    // Mirrors the pattern from `test_max_text_shadow_blur_enforced`:
+    // build a real `FontTable`, fill it to the limit, then assert the
+    // next `add` returns `Err` (CLAUDE.md §11 "Constant Enforcement Tests").
+
+    #[test]
+    fn test_max_fonts_per_document_enforced() {
+        use crate::font::{EmbedDecision, FontEntry, FontMetrics, FontSource, FontTable};
+
+        /// Builds a minimal valid `FontMetrics` for testing.
+        fn make_metrics() -> FontMetrics {
+            FontMetrics::new(
+                1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], false,
+            )
+            .expect("test FontMetrics must be valid")
+        }
+
+        /// Builds a valid `FontEntry` with the given id index.
+        fn make_entry(idx: u128) -> FontEntry {
+            FontEntry::new(
+                uuid::Uuid::from_u128(idx),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                make_metrics(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("test FontEntry must be valid")
+        }
+
+        let mut table = FontTable::new();
+
+        // Add MAX_FONTS_PER_DOCUMENT entries — all must succeed.
+        for i in 0..MAX_FONTS_PER_DOCUMENT {
+            assert!(
+                table.add(make_entry(i as u128 + 1)).is_ok(),
+                "entry {i} should be accepted under the cap"
+            );
+        }
+
+        // The next add must fail: capacity is exhausted.
+        let overflow = make_entry(MAX_FONTS_PER_DOCUMENT as u128 + 1);
+        assert!(
+            table.add(overflow).is_err(),
+            "add beyond MAX_FONTS_PER_DOCUMENT must be rejected"
+        );
     }
 }
