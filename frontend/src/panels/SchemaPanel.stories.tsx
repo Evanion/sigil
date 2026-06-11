@@ -18,6 +18,7 @@ function createMockStore(
       pages: [],
       nodes,
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId,
@@ -67,6 +68,7 @@ function createMockStore(
     deleteToken: () => {},
     renameToken: () => {},
     resolveToken: () => null,
+    getFontEntry: () => undefined,
     destroy: () => {},
   } as DocumentStoreAPI;
 }

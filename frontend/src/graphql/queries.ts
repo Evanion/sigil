@@ -55,3 +55,13 @@ export const NODE_QUERY = `
     }
   }
 `;
+
+/**
+ * Query all font entries in the document font table.
+ *
+ * `fonts` is a JSON scalar — the server returns a JSON-encoded array of
+ * FontEntry objects.  The frontend parses this with `parseFontsResponse`
+ * in document-store-solid.tsx.  This matches the shape of the `add_font`
+ * broadcast value (spec-fonts-1 Task 15a).
+ */
+export const FONTS_QUERY = `query Fonts { fonts }`;

@@ -63,6 +63,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
       pages: [],
       nodes: {},
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId,
@@ -115,6 +116,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     deleteToken: vi.fn(),
     renameToken: vi.fn(),
     resolveToken: () => null,
+    getFontEntry: () => undefined,
     destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;

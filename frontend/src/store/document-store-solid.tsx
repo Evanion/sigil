@@ -17,9 +17,10 @@ import type {
   Token,
   TokenType,
   TokenValue,
+  FontEntry,
 } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
-import { PAGES_QUERY, TOKENS_QUERY } from "../graphql/queries";
+import { PAGES_QUERY, TOKENS_QUERY, FONTS_QUERY } from "../graphql/queries";
 import { APPLY_OPERATIONS_MUTATION } from "../graphql/mutations";
 import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
@@ -91,6 +92,8 @@ export interface DocumentState {
   pages: MutablePage[];
   nodes: Record<string, MutableDocumentNode>;
   tokens: Record<string, Token>;
+  /** Font table keyed by FontEntry.id — populated by fetchFonts() on load. */
+  fontTable: Record<string, FontEntry>;
 }
 
 export type ToolType = "select" | "frame" | "rectangle" | "ellipse" | "text";
@@ -155,6 +158,17 @@ export interface DocumentStoreAPI {
    * "Continuous-Value Controls Must Coalesce History Entries".
    */
   flushHistory(): void;
+
+  /**
+   * Look up a font entry by its stable UUID.
+   *
+   * Returns `undefined` when the id is not in the font table (entry has not
+   * been added or the table has not yet been populated by `fetchFonts`).
+   * Consumers (renderer Task 17, font picker Task 19) read `state.fontTable`
+   * directly for reactive access; this accessor provides a convenient
+   * imperative lookup for non-reactive call sites.
+   */
+  getFontEntry(id: string): FontEntry | undefined;
 
   // Token mutations
   createToken(name: string, tokenType: TokenType, value: TokenValue, description?: string): void;
@@ -338,6 +352,60 @@ function parseTokensResponse(data: unknown): Record<string, Token> {
   }
 
   return tokens;
+}
+
+/**
+ * Parse a raw GraphQL `fonts` query response into a `Record<string, FontEntry>` keyed
+ * by font entry id.
+ *
+ * The `fonts` field is a JSON scalar — urql may deliver it as an already-parsed
+ * value or as a JSON string.  Both shapes are handled.  Malformed entries (missing
+ * or empty `id`, non-object items) are skipped with a `console.warn` so a single
+ * bad entry does not prevent the rest from loading.
+ *
+ * Exported so that it can be unit-tested independently of the full store.
+ */
+export function parseFontsResponse(data: unknown): Record<string, FontEntry> {
+  const table: Record<string, FontEntry> = {};
+
+  if (data === null || data === undefined || typeof data !== "object") return table;
+  const raw = (data as Record<string, unknown>)["fonts"];
+  if (raw === undefined || raw === null) return table;
+
+  // urql may deliver the JSON scalar as an already-parsed value or as a JSON
+  // string — handle both defensively (per "Defensive Message Parsing").
+  let parsed: unknown;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      console.error("parseFontsResponse: failed to parse fonts JSON string", e);
+      return table;
+    }
+  } else {
+    parsed = raw;
+  }
+
+  if (!Array.isArray(parsed)) {
+    console.error("parseFontsResponse: expected array of font entries, got", typeof parsed);
+    return table;
+  }
+
+  for (const item of parsed) {
+    if (item === null || typeof item !== "object") {
+      console.warn("parseFontsResponse: skipping non-object font entry", item);
+      continue;
+    }
+    const entry = item as Record<string, unknown>;
+    const id = entry["id"];
+    if (typeof id !== "string" || id.length === 0) {
+      console.warn("parseFontsResponse: skipping font entry with missing/invalid id", entry);
+      continue;
+    }
+    table[id] = entry as unknown as FontEntry;
+  }
+
+  return table;
 }
 
 // ── Server operation mapping ──────────────────────────────────────────
@@ -596,6 +664,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     pages: [],
     nodes: {},
     tokens: {},
+    fontTable: {},
   });
 
   // ── History Manager ───────────────────────────────────────────────────
@@ -833,6 +902,31 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     }
   }
 
+  // ── Fetch fonts ───────────────────────────────────────────────────────
+
+  /**
+   * Fetch all font entries from the server and populate `state.fontTable`.
+   *
+   * Parsing and validation are delegated to `parseFontsResponse`, which handles
+   * both the already-parsed and JSON-string forms of the urql Json scalar, and
+   * skips malformed entries with a `console.warn`.
+   */
+  async function fetchFonts(): Promise<void> {
+    try {
+      const result = await client.query(gql(FONTS_QUERY), {}).toPromise();
+      if (result.error) {
+        console.error("fetchFonts error:", result.error.message);
+        return;
+      }
+      if (!result.data) return;
+
+      const table = parseFontsResponse(result.data);
+      setState("fontTable", reconcile(table));
+    } catch (err) {
+      console.error("fetchFonts exception:", err);
+    }
+  }
+
   // Track last received sequence number for future reconnect protocol (Plan 15d)
   // @ts-expect-error -- lastSeq is written but read will be used in reconnect/gap-fill protocol
 
@@ -866,6 +960,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   // Initial load
   void fetchPages();
   void fetchTokens();
+  void fetchFonts();
 
   // ── Send operations to server ──────────────────────────────────────
 
@@ -2458,6 +2553,20 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     return resolveTokenPure(state.tokens, name);
   }
 
+  /**
+   * Imperative accessor: look up a font entry by its stable UUID.
+   *
+   * For reactive reads (in components / memos that should re-render when the
+   * font table changes) use `store.state.fontTable[id]` directly — that is
+   * the signal-backed store path that Solid tracks.  This function is
+   * intentionally non-reactive (does not subscribe to the store proxy) and is
+   * suitable for one-shot imperative look-ups (e.g., from canvas rendering
+   * callbacks where Solid tracking is neither available nor desired).
+   */
+  function getFontEntry(id: string): FontEntry | undefined {
+    return state.fontTable[id] as FontEntry | undefined;
+  }
+
   // ── Page Mutations ──────────────────────────────────────────────────
 
   function createPage(name: string): void {
@@ -2832,6 +2941,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     deleteToken,
     renameToken,
     resolveToken: resolveTokenLocal,
+    getFontEntry,
     createPage,
     deletePage,
     renamePage,

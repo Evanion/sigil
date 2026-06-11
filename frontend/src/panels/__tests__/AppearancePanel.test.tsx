@@ -24,6 +24,7 @@ function createMockStore(
       pages: [],
       nodes,
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
@@ -71,6 +72,7 @@ function createMockStore(
     deleteToken: vi.fn(),
     renameToken: vi.fn(),
     resolveToken: () => null,
+    getFontEntry: () => undefined,
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }

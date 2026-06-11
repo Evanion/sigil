@@ -1937,8 +1937,8 @@ mod tests {
 
         for variant in &fixture.variants {
             // 1. Deserialize into a FontEntry — proves the fixture passes validation.
-            let entry: FontEntry = serde_json::from_value(variant.value.clone())
-                .unwrap_or_else(|e| {
+            let entry: FontEntry =
+                serde_json::from_value(variant.value.clone()).unwrap_or_else(|e| {
                     panic!(
                         "variant {:?} failed to deserialize as FontEntry: {e}",
                         variant.name
@@ -1946,12 +1946,9 @@ mod tests {
                 });
 
             // 2. Re-serialize and compare to original JSON value — proves round-trip.
-            let roundtripped: serde_json::Value = serde_json::to_value(&entry)
-                .unwrap_or_else(|e| {
-                    panic!(
-                        "variant {:?} failed to re-serialize: {e}",
-                        variant.name
-                    )
+            let roundtripped: serde_json::Value =
+                serde_json::to_value(&entry).unwrap_or_else(|e| {
+                    panic!("variant {:?} failed to re-serialize: {e}", variant.name)
                 });
 
             assert_eq!(

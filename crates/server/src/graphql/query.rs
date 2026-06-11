@@ -98,6 +98,38 @@ impl QueryRoot {
         Ok(tokens)
     }
 
+    /// Get all font entries in the document font table.
+    ///
+    /// Returns every `FontEntry` (including the bundled default) as a JSON
+    /// scalar array.  The frontend parses each element with the `FontEntry`
+    /// TypeScript type.  Using a JSON scalar keeps the resolver simple and
+    /// consistent with the `add_font` broadcast value shape (spec-fonts-1
+    /// Task 15a).
+    async fn fonts(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<async_graphql::Json<Vec<serde_json::Value>>> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id = crate::graphql::mutation::resolve_session(ctx, state)?;
+        let session = crate::graphql::mutation::require_live_session(state, session_id)?;
+        let guard = session.store.read().await;
+        let doc = &guard.0;
+        // Collect all font entries (including the bundled default) under the lock.
+        // Each entry is serialized to serde_json::Value so the caller receives
+        // the same JSON shape as the `add_font` broadcast.
+        let entries: Vec<serde_json::Value> = doc
+            .font_table()
+            .iter()
+            .map(|entry| {
+                serde_json::to_value(entry).map_err(|e| {
+                    tracing::error!("fonts query: failed to serialize FontEntry: {e}");
+                    async_graphql::Error::new("failed to serialize font entry")
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(async_graphql::Json(entries))
+    }
+
     /// Get a single node by UUID.
     ///
     /// RF-012: delegates to the shared `node_to_gql` function in types.rs.
@@ -179,5 +211,60 @@ mod tests {
         assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
         let data = resp.data.into_json().expect("data json");
         assert_eq!(data["document"]["pageCount"], 1);
+    }
+
+    /// Verify that the `fonts` query returns at least the bundled default entry
+    /// and that a manually-added entry is included in the response with the
+    /// correct `id` and `family` fields.
+    #[tokio::test]
+    async fn test_fonts_query_returns_font_entries() {
+        let (state, session) = new_state_with_session();
+
+        // Add a custom font entry to the session's document store.
+        let custom_id = uuid::Uuid::new_v4();
+        {
+            let mut guard = session.store.write().await;
+            let metrics = sigil_core::FontMetrics::new(
+                1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0u8; 10], false,
+            )
+            .expect("create test FontMetrics");
+            let entry = sigil_core::FontEntry::new(
+                custom_id,
+                "Test Family".to_string(),
+                "TestFamily-Regular".to_string(),
+                sigil_core::FontSource::SystemReference,
+                metrics,
+                0,
+                sigil_core::EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("create test FontEntry");
+            guard.0.font_table_mut().add(entry).expect("add font entry");
+        }
+
+        let schema = build_schema(state);
+        let resp = schema.execute("{ fonts }").await;
+        assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
+
+        let data = resp.data.into_json().expect("data json");
+        let fonts = data["fonts"].as_array().expect("fonts is array");
+
+        // The document starts with the bundled default entry (Inter), plus the
+        // custom one we added — so there must be at least two entries.
+        assert!(
+            fonts.len() >= 2,
+            "expected at least 2 font entries, got {}",
+            fonts.len()
+        );
+
+        // Verify the custom entry is present with the correct id and family.
+        let found = fonts
+            .iter()
+            .any(|f| f["id"] == custom_id.to_string() && f["family"] == "Test Family");
+        assert!(
+            found,
+            "custom font entry not found in response; got: {fonts:?}"
+        );
     }
 }

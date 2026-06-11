@@ -231,6 +231,7 @@ describe("FontEntry parity with Rust fixture", () => {
   it("the custom variant has source.asset_uuid", () => {
     const customVariant = fixture.variants.find((v) => v.name === "custom");
     expect(customVariant).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by toBeDefined above
     const val = customVariant!.value as FontEntry;
     // FontSource discriminated union narrowing
     const src: FontSource = val.source;
@@ -244,6 +245,7 @@ describe("FontEntry parity with Rust fixture", () => {
   it("the variable font variant has is_variable=true and at least one axis", () => {
     const varVariable = fixture.variants.find((v) => v.name === "variable_font");
     expect(varVariable).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by toBeDefined above
     const val = varVariable!.value as FontEntry;
     expect(val.is_variable).toBe(true);
     expect(val.axes.length).toBeGreaterThanOrEqual(1);
@@ -256,6 +258,7 @@ describe("FontEntry parity with Rust fixture", () => {
   it("the library variant has source.catalog_id", () => {
     const libVariant = fixture.variants.find((v) => v.name === "library");
     expect(libVariant).toBeDefined();
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- guarded by toBeDefined above
     const val = libVariant!.value as FontEntry;
     const src: FontSource = val.source;
     expect(src.source).toBe("library");
