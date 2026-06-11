@@ -32,6 +32,12 @@ pub type FontEntryId = uuid::Uuid;
 /// Value `0x0000_0DEF_A000_DEAD_F047_BEEF_CAFE_0000_0001` — a high, memorable
 /// hex literal chosen to avoid collisions with the small `from_u128(1..=99)`
 /// values used in unit tests throughout the codebase.
+///
+/// Note: this is an intentionally-fixed sentinel constructed via
+/// `Uuid::from_u128` and is therefore NOT a standard RFC-4122 versioned
+/// (v4/v5) UUID. This is correct and intentional — it is a well-known
+/// fixed identity, not a randomly generated one, and no code branches on its
+/// version nibble.
 pub const DEFAULT_FONT_ENTRY_ID: FontEntryId =
     uuid::Uuid::from_u128(0x0000_0DEF_A000_DEAD_F047_BEEF_CAFE_0000_0001);
 
@@ -855,8 +861,11 @@ impl FontTable {
     ///     which uses compile-time constants that satisfy all invariants.
     /// (b) The sibling fallible boundary is `FontTable::add()`, which enforces
     ///     capacity and uniqueness for untrusted callers.
-    /// (c) `test_bundled_default_satisfies_new_invariants` re-runs the exact
-    ///     literals through `FontEntry::new()` to prevent silent drift.
+    /// (c) The inserted entry is validated by `test_bundled_default_satisfies_new_invariants`
+    ///     (in `font.rs`) which re-runs the exact literals through `FontEntry::new()` to
+    ///     prevent silent drift. This constructor itself is exercised by
+    ///     `test_document_new_has_font_table_with_default_inter_entry` (in `document.rs`),
+    ///     which verifies the seeded table is reachable from a freshly-created `Document`.
     /// (d) Any future caller that inserts entries in bulk or from untrusted
     ///     input MUST use `FontTable::add()`, not this constructor.
     #[must_use]
