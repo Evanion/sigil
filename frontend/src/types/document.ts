@@ -8,6 +8,7 @@
  *         crates/core/src/path.rs, crates/core/src/document.rs,
  *         crates/core/src/token.rs, crates/core/src/component.rs,
  *         crates/core/src/prototype.rs,
+ *         crates/core/src/font.rs,
  *         crates/server/src/routes/document.rs
  */
 
@@ -362,6 +363,9 @@ export interface TextShadow {
 }
 
 export interface TextStyle {
+  // TODO(fonts-1 Task 17): TextStyle.font_family → font_entry: string lands with
+  // its renderer/UI consumers (text-measure, text-overlay, TypographySection,
+  // text-tool, store). Do not change this field here until Task 17.
   readonly font_family: string;
   readonly font_size: StyleValue<number>;
   readonly font_weight: number;
@@ -372,6 +376,94 @@ export interface TextStyle {
   readonly text_decoration: TextDecoration;
   readonly text_color: StyleValue<Color>;
   readonly text_shadow?: TextShadow | null;
+}
+
+// ── Font Types ────────────────────────────────────────────────────────
+//
+// Mirror of crates/core/src/font.rs.
+// Serde shapes: FontSource uses `#[serde(tag = "source", rename_all = "snake_case")]`.
+// EmbedDecision uses `#[serde(rename_all = "snake_case")]` (plain string enum).
+// FontAxis.tag is [u8; 4] in Rust — serde serializes it as a 4-element number array.
+// FontMetrics.panose is [u8; 10] in Rust — serde serializes it as a 10-element number array.
+// Parity fixture: tests/fixtures/parity/font_entry_encoding.json
+
+/**
+ * Describes where a font's data originates.
+ *
+ * Mirrors `FontSource` in `crates/core/src/font.rs`.
+ * Discriminant field: `source` (serde tag = "source", rename_all = "snake_case").
+ */
+export type FontSource =
+  | { readonly source: "bundled" }
+  | { readonly source: "library"; readonly catalog_id: string }
+  | { readonly source: "custom"; readonly asset_uuid: string }
+  | { readonly source: "system_reference" };
+
+/**
+ * How a font may be embedded in an exported document (derived from OS/2 fsType bits).
+ *
+ * Mirrors `EmbedDecision` in `crates/core/src/font.rs`.
+ * serde `rename_all = "snake_case"` produces the values below.
+ */
+export type EmbedDecision =
+  | "embed"
+  | "reference_restricted"
+  | "reference_system"
+  | "reference_no_os2"
+  | "reference_preview_print";
+
+/**
+ * A single variable-font axis (e.g., Weight `wght`, Width `wdth`).
+ *
+ * Mirrors `FontAxis` in `crates/core/src/font.rs`.
+ * `tag` is `[u8; 4]` in Rust — serde serializes as a 4-element number array
+ * (e.g., `[119, 103, 104, 116]` for `wght`).
+ */
+export interface FontAxis {
+  readonly tag: readonly [number, number, number, number];
+  readonly min: number;
+  readonly default: number;
+  readonly max: number;
+}
+
+/**
+ * Font-level metrics extracted from a font file's OS/2 and hhea tables.
+ *
+ * Mirrors `FontMetrics` in `crates/core/src/font.rs`.
+ * `panose` is `[u8; 10]` in Rust — serde serializes as a 10-element number array.
+ * `units_per_em` is `u16`; all other numeric fields are `f32` (serialized as JSON numbers).
+ */
+export interface FontMetrics {
+  readonly units_per_em: number;
+  readonly ascent: number;
+  readonly descent: number;
+  readonly line_gap: number;
+  readonly cap_height: number;
+  readonly x_height: number;
+  readonly italic_angle: number;
+  readonly avg_advance: number;
+  /** PANOSE classification — 10-element byte array serialized as number[]. */
+  readonly panose: readonly number[];
+  readonly is_serif: boolean;
+}
+
+/**
+ * A single font entry in the document font catalogue.
+ *
+ * Mirrors `FontEntry` in `crates/core/src/font.rs`.
+ * `id` and `source.asset_uuid` are UUID strings (lowercase hyphenated).
+ * `fs_type` is `u16` (JSON number).
+ */
+export interface FontEntry {
+  readonly id: string;
+  readonly family: string;
+  readonly postscript_name: string;
+  readonly source: FontSource;
+  readonly metrics: FontMetrics;
+  readonly fs_type: number;
+  readonly embeddable: EmbedDecision;
+  readonly is_variable: boolean;
+  readonly axes: readonly FontAxis[];
 }
 
 // ── Path ──────────────────────────────────────────────────────────────

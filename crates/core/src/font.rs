@@ -1897,4 +1897,68 @@ mod tests {
             "build_system_reference_entry must reject CSS-significant chars in family"
         );
     }
+
+    // ── Cross-language parity fixture ─────────────────────────────────────
+    //
+    // Loads tests/fixtures/parity/font_entry_encoding.json and verifies:
+    // 1. Each variant deserializes into a valid `FontEntry` (proves the fixture
+    //    is accepted by the Rust validating `Deserialize`).
+    // 2. Each deserialized entry re-serializes to the identical JSON value
+    //    (proves round-trip stability — no lossy fields).
+    //
+    // The matching TypeScript test in
+    //   frontend/src/types/__tests__/document-font-parity.test.ts
+    // consumes the same file. See CLAUDE.md "Parallel Implementations Must
+    // Have Parity Tests".
+
+    #[test]
+    fn test_font_entry_parity_fixture_roundtrips() {
+        #[derive(serde::Deserialize)]
+        struct FixtureVariant {
+            name: String,
+            value: serde_json::Value,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct Fixture {
+            #[allow(dead_code)]
+            description: String,
+            variants: Vec<FixtureVariant>,
+        }
+
+        let json = include_str!("../../../tests/fixtures/parity/font_entry_encoding.json");
+        let fixture: Fixture =
+            serde_json::from_str(json).expect("parity fixture must be valid JSON");
+
+        assert!(
+            !fixture.variants.is_empty(),
+            "parity fixture must contain at least one variant"
+        );
+
+        for variant in &fixture.variants {
+            // 1. Deserialize into a FontEntry — proves the fixture passes validation.
+            let entry: FontEntry = serde_json::from_value(variant.value.clone())
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "variant {:?} failed to deserialize as FontEntry: {e}",
+                        variant.name
+                    )
+                });
+
+            // 2. Re-serialize and compare to original JSON value — proves round-trip.
+            let roundtripped: serde_json::Value = serde_json::to_value(&entry)
+                .unwrap_or_else(|e| {
+                    panic!(
+                        "variant {:?} failed to re-serialize: {e}",
+                        variant.name
+                    )
+                });
+
+            assert_eq!(
+                roundtripped, variant.value,
+                "variant {:?} round-trip mismatch: serialized value differs from fixture",
+                variant.name
+            );
+        }
+    }
 }
