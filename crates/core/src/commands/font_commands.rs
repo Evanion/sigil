@@ -182,6 +182,9 @@ impl FieldOperation for RemoveFontEntry {
 
         // 3. Referential-integrity scan: reject if any Text node still uses this
         //    entry. The scan covers arena nodes — the canonical node store.
+        //    O(n) linear scan over all arena nodes; acceptable for an infrequent
+        //    removal op. A reverse FontEntryId→nodes index would be O(1) but
+        //    adds persistent state not warranted by this access pattern.
         let referenced = doc.arena.iter().any(|node| {
             matches!(
                 &node.kind,
@@ -441,7 +444,6 @@ mod tests {
     /// test's `bytes` payload only needs to pass the earlier size check.
     #[test]
     fn test_max_fonts_per_document_enforced() {
-        use crate::font::{EmbedDecision, FontEntry, FontMetrics, FontSource};
         use crate::validate::MAX_FONTS_PER_DOCUMENT;
 
         let mut doc = Document::new("Test".to_string());
@@ -577,6 +579,20 @@ mod tests {
         };
 
         op.validate(&doc).expect("validate must pass");
+
+        // Assert the node does NOT already have font_id set — so `apply` proves
+        // it changed the value rather than being a no-op.
+        let before = doc
+            .arena
+            .get(node_id)
+            .expect("node must be present before apply");
+        if let NodeKind::Text { text_style, .. } = &before.kind {
+            assert_ne!(
+                text_style.font_entry, font_id,
+                "font_entry must differ before apply so the test proves a real change"
+            );
+        }
+
         op.apply(&mut doc).expect("apply must succeed");
 
         let updated = doc.arena.get(node_id).expect("node must be present");
@@ -621,6 +637,27 @@ mod tests {
         assert!(
             op.validate(&doc).is_err(),
             "SetNodeFont must reject a non-Text node"
+        );
+    }
+
+    /// `validate` must reject when the target `node_id` has never been inserted
+    /// into the arena (exercises the `doc.arena.get(node_id)?` propagation path).
+    #[test]
+    fn test_set_node_font_rejects_missing_node() {
+        let mut doc = Document::new("Test".to_string());
+        // Insert a valid font entry so the font-existence check is not the
+        // rejecting condition — we want the node-existence check to fire.
+        let font_id = Uuid::from_u128(203);
+        insert_test_font_entry(&mut doc, font_id);
+
+        // NodeId(99, 0) was never inserted into the arena.
+        let op = SetNodeFont {
+            node_id: NodeId::new(99, 0),
+            font_entry: font_id,
+        };
+        assert!(
+            op.validate(&doc).is_err(),
+            "SetNodeFont must reject a node_id that does not exist in the arena"
         );
     }
 
