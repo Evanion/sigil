@@ -14,9 +14,12 @@
 //! 6. Signals dirty for persistence and broadcasts the transaction
 
 use async_graphql::{Context, ID, Object, Result};
+use base64::Engine as _;
 
 use sigil_core::FieldOperation;
+use sigil_core::FontSource;
 use sigil_core::PageId;
+use sigil_core::commands::font_commands::{AddFontEntry, RemoveFontEntry, SetNodeFont};
 use sigil_core::commands::node_commands::{
     CreateNode, DeleteNodes, RenameNode, SetLocked, SetTextContent, SetVisible,
 };
@@ -28,6 +31,7 @@ use sigil_core::commands::style_commands::{
 use sigil_core::commands::text_style_commands::{SetTextStyleField, TextStyleField};
 use sigil_core::commands::token_commands::{AddToken, RemoveToken, RenameToken, UpdateToken};
 use sigil_core::commands::tree_commands::{ReorderChildren, ReparentNode};
+use sigil_core::font_parse::FontProvenance;
 use sigil_core::id::TokenId;
 use sigil_core::node::{
     BlendMode, Color, Effect, Fill, FontStyle, NodeKind, Stroke, StyleValue, TextAlign,
@@ -587,6 +591,34 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
                         field: TextStyleField::FontStyle(font_style),
                     }) as Box<dyn FieldOperation + Send>)
                 }),
+                broadcast,
+                post_apply_value: None,
+            })
+        }
+        // `kind.text_style.font_entry` — sets a Text node's active font to an
+        // existing FontTable entry. Value must be a UUID string identifying the
+        // target font entry.
+        //
+        // Broadcast shape for Task 15 (apply-remote.ts handler):
+        //   op_type: "set_field"
+        //   path:    "kind.text_style.font_entry"
+        //   value:   "<font-entry-uuid-string>"
+        "kind.text_style.font_entry" => {
+            let font_entry: uuid::Uuid = serde_json::from_value(value.clone())
+                .map_err(|e| async_graphql::Error::new(format!("invalid font_entry UUID: {e}")))?;
+            Ok(ParsedOp {
+                builder: Box::new(move |doc| {
+                    let node_id = doc
+                        .arena
+                        .id_by_uuid(&parsed_uuid)
+                        .ok_or_else(|| async_graphql::Error::new("node not found"))?;
+                    Ok(Box::new(SetNodeFont {
+                        node_id,
+                        font_entry,
+                    }) as Box<dyn FieldOperation + Send>)
+                }),
+                // broadcast.value is already set to the parsed UUID string from
+                // the top of parse_set_field — exact canonical form for the frontend.
                 broadcast,
                 post_apply_value: None,
             })
@@ -1623,6 +1655,265 @@ impl MutationRoot {
             };
             error_with_code(&format!("closeSession: {e}"), code)
         })?;
+        Ok(true)
+    }
+
+    /// Add a font to the document's font table.
+    ///
+    /// Accepts raw font bytes as a base64-encoded string (GraphQL has no binary
+    /// scalar) and a provenance tag. Returns the new font entry's UUID.
+    ///
+    /// # Broadcast shape (for Task 15 — `apply-remote.ts` handler)
+    ///
+    /// ```json
+    /// {
+    ///   "op_type": "add_font",
+    ///   "path": "font_table",
+    ///   "value": {
+    ///     "id": "<uuid>",
+    ///     "family": "<family name>",
+    ///     "postscript_name": "<PS name>",
+    ///     "source": { … },
+    ///     "metrics": { … },
+    ///     "fs_type": <u16>,
+    ///     "embeddable": "<EmbedDecision>",
+    ///     "is_variable": <bool>,
+    ///     "axes": [ … ]
+    ///   }
+    /// }
+    /// ```
+    ///
+    /// `value` is the full serialized `FontEntry` including `"id"` — required
+    /// by the entity-creation-broadcast rule (CLAUDE.md §4 Broadcast Payload
+    /// Shape Contract). Task 15 should consume this shape in `apply-remote.ts`.
+    ///
+    /// # Lock ordering
+    ///
+    /// Per the lock-ordering rule (`store` before `font_bytes`): we hold
+    /// `store.write()` long enough to apply the mutation, stamp the seq, and
+    /// send the broadcast (all synchronous — no `.await` under the lock). We
+    /// then DROP the store guard, and ONLY THEN acquire `font_bytes.write()`
+    /// (which requires `.await`). The tiny window between broadcast and
+    /// `font_bytes` insert is benign: the persistence debounce is typically ≥1s,
+    /// so the font bytes will be present before the next save. The save path
+    /// already handles a missing-bytes Custom entry by warning+skipping (Task
+    /// 10/11), so even in a hypothetical crash window the behaviour is
+    /// well-defined.
+    async fn add_font(
+        &self,
+        ctx: &Context<'_>,
+        bytes_base64: String,
+        provenance: String,
+    ) -> Result<String> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id = resolve_session(ctx, state)?;
+        let session = require_live_session(state, session_id)?;
+
+        // --- Parse provenance ---
+        let font_provenance = match provenance.as_str() {
+            "user_supplied" => FontProvenance::UserSupplied,
+            "system_directory" => FontProvenance::SystemDirectory,
+            other => {
+                return Err(async_graphql::Error::new(format!(
+                    "unknown provenance: {other:?}; expected \"user_supplied\" or \"system_directory\""
+                )));
+            }
+        };
+
+        // --- Decode base64 ---
+        let font_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&bytes_base64)
+            .map_err(|e| async_graphql::Error::new(format!("invalid base64: {e}")))?;
+
+        // --- Generate a fresh entry id server-side (never trust the client) ---
+        let entry_id = uuid::Uuid::new_v4();
+
+        // --- Build the command ---
+        let op = AddFontEntry {
+            entry_id,
+            bytes: font_bytes.clone(),
+            provenance: font_provenance,
+        };
+
+        // --- Under store lock: validate → apply → stamp seq → broadcast ---
+        //
+        // RF-002: seq stamp AND broadcast send happen while the write lock is
+        // held so apply-order == seq-order == broadcast-enqueue-order.
+        // next_seq() and broadcast.send() are synchronous (no .await), so
+        // holding the write lock across them does not block the runtime.
+        let (entry_id_str, source_is_custom) = {
+            let mut doc_guard = session.store.write().await;
+
+            // Snapshot for rollback on validation or apply failure.
+            let snapshot = doc_guard.0.clone();
+
+            if let Err(e) = op
+                .validate(&doc_guard)
+                .map_err(|e| async_graphql::Error::new(format!("validation failed: {e}")))
+            {
+                doc_guard.0 = snapshot;
+                return Err(e);
+            }
+            if let Err(e) = op
+                .apply(&mut doc_guard)
+                .map_err(|e| async_graphql::Error::new(format!("apply failed: {e}")))
+            {
+                doc_guard.0 = snapshot;
+                return Err(e);
+            }
+
+            // Build broadcast value from POST-APPLY document state. The entry
+            // is guaranteed to be present after a successful apply. We scope
+            // the shared borrow of `doc_guard` so it is released before the
+            // mutable borrow that would be needed for snapshot rollback on error.
+            // In practice `get()` returning `None` is unreachable after a
+            // successful `apply()`, but we still avoid `expect()` per core rules.
+            let entry_ref = doc_guard.0.font_table().get(entry_id).ok_or_else(|| {
+                // Should never happen — apply succeeded, so the entry must exist.
+                async_graphql::Error::new("add_font: entry missing after apply (internal error)")
+            })?;
+
+            // Determine whether this is a Custom source (bytes must be stored
+            // in the session's font_bytes map for persistence).
+            // Match exhaustively per CLAUDE.md §11 "Discriminated-Union Dispatch
+            // Must Be Exhaustive Across All Crates". No wildcard arm.
+            let is_custom = match entry_ref.source() {
+                FontSource::Custom { .. } => true,
+                // Bundled, Library, and SystemReference fonts are not embedded
+                // in the document — no byte storage needed for these.
+                FontSource::Bundled | FontSource::Library { .. } | FontSource::SystemReference => {
+                    false
+                }
+            };
+
+            // Serialize the full FontEntry as the broadcast value. The "id"
+            // field is required by the entity-creation-broadcast rule (CLAUDE.md
+            // §4). Task 15 consumes this shape in apply-remote.ts.
+            let broadcast_json = serde_json::to_value(entry_ref).map_err(|e| {
+                async_graphql::Error::new(format!("broadcast serialize failed: {e}"))
+            })?;
+            // `entry_ref` borrow ends here — `broadcast_json` owns the data.
+
+            let op_payload = OperationPayload {
+                id: uuid::Uuid::new_v4().to_string(),
+                node_uuid: String::new(), // font ops are not node-scoped
+                op_type: "add_font".to_string(),
+                path: "font_table".to_string(),
+                value: Some(broadcast_json),
+            };
+
+            let mut transaction = multi_op_transaction(None, vec![op_payload]);
+            transaction.seq = session.next_seq();
+            let mutation_event = MutationEvent {
+                kind: MutationEventKind::FontAdded,
+                uuid: Some(entry_id.to_string()),
+                data: None,
+                transaction: Some(transaction),
+            };
+            // Fire-and-forget broadcast — no subscribers is not an error.
+            let _ = session
+                .broadcast
+                .send(SessionEvent::DocumentEvent(mutation_event));
+
+            (entry_id.to_string(), is_custom)
+        };
+        // Store lock is now dropped.
+
+        // --- After releasing store lock: populate font_bytes if Custom ---
+        //
+        // Custom fonts (EmbedDecision::Embed) must have their bytes stored so
+        // the persistence save path can embed them. Reference fonts do not need
+        // byte storage — the server references them by PostScript name.
+        //
+        // We acquire font_bytes.write() here (async, after store lock dropped)
+        // because we cannot .await while holding store.write() per the "Hold
+        // Locks for the Full Read-Modify-Write Sequence" rule (no cross-await
+        // under a lock). The tiny window between broadcast and this insert is
+        // benign — see the lock ordering comment on this resolver.
+        if source_is_custom {
+            let mut bytes_guard = session.font_bytes.write().await;
+            bytes_guard.insert(entry_id, font_bytes);
+        }
+
+        Ok(entry_id_str)
+    }
+
+    /// Remove a font entry from the document's font table.
+    ///
+    /// Validates that the entry exists, is not the bundled default, and is not
+    /// referenced by any Text node. Returns `true` on success.
+    ///
+    /// # Broadcast shape (for Task 15 — `apply-remote.ts` handler)
+    ///
+    /// ```json
+    /// {
+    ///   "op_type": "remove_font",
+    ///   "path": "",
+    ///   "value": { "id": "<uuid>" }
+    /// }
+    /// ```
+    ///
+    /// The value carries `"id"` so Task 15's handler can remove the entry from
+    /// the client-side font table by its stable UUID.
+    async fn remove_font(&self, ctx: &Context<'_>, id: String) -> Result<bool> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id = resolve_session(ctx, state)?;
+        let session = require_live_session(state, session_id)?;
+
+        let entry_id: uuid::Uuid = id
+            .parse()
+            .map_err(|_| async_graphql::Error::new("invalid font entry UUID"))?;
+
+        let op = RemoveFontEntry { entry_id };
+
+        // --- Under store lock: validate → apply → stamp seq → broadcast ---
+        {
+            let mut doc_guard = session.store.write().await;
+            let snapshot = doc_guard.0.clone();
+
+            if let Err(e) = op
+                .validate(&doc_guard)
+                .map_err(|e| async_graphql::Error::new(format!("validation failed: {e}")))
+            {
+                doc_guard.0 = snapshot;
+                return Err(e);
+            }
+            if let Err(e) = op
+                .apply(&mut doc_guard)
+                .map_err(|e| async_graphql::Error::new(format!("apply failed: {e}")))
+            {
+                doc_guard.0 = snapshot;
+                return Err(e);
+            }
+
+            let op_payload = OperationPayload {
+                id: uuid::Uuid::new_v4().to_string(),
+                node_uuid: String::new(),
+                op_type: "remove_font".to_string(),
+                path: String::new(),
+                value: Some(serde_json::json!({ "id": entry_id.to_string() })),
+            };
+
+            let mut transaction = multi_op_transaction(None, vec![op_payload]);
+            transaction.seq = session.next_seq();
+            let mutation_event = MutationEvent {
+                kind: MutationEventKind::FontRemoved,
+                uuid: Some(entry_id.to_string()),
+                data: None,
+                transaction: Some(transaction),
+            };
+            let _ = session
+                .broadcast
+                .send(SessionEvent::DocumentEvent(mutation_event));
+        }
+        // Store lock is now dropped.
+
+        // --- Remove bytes from font_bytes store (after store lock released) ---
+        {
+            let mut bytes_guard = session.font_bytes.write().await;
+            bytes_guard.remove(&entry_id);
+        }
+
         Ok(true)
     }
 }
@@ -3491,5 +3782,409 @@ mod tests {
             "closeSession must flush the session store before Sessions::close"
         );
         assert_eq!(persistence.len(), 0, "persistence entry removed on close");
+    }
+
+    // ── Font operation tests ───────────────────────────────────────────────
+
+    // Font fixtures at workspace root tests/fixtures/fonts/.
+    // Path is relative to this source file (crates/server/src/graphql/mutation.rs):
+    // 4 levels up → workspace root, then tests/fixtures/fonts/.
+    const INSTALLABLE_TTF: &[u8] =
+        include_bytes!("../../../../tests/fixtures/fonts/installable.ttf");
+    const RESTRICTED_TTF: &[u8] = include_bytes!("../../../../tests/fixtures/fonts/restricted.ttf");
+
+    /// Helper: base64-encodes bytes using the standard alphabet.
+    fn to_base64(bytes: &[u8]) -> String {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+
+    /// `addFont` with an installable font: returns an id, adds the entry to
+    /// the font table, populates font_bytes (Custom source), and broadcasts
+    /// `op_type == "add_font"` with a value JSON containing `"id"` and `"family"`.
+    #[tokio::test]
+    async fn test_add_font_installable_adds_entry_and_broadcasts() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Subscribe before the mutation so we don't miss the broadcast.
+        let session_id = state.app.default_session_id().expect("default session");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+        drop(session); // release Arc ref before mutation
+
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let query = format!(
+            r#"mutation {{
+                addFont(bytesBase64: "{b64}", provenance: "user_supplied")
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "addFont should succeed for installable font: {:?}",
+            res.errors
+        );
+
+        let returned_id = res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .expect("addFont returns a string id")
+            .to_string();
+        let returned_uuid: uuid::Uuid = returned_id.parse().expect("returned id is a UUID");
+
+        // 1. Font table entry present in the document.
+        let doc = read_session_doc(&state);
+        assert!(
+            doc.font_table().get(returned_uuid).is_some(),
+            "font entry must be in the font table after addFont"
+        );
+        let entry = doc.font_table().get(returned_uuid).unwrap();
+        assert!(
+            !entry.family().is_empty(),
+            "font entry must have a non-empty family name"
+        );
+
+        // 2. font_bytes populated for a Custom (installable) entry.
+        let session = state
+            .app
+            .sessions
+            .get(session_id)
+            .expect("session still present");
+        let bytes_guard = session.font_bytes.try_read().expect("font_bytes read lock");
+        assert!(
+            bytes_guard.contains_key(&returned_uuid),
+            "installable font bytes must be stored in session.font_bytes"
+        );
+        drop(bytes_guard);
+
+        // 3. Broadcast carries op_type == "add_font" and value with "id" and "family".
+        match rx.try_recv().expect("broadcast delivered") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, MutationEventKind::FontAdded);
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.operations.len(), 1);
+                let op = &tx.operations[0];
+                assert_eq!(op.op_type, "add_font", "op_type must be 'add_font'");
+                assert_eq!(op.path, "font_table");
+                let val = op.value.as_ref().expect("value present");
+                assert_eq!(
+                    val["id"].as_str(),
+                    Some(returned_id.as_str()),
+                    "broadcast value must carry the new entry's id"
+                );
+                assert!(
+                    val["family"].as_str().is_some(),
+                    "broadcast value must carry the family name"
+                );
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
+    }
+
+    /// `addFont` with a restricted font: entry added (SystemReference source),
+    /// font_bytes NOT populated (no bytes to store for references), broadcast ok.
+    #[tokio::test]
+    async fn test_add_font_restricted_does_not_store_bytes() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let session_id = state.app.default_session_id().expect("default session");
+
+        let b64 = to_base64(RESTRICTED_TTF);
+        let query = format!(
+            r#"mutation {{
+                addFont(bytesBase64: "{b64}", provenance: "user_supplied")
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "addFont restricted: {:?}",
+            res.errors
+        );
+
+        let returned_id = res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .expect("returned id")
+            .to_string();
+        let returned_uuid: uuid::Uuid = returned_id.parse().expect("uuid");
+
+        // Font table entry present.
+        let doc = read_session_doc(&state);
+        assert!(
+            doc.font_table().get(returned_uuid).is_some(),
+            "restricted font entry must still be in the font table"
+        );
+
+        // font_bytes NOT populated — reference fonts don't embed bytes.
+        let session = state.app.sessions.get(session_id).expect("session present");
+        let bytes_guard = session.font_bytes.try_read().expect("font_bytes read");
+        assert!(
+            !bytes_guard.contains_key(&returned_uuid),
+            "restricted font must NOT be stored in font_bytes (reference, not embed)"
+        );
+    }
+
+    /// `addFont` with invalid base64 is rejected.
+    #[tokio::test]
+    async fn test_add_font_rejects_invalid_base64() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let res = schema
+            .execute(
+                r#"mutation { addFont(bytesBase64: "!not!base64!", provenance: "user_supplied") }"#,
+            )
+            .await;
+        assert!(
+            !res.errors.is_empty(),
+            "invalid base64 must produce a GraphQL error"
+        );
+    }
+
+    /// `addFont` with an unknown provenance string is rejected.
+    #[tokio::test]
+    async fn test_add_font_rejects_unknown_provenance() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let query = format!(
+            r#"mutation {{
+                addFont(bytesBase64: "{b64}", provenance: "totally_made_up")
+            }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "unknown provenance must be rejected"
+        );
+    }
+
+    /// `removeFont` removes an entry from font_table and font_bytes, and
+    /// broadcasts `op_type == "remove_font"` with value `{"id": "..."}`.
+    #[tokio::test]
+    async fn test_remove_font_removes_entry_and_broadcasts() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // First add a font.
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let add_res = schema
+            .execute(&format!(
+                r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#
+            ))
+            .await;
+        assert!(
+            add_res.errors.is_empty(),
+            "addFont should succeed: {:?}",
+            add_res.errors
+        );
+        let font_id = add_res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .expect("font id")
+            .to_string();
+
+        // Subscribe before removeFont so we receive the remove broadcast.
+        let session_id = state.app.default_session_id().expect("default session");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+        drop(session);
+
+        let remove_res = schema
+            .execute(&format!(r#"mutation {{ removeFont(id: "{font_id}") }}"#))
+            .await;
+        assert!(
+            remove_res.errors.is_empty(),
+            "removeFont should succeed: {:?}",
+            remove_res.errors
+        );
+        assert_eq!(
+            remove_res.data.into_json().unwrap()["removeFont"]
+                .as_bool()
+                .unwrap(),
+            true,
+            "removeFont returns true on success"
+        );
+
+        // 1. Entry gone from font table.
+        let doc = read_session_doc(&state);
+        let font_uuid: uuid::Uuid = font_id.parse().unwrap();
+        assert!(
+            doc.font_table().get(font_uuid).is_none(),
+            "entry must be absent from font table after removeFont"
+        );
+
+        // 2. Bytes gone from font_bytes.
+        let session = state.app.sessions.get(session_id).expect("session");
+        let bytes_guard = session.font_bytes.try_read().expect("font_bytes read");
+        assert!(
+            !bytes_guard.contains_key(&font_uuid),
+            "font bytes must be removed from session.font_bytes after removeFont"
+        );
+        drop(bytes_guard);
+
+        // 3. Broadcast shape.
+        match rx.try_recv().expect("remove_font broadcast delivered") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, MutationEventKind::FontRemoved);
+                let tx = me.transaction.expect("transaction present");
+                assert_eq!(tx.operations.len(), 1);
+                let op = &tx.operations[0];
+                assert_eq!(op.op_type, "remove_font");
+                let val = op.value.as_ref().expect("value present");
+                assert_eq!(
+                    val["id"].as_str(),
+                    Some(font_id.as_str()),
+                    "remove_font broadcast must carry the removed entry's id"
+                );
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
+    }
+
+    /// `removeFont` on a referenced font entry is rejected.
+    #[tokio::test]
+    async fn test_remove_font_rejects_referenced_entry() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Add a font.
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let add_res = schema
+            .execute(&format!(
+                r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#
+            ))
+            .await;
+        let font_id = add_res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Create a text node and point it at the font.
+        let text_uuid = create_test_text_direct(&state, "Hello");
+        apply_to_session(&state, |doc| {
+            use sigil_core::commands::font_commands::SetNodeFont;
+            let node_uuid: uuid::Uuid = text_uuid.parse().unwrap();
+            let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+            let font_uuid: uuid::Uuid = font_id.parse().unwrap();
+            let op = SetNodeFont {
+                node_id,
+                font_entry: font_uuid,
+            };
+            op.validate(doc).expect("SetNodeFont validate");
+            op.apply(doc).expect("SetNodeFont apply");
+        });
+
+        // Attempt to remove — should be rejected because a node still references it.
+        let remove_res = schema
+            .execute(&format!(r#"mutation {{ removeFont(id: "{font_id}") }}"#))
+            .await;
+        assert!(
+            !remove_res.errors.is_empty(),
+            "removeFont on a referenced entry must be rejected"
+        );
+    }
+
+    /// `removeFont` with a bogus UUID string is rejected with a parse error.
+    #[tokio::test]
+    async fn test_remove_font_rejects_invalid_uuid() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let res = schema
+            .execute(r#"mutation { removeFont(id: "not-a-uuid") }"#)
+            .await;
+        assert!(
+            !res.errors.is_empty(),
+            "invalid UUID for removeFont must produce an error"
+        );
+    }
+
+    /// `setField` with `path = "kind.text_style.font_entry"` updates the
+    /// Text node's font_entry and broadcasts the UUID at that path.
+    #[tokio::test]
+    async fn test_set_node_font_via_set_field_updates_font_entry_and_broadcasts() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Add a font to the document's font table.
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let add_res = schema
+            .execute(&format!(
+                r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#
+            ))
+            .await;
+        assert!(add_res.errors.is_empty(), "addFont: {:?}", add_res.errors);
+        let font_id = add_res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Create a text node.
+        let text_uuid = create_test_text_direct(&state, "Hello");
+
+        // Subscribe before the setField so we capture the broadcast.
+        let session_id = state.app.default_session_id().expect("session");
+        let session = state.app.sessions.get(session_id).expect("session");
+        let mut rx = session.broadcast.subscribe();
+        drop(session);
+
+        // Send setField with path = "kind.text_style.font_entry".
+        // Value is the font UUID as a JSON string (quoted).
+        let value_json = serde_json::json!(font_id).to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        setField: {{
+                            nodeUuid: "{text_uuid}",
+                            path: "kind.text_style.font_entry",
+                            value: "{value_json_escaped}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#,
+            value_json_escaped = value_json.replace('"', "\\\"")
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "setField font_entry should succeed: {:?}",
+            res.errors
+        );
+
+        // 1. Document state updated.
+        let doc = read_session_doc(&state);
+        let node_uuid: uuid::Uuid = text_uuid.parse().unwrap();
+        let font_uuid: uuid::Uuid = font_id.parse().unwrap();
+        let node_id = doc.arena.id_by_uuid(&node_uuid).expect("node exists");
+        let node = doc.arena.get(node_id).expect("get node");
+        match &node.kind {
+            sigil_core::node::NodeKind::Text { text_style, .. } => {
+                assert_eq!(
+                    text_style.font_entry, font_uuid,
+                    "font_entry must be updated to the new UUID"
+                );
+            }
+            _ => panic!("expected Text node"),
+        }
+
+        // 2. Broadcast carries path == "kind.text_style.font_entry" and op_type == "set_field".
+        match rx.try_recv().expect("broadcast delivered") {
+            SessionEvent::DocumentEvent(me) => {
+                assert_eq!(me.kind, MutationEventKind::NodeUpdated);
+                let tx = me.transaction.expect("tx");
+                assert_eq!(tx.operations.len(), 1);
+                let op = &tx.operations[0];
+                assert_eq!(op.op_type, "set_field");
+                assert_eq!(op.path, "kind.text_style.font_entry");
+                let val = op.value.as_ref().expect("value present");
+                assert_eq!(
+                    val.as_str(),
+                    Some(font_id.as_str()),
+                    "broadcast value must be the font entry UUID string"
+                );
+            }
+            other => panic!("expected DocumentEvent, got {other:?}"),
+        }
     }
 }

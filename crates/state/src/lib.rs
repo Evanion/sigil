@@ -105,6 +105,10 @@ pub enum MutationEventKind {
     TokenUpdated,
     /// A design token was deleted.
     TokenDeleted,
+    /// A new font entry was added to the document's font table.
+    FontAdded,
+    /// A font entry was removed from the document's font table.
+    FontRemoved,
 }
 
 /// Newtype wrapper around `Document` that allows us to assert `Send` and `Sync`

@@ -64,6 +64,9 @@ async-stream = "0.3"
 # Streaming
 futures-util = "0.3"
 
+# Encoding
+base64 = "0.22.1"
+
 # Testing
 assert_matches = "1"
 reqwest = { version = "0.12", features = ["json"] }
