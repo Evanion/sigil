@@ -10,8 +10,9 @@ as public-domain test data (same terms as the repository).
 | `installable.ttf` | `0x0000` | `Installable` | `Embed` |
 | `editable.ttf` | `0x0008` | `Editable` | `Embed` |
 | `restricted.ttf` | `0x0002` | `Restricted` | `ReferenceRestricted` |
+| `variable.ttf` | `0x0000` | `Installable` | `Embed` (also `is_variable=true`, one `wght` axis 100/400/900) |
 
-All three share: `unitsPerEm = 1000`, family `SigilTest`, PostScript name
+The static three share: `unitsPerEm = 1000`, family `SigilTest`, PostScript name
 `SigilTest-Regular`, ascent `800`, descent `-200`, line-gap `0`, cap-height
 `700`, x-height `500`, `xAvgCharWidth = 500`, PANOSE `bFamilyType=2` (Latin
 Text) / `bSerifStyle=2` (serif). OS/2 version 4 (mutually-exclusive fsType
