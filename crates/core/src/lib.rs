@@ -11,6 +11,7 @@ pub mod component;
 pub mod corners_input;
 pub mod document;
 pub mod error;
+pub mod font;
 pub mod id;
 pub mod migrations;
 pub mod node;
