@@ -20,7 +20,9 @@ use serde::{Deserialize, Serialize};
 use sigil_core::serialize::{
     SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
 };
-use sigil_core::{Document, FontSource, Node, NodeId, Page, PageId};
+use sigil_core::{
+    DEFAULT_FONT_ENTRY_ID, Document, FontEntry, FontSource, Node, NodeId, Page, PageId,
+};
 use uuid::Uuid;
 
 /// Maximum manifest file size (1 MiB).
@@ -40,10 +42,35 @@ pub struct Manifest {
     pub page_order: Vec<Uuid>,
     /// Asset UUIDs of embedded custom fonts stored in `fonts/<uuid>.ttf`.
     ///
+    /// This is a co-computed **denormalized index** derived from [`Self::fonts`]:
+    /// it contains only the UUIDs of `Custom`-sourced entries that have on-disk
+    /// bytes. It exists for fast disk↔manifest validation at load time (checking
+    /// which `.ttf` files are expected) without iterating the full `fonts` array.
+    ///
     /// `#[serde(default)]` ensures manifests written before this field existed
     /// (pre-fonts-1) still deserialize without error — backward compatible.
+    ///
+    /// **Invariant:** `font_assets` and `fonts` are always computed together in
+    /// [`prepare_save`] so they cannot diverge — `font_assets` is exactly the
+    /// set of asset UUIDs for `Custom`-sourced entries in `fonts` whose bytes
+    /// were available in the byte store at save time.
     #[serde(default)]
     pub font_assets: Vec<Uuid>,
+    /// Full font-table records for all entries in the document's font table,
+    /// **excluding** the bundled default entry (`DEFAULT_FONT_ENTRY_ID`).
+    ///
+    /// The default entry is seeded by [`Document::new`] on every load, so
+    /// persisting it would cause a duplicate-id error during reconstruction.
+    /// All other entries — both `SystemReference` and `Custom` — are persisted
+    /// here so that they survive a save→load round-trip, including entries that
+    /// have no on-disk bytes (e.g., `SystemReference` fonts, or `Custom` fonts
+    /// uploaded in this session but not yet flushed to `fonts/<uuid>.ttf`).
+    ///
+    /// `#[serde(default)]` ensures older manifests (before this field was added)
+    /// deserialize without error — the table starts with only the default entry
+    /// on load from a legacy workfile.
+    #[serde(default)]
+    pub fonts: Vec<FontEntry>,
 }
 
 impl Manifest {
@@ -51,13 +78,29 @@ impl Manifest {
     ///
     /// `font_assets` is left empty here; [`prepare_save`] populates it from
     /// the byte map after consulting `doc.font_table()`.
+    ///
+    /// `fonts` is populated with every font-table entry **except** the bundled
+    /// default (`DEFAULT_FONT_ENTRY_ID`). The default is seeded by
+    /// [`Document::new`] on load, so persisting it would cause a duplicate-id
+    /// error during reconstruction (see [`load_workfile`]).
     #[must_use]
     pub fn from_document(doc: &Document) -> Self {
+        // Collect all non-default font entries in a single pass.
+        // `font_assets` is populated later by `prepare_save` after the byte map
+        // is consulted, but `fonts` is already complete at this point.
+        let fonts: Vec<FontEntry> = doc
+            .font_table()
+            .iter()
+            .filter(|e| e.id() != DEFAULT_FONT_ENTRY_ID)
+            .cloned()
+            .collect();
+
         Self {
             schema_version: sigil_core::CURRENT_SCHEMA_VERSION,
             name: doc.metadata.name.clone(),
             page_order: doc.pages.iter().map(|p| p.id.uuid()).collect(),
             font_assets: Vec::new(),
+            fonts,
         }
     }
 
@@ -71,6 +114,8 @@ impl Manifest {
     /// - `page_order` contains duplicate UUIDs
     /// - `font_assets` exceeds [`MAX_FONTS_PER_DOCUMENT`](sigil_core::MAX_FONTS_PER_DOCUMENT)
     /// - `font_assets` contains duplicate UUIDs
+    /// - `fonts` exceeds [`MAX_FONTS_PER_DOCUMENT`](sigil_core::MAX_FONTS_PER_DOCUMENT)
+    /// - `fonts` contains entries with duplicate IDs
     pub fn validate(&self) -> Result<()> {
         if self.name.len() > MAX_MANIFEST_NAME_LEN {
             bail!(
@@ -102,10 +147,30 @@ impl Manifest {
             );
         }
 
-        let mut seen_fonts = HashSet::with_capacity(self.font_assets.len());
+        let mut seen_font_assets = HashSet::with_capacity(self.font_assets.len());
         for uuid in &self.font_assets {
-            if !seen_fonts.insert(uuid) {
+            if !seen_font_assets.insert(uuid) {
                 bail!("duplicate UUID in manifest font_assets: {uuid}");
+            }
+        }
+
+        // `fonts` carries the full FontEntry records; validate cap and uniqueness.
+        // The +1 accounts for the default entry which is NOT stored in `fonts`
+        // but IS present in the live document — so `fonts.len()` can equal
+        // MAX_FONTS_PER_DOCUMENT - 1 at most without overflow, but we apply the
+        // cap at MAX_FONTS_PER_DOCUMENT to allow for the default slot.
+        if self.fonts.len() > sigil_core::MAX_FONTS_PER_DOCUMENT {
+            bail!(
+                "manifest fonts exceeds maximum fonts ({} > {})",
+                self.fonts.len(),
+                sigil_core::MAX_FONTS_PER_DOCUMENT
+            );
+        }
+
+        let mut seen_font_ids = HashSet::with_capacity(self.fonts.len());
+        for entry in &self.fonts {
+            if !seen_font_ids.insert(entry.id()) {
+                bail!("duplicate id in manifest fonts: {}", entry.id());
             }
         }
 
@@ -811,6 +876,25 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     // Reorder pages to match manifest ordering
     reorder_pages(&mut doc, &manifest.page_order);
 
+    // Reconstruct font table from manifest.fonts. Document::new already seeded the
+    // bundled default entry, so we skip any entry whose id matches DEFAULT_FONT_ENTRY_ID
+    // (defensive: a corrupt manifest that persisted the default must not cause a
+    // duplicate-id error). For all other entries, a failure means the manifest is
+    // corrupt (validate() should have caught capacity/dedup issues, but `add` is
+    // the enforcing boundary) — treat it as a hard load error.
+    for entry in manifest.fonts {
+        if entry.id() == DEFAULT_FONT_ENTRY_ID {
+            tracing::warn!(
+                "manifest.fonts contained DEFAULT_FONT_ENTRY_ID ({DEFAULT_FONT_ENTRY_ID}); \
+                 skipping — it is already seeded by Document::new"
+            );
+            continue;
+        }
+        doc.font_table_mut().add(entry).map_err(|e| {
+            anyhow::anyhow!("failed to reconstruct font table from manifest.fonts: {e}")
+        })?;
+    }
+
     // Load embedded font bytes from fonts/ (if present). Must run after
     // page-load so the doc is already in its final state when we return.
     let font_bytes = load_font_assets(workfile_path, &manifest.font_assets).await?;
@@ -1049,6 +1133,7 @@ mod tests {
             name: "Test".to_string(),
             page_order: vec![Uuid::nil()],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let json = serde_json::to_string(&manifest).expect("serialize manifest");
         let deserialized: Manifest = serde_json::from_str(&json).expect("deserialize manifest");
@@ -1343,6 +1428,7 @@ mod tests {
             name: "Future Doc".to_string(),
             page_order: vec![],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
         tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
@@ -1415,6 +1501,7 @@ mod tests {
             name: "x".repeat(MAX_MANIFEST_NAME_LEN + 1),
             page_order: vec![],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1432,6 +1519,7 @@ mod tests {
                 .map(|_| Uuid::new_v4())
                 .collect(),
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1448,6 +1536,7 @@ mod tests {
             name: "Test".to_string(),
             page_order: vec![dup, Uuid::new_v4(), dup],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1463,6 +1552,7 @@ mod tests {
             name: "Valid".to_string(),
             page_order: vec![Uuid::new_v4(), Uuid::new_v4()],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         manifest.validate().expect("valid manifest should pass");
     }
@@ -1603,6 +1693,7 @@ mod tests {
             name: "Legacy Doc".to_string(),
             page_order: vec![page_uuid],
             font_assets: Vec::new(),
+            fonts: Vec::new(),
         };
         let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
         tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
@@ -2063,6 +2154,7 @@ mod tests {
             font_assets: (0..=(sigil_core::MAX_FONTS_PER_DOCUMENT as u128))
                 .map(Uuid::from_u128)
                 .collect(),
+            fonts: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -2081,6 +2173,7 @@ mod tests {
             name: "DupFonts".to_string(),
             page_order: vec![],
             font_assets: vec![dup, dup],
+            fonts: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -2505,6 +2598,268 @@ mod tests {
         assert!(
             !loaded.font_bytes.contains_key(&fat_uuid),
             "oversized font file must be excluded from loaded.font_bytes"
+        );
+    }
+
+    // ── Task 12 Part 1: font-table record persistence tests ──────────────────
+
+    /// `Manifest::from_document` must exclude the bundled default entry from
+    /// `manifest.fonts` — the default is re-seeded by `Document::new` on every
+    /// load, so persisting it would cause a duplicate-id add on reconstruction.
+    #[test]
+    fn test_from_document_excludes_default_font_entry() {
+        // A fresh document contains only the default entry.
+        let doc = Document::new("ExcludeDefault".to_string());
+        let manifest = Manifest::from_document(&doc);
+        assert!(
+            manifest.fonts.is_empty(),
+            "manifest.fonts must be empty for a document with only the default entry; \
+             the default must be excluded to prevent duplicate-id on load reconstruction"
+        );
+    }
+
+    /// A full save→load round-trip must preserve font-table records for both
+    /// `SystemReference` and `Custom` entries, while the bundled default entry
+    /// remains present (re-seeded by `Document::new`) and is not duplicated.
+    #[tokio::test]
+    async fn test_manifest_round_trips_font_table_records() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("fonttable_roundtrip.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // IDs chosen to be deterministic and distinct from all other tests.
+        let sys_uuid = Uuid::from_u128(600);
+        let custom_uuid = Uuid::from_u128(700);
+        let font_data = vec![1u8, 2, 3, 4];
+
+        let mut doc = Document::new("FontTableRoundTrip".to_string());
+
+        // Add a SystemReference entry (no embedded bytes).
+        let sys_entry = sigil_core::FontEntry::new(
+            sys_uuid,
+            "Roboto".to_string(),
+            "Roboto-Regular".to_string(),
+            sigil_core::FontSource::SystemReference,
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .expect("SystemReference FontEntry is valid");
+        doc.font_table_mut()
+            .add(sys_entry)
+            .expect("add Roboto entry");
+
+        // Add a Custom entry (has embedded bytes).
+        let custom_entry = sigil_core::FontEntry::new(
+            custom_uuid,
+            "MyFont".to_string(),
+            "MyFont-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: custom_uuid,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("Custom FontEntry is valid");
+        doc.font_table_mut()
+            .add(custom_entry)
+            .expect("add MyFont entry");
+
+        // Save with the Custom entry's bytes provided.
+        let font_bytes = HashMap::from([(custom_uuid, font_data.clone())]);
+        let prepared = prepare_save(&doc, &font_bytes).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Reload the workfile.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile round-trip");
+
+        let loaded_doc = &loaded.document;
+
+        // The SystemReference entry must be present with correct fields.
+        let roboto = loaded_doc
+            .font_table()
+            .get(sys_uuid)
+            .expect("Roboto SystemReference entry must be present after round-trip");
+        assert_eq!(roboto.family(), "Roboto", "Roboto family must be preserved");
+        assert_eq!(
+            roboto.source(),
+            &sigil_core::FontSource::SystemReference,
+            "Roboto source must be SystemReference"
+        );
+
+        // The Custom entry must be present with correct fields.
+        let myfont = loaded_doc
+            .font_table()
+            .get(custom_uuid)
+            .expect("MyFont Custom entry must be present after round-trip");
+        assert_eq!(myfont.family(), "MyFont", "MyFont family must be preserved");
+        assert_eq!(
+            myfont.source(),
+            &sigil_core::FontSource::Custom {
+                asset_uuid: custom_uuid
+            },
+            "MyFont source must be Custom with correct asset_uuid"
+        );
+
+        // The bundled default must still be present (3 total: default + Roboto + MyFont).
+        assert_eq!(
+            loaded_doc.font_table().len(),
+            3,
+            "font table must have 3 entries: default + Roboto + MyFont"
+        );
+
+        // The Custom entry's bytes must have survived the round-trip.
+        assert_eq!(
+            loaded.font_bytes.get(&custom_uuid),
+            Some(&font_data),
+            "Custom font bytes must survive the save→load round-trip"
+        );
+    }
+
+    /// When a manifest's `fonts` list contains an entry with `DEFAULT_FONT_ENTRY_ID`,
+    /// `load_workfile` must skip it (not error) — the default is already seeded
+    /// by `Document::new` and must not be added again.
+    #[tokio::test]
+    async fn test_load_workfile_skips_default_in_manifest_fonts() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("default_in_fonts.sigil");
+        let pages_dir = workfile_path.join("pages");
+        tokio::fs::create_dir_all(&pages_dir)
+            .await
+            .expect("create dirs");
+
+        // Build a manifest that manually includes the default entry in `fonts`.
+        // This represents a corrupt or hand-crafted manifest; load must recover.
+        let default_entry = sigil_core::FontEntry::new(
+            DEFAULT_FONT_ENTRY_ID,
+            "Inter".to_string(), // family for a "default-shaped" entry
+            "Inter-Regular".to_string(),
+            sigil_core::FontSource::SystemReference,
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .expect("default-id entry is constructable (validate checks id separately)");
+
+        let manifest = Manifest {
+            schema_version: sigil_core::CURRENT_SCHEMA_VERSION,
+            name: "DefaultInFonts".to_string(),
+            page_order: vec![],
+            font_assets: Vec::new(),
+            fonts: vec![default_entry],
+        };
+        let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize manifest");
+        tokio::fs::write(workfile_path.join("manifest.json"), &manifest_json)
+            .await
+            .expect("write manifest");
+
+        // Load must succeed — the default entry in fonts is skipped, not errored.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load must succeed even when fonts contains DEFAULT_FONT_ENTRY_ID");
+
+        // The default must be present exactly once (seeded by Document::new,
+        // not re-added from the manifest).
+        assert_eq!(
+            loaded.document.font_table().len(),
+            1,
+            "font table must have exactly 1 entry (the default, not double-counted)"
+        );
+        assert!(
+            loaded
+                .document
+                .font_table()
+                .get(DEFAULT_FONT_ENTRY_ID)
+                .is_some(),
+            "DEFAULT_FONT_ENTRY_ID must be present in the table"
+        );
+    }
+
+    /// `Manifest::validate` must reject a `fonts` list whose length exceeds
+    /// `MAX_FONTS_PER_DOCUMENT`, and must reject a `fonts` list with duplicate IDs.
+    #[test]
+    fn test_manifest_validate_rejects_invalid_fonts_field() {
+        // ── Too many entries ─────────────────────────────────────────────────
+        let too_many: Vec<sigil_core::FontEntry> = (0..=(sigil_core::MAX_FONTS_PER_DOCUMENT
+            as u128))
+            .map(|i| {
+                sigil_core::FontEntry::new(
+                    Uuid::from_u128(i + 10_000),
+                    format!("Family{i}"),
+                    format!("Family{i}-Regular"),
+                    sigil_core::FontSource::SystemReference,
+                    test_font_metrics(),
+                    0,
+                    sigil_core::EmbedDecision::ReferenceSystem,
+                    false,
+                    vec![],
+                )
+                .expect("entry is valid")
+            })
+            .collect();
+        let manifest_too_many = Manifest {
+            schema_version: 1,
+            name: "TooManyFonts".to_string(),
+            page_order: vec![],
+            font_assets: Vec::new(),
+            fonts: too_many,
+        };
+        let err = manifest_too_many.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum fonts"),
+            "expected exceeds-maximum error for fonts, got: {err}"
+        );
+
+        // ── Duplicate IDs ────────────────────────────────────────────────────
+        let dup_id = Uuid::from_u128(99_001);
+        let dup_entry_a = sigil_core::FontEntry::new(
+            dup_id,
+            "DupA".to_string(),
+            "DupA-Regular".to_string(),
+            sigil_core::FontSource::SystemReference,
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .expect("entry A is valid");
+        let dup_entry_b = sigil_core::FontEntry::new(
+            dup_id,
+            "DupB".to_string(),
+            "DupB-Regular".to_string(),
+            sigil_core::FontSource::SystemReference,
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::ReferenceSystem,
+            false,
+            vec![],
+        )
+        .expect("entry B is valid");
+        let manifest_dup = Manifest {
+            schema_version: 1,
+            name: "DupIds".to_string(),
+            page_order: vec![],
+            font_assets: Vec::new(),
+            fonts: vec![dup_entry_a, dup_entry_b],
+        };
+        let err = manifest_dup.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate id in manifest fonts"),
+            "expected duplicate-id error for fonts, got: {err}"
         );
     }
 }
