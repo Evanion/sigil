@@ -1,11 +1,13 @@
 // crates/core/src/serialize.rs
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::CoreError;
 use crate::id::NodeId;
-use crate::migrations::migrate_to_v2;
+use crate::migrations::{migrate_to_v2, migrate_to_v3};
 use crate::node::Node;
 use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
@@ -90,17 +92,24 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
     deserialize_page_with_version(json).map(|(page, _)| page)
 }
 
-/// Deserializes a page from JSON, returning both the parsed page and the
-/// on-disk schema version observed before any migration was applied.
+/// Deserializes a page from JSON, returning the parsed page, the on-disk schema
+/// version observed before any migration was applied, and a map of
+/// `(FontEntryId → family)` pairs collected during v2→v3 migration.
 ///
-/// This is used by the persistence layer to detect when a workfile required
-/// migration on load — e.g. to back up the original v1 files before the first
-/// migrated save and to mark the document dirty so the v2 form is persisted.
+/// This is the authoritative deserialization entry point used by the server's
+/// `load_workfile`. After loading all pages, the server accumulates the
+/// per-page `fonts` maps and uses them to populate the document's `FontTable`
+/// with `SystemReference` entries for all migrated families.
+///
+/// For a workfile that is already at `CURRENT_SCHEMA_VERSION`, no migration
+/// runs and the returned `fonts` map is empty.
 ///
 /// # Errors
 /// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
-/// - `CoreError::SerializationError` if the JSON is malformed.
-pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
+/// - `CoreError::SerializationError` if the JSON is malformed or migration fails.
+pub fn deserialize_page_with_version_and_fonts(
+    json: &str,
+) -> Result<(SerializedPage, u32, BTreeMap<Uuid, String>), CoreError> {
     if json.len() > crate::validate::MAX_FILE_SIZE {
         return Err(CoreError::InputTooLarge(format!(
             "file size {} bytes exceeds maximum of {} bytes",
@@ -132,11 +141,19 @@ pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32)
 
     // Apply schema migrations in version order.
     // Each migrate_to_vN function is idempotent on already-migrated input.
-    let migrated = if version < 2 {
+    let after_v2 = if version < 2 {
         migrate_to_v2(raw)
             .map_err(|e| CoreError::SerializationError(format!("v1→v2 migration failed: {e}")))?
     } else {
         raw
+    };
+
+    let mut fonts: BTreeMap<Uuid, String> = BTreeMap::new();
+    let migrated = if version < 3 {
+        migrate_to_v3(after_v2, &mut fonts)
+            .map_err(|e| CoreError::SerializationError(format!("v2→v3 migration failed: {e}")))?
+    } else {
+        after_v2
     };
 
     let page: SerializedPage = serde_json::from_value(migrated)
@@ -150,7 +167,25 @@ pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32)
         validate_serialized_transition(transition)?;
     }
 
-    Ok((page, version))
+    Ok((page, version, fonts))
+}
+
+/// Deserializes a page from JSON, returning both the parsed page and the
+/// on-disk schema version observed before any migration was applied.
+///
+/// This is a thin wrapper around [`deserialize_page_with_version_and_fonts`]
+/// that discards the font-family map for callers that do not need it (e.g.
+/// tests, the CLI, and any non-server path that loads pages).
+///
+/// The server's `load_workfile` should call
+/// [`deserialize_page_with_version_and_fonts`] directly so it can accumulate
+/// the migrated families and populate the document font table.
+///
+/// # Errors
+/// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
+/// - `CoreError::SerializationError` if the JSON is malformed.
+pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
+    deserialize_page_with_version_and_fonts(json).map(|(page, version, _fonts)| (page, version))
 }
 
 /// Converts arena nodes into serialized nodes, resolving `NodeId`s to UUIDs.

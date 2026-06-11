@@ -1,0 +1,71 @@
+{
+  "id": "a1000000-0000-0000-0000-000000000001",
+  "name": "Page 1",
+  "nodes": [
+    {
+      "children": [],
+      "constraints": {
+        "horizontal": "start",
+        "vertical": "start"
+      },
+      "id": "b2000000-0000-0000-0000-000000000001",
+      "kind": {
+        "content": "Hello, world!",
+        "sizing": "auto_width",
+        "text_style": {
+          "font_family": "Roboto",
+          "font_size": {
+            "type": "literal",
+            "value": 16.0
+          },
+          "font_style": "normal",
+          "font_weight": 400,
+          "letter_spacing": {
+            "type": "literal",
+            "value": 0.0
+          },
+          "line_height": {
+            "type": "literal",
+            "value": 1.5
+          },
+          "text_align": "left",
+          "text_color": {
+            "type": "literal",
+            "value": {
+              "a": 1.0,
+              "b": 0.0,
+              "g": 0.0,
+              "r": 0.0,
+              "space": "srgb"
+            }
+          },
+          "text_decoration": "none",
+          "text_shadow": null
+        },
+        "type": "text"
+      },
+      "locked": false,
+      "name": "Label",
+      "parent": null,
+      "style": {
+        "blend_mode": "normal",
+        "effects": [],
+        "fills": [],
+        "opacity": { "type": "literal", "value": 1.0 },
+        "strokes": []
+      },
+      "transform": {
+        "height": 24.0,
+        "rotation": 0.0,
+        "scale_x": 1.0,
+        "scale_y": 1.0,
+        "width": 120.0,
+        "x": 0.0,
+        "y": 0.0
+      },
+      "visible": true
+    }
+  ],
+  "schema_version": 2,
+  "transitions": []
+}

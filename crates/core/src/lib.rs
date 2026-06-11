@@ -69,14 +69,15 @@ pub use document::{Document, DocumentMetadata, LayoutEngine, Page, Transition};
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
-    SerializedNode, SerializedPage, SerializedTransition, deserialize_page, nodes_to_serialized,
-    page_to_serialized, serialize_page,
+    SerializedNode, SerializedPage, SerializedTransition, deserialize_page,
+    deserialize_page_with_version_and_fonts, nodes_to_serialized, page_to_serialized,
+    serialize_page,
 };
 
 // ── Re-exports: Font ─────────────────────────────────────────────────
 pub use font::{
     DEFAULT_FONT_ENTRY_ID, EmbedDecision, FontAxis, FontEntry, FontEntryId, FontMetrics,
-    FontSource, FontTable,
+    FontSource, FontTable, build_system_reference_entry,
 };
 
 // ── Re-exports: Command ──────────────────────────────────────────────

@@ -497,8 +497,8 @@ mod tests {
         );
         assert_eq!(
             sigil_core::CURRENT_SCHEMA_VERSION,
-            2,
-            "this assertion pins the expected migrated-to version (v2) for RF-004"
+            3,
+            "this assertion pins the expected migrated-to version (v3) for RF-004"
         );
     }
 

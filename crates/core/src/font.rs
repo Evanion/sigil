@@ -207,6 +207,42 @@ impl FontMetrics {
         })
     }
 
+    /// Constructs generic fallback font metrics infallibly.
+    ///
+    /// These neutral defaults are used when migrating a v2 workfile that carried
+    /// `font_family` strings but no actual font files — the migration produces
+    /// `SystemReference` entries without access to the real font's metrics. The
+    /// values are plausible for a 1000 UPM font but should be treated as
+    /// approximate until the font is actually loaded.
+    ///
+    /// # Controlled-infallible-startup exemption (CLAUDE.md §11, point 4)
+    ///
+    /// (a) Every literal used here is a compile-time constant whose value is
+    ///     known to satisfy all `FontMetrics::new()` invariants
+    ///     (`units_per_em > 0`, all f32 fields finite, `ascent >= 0`,
+    ///     `line_gap >= 0`, `cap_height >= 0`, `x_height >= 0`).
+    /// (b) The sibling fallible boundary is `FontMetrics::new()`, which
+    ///     enforces those invariants for untrusted callers.
+    /// (c) `test_fallback_satisfies_new_invariants` feeds these exact values
+    ///     back through `new()` to catch any future value change that would
+    ///     violate an invariant.
+    /// (d) Any future change to these literals MUST keep that test green.
+    #[must_use]
+    pub fn fallback() -> Self {
+        Self {
+            units_per_em: 1000,
+            ascent: 800.0,
+            descent: -200.0,
+            line_gap: 0.0,
+            cap_height: 700.0,
+            x_height: 500.0,
+            italic_angle: 0.0,
+            avg_advance: 500.0,
+            panose: [0; 10],
+            is_serif: false,
+        }
+    }
+
     /// Constructs the Inter default metrics infallibly using compile-time constants.
     ///
     /// # Controlled-infallible-startup exemption (CLAUDE.md §11, point 4)
@@ -998,6 +1034,44 @@ impl<'de> Deserialize<'de> for FontTable {
     }
 }
 
+// ── Migration helpers ──────────────────────────────────────────────────
+
+/// Builds a `FontEntry` with `FontSource::SystemReference` for use during v2→v3
+/// workfile migration.
+///
+/// When migrating a page that carried `text_style.font_family` as a plain
+/// string, the migration derives a deterministic `FontEntryId` from the
+/// family name (using `Uuid::new_v5` with `FONT_MIGRATION_NAMESPACE`) and
+/// calls this function to construct the `FontTable` entry for that family.
+///
+/// Both `family` and `postscript_name` are set to the same string — migrating
+/// from a plain family name gives us no PostScript name, so we use the family
+/// as a best-effort substitute. This is acceptable for `SystemReference` fonts
+/// because the renderer looks up the font by `family`, not PostScript name.
+///
+/// # Errors
+///
+/// Returns `CoreError::ValidationError` if `family` fails
+/// `validate_font_family_name` (empty, too long, CSS-significant chars, or C0
+/// control characters). This surfaces corrupt legacy data as a typed error
+/// rather than silently dropping or coercing the value (CLAUDE.md §11).
+pub fn build_system_reference_entry(
+    id: FontEntryId,
+    family: String,
+) -> Result<FontEntry, CoreError> {
+    FontEntry::new(
+        id,
+        family.clone(),
+        family, // use family as postscript_name best-effort for migrated entries
+        FontSource::SystemReference,
+        FontMetrics::fallback(),
+        0,
+        EmbedDecision::ReferenceSystem,
+        false,
+        vec![],
+    )
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1771,6 +1845,56 @@ mod tests {
             )
             .is_err(),
             "postscript_name over MAX_POSTSCRIPT_NAME_LEN must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_fallback_satisfies_new_invariants() {
+        // Drift-prevention: feed the exact values used in `FontMetrics::fallback()`
+        // back through the fallible `FontMetrics::new()` and assert it accepts them.
+        // If the literals in `fallback()` are ever changed to invalid values,
+        // this test will catch the drift before production code is affected.
+        let m = FontMetrics::fallback();
+        let result = FontMetrics::new(
+            m.units_per_em(),
+            m.ascent(),
+            m.descent(),
+            m.line_gap(),
+            m.cap_height(),
+            m.x_height(),
+            m.italic_angle(),
+            m.avg_advance(),
+            *m.panose(),
+            m.is_serif(),
+        );
+        assert!(
+            result.is_ok(),
+            "FontMetrics::fallback() values must satisfy FontMetrics::new() invariants"
+        );
+    }
+
+    #[test]
+    fn test_build_system_reference_entry_roundtrip() {
+        let id = uuid::Uuid::from_u128(0xABCD_EF01_2345_6789_ABCD_EF01_2345_6789);
+        let entry = build_system_reference_entry(id, "Roboto".to_string())
+            .expect("build_system_reference_entry must succeed for valid family");
+        assert_eq!(entry.id(), id);
+        assert_eq!(entry.family(), "Roboto");
+        assert_eq!(entry.postscript_name(), "Roboto");
+        assert_eq!(entry.source(), &FontSource::SystemReference);
+        assert_eq!(entry.embeddable(), EmbedDecision::ReferenceSystem);
+        assert!(!entry.is_variable());
+        assert!(entry.axes().is_empty());
+    }
+
+    #[test]
+    fn test_build_system_reference_entry_rejects_invalid_family() {
+        // A family name containing a CSS-significant character must be rejected.
+        let id = uuid::Uuid::from_u128(1);
+        let result = build_system_reference_entry(id, "Bad'Family".to_string());
+        assert!(
+            result.is_err(),
+            "build_system_reference_entry must reject CSS-significant chars in family"
         );
     }
 }

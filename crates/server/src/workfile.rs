@@ -12,16 +12,17 @@
 //!    a [`PreparedSave`] containing all serialized JSON strings.
 //! 2. [`write_prepared_save`] — async, writes the prepared data to disk.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use sigil_core::serialize::{
-    SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
+    SerializedPage, deserialize_page_with_version_and_fonts, page_to_serialized, serialize_page,
 };
 use sigil_core::{
     DEFAULT_FONT_ENTRY_ID, Document, FontEntry, FontSource, Node, NodeId, Page, PageId,
+    build_system_reference_entry,
 };
 use uuid::Uuid;
 
@@ -362,26 +363,26 @@ async fn atomic_write_bytes(path: &Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// Subdirectory under the workfile that holds an immutable copy of the original
-/// pre-migration files (manifest + pages). Written exactly once on the first
-/// save after a v1→current migration on load (RF-010).
-const BACKUP_DIR_NAME: &str = ".backup-v1";
-
-/// Backs up the current `manifest.json` and `pages/*.json` files to `.backup-v1/`
-/// before they are overwritten by a migrated save (RF-010).
+/// Backs up the current `manifest.json` and `pages/*.json` files to
+/// `.backup-v{original_version}/` before they are overwritten by a migrated
+/// save (RF-010, CLAUDE.md §4 "Schema Migration Persistence Contract").
+///
+/// The backup directory name is derived dynamically from the source schema
+/// version so that v1→v3 produces `.backup-v1` and v2→v3 produces `.backup-v2`.
 ///
 /// This is a one-shot operation: the function is a no-op if the backup directory
-/// already exists, ensuring we never overwrite the original v1 snapshot. Each
-/// file is copied via the atomic write-to-temp-then-rename pattern to prevent
-/// partially-written backups on crash.
+/// already exists, ensuring we never overwrite the original pre-migration
+/// snapshot. Each file is copied via the atomic write-to-temp-then-rename
+/// pattern to prevent partially-written backups on crash.
 ///
 /// # Errors
 ///
 /// Returns an error if reading the source files fails or writing the backup
 /// fails. Errors from this function abort the save so the migration flag stays
 /// armed for the next attempt.
-async fn backup_v1_files(workfile_path: &Path, original_version: u32) -> Result<()> {
-    let backup_root = workfile_path.join(BACKUP_DIR_NAME);
+async fn backup_pre_migration_files(workfile_path: &Path, original_version: u32) -> Result<()> {
+    let backup_dir_name = format!(".backup-v{original_version}");
+    let backup_root = workfile_path.join(&backup_dir_name);
 
     // Idempotent: if a previous backup exists, leave it alone.
     if tokio::fs::metadata(&backup_root).await.is_ok() {
@@ -453,17 +454,21 @@ async fn backup_v1_files(workfile_path: &Path, original_version: u32) -> Result<
 /// All file writes use atomic write-to-temp-then-rename to prevent partial writes.
 ///
 /// If `prepared.migrated_from` is `Some(v)`, the function first copies the
-/// existing on-disk files to `.backup-v1/` (RF-010) so the original pre-migration
-/// state is preserved. The backup is one-shot: subsequent saves skip the copy
-/// if the backup directory already exists.
+/// existing on-disk files to `.backup-v{v}/` (RF-010) so the original
+/// pre-migration state is preserved (e.g. `.backup-v1` or `.backup-v2`).
+/// The backup is one-shot: subsequent saves skip the copy if the backup
+/// directory already exists.
 ///
 /// # Errors
 ///
 /// Returns an error if directory creation or file writes fail.
 pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) -> Result<()> {
-    // RF-010: back up the original v1 files before the first migrated write.
+    // RF-010: back up the original pre-migration files before the first
+    // migrated write. The backup directory is named `.backup-v{N}` where N is
+    // the original (pre-migration) schema version (e.g. `.backup-v1` or
+    // `.backup-v2`).
     if let Some(original_version) = prepared.migrated_from {
-        backup_v1_files(workfile_path, original_version).await?;
+        backup_pre_migration_files(workfile_path, original_version).await?;
     }
 
     let pages_dir = workfile_path.join("pages");
@@ -795,6 +800,55 @@ async fn load_font_assets(
 /// Returns an error if the directory doesn't exist, is a symlink, the manifest
 /// is invalid, file sizes exceed limits, or any page file fails to parse.
 pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
+    load_workfile_impl(workfile_path).await
+}
+
+/// Populates a document's font table from the entries in `manifest_fonts` and
+/// the `migrated_fonts` map produced by the v2→v3 migration pass.
+///
+/// Manifest entries are loaded first. The default entry (already seeded by
+/// `Document::new`) is skipped defensively. Migration entries are added next,
+/// skipping any UUID already in the table to avoid conflicts on partially-migrated
+/// workfiles that had both `manifest.fonts` and residual `font_family` fields.
+///
+/// # Errors
+///
+/// Returns an error if a manifest font entry or a migrated font family cannot be
+/// inserted into the document's font table (e.g., invalid family name, duplicate
+/// UUID, or font table capacity exceeded).
+fn populate_font_table_from_load(
+    doc: &mut Document,
+    manifest_fonts: Vec<FontEntry>,
+    migrated_fonts: BTreeMap<Uuid, String>,
+) -> Result<()> {
+    for entry in manifest_fonts {
+        if entry.id() == DEFAULT_FONT_ENTRY_ID {
+            tracing::warn!(
+                "manifest.fonts contained DEFAULT_FONT_ENTRY_ID ({DEFAULT_FONT_ENTRY_ID}); \
+                 skipping — it is already seeded by Document::new"
+            );
+            continue;
+        }
+        doc.font_table_mut().add(entry).map_err(|e| {
+            anyhow::anyhow!("failed to reconstruct font table from manifest.fonts: {e}")
+        })?;
+    }
+    for (uuid, family) in migrated_fonts {
+        if doc.font_table().get(uuid).is_none() {
+            let entry = build_system_reference_entry(uuid, family.clone()).map_err(|e| {
+                anyhow::anyhow!(
+                    "v2→v3 migration: family '{family}' is not a valid font family name: {e}"
+                )
+            })?;
+            doc.font_table_mut().add(entry).map_err(|e| {
+                anyhow::anyhow!("v2→v3 migration: failed to add '{family}' to font table: {e}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+async fn load_workfile_impl(workfile_path: &Path) -> Result<LoadedWorkfile> {
     let manifest = read_and_validate_manifest(workfile_path).await?;
 
     let mut doc = Document::new(manifest.name.clone());
@@ -810,6 +864,11 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     // migrated on load and the persistence layer must flush the migrated form
     // back to disk so the on-disk files match the in-memory document.
     let mut min_observed_version: Option<u32> = None;
+
+    // v2→v3: accumulate (FontEntryId → family) pairs discovered during font-
+    // table migration. After the page loop, these are used to populate the
+    // document font table with SystemReference entries for all migrated families.
+    let mut migrated_fonts: BTreeMap<Uuid, String> = BTreeMap::new();
 
     // Load pages from the pages/ directory
     let pages_dir = workfile_path.join("pages");
@@ -833,10 +892,14 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
                 let json = tokio::fs::read_to_string(&path)
                     .await
                     .with_context(|| format!("failed to read page: {}", path.display()))?;
-                let (serialized_page, on_disk_version) = deserialize_page_with_version(&json)
-                    .map_err(|e| {
+                let (serialized_page, on_disk_version, page_fonts) =
+                    deserialize_page_with_version_and_fonts(&json).map_err(|e| {
                         anyhow::anyhow!("failed to deserialize {}: {e}", path.display())
                     })?;
+                // Accumulate font-family pairs from v2→v3 migration. Families that
+                // appear in multiple pages produce the same deterministic UUID so
+                // the BTreeMap simply overwrites duplicates with identical values.
+                migrated_fonts.extend(page_fonts);
 
                 // Track the lowest on-disk version so the persistence layer can
                 // detect migration and back up original files before overwriting.
@@ -876,24 +939,9 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     // Reorder pages to match manifest ordering
     reorder_pages(&mut doc, &manifest.page_order);
 
-    // Reconstruct font table from manifest.fonts. Document::new already seeded the
-    // bundled default entry, so we skip any entry whose id matches DEFAULT_FONT_ENTRY_ID
-    // (defensive: a corrupt manifest that persisted the default must not cause a
-    // duplicate-id error). For all other entries, a failure means the manifest is
-    // corrupt (validate() should have caught capacity/dedup issues, but `add` is
-    // the enforcing boundary) — treat it as a hard load error.
-    for entry in manifest.fonts {
-        if entry.id() == DEFAULT_FONT_ENTRY_ID {
-            tracing::warn!(
-                "manifest.fonts contained DEFAULT_FONT_ENTRY_ID ({DEFAULT_FONT_ENTRY_ID}); \
-                 skipping — it is already seeded by Document::new"
-            );
-            continue;
-        }
-        doc.font_table_mut().add(entry).map_err(|e| {
-            anyhow::anyhow!("failed to reconstruct font table from manifest.fonts: {e}")
-        })?;
-    }
+    // Reconstruct the font table from manifest entries and any families
+    // discovered during the v2→v3 migration pass.
+    populate_font_table_from_load(&mut doc, manifest.fonts, migrated_fonts)?;
 
     // Load embedded font bytes from fonts/ (if present). Must run after
     // page-load so the doc is already in its final state when we return.
