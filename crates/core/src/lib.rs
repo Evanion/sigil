@@ -73,6 +73,12 @@ pub use serialize::{
     page_to_serialized, serialize_page,
 };
 
+// ── Re-exports: Font ─────────────────────────────────────────────────
+pub use font::{
+    DEFAULT_FONT_ENTRY_ID, EmbedDecision, FontAxis, FontEntry, FontEntryId, FontMetrics,
+    FontSource, FontTable,
+};
+
 // ── Re-exports: Command ──────────────────────────────────────────────
 pub use command::{FieldOperation, SideEffect};
 

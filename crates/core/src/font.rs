@@ -23,6 +23,18 @@ use crate::validate::validate_finite;
 /// Serialized").
 pub type FontEntryId = uuid::Uuid;
 
+/// Stable UUID for the bundled "Inter" default font entry seeded into every
+/// new document.
+///
+/// Migration code (Task 12), new-text-node code, and tests use this constant
+/// to refer to the default font without requiring a lookup by name.
+///
+/// Value `0x0000_0DEF_A000_DEAD_F047_BEEF_CAFE_0000_0001` — a high, memorable
+/// hex literal chosen to avoid collisions with the small `from_u128(1..=99)`
+/// values used in unit tests throughout the codebase.
+pub const DEFAULT_FONT_ENTRY_ID: FontEntryId =
+    uuid::Uuid::from_u128(0x0000_0DEF_A000_DEAD_F047_BEEF_CAFE_0000_0001);
+
 // ── FontSource ─────────────────────────────────────────────────────────
 
 /// Describes where a font's data originates.
