@@ -548,8 +548,9 @@ pub struct SetTextStyleInput {
 /// Float fields are validated at the tool-handler layer — NaN and infinity are
 /// rejected before the values reach the core engine.
 ///
-/// Note: font selection is not included here. Use `set_node_font` (Task 13)
-/// to change which font a text node uses.
+/// Note: font selection is not included here. To change which font a text
+/// node uses, the `set_node_font` MCP tool (Fonts-1 Task 13, backed by the
+/// `SetNodeFont` core command from Task 9) will be the entry point.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct PartialTextStyle {
     /// Font size in pixels. Can be a literal or a token reference.

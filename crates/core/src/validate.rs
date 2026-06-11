@@ -53,7 +53,8 @@ pub const MAX_ALIAS_CHAIN_DEPTH: usize = 16;
 /// Maximum gradient stops per gradient definition.
 pub const MAX_GRADIENT_STOPS: usize = 256;
 
-/// Maximum length of a font family name.
+/// Maximum byte length of a `FontEntry.family` or `FontEntry.postscript_name`
+/// string (enforced via `validate_font_family_name` in `FontEntry::new`).
 pub const MAX_FONT_FAMILY_LEN: usize = 256;
 
 /// Maximum length of a page name.
