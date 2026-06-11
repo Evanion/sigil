@@ -195,8 +195,9 @@ pub fn prepare_save<S: std::hash::BuildHasher>(
                     // byte store through this path; until then this is expected
                     // for any Custom entries added before that task ships.
                     tracing::warn!(
-                        "embedded Custom font {} has no bytes in the byte store; \
-                         skipping — font will not be persisted",
+                        "embedded Custom font '{}' ({}) has no bytes in the byte store; \
+                         skipping — not persisted on this save",
+                        entry.family(),
                         entry.id()
                     );
                 }
@@ -421,21 +422,32 @@ pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) 
 
     // Write embedded font files before the manifest so the commit point
     // (manifest rename) is only reached after all font bytes are on disk.
-    if !prepared.font_assets.is_empty() {
-        let fonts_dir = workfile_path.join("fonts");
-        tokio::fs::create_dir_all(&fonts_dir).await?;
+    //
+    // The write pass is gated on having fonts to write — it creates `fonts/`
+    // only when needed. The stale-cleanup pass runs unconditionally whenever
+    // `fonts/` already exists on disk: this ensures that when a document sheds
+    // ALL its custom fonts (next save has `font_assets == []`), any previously
+    // written `.ttf` files are removed. Without this separation, a document that
+    // drops from N fonts to 0 would leave orphaned bytes on disk indefinitely.
+    let fonts_dir = workfile_path.join("fonts");
 
-        // Build the set of current font UUIDs for stale-file removal.
-        let current_font_uuids: HashSet<String> = prepared
-            .font_assets
-            .iter()
-            .map(|(uuid, _)| format!("{uuid}.ttf"))
-            .collect();
+    if !prepared.font_assets.is_empty() {
+        tokio::fs::create_dir_all(&fonts_dir).await?;
 
         // Write each font binary atomically.
         for (uuid, bytes) in &prepared.font_assets {
             atomic_write_bytes(&fonts_dir.join(format!("{uuid}.ttf")), bytes).await?;
         }
+    }
+
+    // Build the set of current font filenames (may be empty when no fonts remain).
+    // Run the stale-cleanup pass unconditionally whenever fonts/ exists on disk.
+    if tokio::fs::metadata(&fonts_dir).await.is_ok() {
+        let current_font_uuids: HashSet<String> = prepared
+            .font_assets
+            .iter()
+            .map(|(uuid, _)| format!("{uuid}.ttf"))
+            .collect();
 
         // Remove stale font files whose UUID is no longer in the current save set.
         let mut font_entries = tokio::fs::read_dir(&fonts_dir).await?;
@@ -1921,5 +1933,169 @@ mod tests {
                 .contains("duplicate UUID in manifest font_assets"),
             "expected duplicate font UUID error, got: {err}"
         );
+    }
+
+    /// When a subsequent save replaces one custom font with a different one,
+    /// `write_prepared_save` must: write the new `<uuid_new>.ttf` AND remove
+    /// the stale `<uuid_old>.ttf`.
+    #[tokio::test]
+    async fn test_write_prepared_save_removes_stale_font_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("stale_fonts.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let uuid_old = Uuid::from_u128(8001);
+        let uuid_new = Uuid::from_u128(8002);
+
+        // ── First save: write uuid_old ────────────────────────────────────
+        let mut doc1 = Document::new("FontStale".to_string());
+        let entry_old = sigil_core::FontEntry::new(
+            uuid_old,
+            "OldFamily".to_string(),
+            "OldFamily-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: uuid_old,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry old is valid");
+        doc1.font_table_mut().add(entry_old).expect("add old entry");
+
+        let font_bytes_old = HashMap::from([(uuid_old, vec![0xAAu8; 16])]);
+        let prepared_old = prepare_save(&doc1, &font_bytes_old).expect("prepare_save old");
+        write_prepared_save(&prepared_old, &workfile_path)
+            .await
+            .expect("write_prepared_save old");
+
+        // Verify uuid_old.ttf is present after the first save.
+        let fonts_dir = workfile_path.join("fonts");
+        let old_path = fonts_dir.join(format!("{uuid_old}.ttf"));
+        assert!(
+            tokio::fs::metadata(&old_path).await.is_ok(),
+            "uuid_old.ttf must exist after first save"
+        );
+
+        // ── Second save: replace with uuid_new ───────────────────────────
+        let mut doc2 = Document::new("FontStale".to_string());
+        let entry_new = sigil_core::FontEntry::new(
+            uuid_new,
+            "NewFamily".to_string(),
+            "NewFamily-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: uuid_new,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry new is valid");
+        doc2.font_table_mut().add(entry_new).expect("add new entry");
+
+        let font_bytes_new = HashMap::from([(uuid_new, vec![0xBBu8; 16])]);
+        let prepared_new = prepare_save(&doc2, &font_bytes_new).expect("prepare_save new");
+        write_prepared_save(&prepared_new, &workfile_path)
+            .await
+            .expect("write_prepared_save new");
+
+        let new_path = fonts_dir.join(format!("{uuid_new}.ttf"));
+        assert!(
+            tokio::fs::metadata(&new_path).await.is_ok(),
+            "uuid_new.ttf must exist after second save"
+        );
+        assert!(
+            tokio::fs::metadata(&old_path).await.is_err(),
+            "uuid_old.ttf must be removed as a stale font after second save"
+        );
+    }
+
+    /// When a document sheds ALL its custom fonts, `write_prepared_save` must
+    /// remove every `.ttf` file from the `fonts/` directory, even though
+    /// `prepared.font_assets` is empty. This directly exercises the bug fixed
+    /// in Finding 1: the stale-cleanup pass must run unconditionally when
+    /// `fonts/` exists on disk, regardless of whether the current save has fonts.
+    #[tokio::test]
+    async fn test_write_prepared_save_removes_all_fonts_when_none_remain() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("all_fonts_removed.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let uuid_orphan = Uuid::from_u128(9001);
+
+        // ── First save: establish a font on disk ─────────────────────────
+        let mut doc_with_font = Document::new("ShedAll".to_string());
+        let entry = sigil_core::FontEntry::new(
+            uuid_orphan,
+            "OrphanFamily".to_string(),
+            "OrphanFamily-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: uuid_orphan,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc_with_font
+            .font_table_mut()
+            .add(entry)
+            .expect("add entry");
+
+        let font_bytes = HashMap::from([(uuid_orphan, vec![0xCCu8; 8])]);
+        let prepared_with_font =
+            prepare_save(&doc_with_font, &font_bytes).expect("prepare_save with font");
+        write_prepared_save(&prepared_with_font, &workfile_path)
+            .await
+            .expect("write_prepared_save with font");
+
+        // Verify the font is on disk before the second save.
+        let fonts_dir = workfile_path.join("fonts");
+        let orphan_path = fonts_dir.join(format!("{uuid_orphan}.ttf"));
+        assert!(
+            tokio::fs::metadata(&orphan_path).await.is_ok(),
+            "orphan.ttf must exist before the second save"
+        );
+
+        // ── Second save: document has NO fonts (font_assets == []) ───────
+        let doc_no_fonts = Document::new("ShedAll".to_string());
+        let prepared_no_fonts =
+            prepare_save(&doc_no_fonts, &HashMap::new()).expect("prepare_save no fonts");
+        assert!(
+            prepared_no_fonts.font_assets.is_empty(),
+            "PreparedSave.font_assets must be empty when document has no fonts"
+        );
+
+        write_prepared_save(&prepared_no_fonts, &workfile_path)
+            .await
+            .expect("write_prepared_save no fonts");
+
+        // The orphaned .ttf must now be gone.
+        assert!(
+            tokio::fs::metadata(&orphan_path).await.is_err(),
+            "orphaned uuid_orphan.ttf must be removed when document has no fonts on second save"
+        );
+
+        // Confirm no .ttf files remain in fonts/.
+        let mut entries = tokio::fs::read_dir(&fonts_dir)
+            .await
+            .expect("read fonts dir");
+        while let Some(e) = entries.next_entry().await.expect("next entry") {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.ends_with(".ttf"),
+                "no .ttf files should remain after all-fonts-removed save, found: {name}"
+            );
+        }
     }
 }
