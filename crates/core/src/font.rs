@@ -130,6 +130,8 @@ impl FontMetrics {
     /// Returns `CoreError::ValidationError` if:
     /// - `units_per_em` is 0 (would cause division-by-zero in layout).
     /// - Any `f32` field is NaN or infinite.
+    /// - `ascent`, `line_gap`, `cap_height`, or `x_height` is negative
+    ///   (all are physical above-baseline heights; negative values are malformed).
     // 10 arguments is unavoidable for a flat validated struct with 10 fields —
     // a builder pattern would be more complex without adding correctness.
     #[allow(clippy::too_many_arguments)]
@@ -160,7 +162,9 @@ impl FontMetrics {
         validate_finite("font_metrics.italic_angle", f64::from(italic_angle))?;
         validate_finite("font_metrics.avg_advance", f64::from(avg_advance))?;
 
-        // Spec §6: ascent and line_gap must be non-negative.
+        // Spec §6: ascent, line_gap, cap_height, and x_height must be non-negative.
+        // These are all physical above-baseline measurements; a negative value is
+        // malformed and would corrupt downstream layout calculations.
         // `descent` may be negative (it is below the baseline by convention).
         if ascent < 0.0 {
             return Err(CoreError::ValidationError(
@@ -170,6 +174,16 @@ impl FontMetrics {
         if line_gap < 0.0 {
             return Err(CoreError::ValidationError(
                 "font_metrics.line_gap must be >= 0".to_string(),
+            ));
+        }
+        if cap_height < 0.0 {
+            return Err(CoreError::ValidationError(
+                "font_metrics.cap_height must be >= 0".to_string(),
+            ));
+        }
+        if x_height < 0.0 {
+            return Err(CoreError::ValidationError(
+                "font_metrics.x_height must be >= 0".to_string(),
             ));
         }
 
@@ -194,7 +208,9 @@ impl FontMetrics {
     /// (a) Every literal used here is a compile-time constant whose value is
     ///     known to satisfy all `FontMetrics::new()` invariants
     ///     (`units_per_em > 0`, all f32 fields finite, `ascent >= 0`,
-    ///     `line_gap >= 0`).
+    ///     `line_gap >= 0`, `cap_height >= 0`, `x_height >= 0`).
+    ///     Inter literals 1456.0 (`cap_height`) and 1118.0 (`x_height`)
+    ///     already satisfy the non-negative constraint.
     /// (b) The sibling fallible boundary is `FontMetrics::new()`, which
     ///     enforces all those invariants for untrusted callers.
     /// (c) `test_inter_default_satisfies_new_invariants` feeds these exact
@@ -1042,6 +1058,22 @@ mod tests {
             1000, 800.0, -200.0, -1.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
         );
         assert!(bad.is_err(), "negative line_gap must be rejected");
+    }
+
+    #[test]
+    fn test_font_metrics_rejects_negative_cap_height() {
+        let bad = FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, -1.0, 500.0, 0.0, 500.0, [0; 10], true,
+        );
+        assert!(bad.is_err(), "negative cap_height must be rejected");
+    }
+
+    #[test]
+    fn test_font_metrics_rejects_negative_x_height() {
+        let bad = FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, 500.0, -1.0, 0.0, 500.0, [0; 10], true,
+        );
+        assert!(bad.is_err(), "negative x_height must be rejected");
     }
 
     #[test]
