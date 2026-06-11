@@ -6,9 +6,9 @@ use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow};
 use crate::validate::{
-    FONT_FAMILY_FORBIDDEN_CHARS, MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT,
-    MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT, validate_finite,
-    validate_style_value_expression, validate_token_name,
+    MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT,
+    validate_finite, validate_font_family_name, validate_style_value_expression,
+    validate_token_name,
 };
 
 /// Which field of `TextStyle` to update.
@@ -96,28 +96,15 @@ fn validate_shadow(shadow: &TextShadow) -> Result<(), CoreError> {
 }
 
 fn validate_font_family(family: &str) -> Result<(), CoreError> {
-    if family.is_empty() {
-        return Err(CoreError::ValidationError(
-            "font_family must not be empty".to_string(),
-        ));
-    }
-    if family.len() > MAX_FONT_FAMILY_LEN {
-        return Err(CoreError::ValidationError(format!(
-            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-            family.len()
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| c.is_control()) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains control character at byte position {pos}"
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains forbidden character at byte position {pos}"
-        )));
-    }
-    Ok(())
+    // Delegate to the shared validator and re-prefix the message with
+    // "font_family" to preserve the existing error-message convention for
+    // this command (shared validator uses "font family name").
+    validate_font_family_name(family).map_err(|e| match e {
+        CoreError::ValidationError(msg) => {
+            CoreError::ValidationError(msg.replace("font family name", "font_family"))
+        }
+        other => other,
+    })
 }
 
 /// Expression variants defer semantic validation to evaluation time.
@@ -270,6 +257,7 @@ mod tests {
     use crate::document::Document;
     use crate::id::NodeId;
     use crate::node::{Node, NodeKind, TextSizing, TextStyle};
+    use crate::validate::MAX_FONT_FAMILY_LEN;
     use uuid::Uuid;
 
     fn make_uuid(n: u8) -> Uuid {

@@ -613,9 +613,7 @@ fn validate_text_style_font_family(family: &str) -> Result<(), CoreError> {
         // that pattern-match the original messages continue to work.
         match e {
             CoreError::ValidationError(msg) => {
-                let prefixed = msg
-                    .replace("font family name", "font_family")
-                    .replace("font family name", "font_family");
+                let prefixed = msg.replace("font family name", "font_family");
                 CoreError::ValidationError(prefixed)
             }
             other => other,

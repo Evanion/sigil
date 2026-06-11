@@ -1139,7 +1139,7 @@ mod tests {
     #[test]
     fn test_font_entry_rejects_bad_axis_range() {
         let m = make_metrics();
-        // default < min and max < default — both cross-field invariants violated
+        // min > default trips the cross-field invariant (min <= default <= max)
         let bad_axis = FontAxis {
             tag: *b"wght",
             min: 700.0,
