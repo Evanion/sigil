@@ -3,6 +3,7 @@
 //! A workfile is a directory with the `.sigil/` suffix containing:
 //! - `manifest.json` — document metadata and page ordering
 //! - `pages/*.json` — individual page files (serialized via core's serialize API)
+//! - `fonts/*.ttf` — embedded custom font binaries, keyed by asset UUID
 //!
 //! The save path is split into two phases to avoid holding a `std::sync::Mutex`
 //! across async `.await` points:
@@ -19,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use sigil_core::serialize::{
     SerializedPage, deserialize_page_with_version, page_to_serialized, serialize_page,
 };
-use sigil_core::{Document, Node, NodeId, Page, PageId};
+use sigil_core::{Document, FontSource, Node, NodeId, Page, PageId};
 use uuid::Uuid;
 
 /// Maximum manifest file size (1 MiB).
@@ -37,16 +38,26 @@ pub struct Manifest {
     pub schema_version: u32,
     pub name: String,
     pub page_order: Vec<Uuid>,
+    /// Asset UUIDs of embedded custom fonts stored in `fonts/<uuid>.ttf`.
+    ///
+    /// `#[serde(default)]` ensures manifests written before this field existed
+    /// (pre-fonts-1) still deserialize without error — backward compatible.
+    #[serde(default)]
+    pub font_assets: Vec<Uuid>,
 }
 
 impl Manifest {
     /// Creates a manifest from the current document state.
+    ///
+    /// `font_assets` is left empty here; [`prepare_save`] populates it from
+    /// the byte map after consulting `doc.font_table()`.
     #[must_use]
     pub fn from_document(doc: &Document) -> Self {
         Self {
             schema_version: sigil_core::CURRENT_SCHEMA_VERSION,
             name: doc.metadata.name.clone(),
             page_order: doc.pages.iter().map(|p| p.id.uuid()).collect(),
+            font_assets: Vec::new(),
         }
     }
 
@@ -58,6 +69,8 @@ impl Manifest {
     /// - `name` exceeds [`MAX_MANIFEST_NAME_LEN`] bytes
     /// - `page_order` exceeds [`MAX_PAGES_PER_DOCUMENT`](sigil_core::MAX_PAGES_PER_DOCUMENT)
     /// - `page_order` contains duplicate UUIDs
+    /// - `font_assets` exceeds [`MAX_FONTS_PER_DOCUMENT`](sigil_core::MAX_FONTS_PER_DOCUMENT)
+    /// - `font_assets` contains duplicate UUIDs
     pub fn validate(&self) -> Result<()> {
         if self.name.len() > MAX_MANIFEST_NAME_LEN {
             bail!(
@@ -81,6 +94,21 @@ impl Manifest {
             }
         }
 
+        if self.font_assets.len() > sigil_core::MAX_FONTS_PER_DOCUMENT {
+            bail!(
+                "manifest font_assets exceeds maximum fonts ({} > {})",
+                self.font_assets.len(),
+                sigil_core::MAX_FONTS_PER_DOCUMENT
+            );
+        }
+
+        let mut seen_fonts = HashSet::with_capacity(self.font_assets.len());
+        for uuid in &self.font_assets {
+            if !seen_fonts.insert(uuid) {
+                bail!("duplicate UUID in manifest font_assets: {uuid}");
+            }
+        }
+
         Ok(())
     }
 }
@@ -95,6 +123,12 @@ pub struct PreparedSave {
     pub manifest_json: String,
     /// Pairs of `(filename, serialized_page_json)` for each page.
     pub pages: Vec<(String, String)>,
+    /// Embedded custom font bytes to write: `(asset_uuid, raw_bytes)`.
+    ///
+    /// Each entry is written to `fonts/<uuid>.ttf` via [`atomic_write_bytes`].
+    /// The UUIDs here are the same set as `manifest.font_assets` — they are
+    /// derived together in [`prepare_save`] to guarantee consistency.
+    pub font_assets: Vec<(Uuid, Vec<u8>)>,
     /// When `Some(v)`, this save is the first persisted write after a v→current
     /// schema migration on load. Set by the persistence task from the migration
     /// flag (RF-009) so writers can apply migration-specific behavior on the
@@ -119,14 +153,60 @@ pub struct LoadedWorkfile {
 
 /// Synchronously serializes the document into a [`PreparedSave`].
 ///
+/// `font_bytes` supplies the raw bytes for any `Custom`-sourced fonts in the
+/// document's font table. The function iterates `doc.font_table()` and for
+/// each entry whose source is `FontSource::Custom { asset_uuid }`:
+/// - If `font_bytes` contains an entry for that UUID, the bytes are included in
+///   both the manifest's `font_assets` list and `PreparedSave.font_assets`.
+/// - If the bytes are absent, a warning is logged and the entry is skipped
+///   (degraded but non-fatal — font will not be embedded on this save).
+///
+/// The `manifest.font_assets` and `PreparedSave.font_assets` UUID sets are
+/// always derived together, guaranteeing they refer to exactly the same files.
+///
 /// This function does no I/O and is safe to call while holding a
 /// `std::sync::Mutex` guard.
 ///
 /// # Errors
 ///
 /// Returns an error if JSON serialization of the manifest or any page fails.
-pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
-    let manifest = Manifest::from_document(doc);
+pub fn prepare_save<S: std::hash::BuildHasher>(
+    doc: &Document,
+    font_bytes: &HashMap<Uuid, Vec<u8>, S>,
+) -> Result<PreparedSave> {
+    let mut manifest = Manifest::from_document(doc);
+
+    // Build the embedded-font list in a single pass over the font table.
+    // Both the manifest's `font_assets` id list and the PreparedSave pairs list
+    // are populated here to guarantee they are always the same set.
+    let mut font_asset_ids: Vec<Uuid> = Vec::new();
+    let mut font_asset_pairs: Vec<(Uuid, Vec<u8>)> = Vec::new();
+
+    for entry in doc.font_table().iter() {
+        if let FontSource::Custom { asset_uuid } = entry.source() {
+            match font_bytes.get(asset_uuid) {
+                Some(bytes) => {
+                    font_asset_ids.push(*asset_uuid);
+                    font_asset_pairs.push((*asset_uuid, bytes.clone()));
+                }
+                None => {
+                    // Degraded, non-fatal: log and skip. The font will not be
+                    // written to disk on this save. Task 11 threads the session
+                    // byte store through this path; until then this is expected
+                    // for any Custom entries added before that task ships.
+                    tracing::warn!(
+                        "embedded Custom font {} has no bytes in the byte store; \
+                         skipping — font will not be persisted",
+                        entry.id()
+                    );
+                }
+            }
+        }
+    }
+
+    // Assign after from_document so the field is populated from the byte map.
+    manifest.font_assets = font_asset_ids;
+
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
 
     let mut pages = Vec::with_capacity(doc.pages.len());
@@ -142,6 +222,7 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
     Ok(PreparedSave {
         manifest_json,
         pages,
+        font_assets: font_asset_pairs,
         migrated_from: None,
     })
 }
@@ -159,6 +240,37 @@ pub fn prepare_save(doc: &Document) -> Result<PreparedSave> {
 /// file is best-effort removed so a failed write does not leak temp files.
 async fn atomic_write(path: &Path, content: &str) -> Result<()> {
     let tmp_path = path.with_extension(format!("json.tmp.{}", Uuid::new_v4().simple()));
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
+    if let Err(e) = tokio::fs::rename(&tmp_path, path).await {
+        // Best-effort cleanup: leaving a stray .tmp.<uuid> is a leak. We log at
+        // debug because the rename error below is the actionable failure.
+        if let Err(rm) = tokio::fs::remove_file(&tmp_path).await {
+            tracing::debug!("failed to clean up temp file {}: {rm}", tmp_path.display());
+        }
+        return Err(e)
+            .with_context(|| format!("failed to rename temp file to: {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Atomically writes binary content to a file by writing to a uniquely-named
+/// temp sibling first, then renaming into place.
+///
+/// Mirrors [`atomic_write`] but accepts `&[u8]` instead of `&str` so that
+/// binary font assets can be written without lossy UTF-8 conversion.
+///
+/// The temp filename carries a per-call UUID suffix so concurrent writers to
+/// the same target never collide on the temp path (rust-defensive
+/// "Filesystem Writes Must Be Atomic"). The rename is the atomic commit point.
+///
+/// # Errors
+///
+/// Returns an error if the write or rename fails. On rename failure the temp
+/// file is best-effort removed so a failed write does not leak temp files.
+async fn atomic_write_bytes(path: &Path, content: &[u8]) -> Result<()> {
+    let tmp_path = path.with_extension(format!("ttf.tmp.{}", Uuid::new_v4().simple()));
     tokio::fs::write(&tmp_path, content)
         .await
         .with_context(|| format!("failed to write temp file: {}", tmp_path.display()))?;
@@ -307,6 +419,39 @@ pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) 
         }
     }
 
+    // Write embedded font files before the manifest so the commit point
+    // (manifest rename) is only reached after all font bytes are on disk.
+    if !prepared.font_assets.is_empty() {
+        let fonts_dir = workfile_path.join("fonts");
+        tokio::fs::create_dir_all(&fonts_dir).await?;
+
+        // Build the set of current font UUIDs for stale-file removal.
+        let current_font_uuids: HashSet<String> = prepared
+            .font_assets
+            .iter()
+            .map(|(uuid, _)| format!("{uuid}.ttf"))
+            .collect();
+
+        // Write each font binary atomically.
+        for (uuid, bytes) in &prepared.font_assets {
+            atomic_write_bytes(&fonts_dir.join(format!("{uuid}.ttf")), bytes).await?;
+        }
+
+        // Remove stale font files whose UUID is no longer in the current save set.
+        let mut font_entries = tokio::fs::read_dir(&fonts_dir).await?;
+        while let Some(entry) = font_entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "ttf")
+                && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                && !current_font_uuids.contains(name)
+            {
+                tokio::fs::remove_file(&path).await.with_context(|| {
+                    format!("failed to remove stale font file: {}", path.display())
+                })?;
+            }
+        }
+    }
+
     // Write manifest LAST — this is the commit point
     atomic_write(
         &workfile_path.join("manifest.json"),
@@ -322,12 +467,16 @@ pub async fn write_prepared_save(prepared: &PreparedSave, workfile_path: &Path) 
 /// **Caller must NOT hold a `std::sync::Mutex` when calling this** — it is
 /// async and will hold the borrow across await points.
 ///
+/// Passes an empty font-byte map — no custom fonts are embedded. Tests that
+/// need to exercise font embedding should call [`prepare_save`] directly with
+/// a populated map.
+///
 /// # Errors
 ///
 /// Returns an error if serialization or file writes fail.
 #[cfg(test)]
 pub(crate) async fn save_workfile(doc: &Document, workfile_path: &Path) -> Result<()> {
-    let prepared = prepare_save(doc)?;
+    let prepared = prepare_save(doc, &HashMap::new())?;
     write_prepared_save(&prepared, workfile_path).await
 }
 
@@ -732,6 +881,7 @@ mod tests {
             schema_version: 1,
             name: "Test".to_string(),
             page_order: vec![Uuid::nil()],
+            font_assets: Vec::new(),
         };
         let json = serde_json::to_string(&manifest).expect("serialize manifest");
         let deserialized: Manifest = serde_json::from_str(&json).expect("deserialize manifest");
@@ -898,7 +1048,7 @@ mod tests {
         doc.add_page(Page::new(page_id, "Page One".to_string()).expect("create page"))
             .expect("add page");
 
-        let prepared = prepare_save(&doc).expect("prepare save");
+        let prepared = prepare_save(&doc, &HashMap::new()).expect("prepare save");
         assert_eq!(prepared.pages.len(), 1);
         assert_eq!(prepared.pages[0].0, page_id.uuid().to_string()); // UUID filename
         assert!(prepared.pages[0].1.contains("Page One")); // JSON contains page name
@@ -1025,6 +1175,7 @@ mod tests {
             schema_version: sigil_core::CURRENT_SCHEMA_VERSION + 1,
             name: "Future Doc".to_string(),
             page_order: vec![],
+            font_assets: Vec::new(),
         };
         let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
         tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
@@ -1096,6 +1247,7 @@ mod tests {
             schema_version: 1,
             name: "x".repeat(MAX_MANIFEST_NAME_LEN + 1),
             page_order: vec![],
+            font_assets: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1112,6 +1264,7 @@ mod tests {
             page_order: (0..=sigil_core::MAX_PAGES_PER_DOCUMENT)
                 .map(|_| Uuid::new_v4())
                 .collect(),
+            font_assets: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1127,6 +1280,7 @@ mod tests {
             schema_version: 1,
             name: "Test".to_string(),
             page_order: vec![dup, Uuid::new_v4(), dup],
+            font_assets: Vec::new(),
         };
         let err = manifest.validate().unwrap_err();
         assert!(
@@ -1141,6 +1295,7 @@ mod tests {
             schema_version: 1,
             name: "Valid".to_string(),
             page_order: vec![Uuid::new_v4(), Uuid::new_v4()],
+            font_assets: Vec::new(),
         };
         manifest.validate().expect("valid manifest should pass");
     }
@@ -1280,6 +1435,7 @@ mod tests {
             schema_version: 1,
             name: "Legacy Doc".to_string(),
             page_order: vec![page_uuid],
+            font_assets: Vec::new(),
         };
         let manifest_json = serde_json::to_string_pretty(&manifest).expect("serialize");
         tokio::fs::write(workfile_path.join("manifest.json"), manifest_json)
@@ -1377,7 +1533,7 @@ mod tests {
 
         // Build a PreparedSave with migrated_from set.
         let doc = Document::new("Migrated".to_string());
-        let mut prepared = prepare_save(&doc).expect("prepare save");
+        let mut prepared = prepare_save(&doc, &HashMap::new()).expect("prepare save");
         prepared.migrated_from = Some(1);
 
         write_prepared_save(&prepared, &workfile_path)
@@ -1440,7 +1596,7 @@ mod tests {
             .expect("write sentinel");
 
         let doc = Document::new("Doc".to_string());
-        let mut prepared = prepare_save(&doc).expect("prepare save");
+        let mut prepared = prepare_save(&doc, &HashMap::new()).expect("prepare save");
         prepared.migrated_from = Some(1);
 
         write_prepared_save(&prepared, &workfile_path)
@@ -1512,7 +1668,7 @@ mod tests {
             .expect("create dir");
 
         let doc = Document::new("Normal".to_string());
-        let prepared = prepare_save(&doc).expect("prepare save");
+        let prepared = prepare_save(&doc, &HashMap::new()).expect("prepare save");
         // migrated_from defaults to None.
 
         write_prepared_save(&prepared, &workfile_path)
@@ -1523,6 +1679,247 @@ mod tests {
         assert!(
             tokio::fs::metadata(&backup_root).await.is_err(),
             ".backup-v1/ should not be created for non-migrated saves"
+        );
+    }
+
+    // ── fonts/ storage tests (Task 10) ────────────────────────────────────
+
+    /// rust-defensive "Filesystem Writes Must Be Atomic" — concurrency test for
+    /// `atomic_write_bytes`. Spawns ≥8 concurrent writers to the SAME target path,
+    /// each with a DISTINCT 4096-byte payload. After all writers finish, the
+    /// on-disk file must contain exactly one writer's full payload — no partial
+    /// bytes, no ENOENT.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn test_atomic_write_bytes_concurrent_writers_no_partial() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let target = dir.path().join(format!("{}.ttf", Uuid::new_v4()));
+
+        const N: u8 = 8;
+        const PAYLOAD_SIZE: usize = 4096;
+
+        // Build N distinct payloads: payload i is a 4096-byte vec of all i's.
+        let payloads: Vec<Vec<u8>> = (0..N).map(|i| vec![i; PAYLOAD_SIZE]).collect();
+
+        let mut set = tokio::task::JoinSet::new();
+        for payload in payloads.clone() {
+            let t = target.clone();
+            set.spawn(async move {
+                // Run several times per task to widen the race window.
+                for _ in 0..8_u32 {
+                    atomic_write_bytes(&t, &payload)
+                        .await
+                        .expect("atomic_write_bytes");
+                }
+            });
+        }
+        while let Some(res) = set.join_next().await {
+            res.expect("writer task panicked");
+        }
+
+        let final_bytes = tokio::fs::read(&target).await.expect("read target");
+        assert_eq!(
+            final_bytes.len(),
+            PAYLOAD_SIZE,
+            "final file must be exactly {PAYLOAD_SIZE} bytes, not a partial write"
+        );
+        // The content must be all one value — proving it came from a single writer.
+        let first = final_bytes[0];
+        assert!(
+            payloads.contains(&final_bytes),
+            "final on-disk content ({first:#x} × {PAYLOAD_SIZE}) must equal exactly \
+             one writer's full payload"
+        );
+
+        // No stray temp files should remain.
+        let mut entries = tokio::fs::read_dir(dir.path()).await.unwrap();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains(".ttf.tmp"),
+                "no temp files should remain after writes, found: {name}"
+            );
+        }
+    }
+
+    /// Build a helper `FontMetrics` for use in font-storage tests.
+    fn test_font_metrics() -> sigil_core::FontMetrics {
+        sigil_core::FontMetrics::new(
+            2048,                           // units_per_em
+            1984.0,                         // ascent
+            -494.0,                         // descent (may be negative)
+            0.0,                            // line_gap
+            1456.0,                         // cap_height
+            1118.0,                         // x_height
+            0.0,                            // italic_angle
+            1024.0,                         // avg_advance
+            [2, 0, 0, 0, 0, 0, 0, 0, 0, 0], // panose
+            false,                          // is_serif
+        )
+        .expect("test FontMetrics are valid")
+    }
+
+    /// `prepare_save` for a document with one `Custom` font entry whose bytes are
+    /// present in `font_bytes` must: populate `prepared.font_assets` with the
+    /// `(uuid, bytes)` pair, and populate `manifest.font_assets` with the UUID.
+    #[test]
+    fn test_prepare_save_includes_custom_font_assets() {
+        let mut doc = Document::new("FontTest".to_string());
+        let id = Uuid::from_u128(500);
+        let entry = sigil_core::FontEntry::new(
+            id,
+            "Inter".to_string(),
+            "Inter-Regular".to_string(),
+            sigil_core::FontSource::Custom { asset_uuid: id },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        let font_bytes = HashMap::from([(id, vec![1u8, 2, 3, 4])]);
+        let prepared = prepare_save(&doc, &font_bytes).expect("prepare_save");
+
+        assert_eq!(
+            prepared.font_assets,
+            vec![(id, vec![1u8, 2, 3, 4])],
+            "font_assets pairs must contain the custom font bytes"
+        );
+
+        let manifest: Manifest =
+            serde_json::from_str(&prepared.manifest_json).expect("deserialize manifest_json");
+        assert_eq!(
+            manifest.font_assets,
+            vec![id],
+            "manifest.font_assets must list the custom font UUID"
+        );
+    }
+
+    /// `write_prepared_save` must write `fonts/<uuid>.ttf` and include the UUID
+    /// in the on-disk `manifest.json`.
+    #[tokio::test]
+    async fn test_write_prepared_save_writes_font_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("fonts.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let mut doc = Document::new("FontWrite".to_string());
+        let id = Uuid::from_u128(600);
+        let entry = sigil_core::FontEntry::new(
+            id,
+            "Inter".to_string(),
+            "Inter-Regular".to_string(),
+            sigil_core::FontSource::Custom { asset_uuid: id },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        let font_bytes = HashMap::from([(id, vec![1u8, 2, 3, 4])]);
+        let prepared = prepare_save(&doc, &font_bytes).expect("prepare_save");
+
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // fonts/<uuid>.ttf must exist with the correct bytes.
+        let font_path = workfile_path.join("fonts").join(format!("{id}.ttf"));
+        let on_disk = tokio::fs::read(&font_path).await.expect("read font file");
+        assert_eq!(on_disk, vec![1u8, 2, 3, 4], "font file bytes must match");
+
+        // manifest.json must include the UUID in font_assets.
+        let manifest_json = tokio::fs::read_to_string(workfile_path.join("manifest.json"))
+            .await
+            .expect("read manifest");
+        let manifest: Manifest =
+            serde_json::from_str(&manifest_json).expect("deserialize manifest");
+        assert_eq!(
+            manifest.font_assets,
+            vec![id],
+            "manifest.font_assets must list the written font UUID"
+        );
+    }
+
+    /// When a document has a `Custom` font entry but no bytes are provided in
+    /// `font_bytes`, `prepare_save` must skip the entry (warn-and-skip path) and
+    /// produce empty `font_assets` in both the `PreparedSave` and the manifest.
+    #[test]
+    fn test_prepare_save_skips_custom_font_without_bytes() {
+        let mut doc = Document::new("SkipFont".to_string());
+        let id = Uuid::from_u128(700);
+        let entry = sigil_core::FontEntry::new(
+            id,
+            "Inter".to_string(),
+            "Inter-Regular".to_string(),
+            sigil_core::FontSource::Custom { asset_uuid: id },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        // Empty byte map — no bytes available for this font.
+        let prepared = prepare_save(&doc, &HashMap::new()).expect("prepare_save");
+
+        assert!(
+            prepared.font_assets.is_empty(),
+            "font_assets must be empty when bytes are missing"
+        );
+
+        let manifest: Manifest =
+            serde_json::from_str(&prepared.manifest_json).expect("deserialize manifest_json");
+        assert!(
+            manifest.font_assets.is_empty(),
+            "manifest.font_assets must be empty when bytes are missing"
+        );
+    }
+
+    /// `Manifest::validate` must reject a `font_assets` list longer than
+    /// `MAX_FONTS_PER_DOCUMENT`.
+    #[test]
+    fn test_manifest_validate_rejects_too_many_font_assets() {
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "TooMany".to_string(),
+            page_order: vec![],
+            font_assets: (0..=(sigil_core::MAX_FONTS_PER_DOCUMENT as u128))
+                .map(Uuid::from_u128)
+                .collect(),
+        };
+        let err = manifest.validate().unwrap_err();
+        assert!(
+            err.to_string().contains("exceeds maximum fonts"),
+            "expected font count error, got: {err}"
+        );
+    }
+
+    /// `Manifest::validate` must reject a `font_assets` list containing duplicate
+    /// UUIDs.
+    #[test]
+    fn test_manifest_validate_rejects_duplicate_font_assets() {
+        let dup = Uuid::from_u128(1);
+        let manifest = Manifest {
+            schema_version: 1,
+            name: "DupFonts".to_string(),
+            page_order: vec![],
+            font_assets: vec![dup, dup],
+        };
+        let err = manifest.validate().unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate UUID in manifest font_assets"),
+            "expected duplicate font UUID error, got: {err}"
         );
     }
 }

@@ -296,7 +296,8 @@ async fn persist_loop(
 async fn do_save_session(session: &Arc<DocumentSession>, migration_flag: &MigrationFlag) {
     let prepared = {
         let guard = session.store.read().await;
-        match workfile::prepare_save(&guard.0) {
+        // Task 11 threads the session font byte store here; empty until then.
+        match workfile::prepare_save(&guard.0, &std::collections::HashMap::new()) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("failed to serialize session {} for save: {e}", session.id);
