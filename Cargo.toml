@@ -27,7 +27,7 @@ serde_json = "1.0.149"
 uuid = { version = "1.23.0", features = ["v4", "serde"] }
 # WASM-safe: `std` feature is excluded; `no-std-float` provides float ops via
 # `libm` (via `core_maths`) so the crate compiles on wasm32-unknown-unknown.
-ttf-parser = { version = "0.25.1", default-features = false, features = ["no-std-float"] }
+ttf-parser = { version = "0.25.1", default-features = false, features = ["no-std-float", "variable-fonts"] }
 
 # CLI
 clap = { version = "4.5.20", features = ["derive"] }

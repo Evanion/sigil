@@ -127,16 +127,24 @@ pub fn classify_font(bytes: &[u8], prov: FontProvenance) -> Result<ParsedFont, C
     let postscript_name = read_name(&face, 6).unwrap_or_else(|| family.clone());
 
     // ── Variable font axes ────────────────────────────────────────────
-    // `face.is_variable()` and `face.variation_axes()` require the ttf-parser
-    // `variable-fonts` feature, which is NOT enabled in this workspace
-    // (Cargo.toml: `default-features = false, features = ["no-std-float"]`).
-    // The WASM-safety comment in the workspace Cargo.toml explains why
-    // default features (which include `variable-fonts`) are excluded.
-    // Variable-font axis metadata is non-essential for the embedding-rights
-    // classification implemented here. A future task may enable the feature
-    // and populate `axes` from `fvar` data.
-    let is_variable = false;
-    let axes: Vec<FontAxis> = Vec::new();
+    // `face.is_variable()` returns true when the font has a valid `fvar` table
+    // with at least one axis.  `face.variation_axes()` returns a `LazyArray16`
+    // of `VariationAxis` entries (tag, min_value, def_value, max_value).
+    // Both methods are gated behind ttf-parser's `variable-fonts` feature, which
+    // is now enabled in the workspace Cargo.toml alongside `no-std-float`.
+    // The feature adds no extra crate dependencies, so WASM compatibility
+    // (wasm32-unknown-unknown) is fully preserved.
+    let is_variable = face.is_variable();
+    let axes: Vec<FontAxis> = face
+        .variation_axes()
+        .into_iter()
+        .map(|a| FontAxis {
+            tag: a.tag.to_bytes(),
+            min: a.min_value,
+            default: a.def_value,
+            max: a.max_value,
+        })
+        .collect();
 
     // ── Embed decision ────────────────────────────────────────────────
     let decision = resolve_decision(&face, prov, fs_type);
@@ -239,6 +247,7 @@ mod tests {
     const INSTALLABLE: &[u8] = include_bytes!("../../../tests/fixtures/fonts/installable.ttf");
     const RESTRICTED: &[u8] = include_bytes!("../../../tests/fixtures/fonts/restricted.ttf");
     const EDITABLE: &[u8] = include_bytes!("../../../tests/fixtures/fonts/editable.ttf");
+    const VARIABLE: &[u8] = include_bytes!("../../../tests/fixtures/fonts/variable.ttf");
 
     #[test]
     fn test_classify_installable_user_supplied_embeds() {
@@ -247,6 +256,7 @@ mod tests {
         assert!(p.metrics.units_per_em() > 0);
         assert_eq!(p.family, "SigilTest");
         assert_eq!(p.fs_type, 0x0000);
+        assert!(!p.is_variable);
     }
 
     #[test]
@@ -270,5 +280,17 @@ mod tests {
     #[test]
     fn test_classify_rejects_garbage() {
         assert!(classify_font(b"not a font", FontProvenance::UserSupplied).is_err());
+    }
+
+    #[test]
+    fn test_classify_variable_font_reports_axes() {
+        let p = classify_font(VARIABLE, FontProvenance::UserSupplied).unwrap();
+        assert!(p.is_variable, "fvar font must report is_variable");
+        assert_eq!(p.axes.len(), 1);
+        assert_eq!(p.axes[0].tag, *b"wght");
+        assert!((p.axes[0].min - 100.0).abs() < 1e-3);
+        assert!((p.axes[0].default - 400.0).abs() < 1e-3);
+        assert!((p.axes[0].max - 900.0).abs() < 1e-3);
+        assert_eq!(p.decision, EmbedDecision::Embed);
     }
 }
