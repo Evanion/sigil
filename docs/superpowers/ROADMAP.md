@@ -24,8 +24,8 @@
 | 1 | **Fonts-1** — font model, embedding & FontFace loading (current renderer) | spec✅ plan✅ | — | `specs/2026-06-11-fonts-1-font-model-embedding.md` | `plans/2026-06-11-fonts-1-font-model-embedding.md` |
 | 2 | **RC-1** — WebGL2 foundation + SceneRenderer seam + golden harness (+P3 probe) | spec✅ | — (Fonts-1 parallel-ok) | `specs/2026-06-11-rc-1-webgl2-foundation.md` | _next_ |
 | 3 | **RC-2** — shape rendering (fills/strokes/corners/gradients/images/clip/blend/P3) | spec✅ | RC-1 | `specs/2026-06-11-rc-2-shape-rendering.md` | — |
-| 4 | **RC-3** — text via hb-gpu (Emscripten build + WASM host + atlas) | planned | RC-1, **Fonts-1** | — | — |
-| 5 | **RC-4** — integration + delete Canvas-2D (chrome overlay, full parity, perf) | planned | RC-2, RC-3 | — | — |
+| 4 | **RC-3** — text via hb-gpu (Emscripten build + WASM host + atlas) | spec✅ | RC-1, **Fonts-1** | `specs/2026-06-11-rc-3-hbgpu-text.md` | — |
+| 5 | **RC-4** — integration + delete Canvas-2D (chrome overlay, full parity, perf) | spec✅ | RC-2, RC-3 | `specs/2026-06-11-rc-4-integration-cutover.md` | — |
 | 6 | **Fonts-2** — server font store + OFL/Google library + picker UI + missing-font UX + MCP | planned | Fonts-1 | — | — |
 | 7 | **Fonts-3** — Tauri OS-font reader + web Local Font Access | planned | Fonts-1 | — | — |
 | 8 | **11c-B** — OpenType features + variable-font axis editing | planned | RC-3 (hb-gpu text), Fonts-1 | — | — |
