@@ -146,6 +146,16 @@ pub struct PreparedSave {
 pub struct LoadedWorkfile {
     /// The document reconstructed from the workfile.
     pub document: Document,
+    /// Embedded custom font bytes read from `fonts/<uuid>.ttf` on disk.
+    ///
+    /// Keyed by asset UUID. Only fonts whose UUID is present in
+    /// `manifest.font_assets` AND whose on-disk file passes size validation
+    /// are loaded. Orphan files (on disk but absent from the manifest) and
+    /// oversized files are skipped with `tracing::warn!`.
+    ///
+    /// Callers (server's `load_workfile_into_state`) must move this map into
+    /// `DocumentSession.font_bytes` after opening the session.
+    pub font_bytes: HashMap<Uuid, Vec<u8>>,
     /// `Some(v)` if any page on disk was at schema version `v < CURRENT_SCHEMA_VERSION`
     /// and required migration. `None` if all pages were already at the current version.
     pub migrated_from: Option<u32>,
@@ -562,6 +572,116 @@ async fn read_and_validate_manifest(workfile_path: &Path) -> Result<Manifest> {
     Ok(manifest)
 }
 
+/// Loads embedded custom font bytes from `workfile_path/fonts/`.
+///
+/// Scans the `fonts/` subdirectory (if it exists) for `*.ttf` files whose
+/// filename stem is a valid UUID. Applies the following rules:
+///
+/// - Files whose stem is not a valid UUID → `tracing::warn!` + skip.
+/// - Files whose UUID is NOT in `manifest_font_assets` (orphan) →
+///   `tracing::warn!` + skip (per CLAUDE.md "stale files must be ignored").
+/// - Files that exceed [`sigil_core::validate::MAX_EMBEDDED_FONT_BYTES`] →
+///   `tracing::warn!` + skip (degrade gracefully; do not abort the load).
+/// - Qualifying files are read and inserted into the returned map keyed by UUID.
+///
+/// After the directory scan, warns for each UUID in `manifest_font_assets` that
+/// has no corresponding file on disk (referenced but missing → degraded, no
+/// error).
+///
+/// Returns an empty map if `fonts/` does not exist.
+///
+/// # Errors
+///
+/// Returns an error only for hard I/O failures (e.g. `read_dir` fails on an
+/// existing directory). Soft issues (skipped files, missing files) are demoted
+/// to warnings.
+async fn load_font_assets(
+    workfile_path: &Path,
+    manifest_font_assets: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<u8>>> {
+    let fonts_dir = workfile_path.join("fonts");
+
+    // Fast-path: no fonts/ directory means nothing to load.
+    if tokio::fs::metadata(&fonts_dir).await.is_err() {
+        return Ok(HashMap::new());
+    }
+
+    // Build a set of UUIDs that are referenced by the manifest for O(1) lookup.
+    let manifest_set: HashSet<Uuid> = manifest_font_assets.iter().copied().collect();
+
+    let mut font_bytes: HashMap<Uuid, Vec<u8>> = HashMap::new();
+    let mut entries = tokio::fs::read_dir(&fonts_dir)
+        .await
+        .with_context(|| format!("failed to read fonts/ directory: {}", fonts_dir.display()))?;
+
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+
+        // Only process .ttf files.
+        if path.extension().and_then(|e| e.to_str()) != Some("ttf") {
+            continue;
+        }
+
+        // Parse the stem as a UUID; skip + warn on any non-UUID stem.
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let Ok(uuid) = Uuid::parse_str(stem) else {
+            tracing::warn!(
+                "fonts/ contains file with non-UUID stem '{}'; skipping",
+                path.display()
+            );
+            continue;
+        };
+
+        // Orphan check: file not referenced in manifest → skip + warn.
+        if !manifest_set.contains(&uuid) {
+            tracing::warn!(
+                "fonts/{}.ttf is present on disk but not referenced by manifest.font_assets; \
+                 skipping (orphan)",
+                uuid
+            );
+            continue;
+        }
+
+        // Size check: reject files that exceed the embedded-font byte limit.
+        // Compare meta.len() (u64) against the constant cast to u64 to avoid a
+        // u64→usize truncation on 32-bit targets (clippy::cast_possible_truncation).
+        let meta = tokio::fs::metadata(&path)
+            .await
+            .with_context(|| format!("failed to stat font file: {}", path.display()))?;
+        let max_bytes = sigil_core::validate::MAX_EMBEDDED_FONT_BYTES as u64;
+        if meta.len() > max_bytes {
+            tracing::warn!(
+                "fonts/{uuid}.ttf exceeds MAX_EMBEDDED_FONT_BYTES \
+                 ({} > {}); skipping — document will degrade",
+                meta.len(),
+                sigil_core::validate::MAX_EMBEDDED_FONT_BYTES
+            );
+            continue;
+        }
+
+        // Read the font bytes.
+        let bytes = tokio::fs::read(&path)
+            .await
+            .with_context(|| format!("failed to read font file: {}", path.display()))?;
+        font_bytes.insert(uuid, bytes);
+    }
+
+    // Warn for any manifest-referenced UUIDs that have no corresponding file.
+    for uuid in manifest_font_assets {
+        if !font_bytes.contains_key(uuid) {
+            tracing::warn!(
+                "manifest.font_assets references {uuid} but fonts/{uuid}.ttf is missing \
+                 from disk; document will degrade (font unavailable)"
+            );
+        }
+    }
+
+    Ok(font_bytes)
+}
+
 /// Loads a workfile from a `.sigil/` directory into a [`LoadedWorkfile`].
 ///
 /// Reads `manifest.json` for metadata, then loads each page from `pages/`.
@@ -661,11 +781,16 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
     // Reorder pages to match manifest ordering
     reorder_pages(&mut doc, &manifest.page_order);
 
+    // Load embedded font bytes from fonts/ (if present). Must run after
+    // page-load so the doc is already in its final state when we return.
+    let font_bytes = load_font_assets(workfile_path, &manifest.font_assets).await?;
+
     tracing::info!(
-        "loaded workfile '{}' with {} pages, {} nodes",
+        "loaded workfile '{}' with {} pages, {} nodes, {} embedded fonts",
         manifest.name,
         doc.pages.len(),
-        doc.arena.len()
+        doc.arena.len(),
+        font_bytes.len(),
     );
 
     if let Some(v) = min_observed_version {
@@ -677,6 +802,7 @@ pub async fn load_workfile(workfile_path: &Path) -> Result<LoadedWorkfile> {
 
     Ok(LoadedWorkfile {
         document: doc,
+        font_bytes,
         migrated_from: min_observed_version,
     })
 }
@@ -715,10 +841,12 @@ pub fn load_workfile_sync(path: &Path) -> Result<Document> {
     Ok(loaded.document)
 }
 
-/// Synchronous variant of [`load_workfile`] that also returns the migration
-/// version, for callers that drive a synchronous loader closure (e.g. the
-/// GraphQL `openSession` resolver) but still need to force-persist + back up a
-/// migrated workfile.
+/// Synchronous variant of [`load_workfile`] that returns the full
+/// [`LoadedWorkfile`] — document, embedded font bytes, and migration flag.
+///
+/// Used by callers that drive a synchronous loader closure (e.g. the GraphQL
+/// `openSession` resolver) but still need `migrated_from` for persistence
+/// registration and `font_bytes` for session population.
 ///
 /// Like [`load_workfile_sync`], requires the multi-threaded tokio runtime
 /// because it uses [`tokio::task::block_in_place`].
@@ -726,11 +854,8 @@ pub fn load_workfile_sync(path: &Path) -> Result<Document> {
 /// # Errors
 ///
 /// Returns an error if the workfile cannot be loaded (see [`load_workfile`]).
-pub fn load_workfile_sync_migrated(path: &Path) -> Result<(Document, Option<u32>)> {
-    let loaded = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(load_workfile(path))
-    })?;
-    Ok((loaded.document, loaded.migrated_from))
+pub fn load_workfile_sync_migrated(path: &Path) -> Result<LoadedWorkfile> {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(load_workfile(path)))
 }
 
 /// Reconstructs a page and its nodes from a [`SerializedPage`] into the document.
@@ -1507,13 +1632,13 @@ mod tests {
         .await
         .unwrap();
 
-        let (doc, migrated_from) = load_workfile_sync_migrated(&workfile_path).unwrap();
+        let loaded = load_workfile_sync_migrated(&workfile_path).unwrap();
         assert_eq!(
-            migrated_from,
+            loaded.migrated_from,
             Some(1),
             "v1 workfile must report migrated_from = Some(1)"
         );
-        assert_eq!(doc.pages.len(), 1);
+        assert_eq!(loaded.document.pages.len(), 1);
     }
 
     /// RF-010: when `prepared.migrated_from` is set, the writer copies the
@@ -2097,5 +2222,219 @@ mod tests {
                 "no .ttf files should remain after all-fonts-removed save, found: {name}"
             );
         }
+    }
+
+    // ── Part A: load_font_assets tests ────────────────────────────────────────
+
+    /// A workfile with a `Custom` FontEntry whose bytes are persisted in
+    /// `fonts/<uuid>.ttf` must round-trip: after `prepare_save` + `write` + `load`,
+    /// `loaded.font_bytes` contains exactly the original bytes, and the FontEntry
+    /// is still in the document's font table.
+    #[tokio::test]
+    async fn test_load_workfile_round_trips_embedded_font_bytes() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("fontroundtrip.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let id = Uuid::from_u128(700);
+        let font_data = vec![9u8, 8, 7, 6, 5];
+
+        // Build a document with one Custom font entry.
+        let mut doc = Document::new("FontRoundTrip".to_string());
+        let entry = sigil_core::FontEntry::new(
+            id,
+            "TestFont".to_string(),
+            "TestFont-Regular".to_string(),
+            sigil_core::FontSource::Custom { asset_uuid: id },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        // Save the document with font bytes.
+        let font_bytes_map = HashMap::from([(id, font_data.clone())]);
+        let prepared = prepare_save(&doc, &font_bytes_map).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Reload — font bytes must survive; font table persistence is in Task 12.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile round-trip");
+
+        assert_eq!(
+            loaded.font_bytes.get(&id),
+            Some(&font_data),
+            "loaded.font_bytes must contain the exact original bytes"
+        );
+    }
+
+    /// A `.ttf` file whose UUID is NOT listed in `manifest.font_assets` is an
+    /// orphan. `load_workfile` must succeed and NOT include the orphan in
+    /// `loaded.font_bytes`.
+    #[tokio::test]
+    async fn test_load_workfile_ignores_orphan_font_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("orphan.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Save an empty document (no fonts in manifest).
+        let doc = Document::new("Orphan".to_string());
+        let prepared = prepare_save(&doc, &HashMap::new()).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Manually plant an orphan font file that is NOT referenced in the manifest.
+        let orphan_uuid = Uuid::from_u128(999_999);
+        let fonts_dir = workfile_path.join("fonts");
+        tokio::fs::create_dir_all(&fonts_dir)
+            .await
+            .expect("create fonts dir");
+        tokio::fs::write(
+            fonts_dir.join(format!("{orphan_uuid}.ttf")),
+            b"orphan bytes",
+        )
+        .await
+        .expect("write orphan ttf");
+
+        // Load must succeed, and the orphan must NOT appear in font_bytes.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile must succeed even with orphan");
+
+        assert!(
+            !loaded.font_bytes.contains_key(&orphan_uuid),
+            "orphan .ttf not in manifest must be excluded from loaded.font_bytes"
+        );
+    }
+
+    /// When `manifest.font_assets` lists a UUID but the corresponding
+    /// `fonts/<uuid>.ttf` file does not exist, `load_workfile` must succeed
+    /// (degraded but non-fatal) and that UUID must be absent from
+    /// `loaded.font_bytes`.
+    #[tokio::test]
+    async fn test_load_workfile_tolerates_missing_referenced_font() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("missing.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let missing_uuid = Uuid::from_u128(888_888);
+
+        // Build a document with a Custom font entry and save it — this writes
+        // fonts/<uuid>.ttf and references it in the manifest.
+        let mut doc = Document::new("MissingFont".to_string());
+        let entry = sigil_core::FontEntry::new(
+            missing_uuid,
+            "Missing".to_string(),
+            "Missing-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: missing_uuid,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        let font_bytes_map = HashMap::from([(missing_uuid, vec![0xAAu8; 4])]);
+        let prepared = prepare_save(&doc, &font_bytes_map).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Now delete the font file to simulate a missing-on-disk scenario.
+        tokio::fs::remove_file(
+            workfile_path
+                .join("fonts")
+                .join(format!("{missing_uuid}.ttf")),
+        )
+        .await
+        .expect("remove font file");
+
+        // Load must succeed; the missing UUID must NOT be in font_bytes (degraded).
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile must succeed when referenced font is missing");
+
+        assert!(
+            !loaded.font_bytes.contains_key(&missing_uuid),
+            "missing font file must be absent from loaded.font_bytes (degraded, not fatal)"
+        );
+    }
+
+    /// A font file that exceeds `MAX_EMBEDDED_FONT_BYTES` must be skipped
+    /// gracefully. `load_workfile` must succeed and that UUID must be absent
+    /// from `loaded.font_bytes`.
+    #[tokio::test]
+    async fn test_load_workfile_skips_oversize_font_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("oversize.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        let fat_uuid = Uuid::from_u128(777_777);
+
+        // Build the manifest manually so it references the fat UUID.
+        // We do this by saving via prepare_save with a 1-byte payload first
+        // (so the manifest lists the UUID in font_assets), then overwriting
+        // the file with an oversized payload before loading.
+        let mut doc = Document::new("Oversize".to_string());
+        let entry = sigil_core::FontEntry::new(
+            fat_uuid,
+            "BigFont".to_string(),
+            "BigFont-Regular".to_string(),
+            sigil_core::FontSource::Custom {
+                asset_uuid: fat_uuid,
+            },
+            test_font_metrics(),
+            0,
+            sigil_core::EmbedDecision::Embed,
+            false,
+            vec![],
+        )
+        .expect("FontEntry is valid");
+        doc.font_table_mut().add(entry).expect("add font entry");
+
+        // Save with a tiny payload so the manifest lists the UUID.
+        let font_bytes_map = HashMap::from([(fat_uuid, vec![0u8; 4])]);
+        let prepared = prepare_save(&doc, &font_bytes_map).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Overwrite the font file with an oversized payload.
+        let oversize_bytes = vec![0u8; sigil_core::validate::MAX_EMBEDDED_FONT_BYTES + 1];
+        tokio::fs::write(
+            workfile_path.join("fonts").join(format!("{fat_uuid}.ttf")),
+            &oversize_bytes,
+        )
+        .await
+        .expect("write oversized font file");
+
+        // Load must succeed; the oversized UUID must be absent from font_bytes.
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile must succeed even with oversized font");
+
+        assert!(
+            !loaded.font_bytes.contains_key(&fat_uuid),
+            "oversized font file must be excluded from loaded.font_bytes"
+        );
     }
 }

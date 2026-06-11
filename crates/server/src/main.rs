@@ -203,7 +203,11 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
     // RF-001: the loaded document is the single source of truth (Spec 22a/22b).
     // Move it directly into the session store via the `open_session_with`
     // loader closure — no full-Document clone.
+    //
+    // `loaded` is partially moved: bind BOTH fields out before the closure so
+    // the borrow checker doesn't reject a partial move inside a closure.
     let document = loaded.document;
+    let loaded_font_bytes = loaded.font_bytes;
 
     // Register the loaded workfile as the default session, then register its
     // per-session persistence task IN THE SAME FUNCTION (Spec 22a §3.3
@@ -213,6 +217,13 @@ async fn load_workfile_into_state(workfile_path: &Path) -> anyhow::Result<Server
     }) {
         Ok(session_id) => {
             if let Some(session) = state.app.sessions.get(session_id) {
+                // Populate embedded font bytes into the session.
+                //
+                // NOTE: Any future runtime workfile-open path (e.g. a hot-reload
+                // triggered by an MCP `reloadSession` tool) MUST also populate
+                // `font_bytes` here before registering the persistence task.
+                *session.font_bytes.write().await = loaded_font_bytes;
+
                 // Passing `migrated_from` forces the first save + `.backup-v(N-1)/`
                 // for a workfile that was migrated on load.
                 state.persistence.register(session, migrated_from);

@@ -1485,18 +1485,21 @@ impl MutationRoot {
         // a tokio worker thread and uses `block_in_place` internally; the
         // server uses the multi-thread runtime so this is sound.
         //
-        // Capture `migrated_from` out-of-band: the loader closure runs inline
-        // on this thread inside `Sessions::open`, so a `Cell` written by the
-        // closure is readable after `open_session_with` returns. If the
-        // session already existed, the loader does not run and the cell stays
-        // `None` (the existing session's persistence was registered on its
-        // first open).
+        // Capture `migrated_from` and `font_bytes` out-of-band: the loader
+        // closure runs inline on this thread inside `Sessions::open`, so
+        // `RefCell`s written by the closure are readable after
+        // `open_session_with` returns. If the session already existed, the
+        // loader does not run and both cells stay at their default values
+        // (the existing session already has its bytes from its first open).
         let migrated_cell: std::cell::Cell<Option<u32>> = std::cell::Cell::new(None);
+        let font_bytes_cell: std::cell::RefCell<std::collections::HashMap<uuid::Uuid, Vec<u8>>> =
+            std::cell::RefCell::new(std::collections::HashMap::new());
         let loader =
             |p: &std::path::Path| -> std::result::Result<sigil_core::Document, anyhow::Error> {
-                let (doc, migrated_from) = crate::workfile::load_workfile_sync_migrated(p)?;
-                migrated_cell.set(migrated_from);
-                Ok(doc)
+                let loaded = crate::workfile::load_workfile_sync_migrated(p)?;
+                migrated_cell.set(loaded.migrated_from);
+                *font_bytes_cell.borrow_mut() = loaded.font_bytes;
+                Ok(loaded.document)
             };
 
         // RF-007: use App::open_session_with so default_session_id repoints
@@ -1528,6 +1531,26 @@ impl MutationRoot {
         // disk-backed session is a no-op.
         let migrated_from = migrated_cell.get();
         if let Some(session) = state.app.sessions.get(id) {
+            // Populate embedded font bytes into the session (Task 11).
+            //
+            // NOTE: if the session already existed (idempotent open), the
+            // loader did not run and `font_bytes_cell` is empty — so we only
+            // overwrite when the loader actually ran (new session). Checking
+            // emptiness is a heuristic: a workfile with no custom fonts also
+            // produces an empty map, but overwriting with empty is a no-op.
+            let loaded_bytes = font_bytes_cell.into_inner();
+            if !loaded_bytes.is_empty() {
+                // Block-in-place so we can await the write lock on the font_bytes
+                // RwLock without requiring the mutation resolver to be async.
+                //
+                // SAFETY: this resolver runs on a tokio worker thread from the
+                // multi-thread runtime, so `block_in_place` is sound.
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        *session.font_bytes.write().await = loaded_bytes;
+                    });
+                });
+            }
             state.persistence.register(session, migrated_from);
         } else {
             // Unreachable in practice — the session was just opened above, so
