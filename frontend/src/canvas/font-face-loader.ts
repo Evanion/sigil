@@ -101,7 +101,9 @@ export function buildMetricFallback(metrics: FontMetrics): MetricFallbackDescrip
   // descent is negative by convention in font metrics; the override needs a
   // positive percentage, so we use the absolute value.
   const ascentOverride = toPercent(ascent);
-  // Math.abs(-Infinity) = Infinity — but toPercent guards non-finite inputs.
+  // Guard: when descent is -Infinity, isFinite is false so Math.abs is NOT
+  // called (Math.abs(-Infinity) would be Infinity); -Infinity passes straight
+  // to toPercent, whose non-finite guard returns "100%".
   const descentOverride = toPercent(Number.isFinite(descent) ? Math.abs(descent) : descent);
   const lineGapOverride = toPercent(line_gap);
 
@@ -174,8 +176,9 @@ async function loadSingleFont(
     return { id, family, status: "error", error: "CSS-unsafe font family name" };
   }
 
-  // Exhaustive switch on source discriminant — a new FontSource variant will
-  // fail tsc (no default catch-all) per CLAUDE.md §11 discriminated-union rule.
+  // Exhaustive switch on source discriminant — the runtime-unreachable
+  // `default` arm assigns to a `never` sentinel, so a new FontSource variant
+  // fails tsc here, per CLAUDE.md §11 discriminated-union rule.
   const src = entry.source.source;
 
   switch (src) {

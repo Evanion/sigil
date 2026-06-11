@@ -271,6 +271,18 @@ describe("buildMetricFallback", () => {
     expect(result.descentOverride).toBe("20.00%");
   });
 
+  it("should return 100% for descentOverride when descent is -Infinity (Math.abs guard)", () => {
+    // -Infinity must NOT reach Math.abs (which would yield Infinity → "Infinity%").
+    // The isFinite ternary passes -Infinity straight to toPercent → "100%".
+    const metrics = makeMetrics({ descent: -Infinity, ascent: 700, units_per_em: 1000 });
+    const result = buildMetricFallback(metrics);
+
+    expect(result.descentOverride).toBe("100%");
+    expect(result.descentOverride).not.toContain("Infinity");
+    // Other axes remain computed correctly.
+    expect(result.ascentOverride).toBe("70.00%");
+  });
+
   it("should return 100% for sizeAdjust when avg_advance is Infinity", () => {
     const metrics = makeMetrics({ avg_advance: Infinity });
     const result = buildMetricFallback(metrics);
