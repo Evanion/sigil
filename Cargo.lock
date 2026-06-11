@@ -2179,6 +2179,7 @@ version = "0.1.1"
 dependencies = [
  "assert_matches",
  "axum",
+ "base64",
  "reqwest",
  "rmcp",
  "schemars",

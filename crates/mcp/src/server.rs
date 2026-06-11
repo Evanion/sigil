@@ -1042,6 +1042,102 @@ impl SigilMcpServer {
         .await
     }
 
+    /// Adds a font to the document's font table from raw font-file bytes.
+    ///
+    /// Classifies embed-vs-reference based on the font's OS/2 fsType flags and
+    /// the supplied provenance. Embeddable fonts (Custom source) have their bytes
+    /// stored in the workfile; reference fonts are recorded by PostScript name
+    /// only. Returns the new entry's UUID and family name.
+    ///
+    /// Provenance values: `"user_supplied"` (drag-dropped or file-picked) or
+    /// `"system_directory"` (discovered from OS font directory). System fonts
+    /// are never embedded regardless of fsType.
+    #[tool(
+        name = "add_font",
+        description = "Add a font from raw font-file bytes (base64). Classifies \
+                        embed-vs-reference and adds it to the document font table; \
+                        embeddable fonts are stored in the workfile. Returns the \
+                        new entry UUID and family name. provenance: \
+                        \"user_supplied\" | \"system_directory\". Accepts an \
+                        optional `session_id` when multiple sessions are open."
+    )]
+    async fn add_font(
+        &self,
+        Parameters(input): Parameters<crate::types::AddFontInput>,
+    ) -> Result<rmcp::handler::server::wrapper::Json<crate::types::AddFontResult>, rmcp::ErrorData>
+    {
+        let session_id =
+            crate::server::resolve_session_or_error(&self.sessions, input.session_id.as_deref())?;
+        let session = self.sessions.get(session_id).ok_or_else(|| {
+            crate::session_resolver::SessionResolveError::NotFound {
+                id: session_id.to_string(),
+                open_sessions: vec![],
+            }
+            .to_rmcp_error()
+        })?;
+
+        let result =
+            crate::tools::font::add_font_flow(session, &input.bytes_base64, &input.provenance)
+                .await?;
+
+        Ok(rmcp::handler::server::wrapper::Json(result))
+    }
+
+    /// Removes a font table entry by UUID.
+    ///
+    /// Fails if any Text node in the document still references the entry
+    /// (referential integrity) or if the entry is the built-in bundled default.
+    #[tool(
+        name = "remove_font",
+        description = "Remove a font table entry by UUID. Fails if any text node \
+                        still uses it or if the entry is the bundled default. \
+                        Accepts an optional `session_id` when multiple sessions \
+                        are open."
+    )]
+    async fn remove_font(
+        &self,
+        Parameters(input): Parameters<crate::types::RemoveFontInput>,
+    ) -> Result<rmcp::handler::server::wrapper::Json<crate::types::MutationResult>, rmcp::ErrorData>
+    {
+        let session_id =
+            crate::server::resolve_session_or_error(&self.sessions, input.session_id.as_deref())?;
+        let session = self.sessions.get(session_id).ok_or_else(|| {
+            crate::session_resolver::SessionResolveError::NotFound {
+                id: session_id.to_string(),
+                open_sessions: vec![],
+            }
+            .to_rmcp_error()
+        })?;
+
+        let result = crate::tools::font::remove_font_flow(session, &input.id).await?;
+
+        Ok(rmcp::handler::server::wrapper::Json(result))
+    }
+
+    /// Sets which font table entry a text node uses (by font entry UUID).
+    ///
+    /// Fails if the node is not a Text node or if the font entry does not
+    /// exist in the document's font table.
+    #[tool(
+        name = "set_node_font",
+        description = "Set which font table entry a text node uses (by font entry \
+                        UUID). Fails if the node is not a text node or the entry \
+                        does not exist. Accepts an optional `session_id` when \
+                        multiple sessions are open."
+    )]
+    async fn set_node_font(
+        &self,
+        Parameters(input): Parameters<crate::types::SetNodeFontInput>,
+    ) -> Result<rmcp::handler::server::wrapper::Json<crate::types::MutationResult>, rmcp::ErrorData>
+    {
+        let node = input.node.clone();
+        let font_entry = input.font_entry.clone();
+        self.run_session_scoped(input.session_id.as_deref(), move |doc| {
+            crate::tools::font::set_node_font_impl(doc, &node, &font_entry)
+        })
+        .await
+    }
+
     /// Lists every workfile session currently open in the running Sigil
     /// server. Returns each session's id, workfile path, display title, and
     /// lifecycle state.
