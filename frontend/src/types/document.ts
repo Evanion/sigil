@@ -442,8 +442,19 @@ export interface FontMetrics {
   readonly x_height: number;
   readonly italic_angle: number;
   readonly avg_advance: number;
-  /** PANOSE classification — 10-element byte array serialized as number[]. */
-  readonly panose: readonly number[];
+  /** PANOSE classification — Rust `[u8; 10]`, serialized as a fixed 10-element number array. */
+  readonly panose: readonly [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
   readonly is_serif: boolean;
 }
 
