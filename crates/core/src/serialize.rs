@@ -820,12 +820,93 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_with_version_returns_current_for_v2_page() {
+    fn test_deserialize_with_version_returns_current_for_current_page() {
+        // A page already at CURRENT_SCHEMA_VERSION round-trips without migration
+        // and reports the current version back.
         let json = format!(
-            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "V2", "nodes": [], "transitions": []}}"#
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#
         );
         let (_, version) = deserialize_page_with_version(&json).expect("deserialize");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    /// v2→v3 migration: a text node whose `kind.text_style.font_family` is
+    /// `"Roboto"` must have `font_entry` set to
+    /// `Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b"Roboto")` and `font_family`
+    /// removed after migration.
+    ///
+    /// This test exercises the full migration chain at the core level (no server
+    /// dependency) and proves that the migrated `font_entry` field name and UUID
+    /// string format round-trip correctly through `SerializedNode`.
+    #[test]
+    fn test_v2_text_node_font_family_migrates_to_font_entry() {
+        use crate::migrations::FONT_MIGRATION_NAMESPACE;
+
+        let v2_json = r#"{
+            "schema_version": 2,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Page",
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000002",
+                "kind": {
+                    "type": "text",
+                    "content": "Hello",
+                    "sizing": "auto_width",
+                    "text_style": {
+                        "font_family": "Roboto",
+                        "font_size": {"type": "literal", "value": 16.0},
+                        "font_weight": 400,
+                        "font_style": "normal",
+                        "line_height": {"type": "literal", "value": 1.5},
+                        "letter_spacing": {"type": "literal", "value": 0.0},
+                        "text_align": "left",
+                        "text_decoration": "none",
+                        "text_color": {"type": "literal", "value": {"space": "srgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},
+                        "text_shadow": null
+                    }
+                },
+                "name": "Label",
+                "parent": null,
+                "children": [],
+                "transform": {"x": 0.0, "y": 0.0, "width": 120.0, "height": 24.0, "rotation": 0.0, "scale_x": 1.0, "scale_y": 1.0},
+                "style": {"fills": [], "strokes": [], "opacity": {"type": "literal", "value": 1.0}, "blend_mode": "normal", "effects": []},
+                "constraints": {"horizontal": "start", "vertical": "start"},
+                "visible": true,
+                "locked": false
+            }],
+            "transitions": []
+        }"#;
+
+        let page = deserialize_page(v2_json).expect("v2 page with font_family must deserialize");
+        assert_eq!(
+            page.schema_version, CURRENT_SCHEMA_VERSION,
+            "migrated page must report CURRENT_SCHEMA_VERSION"
+        );
+        assert_eq!(page.nodes.len(), 1);
+
+        // The `kind` is stored as a raw `serde_json::Value` in `SerializedNode`.
+        // After migration, `font_family` must be gone and `font_entry` must be
+        // the deterministic v5 UUID derived from b"Roboto".
+        let kind = &page.nodes[0].kind;
+        let expected_uuid = Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b"Roboto");
+
+        assert!(
+            kind.get("text_style")
+                .and_then(|ts| ts.get("font_family"))
+                .is_none(),
+            "font_family must be removed after v2→v3 migration, got kind: {kind}"
+        );
+
+        let font_entry_str = kind
+            .get("text_style")
+            .and_then(|ts| ts.get("font_entry"))
+            .and_then(|v| v.as_str())
+            .expect("font_entry must be present after migration as a UUID string");
+        assert_eq!(
+            font_entry_str,
+            expected_uuid.to_string(),
+            "migrated font_entry UUID must match Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b\"Roboto\")"
+        );
     }
 
     #[test]

@@ -115,7 +115,9 @@ impl Manifest {
     /// - `page_order` contains duplicate UUIDs
     /// - `font_assets` exceeds [`MAX_FONTS_PER_DOCUMENT`](sigil_core::MAX_FONTS_PER_DOCUMENT)
     /// - `font_assets` contains duplicate UUIDs
-    /// - `fonts` exceeds [`MAX_FONTS_PER_DOCUMENT`](sigil_core::MAX_FONTS_PER_DOCUMENT)
+    /// - `fonts` has `MAX_FONTS_PER_DOCUMENT` or more entries (the default entry
+    ///   occupies one slot and is not stored in `fonts`, so the manifest can hold
+    ///   at most `MAX_FONTS_PER_DOCUMENT - 1` non-default entries)
     /// - `fonts` contains entries with duplicate IDs
     pub fn validate(&self) -> Result<()> {
         if self.name.len() > MAX_MANIFEST_NAME_LEN {
@@ -140,9 +142,13 @@ impl Manifest {
             }
         }
 
-        if self.font_assets.len() > sigil_core::MAX_FONTS_PER_DOCUMENT {
+        // `font_assets` ⊆ `fonts` (Custom entries only), so its count is bounded
+        // by the same cap. The `>= MAX` bound matches the `fonts` check below:
+        // a non-default entry count of MAX would overflow the document table
+        // once the bundled default entry is added on load.
+        if self.font_assets.len() >= sigil_core::MAX_FONTS_PER_DOCUMENT {
             bail!(
-                "manifest font_assets exceeds maximum fonts ({} > {})",
+                "manifest font_assets exceeds maximum fonts ({} >= {})",
                 self.font_assets.len(),
                 sigil_core::MAX_FONTS_PER_DOCUMENT
             );
@@ -156,15 +162,26 @@ impl Manifest {
         }
 
         // `fonts` carries the full FontEntry records; validate cap and uniqueness.
-        // The +1 accounts for the default entry which is NOT stored in `fonts`
-        // but IS present in the live document — so `fonts.len()` can equal
-        // MAX_FONTS_PER_DOCUMENT - 1 at most without overflow, but we apply the
-        // cap at MAX_FONTS_PER_DOCUMENT to allow for the default slot.
-        if self.fonts.len() > sigil_core::MAX_FONTS_PER_DOCUMENT {
+        //
+        // `Document::new` always seeds one bundled default entry
+        // (`DEFAULT_FONT_ENTRY_ID`) which is NOT stored in `fonts` but IS
+        // present in the live document after load. On load we call
+        // `FontTable::add` once for each entry in `fonts`, which enforces the
+        // `MAX_FONTS_PER_DOCUMENT` cap across the full table (default + manifest
+        // entries). If `fonts.len() == MAX_FONTS_PER_DOCUMENT`, the `add` for
+        // the first entry would succeed (capacity = 1 + 0 ≤ cap), but the table
+        // would already hold the default, making total = 1 + MAX, which exceeds
+        // the cap. Reject at `>= MAX_FONTS_PER_DOCUMENT` so the manifest can
+        // carry at most `MAX_FONTS_PER_DOCUMENT - 1` non-default entries
+        // (1 default + MAX-1 manifest = MAX = cap, exactly at limit).
+        if self.fonts.len() >= sigil_core::MAX_FONTS_PER_DOCUMENT {
             bail!(
-                "manifest fonts exceeds maximum fonts ({} > {})",
+                "manifest fonts exceeds maximum fonts ({} >= {}); \
+                 the bundled default entry occupies one slot, so at most {} \
+                 non-default entries are allowed",
                 self.fonts.len(),
-                sigil_core::MAX_FONTS_PER_DOCUMENT
+                sigil_core::MAX_FONTS_PER_DOCUMENT,
+                sigil_core::MAX_FONTS_PER_DOCUMENT - 1,
             );
         }
 
@@ -1697,7 +1714,7 @@ mod tests {
         assert_eq!(loaded.pages[0].name, "Kept");
     }
 
-    /// RF-009: a v2 workfile loads with `migrated_from = None`.
+    /// RF-009: a current-version workfile loads with `migrated_from = None`.
     #[tokio::test]
     async fn test_load_workfile_returns_no_migration_flag_for_current_schema() {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -2191,24 +2208,40 @@ mod tests {
         );
     }
 
-    /// `Manifest::validate` must reject a `font_assets` list longer than
-    /// `MAX_FONTS_PER_DOCUMENT`.
+    /// `Manifest::validate` must reject a `font_assets` list of length
+    /// `>= MAX_FONTS_PER_DOCUMENT` (the bundled default entry occupies one
+    /// slot, so at most `MAX - 1` non-default entries are allowed).
     #[test]
     fn test_manifest_validate_rejects_too_many_font_assets() {
-        let manifest = Manifest {
+        // BOUNDARY: exactly MAX_FONTS_PER_DOCUMENT entries → Err (>= check).
+        let at_max = Manifest {
             schema_version: 1,
-            name: "TooMany".to_string(),
+            name: "AtMax".to_string(),
             page_order: vec![],
-            font_assets: (0..=(sigil_core::MAX_FONTS_PER_DOCUMENT as u128))
+            font_assets: (0..(sigil_core::MAX_FONTS_PER_DOCUMENT as u128))
                 .map(Uuid::from_u128)
                 .collect(),
             fonts: Vec::new(),
         };
-        let err = manifest.validate().unwrap_err();
+        let err = at_max.validate().unwrap_err();
         assert!(
             err.to_string().contains("exceeds maximum fonts"),
-            "expected font count error, got: {err}"
+            "expected font count error at boundary (==MAX), got: {err}"
         );
+
+        // BOUNDARY: exactly MAX_FONTS_PER_DOCUMENT - 1 entries → Ok.
+        let at_max_minus_one = Manifest {
+            schema_version: 1,
+            name: "AtMaxMinusOne".to_string(),
+            page_order: vec![],
+            font_assets: (0..((sigil_core::MAX_FONTS_PER_DOCUMENT - 1) as u128))
+                .map(Uuid::from_u128)
+                .collect(),
+            fonts: Vec::new(),
+        };
+        at_max_minus_one
+            .validate()
+            .expect("MAX-1 font_assets should be accepted (leaves room for bundled default)");
     }
 
     /// `Manifest::validate` must reject a `font_assets` list containing duplicate
@@ -2836,40 +2869,60 @@ mod tests {
         );
     }
 
-    /// `Manifest::validate` must reject a `fonts` list whose length exceeds
-    /// `MAX_FONTS_PER_DOCUMENT`, and must reject a `fonts` list with duplicate IDs.
+    /// `Manifest::validate` must reject a `fonts` list of length
+    /// `>= MAX_FONTS_PER_DOCUMENT` (the bundled default entry takes one slot,
+    /// so at most `MAX - 1` non-default entries are allowed). It must also
+    /// accept exactly `MAX - 1` entries (the maximum allowed), and reject
+    /// duplicate IDs.
     #[test]
     fn test_manifest_validate_rejects_invalid_fonts_field() {
-        // ── Too many entries ─────────────────────────────────────────────────
-        let too_many: Vec<sigil_core::FontEntry> = (0..=(sigil_core::MAX_FONTS_PER_DOCUMENT
-            as u128))
-            .map(|i| {
-                sigil_core::FontEntry::new(
-                    Uuid::from_u128(i + 10_000),
-                    format!("Family{i}"),
-                    format!("Family{i}-Regular"),
-                    sigil_core::FontSource::SystemReference,
-                    test_font_metrics(),
-                    0,
-                    sigil_core::EmbedDecision::ReferenceSystem,
-                    false,
-                    vec![],
-                )
-                .expect("entry is valid")
-            })
+        // ── BOUNDARY: exactly MAX entries → Err (>= check) ──────────────────
+        let make_entry = |i: u128| {
+            sigil_core::FontEntry::new(
+                Uuid::from_u128(i + 10_000),
+                format!("Family{i}"),
+                format!("Family{i}-Regular"),
+                sigil_core::FontSource::SystemReference,
+                test_font_metrics(),
+                0,
+                sigil_core::EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("entry is valid")
+        };
+
+        let at_max: Vec<sigil_core::FontEntry> = (0..(sigil_core::MAX_FONTS_PER_DOCUMENT as u128))
+            .map(make_entry)
             .collect();
-        let manifest_too_many = Manifest {
+        let manifest_at_max = Manifest {
             schema_version: 1,
-            name: "TooManyFonts".to_string(),
+            name: "AtMaxFonts".to_string(),
             page_order: vec![],
             font_assets: Vec::new(),
-            fonts: too_many,
+            fonts: at_max,
         };
-        let err = manifest_too_many.validate().unwrap_err();
+        let err = manifest_at_max.validate().unwrap_err();
         assert!(
             err.to_string().contains("exceeds maximum fonts"),
-            "expected exceeds-maximum error for fonts, got: {err}"
+            "expected exceeds-maximum error for fonts at boundary (==MAX), got: {err}"
         );
+
+        // ── BOUNDARY: exactly MAX - 1 entries → Ok ──────────────────────────
+        let at_max_minus_one: Vec<sigil_core::FontEntry> = (0
+            ..((sigil_core::MAX_FONTS_PER_DOCUMENT - 1) as u128))
+            .map(make_entry)
+            .collect();
+        let manifest_max_minus_one = Manifest {
+            schema_version: 1,
+            name: "MaxMinusOneFonts".to_string(),
+            page_order: vec![],
+            font_assets: Vec::new(),
+            fonts: at_max_minus_one,
+        };
+        manifest_max_minus_one
+            .validate()
+            .expect("MAX-1 fonts entries should be accepted (leaves room for bundled default)");
 
         // ── Duplicate IDs ────────────────────────────────────────────────────
         let dup_id = Uuid::from_u128(99_001);

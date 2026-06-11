@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use sigil_core::CURRENT_SCHEMA_VERSION;
 use sigil_core::migrations::FONT_MIGRATION_NAMESPACE;
+use sigil_server::persistence::SAVE_DEBOUNCE_MS;
 use sigil_server::state::ServerState;
 use sigil_server::workfile::load_workfile;
 use tokio::time::sleep;
@@ -141,8 +142,8 @@ async fn test_v2_font_workfile_full_migration_pipeline() {
     let session = state.app.sessions.get(session_id).expect("session present");
     state.persistence.register(session, migrated_from);
 
-    // Wait for debounce + margin (SAVE_DEBOUNCE_MS = 500ms).
-    sleep(Duration::from_millis(500 + 300)).await;
+    // Wait for debounce + margin.
+    sleep(Duration::from_millis(SAVE_DEBOUNCE_MS + 300)).await;
 
     // (b) Assert the live manifest is now v3 and contains the Roboto font entry.
     let live_manifest_str = tokio::fs::read_to_string(workfile_path.join("manifest.json"))
