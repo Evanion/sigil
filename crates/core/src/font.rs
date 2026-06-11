@@ -148,6 +148,19 @@ impl FontMetrics {
         validate_finite("font_metrics.italic_angle", f64::from(italic_angle))?;
         validate_finite("font_metrics.avg_advance", f64::from(avg_advance))?;
 
+        // Spec §6: ascent and line_gap must be non-negative.
+        // `descent` may be negative (it is below the baseline by convention).
+        if ascent < 0.0 {
+            return Err(CoreError::ValidationError(
+                "font_metrics.ascent must be >= 0".to_string(),
+            ));
+        }
+        if line_gap < 0.0 {
+            return Err(CoreError::ValidationError(
+                "font_metrics.line_gap must be >= 0".to_string(),
+            ));
+        }
+
         Ok(Self {
             units_per_em,
             ascent,
@@ -458,7 +471,23 @@ mod tests {
     }
 
     #[test]
-    fn test_font_metrics_serde_roundtrip_rejects_dup_keys() {
+    fn test_font_metrics_rejects_negative_ascent() {
+        let bad = FontMetrics::new(
+            1000, -1.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
+        );
+        assert!(bad.is_err(), "negative ascent must be rejected");
+    }
+
+    #[test]
+    fn test_font_metrics_rejects_negative_line_gap() {
+        let bad = FontMetrics::new(
+            1000, 800.0, -200.0, -1.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
+        );
+        assert!(bad.is_err(), "negative line_gap must be rejected");
+    }
+
+    #[test]
+    fn test_font_metrics_serde_roundtrip() {
         let m = FontMetrics::new(
             1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], true,
         )
