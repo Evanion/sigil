@@ -1,7 +1,8 @@
 # Spec 11c-A — CanvasKit Render Core
 
 **Date:** 2026-06-10
-**Status:** Ready for plan
+**Status:** Blocked on the Font Pipeline spec (sequenced first — see Prerequisite).
+**Prerequisite:** **Font Pipeline spec** (filed separately, 2026-06-11). CanvasKit/Skia has no system fonts and needs font *bytes* via `FontMgr.FromData`; Sigil has none today. The font pipeline (FontRef schema + bundled/served font bytes + CanvasKit loader) must land first so 11c-A's text path consumes real fonts. The "text at current behavior" / minimal-bundle language below is superseded by that pipeline — 11c-A's text task (plan Task 14) acquires fonts from the pipeline, not an ad-hoc bundle. See `docs/superpowers/research/2026-06-11-font-pipeline-architecture.md`.
 **Supersedes:** `2026-06-10-11c-webgl-text-rendering.md` (text-only WebGL/HarfBuzz/regl framing — wrong seam, live-2D-fallback, fabricated references). That file is to be deleted.
 **Epic:** WebGL/GPU rendering (PDR "WebGL canvas renderer", promoted from Deferred → scope). Decomposed into:
 - **11c-A (this spec):** CanvasKit/Skia render core — replace the Canvas-2D renderer; port all document content to Skia at visual parity; text renders via Skia at *current* behavior. Frontend-only.
