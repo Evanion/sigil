@@ -5,13 +5,28 @@
  * - urql Client (query method) — controls fontBytes responses
  * - FontFace / document.fonts — same mock pattern as font-face-loader.test.ts
  * - Solid.js reactive runtime — we use createRoot to provide a reactive owner
+ * - font-face-loader (vi.mock with auto-spy) — allows specific tests to override
+ *   loadFonts behavior (e.g. to make it reject) without affecting other tests
  *
  * Per CLAUDE.md testing standards: tests describe behavior, not implementation.
  */
 
+// vi.mock is hoisted before imports by Vitest. The factory delegates to the
+// real implementation by default via vi.importActual so that tests which need
+// real FontFace loading continue to work; individual tests may override via
+// vi.mocked(loadFonts).mockRejectedValueOnce(...).
+vi.mock("../font-face-loader", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../font-face-loader")>();
+  return {
+    ...actual,
+    loadFonts: vi.fn(actual.loadFonts),
+  };
+});
+
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createRoot } from "solid-js";
+import { createRoot, createSignal } from "solid-js";
 import { b64ToUint8Array, installFontLoadingOrchestrator, fontLoadVersion } from "../font-loading";
+import { loadFonts } from "../font-face-loader";
 import type { FontEntry, FontSource } from "../../types/document";
 
 // ---------------------------------------------------------------------------
@@ -355,6 +370,9 @@ describe("installFontLoadingOrchestrator", () => {
   });
 
   it("should not re-fetch an already-processed id on a subsequent fontTable change", async () => {
+    // This test uses a real Solid reactive signal to back the fontTable so that
+    // adding a second entry genuinely re-triggers the orchestrator's createEffect
+    // (unlike a plain object mutation which is invisible to Solid's tracking).
     const fontId1 = "id-stable-1";
     const fontId2 = "id-stable-2";
     const b64 = btoa(String.fromCharCode(1, 2, 3));
@@ -372,48 +390,52 @@ describe("installFontLoadingOrchestrator", () => {
     );
     const client = { query: queryMock };
 
-    // Start with only fontId1
-    let fontTable: Record<string, FontEntry> = {
+    // Use a Solid signal so that setTable() causes the effect to re-run.
+    const [getFontTable, setFontTable] = createSignal<Record<string, FontEntry>>({
       [fontId1]: makeEntry(fontId1, "Font1", { source: "custom", asset_uuid: "a1" }),
-    };
+    });
 
     let disposeRoot: () => void = () => undefined;
     await new Promise<void>((resolve) => {
       disposeRoot = createRoot((dispose) => {
         installFontLoadingOrchestrator(
-          () => fontTable,
+          getFontTable,
           client as unknown as import("../font-loading").FontBytesClient,
         );
+        // createEffect fires synchronously in the same microtask; async work is in-flight
         resolve();
         return dispose;
       });
     });
 
+    // Let the first batch (fontId1) fully resolve
     await flushAsync();
 
-    // fontId1 should have been queried once
-    const queriesForId1Before = queryMock.mock.calls.filter(
+    const queriesForId1After1stBatch = queryMock.mock.calls.filter(
       (args) => (args[1] as Record<string, unknown>)["id"] === fontId1,
     ).length;
-    expect(queriesForId1Before).toBe(1);
+    expect(queriesForId1After1stBatch).toBe(1);
 
-    // Now add fontId2 (simulating a new font being added to the table)
-    // fontId1 entry is guaranteed present because we just inserted it above
-    const entry1 = fontTable[fontId1] ?? makeEntry(fontId1, "Font1", { source: "custom", asset_uuid: "a1" });
-    fontTable = {
-      [fontId1]: entry1,
+    // Reactively add fontId2 — this mutates the signal and re-triggers the effect
+    setFontTable((prev) => ({
+      ...prev,
       [fontId2]: makeEntry(fontId2, "Font2", { source: "custom", asset_uuid: "a2" }),
-    };
+    }));
 
-    // The effect doesn't re-run automatically in this test since fontTable is
-    // a plain object (not a Solid signal). We re-run flushAsync to process
-    // any remaining microtasks but verify that fontId1 is NOT queried again.
+    // Let the second batch (fontId2) fully resolve
     await flushAsync();
 
-    const queriesForId1After = queryMock.mock.calls.filter(
+    // fontId2 must have been fetched exactly once
+    const queriesForId2 = queryMock.mock.calls.filter(
+      (args) => (args[1] as Record<string, unknown>)["id"] === fontId2,
+    ).length;
+    expect(queriesForId2).toBe(1);
+
+    // fontId1 must NOT have been re-fetched — processedIds set guards it
+    const queriesForId1Total = queryMock.mock.calls.filter(
       (args) => (args[1] as Record<string, unknown>)["id"] === fontId1,
     ).length;
-    expect(queriesForId1After).toBe(1); // unchanged — not re-fetched
+    expect(queriesForId1Total).toBe(1); // still exactly 1, not re-dispatched
 
     disposeRoot();
   });
@@ -534,6 +556,62 @@ describe("installFontLoadingOrchestrator", () => {
     // query should NOT have been called for system_reference entries
     expect(querySpy).not.toHaveBeenCalled();
 
+    disposeRoot();
+  });
+
+  it("should catch a loadFonts rejection, log an error, not increment fontLoadVersion, and not crash", async () => {
+    // loadFonts is documented to never reject, but the orchestrator wraps it in
+    // try-catch (~line 282) as a defensive measure. This test exercises that path
+    // by making the vi.mock-wrapped loadFonts reject once.
+    //
+    // Expected behavior per the catch block:
+    //   - console.error is called with "[font-loading] loadFonts threw unexpectedly"
+    //   - the function returns early (no setFontLoadVersion call)
+    //   - no unhandled promise rejection is thrown
+
+    const fontId = "throws-id";
+    const b64 = btoa(String.fromCharCode(0xDE, 0xAD));
+    const client = makeMockClient(new Map([[fontId, { data: { fontBytes: b64 } }]]));
+
+    const fontTable: Record<string, FontEntry> = {
+      [fontId]: makeEntry(fontId, "ThrowsFont", { source: "custom", asset_uuid: "t1" }),
+    };
+
+    // Inject a rejection into the loadFonts mock for this test only.
+    // The one-shot mockRejectedValueOnce is consumed on the first call and
+    // does not bleed into subsequent tests.
+    const expectedError = new Error("loadFonts internal boom");
+    vi.mocked(loadFonts).mockRejectedValueOnce(expectedError);
+
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const versionBefore = fontLoadVersion();
+
+    let disposeRoot!: () => void;
+    await new Promise<void>((resolve) => {
+      disposeRoot = createRoot((dispose) => {
+        installFontLoadingOrchestrator(
+          () => fontTable,
+          client as unknown as import("../font-loading").FontBytesClient,
+        );
+        resolve();
+        return dispose;
+      });
+    });
+
+    await flushAsync();
+
+    // The catch block must have logged the error
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[font-loading] loadFonts threw unexpectedly"),
+      expect.objectContaining({ error: expectedError.message }),
+    );
+
+    // fontLoadVersion must NOT have been incremented — the catch block returns early
+    // before the setFontLoadVersion call
+    expect(fontLoadVersion()).toBe(versionBefore);
+
+    consoleErrorSpy.mockRestore();
     disposeRoot();
   });
 });

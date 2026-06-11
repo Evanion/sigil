@@ -171,7 +171,7 @@ export function installFontLoadingOrchestrator(
     // Kick off the async work in a fire-and-catch wrapper.
     // Per "No Fire-and-Forget Mutations": the promise is captured and any
     // rejection is caught and logged — we don't suppress errors.
-    loadEntriesAsync(newEntries, urqlClient, destroyed, () => destroyed).catch(
+    loadEntriesAsync(newEntries, urqlClient, () => destroyed).catch(
       (err: unknown) => {
         console.error("[font-loading] unexpected error in font load batch", {
           error: err instanceof Error ? err.message : String(err),
@@ -195,14 +195,12 @@ export function installFontLoadingOrchestrator(
  *
  * @param entries      - new font entries to load in this batch
  * @param urqlClient   - urql client for fontBytes queries
- * @param _initialDestroyed - initial destroyed state at call time (unused — we
- *   always check `isDestroyed()` after each await)
- * @param isDestroyed  - zero-arg closure that returns the current destroyed state
+ * @param isDestroyed  - zero-arg closure that returns the current destroyed state;
+ *   checked after each await to prevent post-teardown signal updates
  */
 async function loadEntriesAsync(
   entries: FontEntry[],
   urqlClient: FontBytesClient,
-  _initialDestroyed: boolean,
   isDestroyed: () => boolean,
 ): Promise<void> {
   // --- Step 1: fetch bytes for Custom entries ---
