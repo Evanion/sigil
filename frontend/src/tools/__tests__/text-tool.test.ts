@@ -3,6 +3,7 @@ import { createTextTool } from "../text-tool";
 import type { ToolEvent } from "../tool-manager";
 import type { ToolStore } from "../../store/document-store-types";
 import type { NodeKind, Transform, NodeKindText } from "../../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 import type { PreviewRect } from "../shape-tool";
 
 /** Helper to create a minimal ToolEvent at given world coordinates. */
@@ -152,7 +153,7 @@ describe("createTextTool", () => {
       tool.onPointerUp(makeEvent(50, 100));
 
       const kind = store.createNodeCalls[0].kind as NodeKindText;
-      expect(kind.text_style.font_family).toBe("Inter");
+      expect(kind.text_style.font_entry).toBe(DEFAULT_FONT_ENTRY_ID);
       expect(kind.text_style.font_size).toEqual({ type: "literal", value: 16 });
       expect(kind.text_style.font_weight).toBe(400);
       expect(kind.text_style.font_style).toBe("normal");

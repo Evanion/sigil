@@ -10,11 +10,14 @@
  * propagates silently and corrupts downstream rendering.
  */
 
-import type { TextStyle } from "../types/document";
+import type { TextStyle, FontEntry } from "../types/document";
 import { validateCssIdentifier } from "../validation/css-identifiers";
 
 /** Default font size used when the TextStyle font_size is a token_ref. */
 export const DEFAULT_FONT_SIZE_PX = 16;
+
+/** Fallback font family used when the font_entry id is not in the font table. */
+export const FALLBACK_FONT_FAMILY = "Inter";
 
 /** Fallback line height when an invalid lineHeight is supplied. */
 const FALLBACK_LINE_HEIGHT_PX = 20;
@@ -122,6 +125,50 @@ export function measureTextLines(
 }
 
 /**
+ * Resolve a font entry id to its family name via the document's font table.
+ *
+ * Defense-in-depth per CLAUDE.md §11 "CSS-Rendered String Fields Must Reject
+ * CSS-Significant Characters": even though the family stored in FontEntry was
+ * validated at input time, this helper re-validates before returning a value
+ * that will be interpolated into a CSS font string.
+ *
+ * If the id is absent from the table, or the stored family contains
+ * CSS-significant characters, returns FALLBACK_FONT_FAMILY and emits a
+ * console.warn (once per id per session, to avoid flooding the console during
+ * a 60fps render loop).
+ *
+ * @param fontTable - The document's font table (state.fontTable).
+ * @param fontEntryId - The UUID to look up.
+ * @returns A CSS-safe font family string.
+ */
+const _warnedMissingFontIds = new Set<string>();
+export function resolveFontFamily(
+  fontTable: Record<string, FontEntry>,
+  fontEntryId: string,
+): string {
+  const entry = fontTable[fontEntryId];
+  if (!entry) {
+    if (!_warnedMissingFontIds.has(fontEntryId)) {
+      _warnedMissingFontIds.add(fontEntryId);
+      console.warn("resolveFontFamily: font entry not found in table", { fontEntryId });
+    }
+    return FALLBACK_FONT_FAMILY;
+  }
+  // Defense-in-depth: re-validate the family string before CSS interpolation.
+  if (!validateCssIdentifier(entry.family)) {
+    if (!_warnedMissingFontIds.has(fontEntryId + ":invalid")) {
+      _warnedMissingFontIds.add(fontEntryId + ":invalid");
+      console.warn("resolveFontFamily: font entry family contains CSS-significant characters", {
+        fontEntryId,
+        family: entry.family,
+      });
+    }
+    return FALLBACK_FONT_FAMILY;
+  }
+  return entry.family;
+}
+
+/**
  * Build a CSS font string from a TextStyle object.
  *
  * Format: "[italic ]<weight> <size>px <family>"
@@ -129,8 +176,17 @@ export function measureTextLines(
  * font_size is taken from the literal value; when it is a token_ref (not
  * resolvable at this layer) DEFAULT_FONT_SIZE_PX (16) is used.
  * Non-finite font_size values also fall back to DEFAULT_FONT_SIZE_PX.
+ *
+ * @param style - The TextStyle whose font_entry uuid will be resolved.
+ * @param resolveFamily - A function mapping a font_entry uuid → family string.
+ *   Callers should provide `(id) => resolveFontFamily(fontTable, id)`.
+ *   The default resolver returns the fallback family so callers that do not
+ *   have a font table (e.g., unit tests) still produce a valid CSS font string.
  */
-export function buildFontString(style: TextStyle): string {
+export function buildFontString(
+  style: TextStyle,
+  resolveFamily: (fontEntryId: string) => string = () => FALLBACK_FONT_FAMILY,
+): string {
   const italic = style.font_style === "italic" ? "italic " : "";
 
   let fontSize: number;
@@ -143,8 +199,13 @@ export function buildFontString(style: TextStyle): string {
     fontSize = DEFAULT_FONT_SIZE_PX;
   }
 
-  // RF-006: Use fallback font if font_family contains CSS-significant characters.
-  const family = validateCssIdentifier(style.font_family) ? style.font_family : "sans-serif";
+  // Resolve family via the font table; defense-in-depth CSS-id guard is inside
+  // resolveFontFamily. Use the caller-supplied resolver so the renderer and
+  // overlay can both use the same helper.
+  const rawFamily = resolveFamily(style.font_entry);
+  // Defense-in-depth: re-validate after resolution in case the resolver
+  // returned an un-validated value from a different path.
+  const family = validateCssIdentifier(rawFamily) ? rawFamily : "sans-serif";
 
   return `${italic}${String(style.font_weight)} ${String(fontSize)}px ${family}`;
 }

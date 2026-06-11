@@ -245,7 +245,7 @@ export const Canvas: Component = () => {
       const node = store.state.nodes[uuid];
       if (!node || node.kind.type !== "text") return;
 
-      activeOverlay = createTextOverlay(node, store.viewport(), canvas);
+      activeOverlay = createTextOverlay(node, store.viewport(), canvas, store.state.fontTable);
       editingUuid = uuid;
 
       // RF-026: Announce text edit mode to screen readers
@@ -690,6 +690,11 @@ export const Canvas: Component = () => {
       // Read tokens for token-ref resolution in the renderer
       const tokens = store.state.tokens;
 
+      // Read font table for font-entry resolution in the renderer.
+      // state.fontTable is a Solid store field — reading it here subscribes
+      // the render effect to font table changes.
+      const fontTable = store.state.fontTable;
+
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
       try {
@@ -705,6 +710,7 @@ export const Canvas: Component = () => {
           guides,
           marquee,
           tokens,
+          fontTable,
         );
       } catch (err: unknown) {
         console.error("Canvas render error:", err);

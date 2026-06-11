@@ -1078,6 +1078,19 @@ pub fn build_system_reference_entry(
 mod tests {
     use super::*;
 
+    // ── DEFAULT_FONT_ENTRY_ID string pin ───────────────────────────────
+    //
+    // Parity test: the TypeScript constant `DEFAULT_FONT_ENTRY_ID` in
+    // `frontend/src/types/document.ts` must equal this string.
+    // Cross-reference: frontend/src/types/__tests__/document.test-d.ts
+    #[test]
+    fn test_default_font_entry_id_string() {
+        assert_eq!(
+            DEFAULT_FONT_ENTRY_ID.to_string(),
+            "0defa000-dead-f047-beef-cafe00000001",
+        );
+    }
+
     // ── FontMetrics ────────────────────────────────────────────────────
 
     #[test]

@@ -363,10 +363,8 @@ export interface TextShadow {
 }
 
 export interface TextStyle {
-  // TODO(fonts-1 Task 17): TextStyle.font_family → font_entry: string lands with
-  // its renderer/UI consumers (text-measure, text-overlay, TypographySection,
-  // text-tool, store). Do not change this field here until Task 17.
-  readonly font_family: string;
+  /** UUID of the FontEntry in the document's font table for this text style. */
+  readonly font_entry: string;
   readonly font_size: StyleValue<number>;
   readonly font_weight: number;
   readonly font_style: FontStyle;
@@ -476,6 +474,16 @@ export interface FontEntry {
   readonly is_variable: boolean;
   readonly axes: readonly FontAxis[];
 }
+
+/**
+ * Stable UUID for the bundled "Inter" default font entry seeded into every
+ * new document. Matches `DEFAULT_FONT_ENTRY_ID` in `crates/core/src/font.rs`.
+ *
+ * Parity pin: the Rust constant `DEFAULT_FONT_ENTRY_ID.to_string()` equals
+ * this string (asserted by `test_default_font_entry_id_string` in font.rs).
+ * Cross-reference: frontend/src/types/__tests__/document-parity.test.ts
+ */
+export const DEFAULT_FONT_ENTRY_ID = "0defa000-dead-f047-beef-cafe00000001";
 
 // ── Path ──────────────────────────────────────────────────────────────
 

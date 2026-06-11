@@ -9,10 +9,10 @@
  * per CLAUDE.md "Floating-Point Validation".
  */
 
-import type { DocumentNode, NodeKindText, Color, StyleValue } from "../types/document";
+import type { DocumentNode, FontEntry, NodeKindText, Color, StyleValue } from "../types/document";
 import type { Viewport } from "./viewport";
 // RF-031: Import shared constant instead of duplicating.
-import { DEFAULT_FONT_SIZE_PX } from "./text-measure";
+import { DEFAULT_FONT_SIZE_PX, resolveFontFamily } from "./text-measure";
 import { colorToCss } from "./color-fill";
 
 // ---------------------------------------------------------------------------
@@ -164,6 +164,7 @@ export function createTextOverlay(
   node: DocumentNode,
   viewport: Viewport,
   canvasElement: HTMLCanvasElement,
+  fontTable: Record<string, FontEntry> = {},
 ): TextOverlayHandle {
   const kind = node.kind as NodeKindText;
   const textStyle = kind.text_style;
@@ -186,7 +187,7 @@ export function createTextOverlay(
   const lineHeight = fontSize * lineHeightMultiplier;
   const letterSpacing = resolveNumeric(textStyle.letter_spacing, 0);
 
-  el.style.fontFamily = textStyle.font_family;
+  el.style.fontFamily = resolveFontFamily(fontTable, textStyle.font_entry);
   el.style.fontWeight = String(textStyle.font_weight);
   el.style.fontStyle = textStyle.font_style;
   el.style.textAlign = textStyle.text_align;

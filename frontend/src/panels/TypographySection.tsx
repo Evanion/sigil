@@ -58,7 +58,7 @@ import {
   Underline,
   Strikethrough,
 } from "lucide-solid";
-import { validateCssIdentifier } from "../validation/css-identifiers";
+import { resolveFontFamily } from "../canvas/text-measure";
 import {
   formatColorStyleValue,
   formatNumberStyleValue,
@@ -160,7 +160,10 @@ export const TypographySection: Component = () => {
   const fontFamily = createMemo((): string => {
     const kind = textKind();
     if (!kind) return "";
-    return kind.text_style.font_family;
+    // Resolve font_entry → family name via the document's font table.
+    // The font table is reactive (state.fontTable is a Solid store field),
+    // so this memo re-runs whenever the table changes.
+    return resolveFontFamily(store.state.fontTable, kind.text_style.font_entry);
   });
 
   /** Font size as a display string for ValueInput. */
@@ -258,37 +261,19 @@ export const TypographySection: Component = () => {
 
   // ── Handlers ──────────────────────────────────────────────────────
 
-  function handleFontFamilyChange(value: string): void {
-    const uuid = selectedUuid();
-    if (!uuid || !textKind()) return;
-    // RF-007: Surface a visible message when the user attempts to bind a
-    // token or write an expression in the font_family field. The core
-    // `TextStylePatch["font_family"]` type is still a plain `string`, not
-    // a `StyleValue<string>`, so token refs cannot be persisted here —
-    // silently rejecting them left the user with a DOM revert and no
-    // diagnostic. TODO(spec-13c): Promote TextStylePatch.font_family to
-    // StyleValue<string> to enable token binding for font families.
-    if (value.includes("{") || value.includes("}")) {
-      showToast({
-        title: t("panels:typography.fontFamilyNoTokenBinding"),
-        variant: "info",
-      });
-      return;
-    }
-    // RF-006: Reject font families containing CSS-significant characters.
-    if (!validateCssIdentifier(value)) {
-      showToast({
-        title: t("panels:typography.fontFamilyInvalid"),
-        variant: "error",
-      });
-      return;
-    }
-    store.setTextStyle(uuid, { field: "font_family", value });
+  function handleFontFamilyChange(_value: string): void {
+    // TODO(fonts-1 Task 19): Wire this to store.setNodeFont so users can
+    // pick a font from the document's font table and update font_entry.
+    // Per-node font is set via the dedicated setNodeFont mutation (Task 18),
+    // not via TextStylePatch. The font_family field is now read-only in the
+    // panel UI — it displays the resolved family name from the font table.
+    // No-op: the input is rendered disabled (see JSX below).
+    void _value;
   }
 
   function handleFontFamilyCommit(_value: string): void {
-    // RF-004: onChange already applied the value during the gesture.
-    store.flushHistory();
+    // TODO(fonts-1 Task 19): Wire to store.setNodeFont + flushHistory.
+    void _value;
   }
 
   function handleFontSizeChange(raw: string): void {
@@ -532,13 +517,13 @@ export const TypographySection: Component = () => {
       {/* ── Font family + weight ───────────────────────────────────── */}
       <div class="sigil-typography-section__font-row">
         {/*
-          TODO(spec-13c): Promote TextStylePatch.font_family to
-          StyleValue<string> so font families can bind to tokens. Until
-          that data-model change lands, we intentionally omit token
-          autocomplete (no `tokens` prop, no `font_family` accepted type)
-          and render a plain string input with system font suggestions.
-          Accepting `font_family` here would produce a token dropdown
-          that silently drops selections in handleFontFamilyChange.
+          TODO(fonts-1 Task 19): Replace with a real font picker that calls
+          store.setNodeFont to update font_entry. For now this input is
+          read-only — it displays the resolved family name from the document's
+          font table but cannot be edited until the font picker UI lands.
+          The underlying font_entry (UUID) is set at node-creation time via
+          the default font entry (DEFAULT_FONT_ENTRY_ID); per-node font
+          assignment will be wired in Task 18/19.
         */}
         <ValueInput
           value={fontFamily()}
@@ -549,7 +534,7 @@ export const TypographySection: Component = () => {
           fontProvider={systemFontProvider}
           aria-label={t("panels:typography.fontFamily")}
           placeholder={t("panels:typography.fontFamily")}
-          disabled={disabled()}
+          disabled={true}
         />
         <Select
           options={fontWeightOptions()}

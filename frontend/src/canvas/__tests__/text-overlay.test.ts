@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createTextOverlay, type TextOverlayHandle } from "../text-overlay";
-import type { DocumentNode, TextStyle, NodeKindText } from "../../types/document";
+import type { DocumentNode, FontEntry, TextStyle, NodeKindText } from "../../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 import type { Viewport } from "../viewport";
 
 // ---------------------------------------------------------------------------
@@ -9,7 +10,7 @@ import type { Viewport } from "../viewport";
 
 function makeTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
-    font_family: "Inter",
+    font_entry: DEFAULT_FONT_ENTRY_ID,
     font_size: { type: "literal", value: 16 },
     font_weight: 400,
     font_style: "normal",
@@ -20,6 +21,38 @@ function makeTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
     text_color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
     ...overrides,
   };
+}
+
+/** Build a minimal font table for tests that need font resolution. */
+function makeFontTable(
+  entries: Array<{ id: string; family: string }>,
+): Record<string, FontEntry> {
+  const table: Record<string, FontEntry> = {};
+  for (const e of entries) {
+    table[e.id] = {
+      id: e.id,
+      family: e.family,
+      postscript_name: e.family.replace(/\s+/g, "-"),
+      source: { source: "bundled" },
+      metrics: {
+        units_per_em: 2048,
+        ascent: 1984,
+        descent: -432,
+        line_gap: 0,
+        cap_height: 1456,
+        x_height: 1082,
+        italic_angle: 0,
+        avg_advance: 1000,
+        panose: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] as const,
+        is_serif: false,
+      },
+      fs_type: 0,
+      embeddable: "reference_system",
+      is_variable: false,
+      axes: [],
+    };
+  }
+  return table;
 }
 
 function makeTextNode(overrides: Partial<DocumentNode> = {}): DocumentNode {
@@ -139,13 +172,15 @@ describe("createTextOverlay", () => {
     expect(handle.element.textContent).toBe("Hello world");
   });
 
-  it("should apply font styling from TextStyle", () => {
+  it("should apply font styling from TextStyle, resolving family via fontTable", () => {
+    const robotoEntryId = "roboto-entry-id";
+    const fontTable = makeFontTable([{ id: robotoEntryId, family: "Roboto" }]);
     const node = makeTextNode({
       kind: {
         type: "text",
         content: "Styled",
         text_style: makeTextStyle({
-          font_family: "Roboto",
+          font_entry: robotoEntryId,
           font_size: { type: "literal", value: 24 },
           font_weight: 700,
           font_style: "italic",
@@ -160,7 +195,7 @@ describe("createTextOverlay", () => {
     });
     const vp = makeViewport();
 
-    handle = createTextOverlay(node, vp, canvas);
+    handle = createTextOverlay(node, vp, canvas, fontTable);
 
     expect(handle.element.style.fontFamily).toBe("Roboto");
     expect(handle.element.style.fontSize).toBe("24px");

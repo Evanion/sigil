@@ -13,6 +13,7 @@ import {
 import { DocumentProvider } from "../../store/document-context";
 import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 
 let i18nInstance: i18n;
 
@@ -92,7 +93,7 @@ function createMockStore(
 
 function makeTextNode(
   overrides: Partial<{
-    font_family: string;
+    font_entry: string;
     font_size: number;
     font_weight: number;
     font_style: string;
@@ -125,7 +126,7 @@ function makeTextNode(
       type: "text",
       content: "Hello",
       text_style: {
-        font_family: overrides.font_family ?? "Inter",
+        font_entry: overrides.font_entry ?? DEFAULT_FONT_ENTRY_ID,
         font_size: { type: "literal", value: overrides.font_size ?? 16 },
         font_weight: overrides.font_weight ?? 400,
         font_style: overrides.font_style ?? "normal",
@@ -619,10 +620,11 @@ describe("TypographySection", () => {
     expect(flushHistory).toHaveBeenCalled();
   });
 
-  it("should call flushHistory when the font family ValueInput commits via Enter", () => {
-    const flushHistory = vi.fn();
+  it("should render the font family field as disabled (read-only pending Task 19 font picker)", () => {
+    // The font family input is disabled in Task 17 because editing font_entry requires
+    // the font picker UI from Task 19 (store.setNodeFont). Until then, the input
+    // displays the resolved family name but cannot be edited.
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
-    store.flushHistory = flushHistory;
     render(() => (
       <TransProvider instance={i18nInstance}>
         <DocumentProvider store={store}>
@@ -630,10 +632,9 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
+    // The font family ValueInput should be rendered disabled (aria-disabled="true").
     const fontFamily = screen.getByRole("combobox", { name: "Font family" });
-    const fontFamilyTextbox = fontFamily.querySelector('[role="textbox"]') as HTMLElement;
-    fireEvent.keyDown(fontFamilyTextbox, { key: "Enter" });
-    expect(flushHistory).toHaveBeenCalled();
+    expect(fontFamily.getAttribute("aria-disabled")).toBe("true");
   });
 
   it("should call flushHistory when the text color ValueInput commits via Enter", () => {

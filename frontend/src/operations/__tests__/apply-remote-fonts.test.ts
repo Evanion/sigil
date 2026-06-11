@@ -16,6 +16,7 @@ import {
   type StoreDocumentNode,
 } from "../apply-remote";
 import type { NodeKind } from "../../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 
 // ── Node ID placeholder ────────────────────────────────────────────────────────
 
@@ -58,16 +59,15 @@ function makeRectNode(uuid: string): StoreDocumentNode {
 
 /**
  * Make a text node with a minimal text_style.
- * `text_style` is cast through `unknown` because the TypeScript interface
- * still has `font_family` (Task 17 migrates it) but we need to store
- * `font_entry` for the font_entry path tests.
+ * Now that Task 17 has migrated font_family → font_entry in the TS interface,
+ * no type escape is needed.
  */
-function makeTextNode(uuid: string, fontEntry = ""): StoreDocumentNode {
+function makeTextNode(uuid: string, fontEntry = DEFAULT_FONT_ENTRY_ID): StoreDocumentNode {
   const textKind: NodeKind = {
     type: "text",
     content: "Hello",
     text_style: {
-      font_family: "Inter",
+      font_entry: fontEntry,
       font_size: { type: "literal", value: 16 },
       font_weight: 400,
       font_style: "normal",
@@ -79,9 +79,7 @@ function makeTextNode(uuid: string, fontEntry = ""): StoreDocumentNode {
         type: "literal",
         value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 },
       },
-      // Inject font_entry via type escape (field not yet in TS interface — Task 17)
-      ...(fontEntry ? ({ font_entry: fontEntry } as Record<string, unknown>) : {}),
-    } as unknown as NodeKind extends { type: "text" } ? NodeKind["text_style"] : never,
+    },
   } as unknown as NodeKind;
 
   return {
@@ -556,8 +554,9 @@ describe("applyRemoteTransaction — font operations", () => {
           string,
           unknown
         >;
-        // font_entry should not be set to an empty string
-        expect(textStyle["font_entry"]).toBeUndefined();
+        // font_entry should NOT be set to the empty string; it retains the original value
+        // (DEFAULT_FONT_ENTRY_ID from makeTextNode) because the empty-string operation is rejected.
+        expect(textStyle["font_entry"]).toBe(DEFAULT_FONT_ENTRY_ID);
         expect(warnSpy).toHaveBeenCalledWith(
           expect.stringContaining("font_entry"),
           expect.any(Object),
