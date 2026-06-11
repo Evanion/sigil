@@ -99,6 +99,7 @@ describe("integration: MCP broadcast → applyRemoteTransaction (corners)", () =
         nodes: { [RECT_UUID]: makeRectNode(RECT_UUID) },
         pages: [],
         tokens: {},
+        fontTable: {},
       });
       const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -153,6 +154,7 @@ describe("integration: MCP broadcast → applyRemoteTransaction (corners)", () =
         nodes: { [RECT_UUID]: makeRectNode(RECT_UUID) },
         pages: [],
         tokens: {},
+        fontTable: {},
       });
       const fetchPages = vi.fn().mockResolvedValue(undefined);
 

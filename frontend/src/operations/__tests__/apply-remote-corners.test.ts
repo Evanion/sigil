@@ -133,6 +133,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -160,6 +161,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "frame-1": makeFrameNode("frame-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -198,6 +200,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -226,6 +229,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -249,6 +253,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -273,6 +278,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -300,6 +306,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -327,6 +334,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -361,6 +369,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -399,6 +408,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -434,6 +444,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -471,6 +482,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -506,6 +518,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -541,6 +554,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -578,6 +592,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -613,6 +628,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -648,6 +664,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -708,6 +725,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "ellipse-1": ellipseNode },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -739,6 +757,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -775,6 +794,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -812,6 +832,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -847,6 +868,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -882,6 +904,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -920,6 +943,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -957,6 +981,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -992,6 +1017,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1030,6 +1056,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1066,6 +1093,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1103,6 +1131,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1128,6 +1157,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1153,6 +1183,7 @@ describe("apply-remote corners handler (path='kind')", () => {
           nodes: { "node-1": makeRectNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1193,6 +1224,7 @@ describe("apply-remote corners handler (path='kind')", () => {
             nodes: { "node-1": makeNode("node-1") },
             pages: [],
             tokens: {},
+            fontTable: {},
           });
           const fetchPages = vi.fn().mockResolvedValue(undefined);
           applyRemoteTransaction(

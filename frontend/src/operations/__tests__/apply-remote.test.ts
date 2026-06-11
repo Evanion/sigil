@@ -85,6 +85,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -107,7 +108,7 @@ describe("applyRemoteTransaction", () => {
   describe("legacy fallback", () => {
     it("should call fetchPages when operations array is empty", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -132,6 +133,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newTransform: Transform = {
@@ -163,6 +165,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -185,6 +188,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -207,6 +211,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -229,6 +234,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newFills: Fill[] = [
@@ -257,6 +263,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newStrokes: Stroke[] = [
@@ -288,6 +295,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newEffects: Effect[] = [
@@ -319,6 +327,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -341,6 +350,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -363,6 +373,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newKind: NodeKind = {
@@ -396,6 +407,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
@@ -453,6 +465,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "parent-1": parent, "existing-child": makeNode("existing-child") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const newNodeData = {
@@ -499,6 +512,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -537,6 +551,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -583,6 +598,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -625,6 +641,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -658,6 +675,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "parent-1": parent, "node-1": child, "node-2": makeNode("node-2") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -693,6 +711,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "old-parent": oldParent, "new-parent": newParent, "node-1": child },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -734,6 +753,7 @@ describe("applyRemoteTransaction", () => {
           },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -766,6 +786,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -793,6 +814,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -817,6 +839,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
         const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -842,6 +865,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -861,7 +885,7 @@ describe("applyRemoteTransaction", () => {
 
     it("should handle NaN seq gracefully", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -890,6 +914,7 @@ describe("applyRemoteTransaction", () => {
           },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -914,7 +939,7 @@ describe("applyRemoteTransaction", () => {
   describe("seq parsing", () => {
     it("should return parsed seq number from transaction", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {} });
+        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -942,6 +967,7 @@ describe("applyRemoteTransaction", () => {
           },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -975,6 +1001,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1010,6 +1037,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1050,6 +1078,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "parent-1": parent, "child-1": child },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1095,6 +1124,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { F: frame, C: child, GC: grandchild },
           pages: [{ id: "page-1", name: "Page", root_nodes: [], rootNodeUuids: ["F"] }],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1131,6 +1161,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1169,6 +1200,7 @@ describe("applyRemoteTransaction", () => {
           nodes: { "node-1": makeNode("node-1") },
           pages: [],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -1207,6 +1239,7 @@ describe("applyRemoteTransaction", () => {
           nodes: {},
           pages: [{ id: "page-1", name: "Page", root_nodes: [], rootNodeUuids: ["R0", "R2"] }],
           tokens: {},
+          fontTable: {},
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 

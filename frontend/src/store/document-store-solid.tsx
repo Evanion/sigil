@@ -47,6 +47,7 @@ import { parseCornersInput } from "./corners-input";
 import type { CornersInput } from "./corners-input";
 import { defaultCorners } from "./default-corners";
 import { resolveToken as resolveTokenPure } from "./token-store";
+import { parseFontEntry } from "./font-input";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
@@ -392,25 +393,15 @@ export function parseFontsResponse(data: unknown): Record<string, FontEntry> {
   }
 
   for (const item of parsed) {
-    if (item === null || typeof item !== "object") {
-      console.warn("parseFontsResponse: skipping non-object font entry", item);
+    // Single source-of-truth validation via parseFontEntry (font-input.ts).
+    // Both this path and the remote add_font broadcast path share the same
+    // validator — per CLAUDE.md §5 "single source-of-truth" rule.
+    const entry = parseFontEntry(item);
+    if (entry === null) {
+      console.warn("parseFontsResponse: skipping invalid font entry", item);
       continue;
     }
-    const entry = item as Record<string, unknown>;
-    const id = entry["id"];
-    if (typeof id !== "string" || id.length === 0) {
-      console.warn("parseFontsResponse: skipping font entry with missing/invalid id", entry);
-      continue;
-    }
-    // `family` is the field that flows into `ctx.font` during rendering (Task 17);
-    // a missing/empty family would silently produce `"undefined"` in the CSS font
-    // string. Validate it here so malformed entries are warn+skipped, not stored.
-    const family = entry["family"];
-    if (typeof family !== "string" || family.length === 0) {
-      console.warn("parseFontsResponse: skipping font entry with missing/invalid family", entry);
-      continue;
-    }
-    table[id] = entry as unknown as FontEntry;
+    table[entry.id] = entry;
   }
 
   return table;
