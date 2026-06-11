@@ -64,6 +64,11 @@ pub struct ParsedFont {
     /// `true` if the font declares variable-font axes in its `fvar` table.
     pub is_variable: bool,
     /// Axes declared by a variable font (empty for static fonts).
+    ///
+    /// The `min`/`default`/`max` values come straight from `ttf-parser` and are
+    /// NOT finite-validated at this layer. Callers MUST route these through
+    /// `FontEntry::new` (which validates each axis: finite + `min <= default <=
+    /// max`) before persisting — do not assume they are finite.
     pub axes: Vec<FontAxis>,
 }
 
@@ -211,11 +216,14 @@ fn resolve_decision(face: &Face<'_>, prov: FontProvenance, fs_type: u16) -> Embe
         return EmbedDecision::ReferenceSystem;
     }
 
+    // Two independent "no usable OS/2" guards that intentionally converge on
+    // the same conservative result: the typed-table guard fires when
+    // `os2::Table::parse` rejected the table (unknown version, too short); the
+    // 0xFFFF sentinel guard fires when the raw bytes were unreadable. They
+    // cannot disagree — both yield `ReferenceNoOs2`.
     let Some(os2) = face.tables().os2 else {
         return EmbedDecision::ReferenceNoOs2;
     };
-
-    // Sentinel 0xFFFF means we couldn't read the raw OS/2 bytes at all.
     if fs_type == 0xFFFF {
         return EmbedDecision::ReferenceNoOs2;
     }
