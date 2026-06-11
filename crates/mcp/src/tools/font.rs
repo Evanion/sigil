@@ -47,6 +47,12 @@ use crate::types::{AddFontResult, MutationResult};
 /// The caller is responsible for populating `session.font_bytes` when
 /// `source_is_custom` is true (after the store lock is dropped).
 ///
+/// `snapshot` is the pre-apply document state captured by the caller BEFORE
+/// calling this function. On any error path AFTER a successful `op.apply()`
+/// the caller must restore the snapshot. This function does NOT restore the
+/// snapshot itself because it does not own the document guard — the caller
+/// (`add_font_flow`) holds the write lock and performs the restore.
+///
 /// # Errors
 /// Returns `McpToolError` on invalid base64, unknown provenance, or core
 /// validation/apply failure.
@@ -67,6 +73,9 @@ pub fn add_font_impl(
 
     // Read post-apply state to build the broadcast payload (CLAUDE.md §11:
     // "Side-Effect Artifacts Must Be Constructed After Precondition Verification").
+    // Both of these steps are "unreachable" error paths in practice, but the
+    // caller (add_font_flow) must restore the snapshot on Err to satisfy the
+    // CLAUDE.md §11 "Multi-Item Mutations Must Roll Back on Partial Failure" rule.
     let entry = doc.font_table().get(entry_id).ok_or_else(|| {
         McpToolError::InvalidInput(
             "add_font: entry missing after apply (internal error)".to_string(),
@@ -89,8 +98,8 @@ pub fn add_font_impl(
     let op_payload = OperationPayload {
         id: Uuid::new_v4().to_string(),
         node_uuid: String::new(), // font ops are not node-scoped
-        op_type: "add_font".to_string(),
-        path: "font_table".to_string(),
+        op_type: sigil_state::BROADCAST_OP_ADD_FONT.to_string(),
+        path: sigil_state::BROADCAST_PATH_FONT_TABLE.to_string(),
         value: Some(broadcast_json),
     };
 
@@ -112,19 +121,28 @@ pub async fn add_font_flow(
     provenance_str: &str,
 ) -> Result<AddFontResult, rmcp::ErrorData> {
     // --- Parse provenance ---
-    let provenance = match provenance_str {
-        "user_supplied" => FontProvenance::UserSupplied,
-        "system_directory" => FontProvenance::SystemDirectory,
-        other => {
-            return Err(rmcp::ErrorData::new(
-                rmcp::model::ErrorCode::INVALID_PARAMS,
-                format!(
-                    "unknown provenance: {other:?}; expected \"user_supplied\" or \"system_directory\""
-                ),
-                None,
-            ));
-        }
-    };
+    // Use FontProvenance::from_str (the core canonical parser) so the
+    // validation logic lives in one place (CLAUDE.md §5 single source of truth).
+    let provenance = provenance_str.parse::<FontProvenance>().map_err(|e| {
+        rmcp::ErrorData::new(rmcp::model::ErrorCode::INVALID_PARAMS, e.to_string(), None)
+    })?;
+
+    // --- Pre-decode size guard ---
+    // Reject oversized base64 strings BEFORE decoding to prevent memory
+    // exhaustion (a 270 MiB base64 string would be decoded into RAM before
+    // check_embedded_font_size fires). The constant is derived from
+    // MAX_EMBEDDED_FONT_BYTES in validate.rs so both limits stay in sync.
+    if bytes_base64.len() > sigil_core::validate::MAX_FONT_BYTES_BASE64_LEN {
+        return Err(rmcp::ErrorData::new(
+            rmcp::model::ErrorCode::INVALID_PARAMS,
+            format!(
+                "bytes_base64 length {} exceeds maximum pre-decode limit {} (MAX_FONT_BYTES_BASE64_LEN)",
+                bytes_base64.len(),
+                sigil_core::validate::MAX_FONT_BYTES_BASE64_LEN
+            ),
+            None,
+        ));
+    }
 
     // --- Decode base64 ---
     let font_bytes = base64::engine::general_purpose::STANDARD
@@ -146,12 +164,25 @@ pub async fn add_font_flow(
     // so apply-order == seq-order == broadcast-enqueue-order per session.
     // `session.publish()` is synchronous (no `.await`), so holding the write
     // lock across it does not block the async runtime.
+    //
+    // Snapshot is captured BEFORE `add_font_impl` so that any post-apply error
+    // path (unreachable in practice, but required by CLAUDE.md §11 "Multi-Item
+    // Mutations Must Roll Back on Partial Failure") can restore the document to
+    // its pre-apply state before returning the error.
     let (entry_id_str, family, source_is_custom) = {
         let mut guard = session.store.write().await;
 
+        // Capture snapshot before any mutation (CLAUDE.md §11: "Capture
+        // Snapshots Before Mutations, Not After").
+        let snapshot = guard.0.clone();
+
         let (entry_id_str, family, is_custom, op_payload) =
-            add_font_impl(&mut guard.0, entry_id, &font_bytes, provenance)
-                .map_err(|e| e.to_mcp_error())?;
+            add_font_impl(&mut guard.0, entry_id, &font_bytes, provenance).map_err(|e| {
+                // Restore the snapshot on any error from add_font_impl,
+                // including the post-apply get/serialize paths.
+                guard.0 = snapshot;
+                e.to_mcp_error()
+            })?;
 
         let tx = crate::tools::broadcast::multi_op_transaction(vec![op_payload]);
         session.publish(MutationEventKind::FontAdded, Some(entry_id_str.clone()), tx);
@@ -163,9 +194,23 @@ pub async fn add_font_flow(
     // --- After releasing store lock: populate font_bytes if Custom ---
     //
     // Lock-ordering rule (store before font_bytes): we acquire font_bytes.write()
-    // here, AFTER the store guard is dropped. The tiny window between broadcast
-    // and this insert is benign — persistence debounce is typically ≥1s, and the
-    // save path handles a missing-bytes Custom entry by warning+skipping (Tasks 10/11).
+    // here, AFTER the store guard is dropped.
+    //
+    // WINDOW TRADE-OFF (CLAUDE.md §11 Fix 5): there is a brief window between
+    // the broadcast (inside the lock) and the font_bytes insert (here, after the
+    // lock drop). A crash in this window leaves a font_table Custom entry whose
+    // bytes are not yet in font_bytes (and not yet persisted). This is ACCEPTABLE
+    // because:
+    //   (a) The persistence debounce is typically ≥1s, so bytes will be inserted
+    //       before the next save tick fires.
+    //   (b) The save path (`Tasks 10/11`) handles a missing-bytes Custom entry by
+    //       logging a warning and skipping that font's bytes (graceful degrade),
+    //       NOT corrupt document state.
+    //   (c) On the next successful save, the bytes are persisted from the
+    //       now-populated font_bytes store — the issue self-heals.
+    //   (d) The alternative — holding store.write() across the async
+    //       font_bytes.write() — would violate the lock-ordering rule
+    //       (store before font_bytes) and risk deadlock.
     if source_is_custom {
         let mut bytes_guard = session.font_bytes.write().await;
         bytes_guard.insert(entry_id, font_bytes);
@@ -196,7 +241,8 @@ pub fn remove_font_impl(
     let op_payload = OperationPayload {
         id: Uuid::new_v4().to_string(),
         node_uuid: String::new(),
-        op_type: "remove_font".to_string(),
+        // Shared broadcast-key constant (CLAUDE.md §11 cross-transport parity).
+        op_type: sigil_state::BROADCAST_OP_REMOVE_FONT.to_string(),
         path: String::new(),
         value: Some(serde_json::json!({ "id": entry_id.to_string() })),
     };
@@ -326,8 +372,8 @@ mod tests {
     // ── Font test fixtures ──────────────────────────────────────────────────
     //
     // Relative path from this file: crates/mcp/src/tools/font.rs
-    // → tests/fixtures/fonts/ is five levels up: crates/mcp/../../tests/…
-    // which resolves to <workspace-root>/tests/fixtures/fonts/.
+    // → tests/fixtures/fonts/ is four levels up: ../../../../ resolves to
+    // <workspace-root>/tests/fixtures/fonts/.
     const INSTALLABLE: &[u8] = include_bytes!("../../../../tests/fixtures/fonts/installable.ttf");
     const RESTRICTED: &[u8] = include_bytes!("../../../../tests/fixtures/fonts/restricted.ttf");
 
@@ -444,6 +490,32 @@ mod tests {
         assert!(
             !bytes_guard.contains_key(&entry_uuid),
             "restricted font must NOT be stored in font_bytes"
+        );
+    }
+
+    /// `add_font_flow` rejects a `bytes_base64` string that exceeds
+    /// `MAX_FONT_BYTES_BASE64_LEN` BEFORE attempting to decode it (pre-decode
+    /// size guard).
+    #[tokio::test]
+    async fn test_max_font_bytes_base64_len_enforced() {
+        use sigil_core::validate::MAX_FONT_BYTES_BASE64_LEN;
+        let sessions = Arc::new(Sessions::new(64));
+        let (_, session) = make_session(&sessions);
+
+        // Build a string one character longer than the limit.
+        // Content is 'A' repeated — valid base64 so the error comes from the
+        // length guard, not the decoder.
+        let over_limit = "A".repeat(MAX_FONT_BYTES_BASE64_LEN + 1);
+        let err = add_font_flow(Arc::clone(&session), &over_limit, "user_supplied")
+            .await
+            .expect_err("oversized bytes_base64 must be rejected before decoding");
+        let msg = err.message.to_lowercase();
+        assert!(
+            msg.contains("max_font_bytes_base64_len")
+                || msg.contains("pre-decode limit")
+                || msg.contains("exceeds maximum"),
+            "error message must mention the pre-decode limit, got: {}",
+            err.message
         );
     }
 
@@ -703,39 +775,126 @@ mod tests {
         assert!(matches!(err, McpToolError::NodeNotFound(_)));
     }
 
-    /// Cross-transport parity note: the MCP `add_font` broadcast payload shape
-    /// is identical to the GraphQL `addFont` broadcast shape from 13a:
-    ///
-    /// - op_type: "add_font"
-    /// - path:    "font_table"
-    /// - node_uuid: ""
-    /// - value:   <full FontEntry JSON including "id" and "family">
-    ///
-    /// This is verified by `test_add_font_installable_adds_entry_broadcasts_and_stores_bytes`
-    /// above (checks op_type, path, node_uuid, value["id"], value["family"]).
-    ///
-    /// The MCP `remove_font` broadcast payload shape is identical to GraphQL:
-    ///
-    /// - op_type: "remove_font"
-    /// - path:    ""
-    /// - node_uuid: ""
-    /// - value:   {"id": "<uuid>"}
-    ///
-    /// The MCP `set_node_font` broadcast payload is identical to GraphQL
-    /// `kind.text_style.font_entry`:
-    ///
-    /// - op_type: "set_field"
-    /// - path:    "kind.text_style.font_entry"
-    /// - node_uuid: "<node-uuid>"
-    /// - value:   "<font-entry-uuid-string>"
+    /// `set_node_font_impl` rejects a valid text node when the font_entry UUID
+    /// does not exist in the font table.
     #[test]
-    fn test_cross_transport_parity_note() {
-        // This test exists as a compile-time assertion that the constants are
-        // correct. The actual behavioral parity is verified by the async tests above.
-        assert_eq!("add_font", "add_font");
-        assert_eq!("font_table", "font_table");
-        assert_eq!("remove_font", "remove_font");
-        assert_eq!("set_field", "set_field");
-        assert_eq!("kind.text_style.font_entry", "kind.text_style.font_entry");
+    fn test_set_node_font_rejects_nonexistent_font_entry() {
+        use crate::tools::nodes::create_node_impl;
+        use crate::tools::pages::create_page_impl;
+
+        let mut doc = Document::new("test".to_string());
+        let page = create_page_impl(&mut doc, "Page").expect("create page");
+        let node_info = create_node_impl(&mut doc, "text", "Label", Some(&page.id), None, None)
+            .expect("create text node");
+
+        // The font_entry UUID is freshly generated and not in the font table.
+        let nonexistent_font = Uuid::new_v4().to_string();
+        let err = set_node_font_impl(&mut doc, &node_info.uuid, &nonexistent_font)
+            .expect_err("non-existent font_entry must be rejected");
+        assert!(
+            !format!("{err:?}").is_empty(),
+            "error must not be empty for non-existent font entry"
+        );
+    }
+
+    /// `set_node_font_impl` rejects a non-text node (e.g., a frame) because
+    /// `SetNodeFont::validate` requires NodeKind::Text.
+    #[test]
+    fn test_set_node_font_rejects_non_text_node() {
+        use crate::tools::nodes::create_node_impl;
+        use crate::tools::pages::create_page_impl;
+
+        let mut doc = Document::new("test".to_string());
+        let page = create_page_impl(&mut doc, "Page").expect("create page");
+        let node_info =
+            create_node_impl(&mut doc, "frame", "Container", Some(&page.id), None, None)
+                .expect("create frame node");
+
+        let font_uuid = Uuid::new_v4().to_string();
+        let err = set_node_font_impl(&mut doc, &node_info.uuid, &font_uuid)
+            .expect_err("non-text node must be rejected by set_node_font_impl");
+        assert!(
+            !format!("{err:?}").is_empty(),
+            "error must not be empty for non-text node"
+        );
+    }
+
+    /// Cross-transport parity: verify `add_font_impl` uses the shared broadcast
+    /// constants from `sigil_state` so GraphQL and MCP produce byte-identical
+    /// `OperationPayload` shapes (CLAUDE.md §11 "Validation Must Be Symmetric
+    /// Across All Transports").
+    ///
+    /// This test calls the production `add_font_impl` path and asserts the
+    /// `op_type`/`path` fields equal the `sigil_state::BROADCAST_OP_*` constants.
+    /// Because both transports now reference the SAME constants, structural
+    /// divergence is impossible — this test proves the production code path uses
+    /// them rather than inline literals.
+    #[test]
+    fn test_add_font_impl_broadcast_uses_shared_constants() {
+        let mut doc = Document::new("parity-test".to_string());
+        let entry_id = Uuid::new_v4();
+
+        let (_, _, _, payload) = add_font_impl(
+            &mut doc,
+            entry_id,
+            INSTALLABLE,
+            FontProvenance::UserSupplied,
+        )
+        .expect("add_font_impl must succeed for installable font");
+
+        assert_eq!(
+            payload.op_type,
+            sigil_state::BROADCAST_OP_ADD_FONT,
+            "add_font op_type must equal BROADCAST_OP_ADD_FONT constant"
+        );
+        assert_eq!(
+            payload.path,
+            sigil_state::BROADCAST_PATH_FONT_TABLE,
+            "add_font path must equal BROADCAST_PATH_FONT_TABLE constant"
+        );
+        assert_eq!(payload.node_uuid, "", "font ops are not node-scoped");
+        let val = payload.value.expect("broadcast value must be present");
+        assert_eq!(
+            val["id"].as_str(),
+            Some(entry_id.to_string().as_str()),
+            "broadcast value must carry the entry id"
+        );
+        assert!(
+            val["family"].as_str().is_some(),
+            "broadcast value must carry the family name"
+        );
+    }
+
+    /// Cross-transport parity: verify `remove_font_impl` uses the shared
+    /// broadcast constant from `sigil_state`.
+    #[test]
+    fn test_remove_font_impl_broadcast_uses_shared_constants() {
+        let mut doc = Document::new("parity-test".to_string());
+        let entry_id = Uuid::new_v4();
+
+        // Add the entry first so remove can find it.
+        add_font_impl(
+            &mut doc,
+            entry_id,
+            INSTALLABLE,
+            FontProvenance::UserSupplied,
+        )
+        .expect("add_font_impl must succeed");
+
+        let payload = remove_font_impl(&mut doc, entry_id)
+            .expect("remove_font_impl must succeed for existing entry");
+
+        assert_eq!(
+            payload.op_type,
+            sigil_state::BROADCAST_OP_REMOVE_FONT,
+            "remove_font op_type must equal BROADCAST_OP_REMOVE_FONT constant"
+        );
+        assert_eq!(payload.path, "", "remove_font path must be empty");
+        let val = payload.value.expect("broadcast value present");
+        assert_eq!(
+            val["id"].as_str(),
+            Some(entry_id.to_string().as_str()),
+            "broadcast value must carry the removed entry id"
+        );
     }
 }

@@ -40,7 +40,7 @@ use sigil_core::node::{
 use sigil_core::tokens::{Token, TokenValue};
 use sigil_core::validate::{
     MAX_BATCH_SIZE, MAX_EFFECTS_PER_STYLE, MAX_FIELD_VALUE_SIZE, MAX_FILLS_PER_STYLE,
-    MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
+    MAX_FONT_BYTES_BASE64_LEN, MAX_STROKES_PER_STYLE, MAX_USER_ID_LEN, validate_floats_in_value,
 };
 use sigil_state::sessions::{DocumentSession, SessionEvent, SessionState};
 use sigil_state::{MutationEvent, MutationEventKind, OperationPayload, TransactionPayload};
@@ -1710,15 +1710,25 @@ impl MutationRoot {
         let session = require_live_session(state, session_id)?;
 
         // --- Parse provenance ---
-        let font_provenance = match provenance.as_str() {
-            "user_supplied" => FontProvenance::UserSupplied,
-            "system_directory" => FontProvenance::SystemDirectory,
-            other => {
-                return Err(async_graphql::Error::new(format!(
-                    "unknown provenance: {other:?}; expected \"user_supplied\" or \"system_directory\""
-                )));
-            }
-        };
+        // Use FontProvenance::from_str (the core canonical parser) so the
+        // validation logic lives in one place (CLAUDE.md §5 "Define all
+        // validation artifacts in validate.rs / single source of truth").
+        let font_provenance = provenance
+            .parse::<FontProvenance>()
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        // --- Pre-decode size guard ---
+        // Reject oversized base64 strings BEFORE decoding to prevent memory
+        // exhaustion (a 270 MiB base64 string would be decoded into RAM before
+        // check_embedded_font_size fires). The constant is derived from
+        // MAX_EMBEDDED_FONT_BYTES in validate.rs so both limits stay in sync.
+        if bytes_base64.len() > MAX_FONT_BYTES_BASE64_LEN {
+            return Err(async_graphql::Error::new(format!(
+                "bytes_base64 length {} exceeds maximum pre-decode limit {} (MAX_FONT_BYTES_BASE64_LEN)",
+                bytes_base64.len(),
+                MAX_FONT_BYTES_BASE64_LEN
+            )));
+        }
 
         // --- Decode base64 ---
         let font_bytes = base64::engine::general_purpose::STANDARD
@@ -1763,15 +1773,19 @@ impl MutationRoot {
             }
 
             // Build broadcast value from POST-APPLY document state. The entry
-            // is guaranteed to be present after a successful apply. We scope
-            // the shared borrow of `doc_guard` so it is released before the
-            // mutable borrow that would be needed for snapshot rollback on error.
-            // In practice `get()` returning `None` is unreachable after a
-            // successful `apply()`, but we still avoid `expect()` per core rules.
-            let entry_ref = doc_guard.0.font_table().get(entry_id).ok_or_else(|| {
-                // Should never happen — apply succeeded, so the entry must exist.
-                async_graphql::Error::new("add_font: entry missing after apply (internal error)")
-            })?;
+            // is guaranteed to be present after a successful apply.
+            // Both of these steps are "unreachable" error paths per contract,
+            // but MUST defensively restore the snapshot on failure per
+            // CLAUDE.md §11 "Multi-Item Mutations Must Roll Back on Partial
+            // Failure" — the doc is already mutated and the broadcast has NOT
+            // yet fired, so restoring the snapshot is the correct rollback.
+            let Some(entry_ref) = doc_guard.0.font_table().get(entry_id) else {
+                // Unreachable in practice — apply succeeded, entry must exist.
+                doc_guard.0 = snapshot;
+                return Err(async_graphql::Error::new(
+                    "add_font: entry missing after apply (internal error)",
+                ));
+            };
 
             // Determine whether this is a Custom source (bytes must be stored
             // in the session's font_bytes map for persistence).
@@ -1789,16 +1803,26 @@ impl MutationRoot {
             // Serialize the full FontEntry as the broadcast value. The "id"
             // field is required by the entity-creation-broadcast rule (CLAUDE.md
             // §4). Task 15 consumes this shape in apply-remote.ts.
-            let broadcast_json = serde_json::to_value(entry_ref).map_err(|e| {
-                async_graphql::Error::new(format!("broadcast serialize failed: {e}"))
-            })?;
+            // Serialization failure is also "unreachable" but must roll back.
+            let broadcast_json = match serde_json::to_value(entry_ref) {
+                Ok(v) => v,
+                Err(e) => {
+                    doc_guard.0 = snapshot;
+                    return Err(async_graphql::Error::new(format!(
+                        "broadcast serialize failed: {e}"
+                    )));
+                }
+            };
             // `entry_ref` borrow ends here — `broadcast_json` owns the data.
 
             let op_payload = OperationPayload {
                 id: uuid::Uuid::new_v4().to_string(),
                 node_uuid: String::new(), // font ops are not node-scoped
-                op_type: "add_font".to_string(),
-                path: "font_table".to_string(),
+                // Use the shared constants from sigil_state to ensure byte-identical
+                // broadcast shape between GraphQL and MCP (CLAUDE.md §11 cross-transport
+                // parity rule; Task 15 apply-remote.ts depends on these exact strings).
+                op_type: sigil_state::BROADCAST_OP_ADD_FONT.to_string(),
+                path: sigil_state::BROADCAST_PATH_FONT_TABLE.to_string(),
                 value: Some(broadcast_json),
             };
 
@@ -1828,8 +1852,23 @@ impl MutationRoot {
         // We acquire font_bytes.write() here (async, after store lock dropped)
         // because we cannot .await while holding store.write() per the "Hold
         // Locks for the Full Read-Modify-Write Sequence" rule (no cross-await
-        // under a lock). The tiny window between broadcast and this insert is
-        // benign — see the lock ordering comment on this resolver.
+        // under a lock).
+        //
+        // WINDOW TRADE-OFF (CLAUDE.md §11 Fix 5): there is a brief window
+        // between the broadcast (inside the lock) and the font_bytes insert
+        // (here, after the lock drop). A crash in this window leaves a
+        // font_table Custom entry whose bytes are not yet in font_bytes (and
+        // not yet persisted). This is ACCEPTABLE because:
+        //   (a) The persistence debounce is typically ≥1s, so bytes will be
+        //       inserted before the next save tick fires.
+        //   (b) The save path (`Tasks 10/11`) handles a missing-bytes Custom
+        //       entry by logging a warning and skipping that font's bytes
+        //       (graceful degrade), NOT corrupt document state.
+        //   (c) On the next successful save, the bytes are persisted from the
+        //       now-populated font_bytes store — the issue self-heals.
+        //   (d) The alternative — holding store.write() across the async
+        //       font_bytes.write() — would violate the lock-ordering rule
+        //       (store before font_bytes) and risk deadlock.
         if source_is_custom {
             let mut bytes_guard = session.font_bytes.write().await;
             bytes_guard.insert(entry_id, font_bytes);
@@ -1889,7 +1928,8 @@ impl MutationRoot {
             let op_payload = OperationPayload {
                 id: uuid::Uuid::new_v4().to_string(),
                 node_uuid: String::new(),
-                op_type: "remove_font".to_string(),
+                // Shared broadcast-key constant (CLAUDE.md §11 cross-transport parity).
+                op_type: sigil_state::BROADCAST_OP_REMOVE_FONT.to_string(),
                 path: String::new(),
                 value: Some(serde_json::json!({ "id": entry_id.to_string() })),
             };
@@ -3923,6 +3963,36 @@ mod tests {
         );
     }
 
+    /// `addFont` rejects a base64 string that exceeds `MAX_FONT_BYTES_BASE64_LEN`
+    /// BEFORE attempting to decode it (pre-decode size guard).
+    #[tokio::test]
+    async fn test_max_font_bytes_base64_len_enforced() {
+        use sigil_core::validate::MAX_FONT_BYTES_BASE64_LEN;
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Build a string that is one character longer than the limit.
+        // Content is 'A' repeated — valid base64 characters so the error comes
+        // from the length guard, not the base64 decoder.
+        let over_limit = "A".repeat(MAX_FONT_BYTES_BASE64_LEN + 1);
+        let query = format!(
+            r#"mutation {{ addFont(bytesBase64: "{over_limit}", provenance: "user_supplied") }}"#
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "oversized bytes_base64 must be rejected before decoding"
+        );
+        let err_msg = res.errors[0].message.to_lowercase();
+        assert!(
+            err_msg.contains("max_font_bytes_base64_len")
+                || err_msg.contains("pre-decode limit")
+                || err_msg.contains("exceeds maximum"),
+            "error message must mention the pre-decode limit, got: {}",
+            res.errors[0].message
+        );
+    }
+
     /// `addFont` with invalid base64 is rejected.
     #[tokio::test]
     async fn test_add_font_rejects_invalid_base64() {
@@ -4186,5 +4256,89 @@ mod tests {
             }
             other => panic!("expected DocumentEvent, got {other:?}"),
         }
+    }
+
+    /// `setField` with `path = "kind.text_style.font_entry"` rejects a valid
+    /// text node when the font_entry UUID does not exist in the font table.
+    #[tokio::test]
+    async fn test_set_node_font_rejects_nonexistent_font_entry() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Create a text node without adding any font entry.
+        let text_uuid = create_test_text_direct(&state, "Hello");
+        let nonexistent_font_uuid = uuid::Uuid::new_v4().to_string();
+
+        let value_json = serde_json::json!(nonexistent_font_uuid).to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        setField: {{
+                            nodeUuid: "{text_uuid}",
+                            path: "kind.text_style.font_entry",
+                            value: "{value_json_escaped}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#,
+            value_json_escaped = value_json.replace('"', "\\\"")
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "set_node_font with non-existent font_entry UUID must be rejected"
+        );
+    }
+
+    /// `setField` with `path = "kind.text_style.font_entry"` rejects a
+    /// non-text node (e.g., a frame).
+    #[tokio::test]
+    async fn test_set_node_font_rejects_non_text_node() {
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+
+        // Add a font entry so the UUID itself is valid.
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let add_res = schema
+            .execute(&format!(
+                r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#
+            ))
+            .await;
+        assert!(add_res.errors.is_empty(), "addFont: {:?}", add_res.errors);
+        let font_id = add_res.data.into_json().unwrap()["addFont"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Target a Frame node, not a Text node.
+        let frame_uuid = create_test_frame_direct(&state, "Frame");
+
+        let value_json = serde_json::json!(font_id).to_string();
+        let query = format!(
+            r#"mutation {{
+                applyOperations(
+                    operations: [{{
+                        setField: {{
+                            nodeUuid: "{frame_uuid}",
+                            path: "kind.text_style.font_entry",
+                            value: "{value_json_escaped}"
+                        }}
+                    }}],
+                    userId: "test-user"
+                ) {{
+                    seq
+                }}
+            }}"#,
+            value_json_escaped = value_json.replace('"', "\\\"")
+        );
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "set_node_font on a non-text node must be rejected"
+        );
     }
 }

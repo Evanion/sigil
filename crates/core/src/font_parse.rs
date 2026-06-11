@@ -46,6 +46,32 @@ pub enum FontProvenance {
     SystemDirectory,
 }
 
+impl std::str::FromStr for FontProvenance {
+    type Err = CoreError;
+
+    /// Parses a provenance string into `FontProvenance`.
+    ///
+    /// Accepts `"user_supplied"` and `"system_directory"`. Any other string
+    /// returns [`CoreError::ValidationError`].
+    ///
+    /// This is WASM-safe: `std::str::FromStr` is available in `no_std`
+    /// environments when `alloc` is present, and the implementation uses only
+    /// `match` — no I/O, no system calls.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoreError::ValidationError`] for unknown provenance strings.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "user_supplied" => Ok(FontProvenance::UserSupplied),
+            "system_directory" => Ok(FontProvenance::SystemDirectory),
+            other => Err(CoreError::ValidationError(format!(
+                "unknown provenance: {other:?}; expected \"user_supplied\" or \"system_directory\""
+            ))),
+        }
+    }
+}
+
 // ── ParsedFont ─────────────────────────────────────────────────────────
 
 /// The result of successfully parsing and classifying a font file.
@@ -288,6 +314,36 @@ mod tests {
     #[test]
     fn test_classify_rejects_garbage() {
         assert!(classify_font(b"not a font", FontProvenance::UserSupplied).is_err());
+    }
+
+    // ── FontProvenance::from_str tests ────────────────────────────────────
+
+    #[test]
+    fn test_font_provenance_from_str_user_supplied() {
+        let p: FontProvenance = "user_supplied".parse().expect("valid provenance");
+        assert_eq!(p, FontProvenance::UserSupplied);
+    }
+
+    #[test]
+    fn test_font_provenance_from_str_system_directory() {
+        let p: FontProvenance = "system_directory".parse().expect("valid provenance");
+        assert_eq!(p, FontProvenance::SystemDirectory);
+    }
+
+    #[test]
+    fn test_font_provenance_from_str_unknown_returns_error() {
+        let err = "totally_made_up"
+            .parse::<FontProvenance>()
+            .expect_err("unknown provenance must fail");
+        assert!(
+            matches!(err, CoreError::ValidationError(_)),
+            "unknown provenance must produce ValidationError, got: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("totally_made_up"),
+            "error must mention the unknown string, got: {msg}"
+        );
     }
 
     #[test]

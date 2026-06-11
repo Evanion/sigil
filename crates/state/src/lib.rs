@@ -27,6 +27,31 @@ pub use sessions::{SessionId, Sessions, SessionsError};
 /// subscribers.
 pub const MUTATION_BROADCAST_CAPACITY: usize = 256;
 
+// ── Font broadcast wire-format constants ─────────────────────────────────────
+//
+// Single source of truth for the `op_type` and `path` strings used in
+// `OperationPayload` for font operations. Both the GraphQL transport
+// (`crates/server/src/graphql/mutation.rs`) and the MCP transport
+// (`crates/mcp/src/tools/font.rs`) MUST use these constants. The TypeScript
+// frontend (`frontend/src/operations/apply-remote.ts`, Task 15) must switch on
+// these exact string values — any divergence causes font ops to be silently
+// ignored by connected clients.
+
+/// `op_type` string for an `add_font` broadcast (`OperationPayload.op_type`).
+pub const BROADCAST_OP_ADD_FONT: &str = "add_font";
+
+/// `op_type` string for a `remove_font` broadcast (`OperationPayload.op_type`).
+pub const BROADCAST_OP_REMOVE_FONT: &str = "remove_font";
+
+/// `path` string for an `add_font` broadcast (`OperationPayload.path`).
+pub const BROADCAST_PATH_FONT_TABLE: &str = "font_table";
+
+/// `path` string for a `set_node_font` broadcast (`OperationPayload.path`).
+///
+/// The `op_type` for this operation is `"set_field"` (the standard field-set
+/// op type); only the path is font-specific.
+pub const BROADCAST_PATH_FONT_ENTRY: &str = "kind.text_style.font_entry";
+
 /// A single field-level operation payload for broadcast.
 ///
 /// This is the transport-agnostic representation that flows through

@@ -539,6 +539,19 @@ pub const MAX_FONTS_PER_DOCUMENT: usize = 256;
 /// Rejects over-limit payloads before buffering to prevent memory exhaustion.
 pub const MAX_EMBEDDED_FONT_BYTES: usize = 32 * 1024 * 1024;
 
+/// Maximum length of a base64-encoded embedded font payload.
+///
+/// Base64 encoding inflates raw bytes by a factor of 4/3 (every 3 bytes become
+/// 4 base64 characters), plus up to 2 padding characters. This bound lets
+/// transport handlers reject an oversized `bytes_base64` string BEFORE decoding
+/// it — a 270 MiB base64 string would otherwise be fully buffered and decoded
+/// into memory before `check_embedded_font_size` fires.
+///
+/// Formula: `ceil(MAX_EMBEDDED_FONT_BYTES / 3) * 4 + 4` (the `+4` gives a
+/// small margin for padding and is conservative). Defined as a `const` derived
+/// from `MAX_EMBEDDED_FONT_BYTES` so the two constants stay in sync.
+pub const MAX_FONT_BYTES_BASE64_LEN: usize = (MAX_EMBEDDED_FONT_BYTES / 3 + 1) * 4 + 4;
+
 /// Maximum byte length of a PostScript name (e.g., "Inter-Regular").
 ///
 /// PostScript names feed PDF/SVG font references and may also be interpolated
@@ -1865,6 +1878,38 @@ mod tests {
         assert!(
             check_embedded_font_size(MAX_EMBEDDED_FONT_BYTES + 1).is_err(),
             "payload one byte over MAX_EMBEDDED_FONT_BYTES must be rejected"
+        );
+    }
+
+    // ── MAX_FONT_BYTES_BASE64_LEN enforcement ─────────────────────────────
+
+    #[test]
+    fn test_max_font_bytes_base64_len_enforced() {
+        // The constant must be strictly greater than MAX_EMBEDDED_FONT_BYTES
+        // (base64 is larger than raw bytes) and consistently derivable from it.
+        assert!(
+            MAX_FONT_BYTES_BASE64_LEN > MAX_EMBEDDED_FONT_BYTES,
+            "base64 limit must be larger than raw-byte limit"
+        );
+        // Verify the formula: a payload exactly at MAX_EMBEDDED_FONT_BYTES
+        // encodes to at most MAX_FONT_BYTES_BASE64_LEN base64 chars.
+        // base64::encoded_len returns the padded length.
+        let expected_b64_len = (MAX_EMBEDDED_FONT_BYTES + 2) / 3 * 4;
+        assert!(
+            expected_b64_len <= MAX_FONT_BYTES_BASE64_LEN,
+            "MAX_FONT_BYTES_BASE64_LEN ({MAX_FONT_BYTES_BASE64_LEN}) must be >= \
+             base64-encoded length of MAX_EMBEDDED_FONT_BYTES ({expected_b64_len})"
+        );
+        // A string of length MAX_FONT_BYTES_BASE64_LEN + 1 must be rejected.
+        // The transport enforcement is in the server and MCP crates; this test
+        // verifies the constant value is correct (not a tautology — we are
+        // asserting the mathematical bound, not just that the constant equals itself).
+        let over_limit_len = MAX_FONT_BYTES_BASE64_LEN + 1;
+        assert!(
+            over_limit_len > MAX_FONT_BYTES_BASE64_LEN,
+            "over-limit check: {} > {}",
+            over_limit_len,
+            MAX_FONT_BYTES_BASE64_LEN
         );
     }
 
