@@ -3,8 +3,9 @@
  *
  * These tests exercise the module-level `parseFontsResponse` function
  * directly — no network calls, no Solid reactive context required.
- * The full fetchFonts() integration is covered by the store's own
- * internal wiring (identical to fetchTokens pattern).
+ * `fetchFonts()` itself (the thin query→parse→setState wrapper) is not
+ * separately integration-tested; its parsing logic is fully covered here
+ * via `parseFontsResponse`, mirroring the existing `fetchTokens` pattern.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { parseFontsResponse } from "../document-store-solid";
@@ -95,6 +96,23 @@ describe("parseFontsResponse", () => {
 
     // Each malformed entry should have triggered a warn
     expect(warnSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("should skip entries with missing/empty family and warn (family flows into ctx.font)", () => {
+    const validEntry = makeFontEntry({ id: "valid-id", family: "Valid" });
+    const missingFamily = { id: "no-family-id", postscript_name: "X-Regular" };
+    const emptyFamily = { ...makeFontEntry({ id: "empty-family-id" }), family: "" };
+
+    const data = { fonts: [missingFamily, emptyFamily, validEntry] };
+
+    const result = parseFontsResponse(data);
+
+    // Only the entry with a valid family survives.
+    expect(Object.keys(result)).toHaveLength(1);
+    expect(result["valid-id"]).toBeDefined();
+    expect(result["no-family-id"]).toBeUndefined();
+    expect(result["empty-family-id"]).toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledTimes(2);
   });
 
   it("should return empty table when fonts field is absent", () => {

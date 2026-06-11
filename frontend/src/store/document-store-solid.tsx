@@ -402,6 +402,14 @@ export function parseFontsResponse(data: unknown): Record<string, FontEntry> {
       console.warn("parseFontsResponse: skipping font entry with missing/invalid id", entry);
       continue;
     }
+    // `family` is the field that flows into `ctx.font` during rendering (Task 17);
+    // a missing/empty family would silently produce `"undefined"` in the CSS font
+    // string. Validate it here so malformed entries are warn+skipped, not stored.
+    const family = entry["family"];
+    if (typeof family !== "string" || family.length === 0) {
+      console.warn("parseFontsResponse: skipping font entry with missing/invalid family", entry);
+      continue;
+    }
     table[id] = entry as unknown as FontEntry;
   }
 
@@ -2556,12 +2564,13 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
   /**
    * Imperative accessor: look up a font entry by its stable UUID.
    *
-   * For reactive reads (in components / memos that should re-render when the
-   * font table changes) use `store.state.fontTable[id]` directly — that is
-   * the signal-backed store path that Solid tracks.  This function is
-   * intentionally non-reactive (does not subscribe to the store proxy) and is
-   * suitable for one-shot imperative look-ups (e.g., from canvas rendering
-   * callbacks where Solid tracking is neither available nor desired).
+   * This accessor adds NO reactive root of its own. Called from OUTSIDE a Solid
+   * tracking context (e.g. a canvas rendering callback) it returns the current
+   * value without subscribing. Called from INSIDE a tracking context (component
+   * body, `createMemo`, `createEffect`) the underlying `state.fontTable[id]` read
+   * WILL be tracked, like any store read. For purely reactive access prefer
+   * `store.state.fontTable[id]` directly; use this for one-shot imperative
+   * look-ups where Solid tracking is neither available nor desired.
    */
   function getFontEntry(id: string): FontEntry | undefined {
     return state.fontTable[id] as FontEntry | undefined;
