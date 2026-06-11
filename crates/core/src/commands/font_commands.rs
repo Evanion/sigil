@@ -25,6 +25,14 @@ use crate::validate::{MAX_FONTS_PER_DOCUMENT, check_embedded_font_size};
 /// server holds the bytes (it constructs this op) and persists them separately
 /// in Tasks 11 / 13. The font bytes carried here are used exclusively for
 /// parsing/classification in `validate` and `apply`.
+///
+/// # Double-parse note
+///
+/// `classify_font` is intentionally called twice (once in `validate`, once in
+/// `apply`) because the `FieldOperation` contract requires each method to be
+/// independently callable, so the parse result cannot be cached on the struct.
+/// This is O(font-size) work duplicated, which is acceptable for a
+/// once-per-upload operation.
 #[derive(Debug)]
 pub struct AddFontEntry {
     /// Stable UUID for the new font entry (must be unique within the document).
@@ -48,9 +56,11 @@ impl FieldOperation for AddFontEntry {
         // 1. Size cap.
         check_embedded_font_size(self.bytes.len())?;
 
-        // 2. Duplicate-ID check — pre-check for a precise message. FontTable::add
-        //    also enforces uniqueness, but checking here surfaces the duplicate
-        //    identity explicitly rather than as a generic capacity-or-duplicate error.
+        // 2. Duplicate-ID check — cheap early exit that surfaces the conflicting
+        //    `entry_id` explicitly and avoids running `classify_font` only to
+        //    have `FontTable::add` reject the duplicate. `FontTable::add` also
+        //    enforces uniqueness with its own typed error; this is defense-in-depth
+        //    with a more informative message.
         if doc.font_table().get(self.entry_id).is_some() {
             return Err(CoreError::ValidationError(format!(
                 "font entry {} already exists",
@@ -150,6 +160,12 @@ mod tests {
 
         op.validate(&doc).expect("validate should pass");
         op.apply(&mut doc).expect("apply should succeed");
+
+        assert_eq!(
+            doc.font_table().len(),
+            2,
+            "table must contain the bundled default plus the newly added entry"
+        );
 
         let entry = doc
             .font_table()
@@ -260,6 +276,66 @@ mod tests {
         assert!(
             op.validate(&doc).is_err(),
             "garbage bytes must be rejected by validate"
+        );
+    }
+
+    /// `AddFontEntry::validate` must reject when the table is already at
+    /// `MAX_FONTS_PER_DOCUMENT` capacity (CLAUDE.md §11 Constant-Enforcement
+    /// Tests — exercises the command path, not just `FontTable::add` directly).
+    ///
+    /// The table is filled cheaply via synthetic `FontEntry` objects constructed
+    /// directly with `FontEntry::new` — no font-byte parsing required for setup.
+    /// The enforcement check fires before `classify_font` is called, so the
+    /// test's `bytes` payload only needs to pass the earlier size check.
+    #[test]
+    fn test_max_fonts_per_document_enforced() {
+        use crate::font::{EmbedDecision, FontEntry, FontMetrics, FontSource};
+        use crate::validate::MAX_FONTS_PER_DOCUMENT;
+
+        let mut doc = Document::new("Test".to_string());
+
+        // Build a minimal valid FontMetrics once and reuse its values.
+        let metrics = FontMetrics::new(
+            1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], false,
+        )
+        .expect("test FontMetrics must be valid");
+
+        // Document::new already holds 1 entry (the bundled default).
+        // Insert MAX_FONTS_PER_DOCUMENT - 1 more synthetic entries to reach capacity.
+        for i in 0..(MAX_FONTS_PER_DOCUMENT - 1) {
+            let entry = FontEntry::new(
+                Uuid::from_u128(100 + i as u128),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                metrics.clone(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("synthetic FontEntry must be valid");
+            doc.font_table_mut()
+                .add(entry)
+                .expect("synthetic insert must succeed under the cap");
+        }
+
+        assert_eq!(
+            doc.font_table().len(),
+            MAX_FONTS_PER_DOCUMENT,
+            "table must be exactly at capacity before the capacity test"
+        );
+
+        // Now attempt to add one more via the command path — must be rejected.
+        let op = AddFontEntry {
+            entry_id: Uuid::from_u128(999),
+            bytes: INSTALLABLE.to_vec(),
+            provenance: FontProvenance::UserSupplied,
+        };
+
+        assert!(
+            op.validate(&doc).is_err(),
+            "AddFontEntry::validate must reject when the table is at MAX_FONTS_PER_DOCUMENT capacity"
         );
     }
 }
