@@ -475,7 +475,8 @@ describe("setNodeFont (isolated logic + undo/redo tests)", () => {
     // Undo
     const inverseTx = historyManager.undo();
     expect(inverseTx).not.toBeNull();
-    for (const inverseOp of inverseTx!.operations) {
+    if (inverseTx === null) throw new Error("undo returned null");
+    for (const inverseOp of inverseTx.operations) {
       applyOperationToStore(inverseOp, setState, reader);
     }
 
@@ -486,7 +487,8 @@ describe("setNodeFont (isolated logic + undo/redo tests)", () => {
     // Redo
     const redoTx = historyManager.redo();
     expect(redoTx).not.toBeNull();
-    for (const redoOp of redoTx!.operations) {
+    if (redoTx === null) throw new Error("redo returned null");
+    for (const redoOp of redoTx.operations) {
       applyOperationToStore(redoOp, setState, reader);
     }
 
@@ -594,7 +596,7 @@ async function simulateRemoveFont(
 
   // Optimistic delete
   deletedIds.push(id);
-  delete fontTable[id];
+  Reflect.deleteProperty(fontTable, id);
 
   // Call server
   const result = await mutationFn({ id });
