@@ -40,6 +40,21 @@ When a mutation is debounced (delayed to batch rapid user input), the pre-mutati
 
 Every `setTimeout`, `setInterval`, `requestAnimationFrame`, `addEventListener`, or subscription registration at module scope or store scope MUST have a corresponding cleanup in the module's or store's teardown/destroy function. A timer that fires after its owning context is destroyed operates on stale references — this causes silent errors, memory leaks, and test flakiness. When adding a timer or subscription, add the cleanup call in the same commit.
 
+### Registry/Cache Additions Require Symmetric Removal and a Re-Add Test
+
+When a PR adds an entity to a registry, dedup set, external browser store, or cache that lives outside the document store — the browser `FontFace` set, an image-bitmap or texture cache, a `MutationObserver`/`ResizeObserver` registration, an orchestrator's "already-processed" id set — the SAME PR MUST implement the symmetric removal/unload path AND wire it to every code path that removes the entity (the user-initiated remove handler AND the remote-operation handler in `apply-remote.ts`).
+
+Two failure modes this prevents:
+1. **Leak + shadowing** — an external resource registered on add but never unregistered on remove (e.g., a `FontFace` added to `document.fonts` but not deleted) accumulates; a later re-add with the same key is shadowed by the stale registration or silently duplicated.
+2. **Stale dedup state** — a "processed-ids" set populated on add but never pruned on remove causes a subsequent re-add of the same id to be skipped as "already processed," so the resource is never re-registered.
+
+Required in the same PR:
+- A removal/unload function keyed by the entity's stable id (e.g., `unloadFont(id)`), called from BOTH the local remove handler and the `apply-remote.ts` remove handler.
+- Pruning of any dedup/processed set against the current key-set (or explicit deletion of the removed key) on every remove.
+- An **add → remove → re-add** test that asserts the re-add fully re-registers the resource (the external store contains it again, the dedup set does not shadow it). A test that only covers add, or add→remove, does not prove the re-add path.
+
+Precedent: PR #77 (RF-005, RF-006) — the font orchestrator's `processedIds` was never pruned on remove (re-add skipped), and `removeFont` never deleted the registered `FontFace` (leak + shadowing on re-add). Fixed by pruning `processedIds` against the current key-set each run, adding `unloadFont(id)` tracked by id and called from `removeFont` + `applyRemoveFont`, with add→remove→re-add tests.
+
 ### Continuous-Value Controls Must Coalesce History Entries
 
 Any UI control that fires change events at high frequency during a single user gesture (color picker during drag, slider during drag, canvas transform during drag, numeric scrub) MUST coalesce those events into a single history/undo entry. The pattern: capture the pre-gesture snapshot on gesture start (pointerdown, focus), apply intermediate values to the store without creating history entries, and commit a single history entry on gesture end (pointerup, blur, dialog close). Creating a discrete undo entry per intermediate value floods the undo stack — the user must press Ctrl+Z dozens of times to undo a single drag. This obligation applies to both the client-side history manager and server-side mutations. If the control does not expose gesture start/end events, the implementer must add them or wrap the control to provide them before wiring it to a tracked mutation.
