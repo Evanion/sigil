@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { render, screen, cleanup, fireEvent, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
 import type { i18n } from "i18next";
@@ -870,6 +870,12 @@ describe("TypographySection", () => {
       });
       fireEvent.change(fileInput);
     }
+
+    // End-to-end wiring (frontend-defensive "Reactive Pipelines Must Be Verified
+    // End-to-End"): the file-input change must reach store.addFont, and on success
+    // apply the new entry to the selected node via setNodeFont.
+    await waitFor(() => expect(addFont).toHaveBeenCalledOnce());
+    expect(setNodeFont).toHaveBeenCalledWith("text-1", "new-entry-id");
 
     // Status region must be the SAME node — not re-mounted.
     const statusRegionsAfter = document.querySelectorAll('[role="status"]');

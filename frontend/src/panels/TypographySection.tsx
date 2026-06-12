@@ -558,7 +558,7 @@ export const TypographySection: Component = () => {
         {/* Read-only family name display */}
         <span
           class="sigil-typography-section__font-family-display"
-          aria-label={t("panels:typography.fontFamily")}
+          data-testid="font-family-display"
           title={fontFamily() || t("panels:typography.fontFamily")}
         >
           {fontFamily() || t("panels:typography.fontFamily")}
@@ -579,7 +579,6 @@ export const TypographySection: Component = () => {
         <Button
           variant="secondary"
           size="sm"
-          aria-label={t("panels:typography.addFont")}
           onClick={() => fileInputRef?.click()}
         >
           {t("panels:typography.addFont")}

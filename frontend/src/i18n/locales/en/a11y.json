@@ -62,9 +62,7 @@
     "textAlign": "Text alignment set to {{alignment}}",
     "textDecoration": "Text decoration set to {{decoration}}",
     "shadowEnabled": "Text shadow enabled",
-    "shadowDisabled": "Text shadow disabled",
-    "fontAdded": "Font {{family}} added",
-    "fontAddError": "Failed to add font: {{error}}"
+    "shadowDisabled": "Text shadow disabled"
   },
   "status": {
     "connected": "Connected to server",
