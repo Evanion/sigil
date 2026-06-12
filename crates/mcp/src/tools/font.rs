@@ -43,30 +43,29 @@ use crate::types::{AddFontResult, MutationResult};
 
 /// Adds a new font to the document font table.
 ///
-/// Returns `(entry_id_string, family_name, source_is_custom)`.
+/// Takes the already-constructed [`AddFontEntry`] op by reference (RF-009: the
+/// caller owns the decoded bytes in `op.bytes` and reclaims them by move for the
+/// `font_bytes` insert after this returns — `apply(&self, ...)` only borrows, so
+/// `op.bytes` survives intact).
+///
+/// Returns `(entry_id_string, family_name, source_is_custom, broadcast_payload)`.
 /// The caller is responsible for populating `session.font_bytes` when
 /// `source_is_custom` is true (after the store lock is dropped).
 ///
-/// `snapshot` is the pre-apply document state captured by the caller BEFORE
-/// calling this function. On any error path AFTER a successful `op.apply()`
-/// the caller must restore the snapshot. This function does NOT restore the
-/// snapshot itself because it does not own the document guard — the caller
-/// (`add_font_flow`) holds the write lock and performs the restore.
+/// The caller captures a pre-apply snapshot BEFORE calling this function. On any
+/// error path AFTER a successful `op.apply()` the caller must restore the
+/// snapshot. This function does NOT restore the snapshot itself because it does
+/// not own the document guard — the caller (`add_font_flow`) holds the write
+/// lock and performs the restore.
 ///
 /// # Errors
-/// Returns `McpToolError` on invalid base64, unknown provenance, or core
-/// validation/apply failure.
+/// Returns `McpToolError` on core validation/apply failure or a post-apply
+/// serialization failure.
 pub fn add_font_impl(
     doc: &mut sigil_core::Document,
-    entry_id: Uuid,
-    font_bytes: &[u8],
-    provenance: FontProvenance,
+    op: &AddFontEntry,
 ) -> Result<(String, String, bool, OperationPayload), McpToolError> {
-    let op = AddFontEntry {
-        entry_id,
-        bytes: font_bytes.to_vec(),
-        provenance,
-    };
+    let entry_id = op.entry_id;
 
     op.validate(doc).map_err(McpToolError::CoreError)?;
     op.apply(doc).map_err(McpToolError::CoreError)?;
@@ -145,7 +144,7 @@ pub async fn add_font_flow(
     }
 
     // --- Decode base64 ---
-    let font_bytes = base64::engine::general_purpose::STANDARD
+    let decoded = base64::engine::general_purpose::STANDARD
         .decode(bytes_base64)
         .map_err(|e| {
             rmcp::ErrorData::new(
@@ -155,8 +154,56 @@ pub async fn add_font_flow(
             )
         })?;
 
+    // --- Aggregate embedded-font byte cap (RF-001) ---
+    //
+    // Enforce MAX_TOTAL_EMBEDDED_FONT_BYTES BEFORE any document mutation so no
+    // rollback is needed. The running total lives in `session.font_bytes`
+    // (outside the core document), so the check lives here, symmetric with the
+    // GraphQL `add_font` mutation (CLAUDE.md §11 "Validation Must Be Symmetric
+    // Across All Transports"). Only Custom (embedded) fonts consume `font_bytes`,
+    // so we classify upfront to learn whether THIS font would be embedded
+    // (`EmbedDecision::Embed`). classify_font is I/O-free and pure; the op's
+    // validate/apply re-parse independently per the self-contained contract.
+    let parsed_for_cap =
+        sigil_core::font_parse::classify_font(&decoded, provenance).map_err(|e| {
+            rmcp::ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!("invalid font: {e}"),
+                None,
+            )
+        })?;
+    if matches!(
+        parsed_for_cap.decision,
+        sigil_core::font::EmbedDecision::Embed
+    ) {
+        let existing_total: usize = session.font_bytes.read().await.values().map(Vec::len).sum();
+        let new_total = existing_total.checked_add(decoded.len());
+        if new_total.is_none_or(|t| t > sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES) {
+            return Err(rmcp::ErrorData::new(
+                rmcp::model::ErrorCode::INVALID_PARAMS,
+                format!(
+                    "adding this font ({} bytes) would exceed the session embedded-font limit \
+                     of {} bytes (current total {}); remove an embedded font and retry",
+                    decoded.len(),
+                    sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES,
+                    existing_total
+                ),
+                None,
+            ));
+        }
+    }
+
     // Server generates the entry id — never trust the client.
     let entry_id = Uuid::new_v4();
+
+    // --- Build the command (RF-009: move decoded bytes into the op; reclaim
+    // them from `op.bytes` for the font_bytes insert after apply, avoiding an
+    // up-front clone). ---
+    let op = AddFontEntry {
+        entry_id,
+        bytes: decoded,
+        provenance,
+    };
 
     // --- Under store lock: validate → apply → stamp seq → broadcast ---
     //
@@ -176,8 +223,8 @@ pub async fn add_font_flow(
         // Snapshots Before Mutations, Not After").
         let snapshot = guard.0.clone();
 
-        let (entry_id_str, family, is_custom, op_payload) =
-            add_font_impl(&mut guard.0, entry_id, &font_bytes, provenance).map_err(|e| {
+        let (entry_id_str, family, is_custom, op_payload) = add_font_impl(&mut guard.0, &op)
+            .map_err(|e| {
                 // Restore the snapshot on any error from add_font_impl,
                 // including the post-apply get/serialize paths.
                 guard.0 = snapshot;
@@ -212,8 +259,11 @@ pub async fn add_font_flow(
     //       font_bytes.write() — would violate the lock-ordering rule
     //       (store before font_bytes) and risk deadlock.
     if source_is_custom {
+        // RF-009: reclaim the bytes from the op by move (no clone). `op` is no
+        // longer needed after apply; its `bytes` field still holds the decoded
+        // payload because `apply(&self, ...)` only borrowed it.
         let mut bytes_guard = session.font_bytes.write().await;
-        bytes_guard.insert(entry_id, font_bytes);
+        bytes_guard.insert(entry_id, op.bytes);
     }
 
     Ok(AddFontResult {
@@ -334,14 +384,16 @@ pub fn set_node_font_impl(
     op.validate(doc).map_err(McpToolError::CoreError)?;
     op.apply(doc).map_err(McpToolError::CoreError)?;
 
-    // Broadcast shape (matches GraphQL parse_set_field "kind.text_style.font_entry"):
+    // Broadcast shape (matches GraphQL parse_set_field BROADCAST_PATH_FONT_ENTRY):
     //   op_type: "set_field"
-    //   path:    "kind.text_style.font_entry"
+    //   path:    BROADCAST_PATH_FONT_ENTRY ("kind.text_style.font_entry")
     //   value:   "<font-entry-uuid-string>"  (the canonical UUID string)
+    // Use the shared sigil_state constant so GraphQL and MCP cannot drift
+    // (RF-007 — CLAUDE.md §11 cross-transport parity).
     let tx = single_op_transaction(
         node_uuid_str,
         "set_field",
-        "kind.text_style.font_entry",
+        sigil_state::BROADCAST_PATH_FONT_ENTRY,
         Some(serde_json::json!(font_entry_uuid_str)),
     );
 
@@ -517,6 +569,74 @@ mod tests {
             "error message must mention the pre-decode limit, got: {}",
             err.message
         );
+    }
+
+    /// RF-001: `add_font_flow` rejects a Custom (embeddable) font when adding it
+    /// would push the session's total embedded-font bytes past
+    /// `MAX_TOTAL_EMBEDDED_FONT_BYTES`. Pre-seed `session.font_bytes` to the cap
+    /// (single lazily-allocated zeroed Vec; the aggregate sum reads only Vec
+    /// lengths, so this is O(1) at check time), then attempt to add a small
+    /// installable font and assert rejection. Symmetric with the GraphQL
+    /// `test_max_total_embedded_font_bytes_enforced` (CLAUDE.md §11 "Validation
+    /// Must Be Symmetric Across All Transports").
+    #[tokio::test]
+    async fn test_max_total_embedded_font_bytes_enforced() {
+        use sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES;
+
+        let sessions = Arc::new(Sessions::new(64));
+        let (_, session) = make_session(&sessions);
+
+        // Seed the byte store to the aggregate cap.
+        {
+            let mut guard = session.font_bytes.write().await;
+            guard.insert(Uuid::new_v4(), vec![0u8; MAX_TOTAL_EMBEDDED_FONT_BYTES]);
+        }
+
+        let len_before = session.store.read().await.0.font_table().len();
+
+        let err = add_font_flow(
+            Arc::clone(&session),
+            &to_base64(INSTALLABLE),
+            "user_supplied",
+        )
+        .await
+        .expect_err("add_font_flow must reject when the aggregate cap is exceeded");
+        let msg = err.message.to_lowercase();
+        assert!(
+            msg.contains("embedded-font limit") || msg.contains("exceed"),
+            "error must mention the aggregate limit, got: {}",
+            err.message
+        );
+
+        // Document must be untouched (check fires before any mutation).
+        let len_after = session.store.read().await.0.font_table().len();
+        assert_eq!(
+            len_before, len_after,
+            "font table must not change when the aggregate cap rejects the add"
+        );
+    }
+
+    /// RF-001 symmetry: a REFERENCE font is not embedded and stores no bytes, so
+    /// the aggregate cap must NOT block it even when the byte store is at the cap.
+    #[tokio::test]
+    async fn test_max_total_embedded_font_bytes_does_not_block_reference_fonts() {
+        use sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES;
+
+        let sessions = Arc::new(Sessions::new(64));
+        let (_, session) = make_session(&sessions);
+
+        {
+            let mut guard = session.font_bytes.write().await;
+            guard.insert(Uuid::new_v4(), vec![0u8; MAX_TOTAL_EMBEDDED_FONT_BYTES]);
+        }
+
+        add_font_flow(
+            Arc::clone(&session),
+            &to_base64(RESTRICTED),
+            "user_supplied",
+        )
+        .await
+        .expect("reference font must not be blocked by the aggregate cap");
     }
 
     /// `add_font` rejects invalid base64.
@@ -741,6 +861,9 @@ mod tests {
                 assert_eq!(bx.operations.len(), 1);
                 let op = &bx.operations[0];
                 assert_eq!(op.op_type, "set_field");
+                // RF-007: path must equal the shared sigil_state constant
+                // (not a hardcoded literal) so GraphQL and MCP stay in lockstep.
+                assert_eq!(op.path, sigil_state::BROADCAST_PATH_FONT_ENTRY);
                 assert_eq!(op.path, "kind.text_style.font_entry");
                 assert_eq!(op.node_uuid, node_uuid_str);
                 assert_eq!(
@@ -834,13 +957,13 @@ mod tests {
         let mut doc = Document::new("parity-test".to_string());
         let entry_id = Uuid::new_v4();
 
-        let (_, _, _, payload) = add_font_impl(
-            &mut doc,
+        let op = AddFontEntry {
             entry_id,
-            INSTALLABLE,
-            FontProvenance::UserSupplied,
-        )
-        .expect("add_font_impl must succeed for installable font");
+            bytes: INSTALLABLE.to_vec(),
+            provenance: FontProvenance::UserSupplied,
+        };
+        let (_, _, _, payload) =
+            add_font_impl(&mut doc, &op).expect("add_font_impl must succeed for installable font");
 
         assert_eq!(
             payload.op_type,
@@ -873,13 +996,12 @@ mod tests {
         let entry_id = Uuid::new_v4();
 
         // Add the entry first so remove can find it.
-        add_font_impl(
-            &mut doc,
+        let op = AddFontEntry {
             entry_id,
-            INSTALLABLE,
-            FontProvenance::UserSupplied,
-        )
-        .expect("add_font_impl must succeed");
+            bytes: INSTALLABLE.to_vec(),
+            provenance: FontProvenance::UserSupplied,
+        };
+        add_font_impl(&mut doc, &op).expect("add_font_impl must succeed");
 
         let payload = remove_font_impl(&mut doc, entry_id)
             .expect("remove_font_impl must succeed for existing entry");

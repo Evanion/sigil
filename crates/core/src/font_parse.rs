@@ -256,9 +256,13 @@ fn resolve_decision(face: &Face<'_>, prov: FontProvenance, fs_type: u16) -> Embe
 
     // Bitmap-embedding-only flag (bit 9). When set, only bitmaps may be
     // embedded even if Permissions says otherwise. If the face has outline
-    // tables (glyf or cff), we must not embed them.
+    // tables (glyf, cff, or cff2), we must not embed them. CFF2 is the
+    // variable-font outline format (ttf-parser 0.25 `FaceTables::cff2:
+    // Option<cff2::Table>`); omitting it would let a bitmap-only CFF2 font
+    // smuggle restricted outlines past this guard (RF-011).
     let bitmap_only = (fs_type & 0x0200) != 0;
-    let has_outlines = face.tables().glyf.is_some() || face.tables().cff.is_some();
+    let has_outlines =
+        face.tables().glyf.is_some() || face.tables().cff.is_some() || face.tables().cff2.is_some();
     if bitmap_only && has_outlines {
         return EmbedDecision::ReferenceRestricted;
     }

@@ -599,11 +599,19 @@ fn parse_set_field(sf: &SetFieldInput) -> Result<ParsedOp> {
         // existing FontTable entry. Value must be a UUID string identifying the
         // target font entry.
         //
+        // RF-007: dispatch on the shared `sigil_state::BROADCAST_PATH_FONT_ENTRY`
+        // constant (a path-qualified `&str` const pattern) rather than a
+        // hardcoded literal, so the GraphQL path key and the broadcast path key
+        // (which the MCP transport and apply-remote.ts also consume) cannot
+        // drift. The broadcast `path` is `sf.path.clone()` set at the top of
+        // this function, so it already carries this exact string when this arm
+        // matches.
+        //
         // Broadcast shape for Task 15 (apply-remote.ts handler):
         //   op_type: "set_field"
-        //   path:    "kind.text_style.font_entry"
+        //   path:    BROADCAST_PATH_FONT_ENTRY ("kind.text_style.font_entry")
         //   value:   "<font-entry-uuid-string>"
-        "kind.text_style.font_entry" => {
+        sigil_state::BROADCAST_PATH_FONT_ENTRY => {
             let font_entry: uuid::Uuid = serde_json::from_value(value.clone())
                 .map_err(|e| async_graphql::Error::new(format!("invalid font_entry UUID: {e}")))?;
             Ok(ParsedOp {
@@ -1735,17 +1743,28 @@ impl MutationRoot {
         }
 
         // --- Decode base64 ---
-        let font_bytes = base64::engine::general_purpose::STANDARD
+        let decoded = base64::engine::general_purpose::STANDARD
             .decode(&bytes_base64)
             .map_err(|e| async_graphql::Error::new(format!("invalid base64: {e}")))?;
+
+        // --- Aggregate embedded-font byte cap (RF-001) ---
+        // Enforce MAX_TOTAL_EMBEDDED_FONT_BYTES BEFORE any document mutation so
+        // no rollback is needed (the doc is untouched if we reject here). The
+        // running total lives in `session.font_bytes`, outside the core
+        // document, so the check lives in this handler — see the helper for the
+        // full rationale and the MCP-symmetry note.
+        enforce_aggregate_embedded_font_cap(&session, &decoded, font_provenance).await?;
 
         // --- Generate a fresh entry id server-side (never trust the client) ---
         let entry_id = uuid::Uuid::new_v4();
 
-        // --- Build the command ---
+        // --- Build the command (RF-009: move decoded bytes into the op; we
+        // reclaim them from `op.bytes` for the font_bytes insert after apply,
+        // avoiding an up-front 32 MiB clone). `FieldOperation::apply(&self, ...)`
+        // borrows, so `op.bytes` survives apply intact. ---
         let op = AddFontEntry {
             entry_id,
-            bytes: font_bytes.clone(),
+            bytes: decoded,
             provenance: font_provenance,
         };
 
@@ -1876,8 +1895,11 @@ impl MutationRoot {
         //       font_bytes.write() — would violate the lock-ordering rule
         //       (store before font_bytes) and risk deadlock.
         if source_is_custom {
+            // RF-009: reclaim the bytes from the op by move (no clone). `op` is
+            // no longer needed after apply; its `bytes` field still holds the
+            // decoded payload because `apply(&self, ...)` only borrowed it.
             let mut bytes_guard = session.font_bytes.write().await;
-            bytes_guard.insert(entry_id, font_bytes);
+            bytes_guard.insert(entry_id, op.bytes);
         }
 
         Ok(async_graphql::Json(entry_json))
@@ -1976,6 +1998,48 @@ fn error_with_code(message: &str, code: &str) -> async_graphql::Error {
     ext.set("code", code);
     err.extensions = Some(ext);
     err
+}
+
+/// Enforces the per-session aggregate embedded-font byte cap (RF-001) BEFORE any
+/// document mutation, so the caller never needs a rollback.
+///
+/// Only Custom (embedded) fonts consume `session.font_bytes`, so this classifies
+/// `decoded` upfront and applies the cap only when the font would be embedded
+/// (`EmbedDecision::Embed`). `classify_font` is I/O-free and pure; the op's
+/// `validate`/`apply` re-parse independently per the `FieldOperation`
+/// self-contained contract.
+///
+/// Concurrency note: another `add_font` could insert between this check and the
+/// later `font_bytes` insert. That window is bounded by the per-font cap
+/// (32 MiB × concurrent requests) and matches the existing post-lock window
+/// trade-off; the aggregate is a soft resident-memory bound, so a small
+/// concurrent overshoot is acceptable. Symmetric with the MCP `add_font_flow`.
+///
+/// # Errors
+/// Returns a GraphQL error if the font cannot be parsed, or if adding its bytes
+/// would exceed [`sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES`].
+async fn enforce_aggregate_embedded_font_cap(
+    session: &DocumentSession,
+    decoded: &[u8],
+    provenance: FontProvenance,
+) -> Result<()> {
+    let parsed = sigil_core::font_parse::classify_font(decoded, provenance)
+        .map_err(|e| async_graphql::Error::new(format!("invalid font: {e}")))?;
+    if !matches!(parsed.decision, sigil_core::font::EmbedDecision::Embed) {
+        return Ok(());
+    }
+    let existing_total: usize = session.font_bytes.read().await.values().map(Vec::len).sum();
+    let new_total = existing_total.checked_add(decoded.len());
+    if new_total.is_none_or(|t| t > sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES) {
+        return Err(async_graphql::Error::new(format!(
+            "adding this font ({} bytes) would exceed the session embedded-font limit \
+             of {} bytes (current total {}); remove an embedded font and retry",
+            decoded.len(),
+            sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES,
+            existing_total
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -4013,6 +4077,90 @@ mod tests {
         );
     }
 
+    /// RF-001: `addFont` rejects a Custom (embeddable) font when adding it would
+    /// push the session's total embedded-font bytes past
+    /// `MAX_TOTAL_EMBEDDED_FONT_BYTES`. We pre-seed `session.font_bytes` with a
+    /// fake entry sized to the aggregate cap (a single lazily-allocated zeroed
+    /// Vec — `.values().map(Vec::len).sum()` reads only the length, so this is
+    /// O(1) at check time), then attempt to add a small installable font. The
+    /// add must be rejected with a typed error mentioning the limit, and the
+    /// document must NOT be mutated (no rollback needed because the check fires
+    /// before apply).
+    #[tokio::test]
+    async fn test_max_total_embedded_font_bytes_enforced() {
+        use sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES;
+
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let session_id = state.app.default_session_id().expect("default session");
+        let session = state.app.sessions.get(session_id).expect("session");
+
+        // Pre-seed font_bytes so the running total is already AT the cap. Adding
+        // any embeddable font then exceeds it.
+        {
+            let mut guard = session.font_bytes.write().await;
+            guard.insert(
+                uuid::Uuid::new_v4(),
+                vec![0u8; MAX_TOTAL_EMBEDDED_FONT_BYTES],
+            );
+        }
+
+        let font_table_len_before = read_session_doc(&state).font_table().len();
+
+        let b64 = to_base64(INSTALLABLE_TTF);
+        let query =
+            format!(r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#);
+        let res = schema.execute(&query).await;
+        assert!(
+            !res.errors.is_empty(),
+            "addFont must be rejected when the aggregate embedded-font cap is exceeded"
+        );
+        let err_msg = res.errors[0].message.to_lowercase();
+        assert!(
+            err_msg.contains("embedded-font limit") || err_msg.contains("exceed"),
+            "error must mention the aggregate limit, got: {}",
+            res.errors[0].message
+        );
+
+        // Document must be untouched (check fires before any mutation).
+        let font_table_len_after = read_session_doc(&state).font_table().len();
+        assert_eq!(
+            font_table_len_before, font_table_len_after,
+            "font table must not change when the aggregate cap rejects the add"
+        );
+    }
+
+    /// RF-001 symmetry: a REFERENCE font (not embeddable) is NOT subject to the
+    /// aggregate cap — it stores no bytes. Even with the byte store seeded to the
+    /// cap, adding a restricted font must succeed.
+    #[tokio::test]
+    async fn test_max_total_embedded_font_bytes_does_not_block_reference_fonts() {
+        use sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES;
+
+        let state = ServerState::new();
+        let schema = test_schema(state.clone());
+        let session_id = state.app.default_session_id().expect("default session");
+        let session = state.app.sessions.get(session_id).expect("session");
+
+        {
+            let mut guard = session.font_bytes.write().await;
+            guard.insert(
+                uuid::Uuid::new_v4(),
+                vec![0u8; MAX_TOTAL_EMBEDDED_FONT_BYTES],
+            );
+        }
+
+        let b64 = to_base64(RESTRICTED_TTF);
+        let query =
+            format!(r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#);
+        let res = schema.execute(&query).await;
+        assert!(
+            res.errors.is_empty(),
+            "reference (non-embedded) font must not be blocked by the aggregate cap: {:?}",
+            res.errors
+        );
+    }
+
     /// `addFont` with invalid base64 is rejected.
     #[tokio::test]
     async fn test_add_font_rejects_invalid_base64() {
@@ -4269,6 +4417,9 @@ mod tests {
                 assert_eq!(tx.operations.len(), 1);
                 let op = &tx.operations[0];
                 assert_eq!(op.op_type, "set_field");
+                // RF-007: path must equal the shared sigil_state constant so
+                // GraphQL and MCP stay byte-identical.
+                assert_eq!(op.path, sigil_state::BROADCAST_PATH_FONT_ENTRY);
                 assert_eq!(op.path, "kind.text_style.font_entry");
                 let val = op.value.as_ref().expect("value present");
                 assert_eq!(

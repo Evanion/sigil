@@ -83,11 +83,25 @@ pub enum EmbedDecision {
 
 /// A single variable-font axis (e.g., Weight `wght`, Width `wdth`).
 ///
-/// Plain data carrier; field ranges are not validated here because valid ranges
-/// are defined by the font file and callers are expected to clamp before
-/// constructing a `FontAxis`. This type is used for metadata display, not for
-/// producing CSS `font-variation-settings` values (which are validated at the
-/// point of use).
+/// # Self-validation invariant (RF-013)
+///
+/// `FontAxis` derives `Deserialize` with public `f32` fields and performs NO
+/// finite/range checks of its own. This is sound ONLY because every path that
+/// admits a `FontAxis` from untrusted input routes it through
+/// [`FontEntry::new`], which validates each axis: `min`, `default`, and `max`
+/// must all be finite (no NaN/Infinity) and satisfy `min <= default <= max`
+/// (see the per-axis loop in `FontEntry::new`). The `FontEntry` `Deserialize`
+/// impl funnels through `new()`, so a `FontEntry` loaded from a workfile always
+/// re-validates its axes.
+///
+/// A standalone `FontAxis` deserialized OUTSIDE a `FontEntry` (e.g., a future
+/// API parameter, or a `Vec<FontAxis>` field added to some other type) is NOT
+/// validated. Any such future deserializer MUST re-validate each axis (finite +
+/// `min <= default <= max`) at its own boundary, or route construction through a
+/// validating constructor — do not assume the values are finite or ordered.
+///
+/// This type is used for metadata display, not for producing CSS
+/// `font-variation-settings` values (which are validated at the point of use).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FontAxis {
     /// 4-byte OpenType axis tag (e.g., `b"wght"`, `b"wdth"`).

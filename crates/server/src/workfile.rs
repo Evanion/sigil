@@ -707,9 +707,19 @@ async fn load_font_assets(
     let manifest_set: HashSet<Uuid> = manifest_font_assets.iter().copied().collect();
 
     let mut font_bytes: HashMap<Uuid, Vec<u8>> = HashMap::new();
-    // Track UUIDs that were present on disk but skipped (oversize, etc.) so the
-    // post-scan loop can distinguish "missing from disk" from "present but skipped".
+    // Track UUIDs that were present on disk but skipped (oversize, over-aggregate,
+    // etc.) so the post-scan loop can distinguish "missing from disk" from
+    // "present but skipped".
     let mut skipped_uuids: HashSet<Uuid> = HashSet::new();
+    // RF-001: running sum of all loaded embedded-font bytes. Once adding a font
+    // would push the resident total past MAX_TOTAL_EMBEDDED_FONT_BYTES, that
+    // font is skipped (degrade, don't fail the whole load) — mirrors the
+    // oversize/orphan skip handling above. Note: `read_dir` order is
+    // filesystem-defined, so WHICH fonts are skipped under the aggregate cap is
+    // not deterministic across platforms; the cap itself (resident memory bound)
+    // is what matters, and a degraded workfile that exceeds the aggregate is a
+    // corrupt/adversarial input either way.
+    let mut running_total: usize = 0;
     let mut entries = tokio::fs::read_dir(&fonts_dir)
         .await
         .with_context(|| format!("failed to read fonts/ directory: {}", fonts_dir.display()))?;
@@ -779,6 +789,27 @@ async fn load_font_assets(
             );
             skipped_uuids.insert(uuid);
             continue;
+        }
+
+        // RF-001: aggregate cap. Skip (degrade) any font that would push the
+        // resident total over MAX_TOTAL_EMBEDDED_FONT_BYTES. `checked_add`
+        // guards against an overflow wrapping the running total on pathological
+        // input; `None` (overflow) and `Some(t > cap)` both trigger the skip.
+        match running_total.checked_add(bytes.len()) {
+            Some(new_total) if new_total <= sigil_core::validate::MAX_TOTAL_EMBEDDED_FONT_BYTES => {
+                running_total = new_total;
+            }
+            _ => {
+                tracing::warn!(
+                    "fonts/{uuid}.ttf would exceed MAX_TOTAL_EMBEDDED_FONT_BYTES \
+                     (running total {} + {} > {}); skipping — document will degrade",
+                    running_total,
+                    bytes.len(),
+                    sigil_core::validate::MAX_TOTAL_EMBEDDED_FONT_BYTES
+                );
+                skipped_uuids.insert(uuid);
+                continue;
+            }
         }
 
         font_bytes.insert(uuid, bytes);
@@ -963,6 +994,28 @@ async fn load_workfile_impl(workfile_path: &Path) -> Result<LoadedWorkfile> {
     // Load embedded font bytes from fonts/ (if present). Must run after
     // page-load so the doc is already in its final state when we return.
     let font_bytes = load_font_assets(workfile_path, &manifest.font_assets).await?;
+
+    // RF-014: warn for any Custom font entry whose bytes did not load. A
+    // `FontSource::Custom { asset_uuid }` entry renders from embedded bytes; if
+    // `asset_uuid` is absent from `font_bytes` (file missing, oversized,
+    // over-aggregate, or orphaned), the entry will render as a missing custom
+    // font. `load_font_assets` already warns per-UUID for entries listed in
+    // `manifest.font_assets`, but a Custom entry whose `asset_uuid` was never
+    // listed there (corrupt/hand-edited manifest where `fonts` and
+    // `font_assets` diverged) would otherwise warn nowhere — this loop catches
+    // exactly that gap.
+    for entry in doc.font_table().iter() {
+        if let FontSource::Custom { asset_uuid } = entry.source()
+            && !font_bytes.contains_key(asset_uuid)
+        {
+            tracing::warn!(
+                "font entry {} ('{}') is Custom but its bytes ({asset_uuid}) are not \
+                 present after load; it will render as a missing custom font",
+                entry.id(),
+                entry.family()
+            );
+        }
+    }
 
     tracing::info!(
         "loaded workfile '{}' with {} pages, {} nodes, {} embedded fonts",
@@ -2679,6 +2732,85 @@ mod tests {
         assert!(
             !loaded.font_bytes.contains_key(&fat_uuid),
             "oversized font file must be excluded from loaded.font_bytes"
+        );
+    }
+
+    /// RF-001: `load_font_assets` enforces `MAX_TOTAL_EMBEDDED_FONT_BYTES` as a
+    /// running sum. We plant enough per-font-cap-sized sparse font files that
+    /// their total exceeds the aggregate cap; `load_workfile` must succeed
+    /// (degrade, not fail) while loading no more than the cap allows — at least
+    /// one font is skipped and the loaded total never exceeds the aggregate cap.
+    ///
+    /// Sparse files (`set_len`) keep on-disk allocation cheap; each loaded font's
+    /// bytes are read into a real zeroed Vec, so peak retained memory is bounded
+    /// by the aggregate cap itself (~256 MiB). This mirrors the existing
+    /// oversize-skip test's sparse-file technique.
+    #[tokio::test]
+    async fn test_max_total_embedded_font_bytes_enforced() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let workfile_path = dir.path().join("aggregate.sigil");
+        tokio::fs::create_dir_all(&workfile_path)
+            .await
+            .expect("create workfile dir");
+
+        // Each file is exactly the per-font cap, so each passes the per-font
+        // check; the number of files makes the SUM exceed the aggregate cap.
+        let per_file = sigil_core::validate::MAX_EMBEDDED_FONT_BYTES;
+        let n_files = sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES / per_file + 1; // strictly over the cap
+
+        let mut doc = Document::new("Aggregate".to_string());
+        let mut uuids = Vec::with_capacity(n_files);
+        let mut font_bytes_map: HashMap<Uuid, Vec<u8>> = HashMap::new();
+        for i in 0..n_files {
+            let id = Uuid::from_u128(900_000 + i as u128);
+            uuids.push(id);
+            let entry = sigil_core::FontEntry::new(
+                id,
+                format!("Font{i}"),
+                format!("Font{i}-Regular"),
+                sigil_core::FontSource::Custom { asset_uuid: id },
+                test_font_metrics(),
+                0,
+                sigil_core::EmbedDecision::Embed,
+                false,
+                vec![],
+            )
+            .expect("FontEntry is valid");
+            doc.font_table_mut().add(entry).expect("add font entry");
+            // Tiny payload so the manifest lists every UUID in font_assets.
+            font_bytes_map.insert(id, vec![0u8; 4]);
+        }
+
+        let prepared = prepare_save(&doc, &font_bytes_map).expect("prepare_save");
+        write_prepared_save(&prepared, &workfile_path)
+            .await
+            .expect("write_prepared_save");
+
+        // Sparse-resize every font file to the per-font cap.
+        for id in &uuids {
+            let path = workfile_path.join("fonts").join(format!("{id}.ttf"));
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(&path)
+                .expect("open font file for sparse write");
+            file.set_len(per_file as u64)
+                .expect("set_len to per-font cap");
+        }
+
+        let loaded = load_workfile(&workfile_path)
+            .await
+            .expect("load_workfile must succeed (degrade) under the aggregate cap");
+
+        let loaded_total: usize = loaded.font_bytes.values().map(Vec::len).sum();
+        assert!(
+            loaded_total <= sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES,
+            "loaded embedded-font total {loaded_total} must not exceed the aggregate cap {}",
+            sigil_core::MAX_TOTAL_EMBEDDED_FONT_BYTES
+        );
+        assert!(
+            loaded.font_bytes.len() < n_files,
+            "at least one over-aggregate font must be skipped (loaded {} of {n_files})",
+            loaded.font_bytes.len()
         );
     }
 

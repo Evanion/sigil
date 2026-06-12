@@ -104,13 +104,13 @@ pub use validate::{
     MAX_PROPERTIES_PER_COMPONENT, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
     MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TEXT_SHADOW_BLUR, MAX_TOKEN_DESCRIPTION_LEN,
     MAX_TOKEN_EXPRESSION_LENGTH, MAX_TOKEN_FONT_FAMILIES, MAX_TOKEN_NAME_LEN,
-    MAX_TOKENS_PER_CONTEXT, MAX_TRANSITION_DURATION, MAX_TRANSITIONS_PER_DOCUMENT,
-    MAX_VARIANTS_PER_COMPONENT, MIN_COLOR_CHANNEL, MIN_CORNER_SMOOTHING, MIN_FONT_SIZE,
-    MIN_FONT_WEIGHT, MIN_GROUP_MEMBERS, validate_asset_ref, validate_collection_size,
-    validate_color_channel, validate_color_channel_finite, validate_conic_gradient,
-    validate_corners, validate_finite, validate_floats_in_value, validate_grid_track,
-    validate_node_name, validate_page_name, validate_style_value_expression, validate_text_content,
-    validate_token_name,
+    MAX_TOKENS_PER_CONTEXT, MAX_TOTAL_EMBEDDED_FONT_BYTES, MAX_TRANSITION_DURATION,
+    MAX_TRANSITIONS_PER_DOCUMENT, MAX_VARIANTS_PER_COMPONENT, MIN_COLOR_CHANNEL,
+    MIN_CORNER_SMOOTHING, MIN_FONT_SIZE, MIN_FONT_WEIGHT, MIN_GROUP_MEMBERS, validate_asset_ref,
+    validate_collection_size, validate_color_channel, validate_color_channel_finite,
+    validate_conic_gradient, validate_corners, validate_finite, validate_floats_in_value,
+    validate_grid_track, validate_node_name, validate_page_name, validate_style_value_expression,
+    validate_text_content, validate_token_name,
 };
 
 #[must_use]

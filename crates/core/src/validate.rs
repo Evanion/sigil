@@ -539,6 +539,40 @@ pub const MAX_FONTS_PER_DOCUMENT: usize = 256;
 /// Rejects over-limit payloads before buffering to prevent memory exhaustion.
 pub const MAX_EMBEDDED_FONT_BYTES: usize = 32 * 1024 * 1024;
 
+/// Maximum total byte length of ALL embedded (Custom) font payloads held
+/// resident for a single session (256 MiB).
+///
+/// # Rationale
+///
+/// The per-font cap (`MAX_EMBEDDED_FONT_BYTES` = 32 MiB) and the per-document
+/// font-count cap (`MAX_FONTS_PER_DOCUMENT` = 256) multiply to ~8 GiB of
+/// resident embedded-font bytes — a memory-exhaustion vector in the
+/// resource-constrained container target (CLAUDE.md "Performance Requirements:
+/// The app runs in containers with limited resources"). This aggregate cap
+/// bounds the sum of all `session.font_bytes` payloads so a session cannot be
+/// driven to multi-GiB resident memory by repeatedly adding 32 MiB fonts.
+///
+/// `256 MiB` is chosen as 8 × the per-font cap: large enough to admit a
+/// realistic design system (dozens of embedded weights/styles) while keeping
+/// worst-case resident font memory an order of magnitude below the naïve
+/// 8 GiB product. It is necessarily `>= MAX_EMBEDDED_FONT_BYTES` so a single
+/// at-limit font always fits.
+///
+/// # Enforcement
+///
+/// This cap is enforced as a running sum at the byte-store boundary — the
+/// GraphQL `add_font` mutation and the MCP `add_font` flow, which own
+/// `session.font_bytes`. The core `AddFontEntry` operation cannot see the byte
+/// store (core is I/O-free and holds no session state), so the aggregate check
+/// lives in the transport handlers. See
+/// `test_max_total_embedded_font_bytes_enforced` in those crates.
+pub const MAX_TOTAL_EMBEDDED_FONT_BYTES: usize = 256 * 1024 * 1024;
+
+const _: () = assert!(
+    MAX_TOTAL_EMBEDDED_FONT_BYTES >= MAX_EMBEDDED_FONT_BYTES,
+    "aggregate embedded-font cap must admit at least one at-limit font",
+);
+
 /// Maximum length of a base64-encoded embedded font payload.
 ///
 /// Base64 encoding inflates raw bytes by a factor of 4/3 (every 3 bytes become
@@ -1881,10 +1915,18 @@ mod tests {
         );
     }
 
-    // ── MAX_FONT_BYTES_BASE64_LEN enforcement ─────────────────────────────
+    // ── MAX_FONT_BYTES_BASE64_LEN formula relationship ───────────────────
+    //
+    // This is NOT an `_enforced` test: `MAX_FONT_BYTES_BASE64_LEN` is a
+    // pre-decode bound enforced in the transport crates (server `add_font`
+    // mutation, MCP `add_font` flow), not in core. Those crates carry the
+    // real `test_max_font_bytes_base64_len_enforced` tests that exercise the
+    // length guard against an over-limit string. This test verifies only the
+    // mathematical relationship between the constant and `MAX_EMBEDDED_FONT_BYTES`
+    // so the two stay in sync — it deliberately does not claim enforcement.
 
     #[test]
-    fn test_max_font_bytes_base64_len_enforced() {
+    fn test_max_font_bytes_base64_len_formula() {
         // The constant must be strictly greater than MAX_EMBEDDED_FONT_BYTES
         // (base64 is larger than raw bytes) and consistently derivable from it.
         assert!(
@@ -1899,17 +1941,6 @@ mod tests {
             expected_b64_len <= MAX_FONT_BYTES_BASE64_LEN,
             "MAX_FONT_BYTES_BASE64_LEN ({MAX_FONT_BYTES_BASE64_LEN}) must be >= \
              base64-encoded length of MAX_EMBEDDED_FONT_BYTES ({expected_b64_len})"
-        );
-        // A string of length MAX_FONT_BYTES_BASE64_LEN + 1 must be rejected.
-        // The transport enforcement is in the server and MCP crates; this test
-        // verifies the constant value is correct (not a tautology — we are
-        // asserting the mathematical bound, not just that the constant equals itself).
-        let over_limit_len = MAX_FONT_BYTES_BASE64_LEN + 1;
-        assert!(
-            over_limit_len > MAX_FONT_BYTES_BASE64_LEN,
-            "over-limit check: {} > {}",
-            over_limit_len,
-            MAX_FONT_BYTES_BASE64_LEN
         );
     }
 
