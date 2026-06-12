@@ -322,10 +322,46 @@ mod tests {
 
     #[test]
     fn test_mutation_broadcast_capacity_enforced() {
-        // Verify the constant has the expected value. Enforcement occurs at
-        // channel construction in `Sessions::new` (one broadcast channel per
-        // session) — see `sessions::registry_tests`.
-        assert_eq!(MUTATION_BROADCAST_CAPACITY, 256);
+        // The constant sizes each per-session broadcast channel
+        // (`Sessions::new` → `broadcast::channel(broadcast_capacity)`).
+        // Enforcement = the buffer is bounded at exactly the constant: a
+        // subscriber that does not drain sees `Lagged` once MORE than
+        // `MUTATION_BROADCAST_CAPACITY` messages are sent. A tautological
+        // `assert_eq!(CONST, 256)` (the prior body) proves nothing — this
+        // exercises the construction-time bound the constant exists to set.
+        use tokio::sync::broadcast::error::TryRecvError;
+
+        let sessions = Sessions::new(MUTATION_BROADCAST_CAPACITY);
+        let id = sessions.register_in_memory(Document::new("cap".to_string()));
+        let session = sessions.get(id).expect("session registered");
+        let mut rx = session.broadcast.subscribe();
+
+        // Fill the buffer exactly to capacity — all of these are retained.
+        for _ in 0..MUTATION_BROADCAST_CAPACITY {
+            session
+                .broadcast
+                .send(sessions::SessionEvent::SessionFatal {
+                    reason: "fill".to_string(),
+                })
+                .expect("subscriber alive, send succeeds");
+        }
+        // One more send overflows the bound and evicts the oldest message.
+        session
+            .broadcast
+            .send(sessions::SessionEvent::SessionFatal {
+                reason: "overflow".to_string(),
+            })
+            .expect("subscriber alive, send succeeds");
+
+        // The bound fired: the lagging subscriber's next read reports exactly
+        // one dropped message (the overflow displaced the oldest). An
+        // unbounded or mis-sized channel would NOT lag here.
+        match rx.try_recv() {
+            Err(TryRecvError::Lagged(dropped)) => {
+                assert_eq!(dropped, 1, "exactly one message past capacity dropped");
+            }
+            other => panic!("expected Lagged(1) at capacity+1, got {other:?}"),
+        }
     }
 }
 

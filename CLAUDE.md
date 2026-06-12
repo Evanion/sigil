@@ -520,6 +520,8 @@ Every `MAX_*`, `MIN_*`, or `LIMIT_*` constant MUST have at least one test that v
 
 Specifically reject tests that ONLY contain assertions of the form `assert!(CONST <= literal)`, `assert!(CONST >= literal)`, `expect(CONST).toBe(…)`, or `assert_eq!(CONST, …)` — these are tautologies that read the constant's value but do not exercise enforcement. The check must ship with a violation-fires test per the "CI Guards Must Ship With a Violation-Fires Test" rule below.
 
+This guard SHIPS as the `enforced-test-tautology-check` CI job (`.github/workflows/ci.yml`, in the `ci-gate` aggregate). It runs `.github/workflows/scripts/enforced-tautology-check.sh`, which globs `crates/**/*.rs` and `frontend/src/**/*.{ts,tsx}` (per "CI Guards Must Cover Their Whole File Class") and fails on any `*_enforced` test whose only assertions read a constant's value with no fallible-boundary signal. Its violation-fires sentinel — `.github/workflows/scripts/test-enforced-tautology-check.sh` — runs in the same job before the scan and asserts the guard fires on a representative tautology and passes on a legitimate enforcement test in BOTH Rust and TypeScript.
+
 Precedent: PR #67 (Spec 18) — `test_min_color_channel_enforced` asserted `MIN_COLOR_CHANNEL <= 0.0` (tautology). The `_enforced` suffix made the constant pass any `_enforced`-grep audit despite zero actual enforcement in production. The prose-only obligation above was not sufficient — the implementer named the test correctly per the convention but skipped the enforcement-asserting body. Four reviewers (Architect, BE, Compliance, Data Scientist) independently flagged this. CI enforcement is the only fix that prevents recurrence.
 
 ### CI Guards Must Ship With a Violation-Fires Test
