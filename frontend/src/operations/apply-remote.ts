@@ -26,6 +26,7 @@ import type {
   FontEntry,
 } from "../types/document";
 import { parseFontEntry } from "../store/font-input";
+import { unloadFont } from "../canvas/font-face-loader";
 import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
 import {
   isValidStyleValue,
@@ -1301,6 +1302,9 @@ function applyRemoveFont(value: unknown, setState: SetStoreFunction<StoreState>)
       Reflect.deleteProperty(s.fontTable, fontId);
     }),
   );
+  // RF-006: unload the FontFace from document.fonts so a remote removal does
+  // not leak the face or let it shadow a later same-family font.
+  unloadFont(fontId);
 }
 
 // ── Internal: rename_token ───────────────────────────────────────────

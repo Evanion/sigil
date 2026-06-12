@@ -439,6 +439,64 @@ describe("installFontLoadingOrchestrator", () => {
     disposeRoot();
   });
 
+  it("should re-fetch a font when the same id is removed and re-added (RF-005 prune)", async () => {
+    // RF-005: processedIds must drop ids no longer present in fontTable so a
+    // remove-then-re-add of the same id reloads. Without the prune the set is
+    // append-only and the re-added id is treated as "already processed".
+    const fontId = "id-readd-1";
+    const b64 = btoa(String.fromCharCode(4, 5, 6));
+
+    const queryMock = vi
+      .fn()
+      .mockImplementation((_doc: unknown, variables: Record<string, unknown>) => {
+        const id = variables["id"] as string;
+        return {
+          toPromise: () => Promise.resolve({ data: { fontBytes: id === fontId ? b64 : null } }),
+        };
+      });
+    const client = { query: queryMock };
+
+    const entry = makeEntry(fontId, "ReAddFont", { source: "custom", asset_uuid: "ra1" });
+    const [getFontTable, setFontTable] = createSignal<Record<string, FontEntry>>({
+      [fontId]: entry,
+    });
+
+    let disposeRoot: () => void = () => undefined;
+    await new Promise<void>((resolve) => {
+      disposeRoot = createRoot((dispose) => {
+        installFontLoadingOrchestrator(
+          getFontTable,
+          client as unknown as import("../font-loading").FontBytesClient,
+        );
+        resolve();
+        return dispose;
+      });
+    });
+
+    // First add resolves — fetched once.
+    await flushAsync();
+    expect(
+      queryMock.mock.calls.filter((args) => (args[1] as Record<string, unknown>)["id"] === fontId)
+        .length,
+    ).toBe(1);
+
+    // Remove the id (reactively).
+    setFontTable(() => ({}));
+    await flushAsync();
+
+    // Re-add the same id (reactively).
+    setFontTable(() => ({ [fontId]: entry }));
+    await flushAsync();
+
+    // The fetch MUST have been dispatched a second time for the re-added id.
+    const totalQueriesForId = queryMock.mock.calls.filter(
+      (args) => (args[1] as Record<string, unknown>)["id"] === fontId,
+    ).length;
+    expect(totalQueriesForId).toBe(2);
+
+    disposeRoot();
+  });
+
   it("should not update fontLoadVersion after teardown (destroyed guard)", async () => {
     const fontId = "teardown-id";
     const b64 = btoa(String.fromCharCode(9, 8, 7));

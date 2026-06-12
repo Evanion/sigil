@@ -8,7 +8,7 @@
  * async plumbing visible at the call site.
  */
 
-import type { FontProvenance } from "../types/document";
+import type { EmbedDecision, FontEntry, FontProvenance } from "../types/document";
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -16,9 +16,13 @@ import type { FontProvenance } from "../types/document";
  * Minimal slice of DocumentStoreAPI consumed by the add-font handler.
  * Using a structural sub-type here lets tests supply a minimal mock without
  * importing the full DocumentStoreAPI.
+ *
+ * RF-002: addFont resolves to the full server-canonical FontEntry so the
+ * handler can branch its status message on `entry.embeddable` (embed vs
+ * reference) and use the canonical `entry.family` (not the stripped filename).
  */
 export interface AddFontStore {
-  addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<string>;
+  addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<FontEntry>;
   setNodeFont(uuid: string, entryId: string): void;
 }
 
@@ -33,6 +37,48 @@ export interface AddFontResult {
    * Undefined on failure.
    */
   readonly family?: string;
+  /**
+   * RF-002/RF-003: the embed classification on success (undefined on failure),
+   * so the caller can pick the toast variant (a non-alarming warning for
+   * reference decisions, success for "embed").
+   */
+  readonly embeddable?: EmbedDecision;
+}
+
+/**
+ * RF-002: build the status/toast message for a successful add, branching on
+ * the server's embed classification.
+ *
+ * - "embed": the font's OS/2 fsType permits embedding → plain "Added {family}".
+ * - reference_* : the font will be referenced (not embedded) on export. We
+ *   surface a distinct, NON-alarming notice naming the family so the user
+ *   understands the font won't travel with the exported document.
+ *
+ * Exhaustive switch with a `never` sentinel so a new EmbedDecision variant
+ * fails tsc here (CLAUDE.md §11 discriminated-union dispatch rule).
+ */
+export function addFontSuccessMessage(
+  family: string,
+  embeddable: EmbedDecision,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string {
+  switch (embeddable) {
+    case "embed":
+      return t("panels:typography.fontAdded", { family });
+    case "reference_restricted":
+    case "reference_system":
+    case "reference_no_os2":
+    case "reference_preview_print":
+      return t("panels:typography.fontAddedReferenced", { family });
+    default: {
+      // Exhaustiveness sentinel: unreachable if every EmbedDecision variant is
+      // handled above; a new variant fails tsc here.
+      const _exhaustive: never = embeddable;
+      void _exhaustive;
+      // Fall back to the plain message rather than throwing in a UI path.
+      return t("panels:typography.fontAdded", { family });
+    }
+  }
 }
 
 // ── Exported helpers ─────────────────────────────────────────────────────
@@ -77,32 +123,35 @@ export async function handleAddFontFile(
 
   // Add the font to the document via the store. NOT fire-and-forget — await
   // and handle rejection per CLAUDE.md §11 "No Fire-and-Forget Mutations".
-  let entryId: string;
+  // RF-002: addFont resolves to the full server-canonical FontEntry.
+  let entry: FontEntry;
   try {
-    entryId = await store.addFont(bytes, "user_supplied");
+    entry = await store.addFont(bytes, "user_supplied");
   } catch (err: unknown) {
+    // RF-015: store.addFont already rejects with a clean user-facing message
+    // (no `addFont:` debug prefix). Surface that message verbatim; verbose
+    // detail stays in the store's console.error.
     const msg = err instanceof Error ? err.message : String(err);
     console.error("handleAddFontFile: addFont rejected", err);
     return {
-      statusMessage: t("panels:typography.fontAddError", { error: msg }),
+      statusMessage: msg,
       ok: false,
     };
   }
 
   // Apply the new font to the selected text node (if any).
   if (nodeUuid !== null) {
-    store.setNodeFont(nodeUuid, entryId);
+    store.setNodeFont(nodeUuid, entry.id);
   }
 
-  // Extract family name from the file name as a display hint (server returns
-  // the authoritative family in FontEntry, but we don't have it here — the
-  // caller can enrich the message later if needed; the entryId gives a stable
-  // handle).  Strip common suffixes for a readable label.
-  const family = file.name.replace(/\.(ttf|otf|woff2?|ttc)$/i, "");
-
+  // RF-002/RF-003: use the canonical family from the FontEntry (NOT the
+  // stripped filename) and branch the status message on the embed
+  // classification.
+  const family = entry.family;
   return {
-    statusMessage: t("panels:typography.fontAdded", { family }),
+    statusMessage: addFontSuccessMessage(family, entry.embeddable, t),
     ok: true,
     family,
+    embeddable: entry.embeddable,
   };
 }

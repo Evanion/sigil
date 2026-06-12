@@ -39,6 +39,43 @@ const REFERENCE_AVG_ADVANCE_RATIO = 0.5;
 const METRIC_FALLBACK_PERCENT = "100%";
 
 // ---------------------------------------------------------------------------
+// Created-face registry (RF-006)
+//
+// Tracks every FontFace this module added to `document.fonts`, keyed by the
+// owning FontEntry id, so `unloadFont(id)` can remove the exact face on
+// remove. Without this, removing a font leaks its FontFace and a stale face
+// can shadow a later same-family font.
+//
+// Per CLAUDE.md §5 "Module-Level Timers and Subscriptions Must Be Cleared on
+// Teardown": this map's entries are reclaimed by `unloadFont` at the same
+// boundary that removes the font from the store (store.removeFont and the
+// remote remove_font handler), so faces never outlive their table entry.
+// ---------------------------------------------------------------------------
+
+const createdFaces = new Map<string, FontFace>();
+
+/**
+ * Remove the FontFace previously created for `id` from `document.fonts` and
+ * drop its registry entry. Idempotent: a no-op if no face was tracked for the
+ * id (e.g. bundled fonts, or an entry whose load failed and already reverted).
+ */
+export function unloadFont(id: string): void {
+  const face = createdFaces.get(id);
+  if (face === undefined) return;
+  try {
+    document.fonts.delete(face);
+  } catch (err) {
+    // document.fonts.delete should not throw for a face we added, but guard
+    // so a teardown path never crashes the caller.
+    console.error("[font-face-loader] unloadFont: failed to delete face", {
+      id,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  createdFaces.delete(id);
+}
+
+// ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
@@ -232,6 +269,8 @@ async function loadCustomFont(
   // lib.dom.d.ts stricter-generic artifact.
   const face = new FontFace(family, bytes as unknown as BufferSource);
   document.fonts.add(face);
+  // RF-006: track the created face so removeFont/unloadFont can delete it.
+  createdFaces.set(id, face);
 
   try {
     await face.load();
@@ -241,6 +280,7 @@ async function loadCustomFont(
     // "No Fire-and-Forget Mutations" and "No Silent Error Suppression":
     // we must revert optimistic state on failure.
     document.fonts.delete(face);
+    createdFaces.delete(id);
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("[font-face-loader] Failed to load custom font", { id, family, error: errorMsg });
     return { id, family, status: "error", error: errorMsg };
@@ -266,12 +306,15 @@ async function loadSystemOrFallback(entry: FontEntry): Promise<FontLoadResult> {
   const descriptors = buildMetricFallback(metrics);
   const face = new FontFace(family, "local('Arial')", descriptors);
   document.fonts.add(face);
+  // RF-006: track the created fallback face so unloadFont can delete it.
+  createdFaces.set(id, face);
 
   try {
     await face.load();
     return { id, family, status: "fallback" };
   } catch (err) {
     document.fonts.delete(face);
+    createdFaces.delete(id);
     const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("[font-face-loader] Failed to register metric fallback", {
       id,

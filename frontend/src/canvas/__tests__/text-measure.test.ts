@@ -209,7 +209,20 @@ describe("buildFontString", () => {
       font_entry: "arial-entry-id",
     });
     const resolver = (id: string) => (id === "arial-entry-id" ? "Arial" : FALLBACK_FONT_FAMILY);
-    expect(buildFontString(style, resolver)).toBe("400 16px Arial");
+    // RF-010: family is double-quoted in ctx.font.
+    expect(buildFontString(style, resolver)).toBe('400 16px "Arial"');
+  });
+
+  it("should double-quote a multi-word family so it resolves (RF-010)", () => {
+    const style = makeStyle({
+      font_weight: 400,
+      font_style: "normal",
+      font_size: { type: "literal", value: 16 },
+      font_entry: "open-sans-entry-id",
+    });
+    const resolver = (id: string) =>
+      id === "open-sans-entry-id" ? "Open Sans" : FALLBACK_FONT_FAMILY;
+    expect(buildFontString(style, resolver)).toBe('400 16px "Open Sans"');
   });
 
   it("should prepend italic when font_style is italic", () => {
@@ -219,7 +232,7 @@ describe("buildFontString", () => {
       font_entry: "georgia-entry-id",
     });
     const resolver = (id: string) => (id === "georgia-entry-id" ? "Georgia" : FALLBACK_FONT_FAMILY);
-    expect(buildFontString(style, resolver)).toBe("italic 400 14px Georgia");
+    expect(buildFontString(style, resolver)).toBe('italic 400 14px "Georgia"');
   });
 
   it("should use default font size 16 for token_ref font_size", () => {
@@ -234,7 +247,7 @@ describe("buildFontString", () => {
       font_entry: "roboto-entry-id",
     });
     const resolver = (id: string) => (id === "roboto-entry-id" ? "Roboto" : FALLBACK_FONT_FAMILY);
-    expect(buildFontString(style, resolver)).toBe("700 18px Roboto");
+    expect(buildFontString(style, resolver)).toBe('700 18px "Roboto"');
   });
 
   it("should produce a string with no NaN values", () => {

@@ -67,6 +67,8 @@ import {
   getGraphqlWsUrl,
   setSessionGlobals,
 } from "../transport/session";
+import { i18nInstance } from "../i18n";
+import { unloadFont } from "../canvas/font-face-loader";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -194,10 +196,13 @@ export interface DocumentStoreAPI {
    *
    * @param bytes      Raw font file bytes (TTF, OTF, WOFF, WOFF2).
    * @param provenance One of the `FontProvenance` variants, e.g. `"user_supplied"`.
-   * @returns          A `Promise` resolving to the new entry's stable UUID.
+   * @returns          A `Promise` resolving to the full server-canonical
+   *                   `FontEntry` (incl. its `family` and `embeddable`
+   *                   classification). Callers use `embeddable` to surface the
+   *                   embed-vs-reference distinction (RF-002).
    *                   Rejects on validation failure, oversize payload, or server error.
    */
-  addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<string>;
+  addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<FontEntry>;
 
   /**
    * Remove a font from the document's font library.
@@ -2669,13 +2674,21 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
    *
    * Resource-import model: NOT on the undo stack (controller-approved).
    */
-  async function addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<string> {
+  async function addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<FontEntry> {
+    // RF-015: All rejection messages reaching the user are user-facing (no
+    // `addFont:` debug prefix, no raw byte counts). Verbose diagnostic detail
+    // stays in console.error only.
+
     // Symmetric pre-check: reject oversize payloads before base64-encoding.
     // Mirrors `crates/core/src/validate.rs MAX_EMBEDDED_FONT_BYTES`.
     if (bytes.length > MAX_EMBEDDED_FONT_BYTES) {
-      const msg = `addFont: font file is ${bytes.length} bytes, exceeds max ${MAX_EMBEDDED_FONT_BYTES}`;
-      announceError(msg);
-      return Promise.reject(new Error(msg));
+      const maxMb = Math.floor(MAX_EMBEDDED_FONT_BYTES / (1024 * 1024));
+      console.error(
+        `addFont: font file is ${bytes.length} bytes, exceeds max ${MAX_EMBEDDED_FONT_BYTES}`,
+      );
+      const userMsg = i18nInstance.t("panels:typography.fontTooLarge", { maxMb });
+      announceError(userMsg);
+      return Promise.reject(new Error(userMsg));
     }
 
     // Base64-encode defensively (chunk-based to avoid stack overflow on large files).
@@ -2683,10 +2696,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     try {
       bytesBase64 = uint8ArrayToBase64(bytes);
     } catch (err: unknown) {
-      const msg = `addFont: failed to base64-encode font bytes`;
-      console.error(msg, err);
-      announceError(msg);
-      return Promise.reject(new Error(msg));
+      console.error("addFont: failed to base64-encode font bytes", err);
+      const userMsg = i18nInstance.t("panels:typography.fontAddFailed");
+      announceError(userMsg);
+      return Promise.reject(new Error(userMsg));
     }
 
     // Send to server — classification happens server-side.
@@ -2696,17 +2709,17 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
         .mutation(gql(ADD_FONT_MUTATION), { bytesBase64, provenance })
         .toPromise();
     } catch (err: unknown) {
-      const msg = `addFont: network error`;
-      console.error(msg, err);
-      announceError(msg);
-      return Promise.reject(new Error(msg));
+      console.error("addFont: network error", err);
+      const userMsg = i18nInstance.t("panels:typography.fontAddFailed");
+      announceError(userMsg);
+      return Promise.reject(new Error(userMsg));
     }
 
     if (result.error) {
-      const msg = `addFont: server error — ${result.error.message}`;
-      console.error(msg);
-      announceError(msg);
-      return Promise.reject(new Error(msg));
+      console.error(`addFont: server error — ${result.error.message}`);
+      const userMsg = i18nInstance.t("panels:typography.fontAddFailed");
+      announceError(userMsg);
+      return Promise.reject(new Error(userMsg));
     }
 
     // The server returns the full FontEntry as a JSON scalar.  Parse and
@@ -2714,10 +2727,10 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     const rawEntry: unknown = (result.data as Record<string, unknown> | undefined)?.["addFont"];
     const entry = parseFontEntry(rawEntry);
     if (entry === null) {
-      const msg = `addFont: server returned an invalid FontEntry`;
-      console.warn(msg, rawEntry);
-      announceError(msg);
-      return Promise.reject(new Error(msg));
+      console.warn("addFont: server returned an invalid FontEntry", rawEntry);
+      const userMsg = i18nInstance.t("panels:typography.fontAddFailed");
+      announceError(userMsg);
+      return Promise.reject(new Error(userMsg));
     }
 
     // Insert into the font table. The font-loading orchestrator (Task 17) watches
@@ -2725,7 +2738,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // call loadFonts here.
     setState("fontTable", entry.id, entry);
 
-    return entry.id;
+    // RF-002: return the full server-canonical FontEntry so the caller can
+    // surface the embed-vs-reference classification (entry.embeddable).
+    return entry;
   }
 
   /**
@@ -2799,7 +2814,14 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
       const msg = `removeFont: server error — ${result.error.message}`;
       console.error(msg);
       announceError(msg);
+      return;
     }
+
+    // RF-006: server confirmed the removal — unload the FontFace from
+    // document.fonts so it does not leak or shadow a later same-family font.
+    // Done only on the success path; the rollback branches above leave the
+    // face untouched (it was never removed) so the table stays consistent.
+    unloadFont(id);
   }
 
   /**

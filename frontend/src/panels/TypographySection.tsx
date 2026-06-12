@@ -264,6 +264,12 @@ export const TypographySection: Component = () => {
   // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
   let fileInputRef: HTMLInputElement | undefined;
 
+  // RF-012: ref to the "Add font…" button so focus returns to it after the
+  // native file dialog closes (the hidden input is tabindex=-1 and must not
+  // hold focus). WCAG 2.4.3 Focus Order.
+  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
+  let addFontButtonRef: HTMLButtonElement | undefined;
+
   // ── Handlers ──────────────────────────────────────────────────────
 
   /**
@@ -278,21 +284,40 @@ export const TypographySection: Component = () => {
     // Reset early so re-selecting the same file re-fires the change event.
     input.value = "";
 
+    // RF-012: return focus to the visible "Add font…" button after the native
+    // file dialog closes — including the no-file (cancelled) early-return.
+    addFontButtonRef?.focus();
+
     if (!file) return;
 
     const uuid = selectedUuid();
 
     // No fire-and-forget: we attach an error handler and update the status
-    // region on both success and failure (CLAUDE.md §11).
+    // region on both success and failure (CLAUDE.md §11). RF-003: the outcome
+    // is ALSO routed to the visible Toast channel — the sr-only role=status
+    // region remains the screen-reader channel (it is not re-mounted).
     handleAddFontFile(file, uuid, store, t).then(
       (result) => {
         announce(result.statusMessage);
+        if (result.ok) {
+          // RF-002/RF-003: a reference (non-embeddable) result uses a
+          // non-alarming "warning" variant; an embeddable one uses "success".
+          const isReferenced = result.embeddable !== undefined && result.embeddable !== "embed";
+          showToast({
+            title: result.statusMessage,
+            variant: isReferenced ? "warning" : "success",
+          });
+        } else {
+          showToast({ title: result.statusMessage, variant: "error" });
+        }
       },
       (err: unknown) => {
         // Should not reach here — handleAddFontFile catches all errors and
         // resolves with an error AddFontResult — but guard defensively.
         const msg = err instanceof Error ? err.message : String(err);
-        announce(t("panels:typography.fontAddError", { error: msg }));
+        const statusMessage = t("panels:typography.fontAddError", { error: msg });
+        announce(statusMessage);
+        showToast({ title: statusMessage, variant: "error" });
       },
     );
   }
@@ -576,7 +601,12 @@ export const TypographySection: Component = () => {
         />
 
         {/* "Add font…" button — keyboard-accessible via Kobalte Button wrapper */}
-        <Button variant="secondary" size="sm" onClick={() => fileInputRef?.click()}>
+        <Button
+          ref={addFontButtonRef}
+          variant="secondary"
+          size="sm"
+          onClick={() => fileInputRef?.click()}
+        >
           {t("panels:typography.addFont")}
         </Button>
       </div>

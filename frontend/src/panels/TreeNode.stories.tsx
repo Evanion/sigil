@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { makeTestFontEntry } from "../test-utils/font-entry";
 import { createSignal } from "solid-js";
 import { TreeNode } from "./TreeNode";
 import { DocumentProvider } from "../store/document-context";
@@ -72,7 +73,7 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     renameToken: () => {},
     resolveToken: () => null,
     getFontEntry: () => undefined,
-    addFont: () => Promise.resolve(""),
+    addFont: () => Promise.resolve(makeTestFontEntry()),
     removeFont: () => Promise.resolve(),
     setNodeFont: () => {},
     destroy: () => {},

@@ -10,7 +10,7 @@ import { HistoryManager } from "../../operations/history-manager";
 import { createSetFieldOp } from "../../operations/operation-helpers";
 import { applyOperationToStore, type StoreStateReader } from "../../operations/apply-to-store";
 import { parseFontEntry } from "../font-input";
-import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
+import { DEFAULT_FONT_ENTRY_ID, type FontEntry } from "../../types/document";
 import { MAX_EMBEDDED_FONT_BYTES } from "../../types/validation";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ function makeFontEntry(id: string, family = "Inter"): Record<string, unknown> {
       is_serif: false,
     },
     fs_type: 0,
-    embeddable: "embed_editable",
+    embeddable: "embed",
     is_variable: false,
     axes: [],
   };
@@ -118,7 +118,7 @@ describe("addFont (isolated logic tests)", () => {
       fontTableUpdates,
     );
 
-    expect(result).toBe(entryId);
+    expect(result.id).toBe(entryId);
     expect(mockMutation).toHaveBeenCalledOnce();
     expect(fontTableUpdates).toHaveLength(1);
     expect(fontTableUpdates[0]).toMatchObject({ id: entryId, family: "Inter" });
@@ -141,7 +141,7 @@ describe("addFont (isolated logic tests)", () => {
       fontTableUpdates,
     );
 
-    expect(result).toBe(entryId);
+    expect(result.id).toBe(entryId);
     expect(fontTableUpdates).toHaveLength(1);
     expect(fontTableUpdates[0]).toMatchObject({ id: entryId, family: "Roboto" });
   });
@@ -554,7 +554,7 @@ type MutationResult = { error: { message: string } | null; data: Record<string, 
 
 /**
  * Simulates the addFont store function.
- * Returns the new entry id on success, or throws on error.
+ * Returns the new FontEntry on success (RF-002), or throws on error.
  */
 async function simulateAddFont(
   bytes: Uint8Array,
@@ -562,7 +562,7 @@ async function simulateAddFont(
   mutationFn: (vars: Record<string, unknown>) => Promise<MutationResult>,
   announceErrorFn: (msg: string) => void,
   fontTableUpdates?: Record<string, unknown>[],
-): Promise<string> {
+): Promise<FontEntry> {
   if (bytes.length > MAX_EMBEDDED_FONT_BYTES) {
     const msg = `addFont: font file is ${bytes.length} bytes, exceeds max ${MAX_EMBEDDED_FONT_BYTES}`;
     announceErrorFn(msg);
@@ -599,7 +599,8 @@ async function simulateAddFont(
   // Insert into table (in real code: setState("fontTable", entry.id, entry))
   fontTableUpdates?.push(entry as unknown as Record<string, unknown>);
 
-  return entry.id;
+  // RF-002: real store.addFont returns the full FontEntry, not just the id.
+  return entry;
 }
 
 type NodeShape = { kind: { type: string; text_style?: { font_entry: string } } };

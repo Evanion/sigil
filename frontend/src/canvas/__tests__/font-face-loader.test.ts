@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { buildMetricFallback, loadFonts } from "../font-face-loader";
+import { buildMetricFallback, loadFonts, unloadFont } from "../font-face-loader";
 import type { FontEntry, FontMetrics, FontSource } from "../../types/document";
 
 // ---------------------------------------------------------------------------
@@ -577,5 +577,51 @@ describe("loadFonts (batch)", () => {
     expect(results).toHaveLength(2);
     expect(results[0].status).toBe("missing"); // custom with no bytes
     expect(results[1].status).toBe("loaded"); // bundled
+  });
+});
+
+// ---------------------------------------------------------------------------
+// unloadFont (RF-006)
+// ---------------------------------------------------------------------------
+
+describe("unloadFont (RF-006)", () => {
+  it("should delete the FontFace created for a custom font from document.fonts", async () => {
+    const entry = makeEntry("id-unload-1", "UnloadFont", {
+      source: "custom",
+      asset_uuid: "uuid-unload-1",
+    });
+    const bytesById = new Map([["id-unload-1", new Uint8Array([7, 8, 9])]]);
+
+    const results = await loadFonts([entry], bytesById);
+    expect(results[0].status).toBe("loaded");
+    // The face was added.
+    expect(mockFonts._added).toHaveLength(1);
+    const addedFace = mockFonts._added[0];
+
+    // Unload it — document.fonts.delete must be called with the same face.
+    unloadFont("id-unload-1");
+
+    expect(mockFonts._deleted).toHaveLength(1);
+    expect(mockFonts._deleted[0]).toBe(addedFace);
+  });
+
+  it("should be idempotent — a second unload for the same id is a no-op", async () => {
+    const entry = makeEntry("id-unload-2", "UnloadTwice", {
+      source: "custom",
+      asset_uuid: "uuid-unload-2",
+    });
+    const bytesById = new Map([["id-unload-2", new Uint8Array([1, 2])]]);
+
+    await loadFonts([entry], bytesById);
+    unloadFont("id-unload-2");
+    unloadFont("id-unload-2");
+
+    // delete called exactly once despite two unload calls.
+    expect(mockFonts._deleted).toHaveLength(1);
+  });
+
+  it("should be a no-op for an id that was never loaded", () => {
+    unloadFont("never-loaded-id");
+    expect(mockFonts._deleted).toHaveLength(0);
   });
 });

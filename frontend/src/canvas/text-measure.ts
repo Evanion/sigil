@@ -207,7 +207,11 @@ export function buildFontString(
   // returned an un-validated value from a different path.
   const family = validateCssIdentifier(rawFamily) ? rawFamily : "sans-serif";
 
-  return `${italic}${String(style.font_weight)} ${String(fontSize)}px ${family}`;
+  // RF-010: double-quote the family so multi-word names ("Open Sans") resolve
+  // correctly in ctx.font. The CSS denylist (validateCssIdentifier) already
+  // guarantees the family contains no embedded double-quote, so the quoting is
+  // injection-safe.
+  return `${italic}${String(style.font_weight)} ${String(fontSize)}px "${family}"`;
 }
 
 // ---------------------------------------------------------------------------

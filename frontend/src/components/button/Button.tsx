@@ -13,6 +13,12 @@ export interface ButtonProps {
   onClick?: () => void;
   class?: string;
   "aria-label"?: string;
+  /**
+   * Ref to the underlying `<button>` element. Forwarded to Kobalte's Button,
+   * which assigns the real DOM node. Enables focus management by consumers
+   * (e.g. RF-012: restoring focus after a native file dialog closes).
+   */
+  ref?: HTMLButtonElement | ((el: HTMLButtonElement) => void);
 }
 
 export function Button(props: ButtonProps) {

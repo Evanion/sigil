@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
+import { makeTestFontEntry } from "../../test-utils/font-entry";
 import { render, screen, cleanup, fireEvent, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
@@ -85,7 +86,7 @@ function createMockStore(
     renameToken: vi.fn(),
     resolveToken: () => null,
     getFontEntry: () => undefined,
-    addFont: vi.fn(() => Promise.resolve("")),
+    addFont: vi.fn(() => Promise.resolve(makeTestFontEntry())),
     removeFont: vi.fn(() => Promise.resolve()),
     setNodeFont: vi.fn(),
     destroy: vi.fn(),
@@ -836,7 +837,9 @@ describe("TypographySection", () => {
   // ── Add font from file (Task 19) ──────────────────────────────────────
 
   it("should render a single persistent role=status region that is not re-mounted on file select", async () => {
-    const addFont = vi.fn(() => Promise.resolve("new-entry-id"));
+    const addFont = vi.fn(() =>
+      Promise.resolve(makeTestFontEntry({ id: "new-entry-id", family: "Inter" })),
+    );
     const setNodeFont = vi.fn();
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     store.addFont = addFont;
@@ -898,6 +901,65 @@ describe("TypographySection", () => {
     expect(fileInput?.getAttribute("aria-label")).toBeTruthy();
     // Must be excluded from Tab order (programmatically triggered by button).
     expect(fileInput?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("should restore focus to the Add font button after the file input change fires (RF-012)", async () => {
+    const addFont = vi.fn(() =>
+      Promise.resolve(makeTestFontEntry({ id: "rf012-entry", family: "Inter" })),
+    );
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.addFont = addFont;
+    store.setNodeFont = vi.fn();
+
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+
+    const mockFile = new File([new Uint8Array([0, 1, 2])], "Inter.ttf", { type: "font/ttf" });
+    if (fileInput) {
+      Object.defineProperty(fileInput, "files", {
+        value: { 0: mockFile, length: 1, item: (i: number) => (i === 0 ? mockFile : null) },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    // Focus must return to the visible button (the tabindex=-1 input must not
+    // hold focus after the dialog closes). WCAG 2.4.3.
+    expect(document.activeElement).toBe(addFontBtn);
+  });
+
+  it("should restore focus to the Add font button when the file dialog is cancelled (no file) (RF-012)", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    if (fileInput) {
+      // No files selected (cancelled dialog) — change still fires the handler.
+      Object.defineProperty(fileInput, "files", {
+        value: { length: 0, item: () => null },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    expect(document.activeElement).toBe(addFontBtn);
   });
 
   it("should not have aria-hidden wrapping a focusable element in the add-font area", () => {

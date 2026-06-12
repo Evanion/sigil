@@ -7,6 +7,7 @@
  * - 1 node: panel not shown (nothing rendered)
  */
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { makeTestFontEntry } from "../test-utils/font-entry";
 import { createSignal } from "solid-js";
 import { AlignPanel } from "./AlignPanel";
 import { DocumentProvider } from "../store/document-context";
@@ -75,7 +76,7 @@ function createMockStore(
     renameToken: () => {},
     resolveToken: () => null,
     getFontEntry: () => undefined,
-    addFont: () => Promise.resolve(""),
+    addFont: () => Promise.resolve(makeTestFontEntry()),
     removeFont: () => Promise.resolve(),
     setNodeFont: () => {},
     destroy: () => {},

@@ -10,18 +10,23 @@
  */
 
 import { describe, it, expect, vi } from "vitest";
-import { handleAddFontFile, type AddFontStore } from "../typography-helpers";
+import { addFontSuccessMessage, handleAddFontFile, type AddFontStore } from "../typography-helpers";
+import type { EmbedDecision, FontEntry } from "../../types/document";
+import { makeTestFontEntry } from "../../test-utils/font-entry";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 /**
  * Create a minimal mock AddFontStore.
- * @param addFontImpl Optional override for addFont — defaults to resolving "entry-123".
+ * @param addFontImpl Optional override for addFont — defaults to resolving an
+ *   embeddable FontEntry with id "entry-123" and family "Inter".
  */
 function makeStore(
-  addFontImpl?: (bytes: Uint8Array) => Promise<string>,
+  addFontImpl?: (bytes: Uint8Array) => Promise<FontEntry>,
 ): AddFontStore & { addFont: ReturnType<typeof vi.fn>; setNodeFont: ReturnType<typeof vi.fn> } {
-  const addFont = vi.fn(addFontImpl ?? (() => Promise.resolve("entry-123")));
+  const addFont = vi.fn(
+    addFontImpl ?? (() => Promise.resolve(makeTestFontEntry({ id: "entry-123", family: "Inter" }))),
+  );
   const setNodeFont = vi.fn();
   return { addFont, setNodeFont };
 }
@@ -64,40 +69,57 @@ describe("handleAddFontFile", () => {
     expect(store.setNodeFont).toHaveBeenCalledWith("node-uuid", "entry-123");
   });
 
-  it("should include the font family name in the result.family field and in the status message", async () => {
-    const store = makeStore();
-    const file = makeFile("Roboto.ttf");
+  it("should use the canonical FontEntry.family (not the filename) in result.family and the status message (RF-002)", async () => {
+    // The file is named "Roboto-weird.ttf" but the server-canonical family is
+    // "Roboto Mono" — the result must reflect the canonical family.
+    const store = makeStore(() =>
+      Promise.resolve(makeTestFontEntry({ id: "e1", family: "Roboto Mono" })),
+    );
+    const file = makeFile("Roboto-weird.ttf");
 
     const result = await handleAddFontFile(file, "node-uuid", store, t);
 
     expect(result.ok).toBe(true);
-    // The family field must be the stripped filename.
-    expect(result.family).toBe("Roboto");
-    // The status message must be non-empty (actual i18n interpolates "Added Roboto";
-    // the test mock returns the key with {{family}} replaced — assert the variable
-    // was forwarded to the translation function regardless of how it renders it).
-    expect(result.statusMessage).toBeTruthy();
+    // The family field must be the server-canonical family, not the filename.
+    expect(result.family).toBe("Roboto Mono");
+    expect(result.family).not.toContain("weird");
+    // The success message uses the plain "fontAdded" key for an embeddable font.
+    // (The test mock `t` returns the key; it has no {{family}} placeholder to
+    // interpolate, so we assert the key, not the rendered English.)
+    expect(result.statusMessage).toContain("panels:typography.fontAdded");
   });
 
-  it("should strip .ttf extension from the displayed family name", async () => {
-    const store = makeStore();
-    const file = makeFile("OpenSans.ttf");
+  it("should surface a non-alarming referenced message for a non-embeddable font (RF-002)", async () => {
+    const store = makeStore(() =>
+      Promise.resolve(
+        makeTestFontEntry({
+          id: "e2",
+          family: "Restricted Sans",
+          embeddable: "reference_restricted",
+        }),
+      ),
+    );
+    const file = makeFile("whatever.ttf");
 
     const result = await handleAddFontFile(file, "node-uuid", store, t);
 
     expect(result.ok).toBe(true);
-    expect(result.family).toBe("OpenSans");
-    expect(result.family).not.toContain(".ttf");
+    expect(result.embeddable).toBe("reference_restricted");
+    expect(result.family).toBe("Restricted Sans");
+    // Distinct key from the plain "fontAdded" message.
+    expect(result.statusMessage).toContain("panels:typography.fontAddedReferenced");
   });
 
-  it("should strip .otf extension from the displayed family name", async () => {
-    const store = makeStore();
-    const file = makeFile("Lato.otf");
-
-    const result = await handleAddFontFile(file, "node-uuid", store, t);
+  it("should use the plain fontAdded message for an embeddable font (RF-002)", async () => {
+    const store = makeStore(() =>
+      Promise.resolve(makeTestFontEntry({ id: "e3", family: "Embed Me", embeddable: "embed" })),
+    );
+    const result = await handleAddFontFile(makeFile("Embed.ttf"), "node-uuid", store, t);
 
     expect(result.ok).toBe(true);
-    expect(result.family).toBe("Lato");
+    expect(result.embeddable).toBe("embed");
+    expect(result.statusMessage).toContain("panels:typography.fontAdded");
+    expect(result.statusMessage).not.toContain("fontAddedReferenced");
   });
 
   it("should NOT call setNodeFont when addFont rejects, and should return an error status", async () => {
@@ -154,5 +176,22 @@ describe("handleAddFontFile", () => {
     // addFont must NOT have been called.
     expect(store.addFont).not.toHaveBeenCalled();
     expect(store.setNodeFont).not.toHaveBeenCalled();
+  });
+});
+
+describe("addFontSuccessMessage", () => {
+  it("should use the plain fontAdded key for the embed decision", () => {
+    expect(addFontSuccessMessage("Inter", "embed", t)).toBe("panels:typography.fontAdded");
+  });
+
+  it.each<EmbedDecision>([
+    "reference_restricted",
+    "reference_system",
+    "reference_no_os2",
+    "reference_preview_print",
+  ])("should use the referenced key for the %s decision", (decision) => {
+    expect(addFontSuccessMessage("Inter", decision, t)).toBe(
+      "panels:typography.fontAddedReferenced",
+    );
   });
 });

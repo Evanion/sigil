@@ -62,7 +62,10 @@
     "addFont": "Add font…",
     "addFontLabel": "Add font from file",
     "fontAdded": "Added {{family}}",
-    "fontAddError": "Failed to add font: {{error}}"
+    "fontAddedReferenced": "Added {{family}} — license-restricted, will be referenced not embedded on export",
+    "fontAddError": "Failed to add font: {{error}}",
+    "fontAddFailed": "Couldn’t add this font. Please try a different file.",
+    "fontTooLarge": "This font is too large to add (max {{maxMb}} MB)."
   },
   "fontWeight": {
     "100": "Thin",

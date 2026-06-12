@@ -150,6 +150,16 @@ export function installFontLoadingOrchestrator(
     const fontTable = getFontTable();
     const allIds = Object.keys(fontTable);
 
+    // RF-005: prune processedIds of any id no longer in fontTable. Without this
+    // the set is append-only, so a remove-then-re-add of the same id would
+    // never reload (the id stays "processed"). Dropping removed ids makes a
+    // re-added id look new again and re-dispatch.
+    for (const id of processedIds) {
+      if (!(id in fontTable)) {
+        processedIds.delete(id);
+      }
+    }
+
     // Find entries that haven't been dispatched yet.
     const newIds = allIds.filter((id) => !processedIds.has(id));
     if (newIds.length === 0) return;
