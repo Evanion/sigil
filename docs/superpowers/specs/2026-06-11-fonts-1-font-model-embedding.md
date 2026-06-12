@@ -28,6 +28,7 @@ Introduce a document-level **font table** and a renderer-agnostic font pipeline 
 - CanvasKit `FontMgr` loading + Skia script/emoji fallback (11c-A).
 - Export-time subsetting (future export spec).
 - Variable-font axis editing UI (Fonts-2/11c-B); the data model carries axes, no axis editor ships here.
+- **Undo of font-library mutations.** Adding/removing a font in the document font library (`addFont`/`removeFont`) is a **resource-import** operation and is intentionally NOT on the undo stack (like importing an image asset). Only `setNodeFont` — which font a text node uses — is undoable (via the client HistoryManager). This is a deliberate deviation from the "all entity mutations wired to history" convention, recorded here per the Design Decision Criteria (RF-018, PR #77 review).
 
 ## 3. PDR Traceability
 **Implements:** custom-fonts capability (memory `project_font_strategy`: "custom fonts essential for v1"); enables portable workfiles. **Defers:** library/Google fonts (Fonts-2), local OS fonts (Fonts-3), GPU text (11c-A), OpenType feature/variable editing (11c-B). **MVP coverage:** no MVP capability dropped; text rendering for the default/system case is preserved (migration maps existing nodes to `SystemReference`, which renders exactly as today via the browser).
