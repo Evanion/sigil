@@ -117,6 +117,9 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     renameToken: vi.fn(),
     resolveToken: () => null,
     getFontEntry: () => undefined,
+    addFont: vi.fn(() => Promise.resolve("")),
+    removeFont: vi.fn(() => Promise.resolve()),
+    setNodeFont: vi.fn(),
     destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;

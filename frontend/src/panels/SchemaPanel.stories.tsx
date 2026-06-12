@@ -69,6 +69,9 @@ function createMockStore(
     renameToken: () => {},
     resolveToken: () => null,
     getFontEntry: () => undefined,
+    addFont: () => Promise.resolve(""),
+    removeFont: () => Promise.resolve(),
+    setNodeFont: () => {},
     destroy: () => {},
   } as DocumentStoreAPI;
 }

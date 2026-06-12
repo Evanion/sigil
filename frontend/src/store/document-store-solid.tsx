@@ -19,9 +19,10 @@ import type {
   TokenValue,
   FontEntry,
 } from "../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY, TOKENS_QUERY, FONTS_QUERY } from "../graphql/queries";
-import { APPLY_OPERATIONS_MUTATION } from "../graphql/mutations";
+import { APPLY_OPERATIONS_MUTATION, ADD_FONT_MUTATION, REMOVE_FONT_MUTATION } from "../graphql/mutations";
 import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
@@ -51,7 +52,7 @@ import { parseFontEntry } from "./font-input";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
-import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH } from "../types/validation";
+import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH, MAX_EMBEDDED_FONT_BYTES } from "../types/validation";
 import {
   getSessionId,
   getGraphqlHttpUrl,
@@ -170,6 +171,52 @@ export interface DocumentStoreAPI {
    * imperative lookup for non-reactive call sites.
    */
   getFontEntry(id: string): FontEntry | undefined;
+
+  // Font mutations
+
+  /**
+   * Upload a font file to the document's font library.
+   *
+   * Classification is server-side (NOT optimistic): we send the raw bytes
+   * base64-encoded, await the server's classification result, then insert the
+   * returned `FontEntry` into `state.fontTable`.
+   *
+   * Resource-import model (controller-approved): addFont is NOT undoable.
+   * The font bytes are stored server-side; there is no history entry.
+   *
+   * @param bytes      Raw font file bytes (TTF, OTF, WOFF, WOFF2).
+   * @param provenance One of the `FontProvenance` variants, e.g. `"user_supplied"`.
+   * @returns          A `Promise` resolving to the new entry's stable UUID.
+   *                   Rejects on validation failure, oversize payload, or server error.
+   */
+  addFont(bytes: Uint8Array, provenance: string): Promise<string>;
+
+  /**
+   * Remove a font from the document's font library.
+   *
+   * Symmetric pre-check (mirrors server validation): rejects if the entry is
+   * the bundled default, or if any text node currently references it.
+   *
+   * Optimistic: deletes locally, then calls the server.  On server error the
+   * entry is re-inserted (snapshot rollback).
+   *
+   * Resource-import model (controller-approved): removeFont is NOT undoable.
+   *
+   * @param id  The stable UUID of the FontEntry to remove.
+   */
+  removeFont(id: string): Promise<void>;
+
+  /**
+   * Set the active font on a text node.  Undoable via the interceptor/HistoryManager.
+   *
+   * Validates that the node exists, is a text node, and that the target FontEntry
+   * is present in the font table.  Uses the standard `interceptor.set` path so
+   * undo/redo work identically to `setTextStyle`.
+   *
+   * @param uuid     The UUID of the text node to update.
+   * @param entryId  The stable UUID of the FontEntry to apply.
+   */
+  setNodeFont(uuid: string, entryId: string): void;
 
   /**
    * The urql `Client` instance used for all GraphQL queries and mutations.
@@ -2588,6 +2635,225 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     return state.fontTable[id] as FontEntry | undefined;
   }
 
+  // ── Font Mutations ──────────────────────────────────────────────────
+
+  /**
+   * Encode a Uint8Array to a Base64 string in a browser-safe way.
+   *
+   * We use a chunk-based approach because `String.fromCharCode(...bytes)` on
+   * large arrays exceeds the JS engine's call-stack argument limit.
+   */
+  function uint8ArrayToBase64(bytes: Uint8Array): string {
+    let binary = "";
+    // Process in 65536-byte chunks to stay under the call-stack argument limit.
+    const CHUNK = 65536;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+  }
+
+  /**
+   * Add a font to the document's font library.
+   *
+   * Classification is SERVER-SIDE so this is await-then-insert, NOT optimistic.
+   * Returns the new entry's stable UUID, or rejects on any error.
+   *
+   * Resource-import model: NOT on the undo stack (controller-approved).
+   */
+  async function addFont(bytes: Uint8Array, provenance: string): Promise<string> {
+    // Symmetric pre-check: reject oversize payloads before base64-encoding.
+    // Mirrors `crates/core/src/validate.rs MAX_EMBEDDED_FONT_BYTES`.
+    if (bytes.length > MAX_EMBEDDED_FONT_BYTES) {
+      const msg = `addFont: font file is ${bytes.length} bytes, exceeds max ${MAX_EMBEDDED_FONT_BYTES}`;
+      announceError(msg);
+      return Promise.reject(new Error(msg));
+    }
+
+    // Base64-encode defensively (chunk-based to avoid stack overflow on large files).
+    let bytesBase64: string;
+    try {
+      bytesBase64 = uint8ArrayToBase64(bytes);
+    } catch (err: unknown) {
+      const msg = `addFont: failed to base64-encode font bytes`;
+      console.error(msg, err);
+      announceError(msg);
+      return Promise.reject(new Error(msg));
+    }
+
+    // Send to server — classification happens server-side.
+    let result: Awaited<ReturnType<typeof client.mutation>>;
+    try {
+      result = await client
+        .mutation(gql(ADD_FONT_MUTATION), { bytesBase64, provenance })
+        .toPromise();
+    } catch (err: unknown) {
+      const msg = `addFont: network error`;
+      console.error(msg, err);
+      announceError(msg);
+      return Promise.reject(new Error(msg));
+    }
+
+    if (result.error) {
+      const msg = `addFont: server error — ${result.error.message}`;
+      console.error(msg);
+      announceError(msg);
+      return Promise.reject(new Error(msg));
+    }
+
+    // The server returns the full FontEntry as a JSON scalar.  Parse and
+    // validate it before inserting into the local font table.
+    const rawEntry: unknown = (result.data as Record<string, unknown> | undefined)?.["addFont"];
+    const entry = parseFontEntry(rawEntry);
+    if (entry === null) {
+      const msg = `addFont: server returned an invalid FontEntry`;
+      console.warn(msg, rawEntry);
+      announceError(msg);
+      return Promise.reject(new Error(msg));
+    }
+
+    // Insert into the font table. The font-loading orchestrator (Task 17) watches
+    // fontTable for new entries and loads the FontFace automatically — do NOT
+    // call loadFonts here.
+    setState("fontTable", entry.id, entry);
+
+    return entry.id;
+  }
+
+  /**
+   * Remove a font from the document's font library.
+   *
+   * Symmetric pre-checks (mirror server validation in RemoveFontEntry::validate):
+   *  1. Rejects the bundled default font entry (cannot be removed).
+   *  2. Rejects entries referenced by at least one text node.
+   *
+   * Uses optimistic local state: deletes immediately, then calls the server.
+   * On server error the snapshot is re-inserted (surgical rollback).
+   *
+   * Resource-import model: NOT on the undo stack (controller-approved).
+   */
+  async function removeFont(id: string): Promise<void> {
+    // Pre-check 1: cannot remove the bundled default.
+    if (id === DEFAULT_FONT_ENTRY_ID) {
+      const msg = `removeFont: cannot remove the bundled default font`;
+      announceError(msg);
+      return;
+    }
+
+    // Pre-check 2: font in use by at least one text node.
+    const isReferenced = Object.values(state.nodes).some(
+      (node) => node.kind.type === "text" && node.kind.text_style.font_entry === id,
+    );
+    if (isReferenced) {
+      const msg = `removeFont: font is in use by one or more text nodes and cannot be removed`;
+      announceError(msg);
+      return;
+    }
+
+    // Entry not in table — nothing to remove locally or on the server.
+    if (state.fontTable[id] === undefined) {
+      return;
+    }
+
+    // Capture snapshot BEFORE mutation (CLAUDE.md §11 "Capture Snapshots Before Mutations").
+    // JSON clone: Solid proxy not structuredClone-safe
+    let snapshot: FontEntry;
+    try {
+      snapshot = JSON.parse(JSON.stringify(state.fontTable[id])) as FontEntry;
+    } catch (err: unknown) {
+      console.error("removeFont: failed to snapshot entry", err);
+      return;
+    }
+
+    // Optimistic delete.
+    setState(
+      produce((s) => {
+        Reflect.deleteProperty(s.fontTable, id);
+      }),
+    );
+
+    // Send to server.
+    let result: Awaited<ReturnType<typeof client.mutation>>;
+    try {
+      result = await client
+        .mutation(gql(REMOVE_FONT_MUTATION), { id })
+        .toPromise();
+    } catch (err: unknown) {
+      // Network error — restore snapshot.
+      setState("fontTable", id, snapshot);
+      const msg = `removeFont: network error`;
+      console.error(msg, err);
+      announceError(msg);
+      return;
+    }
+
+    if (result.error) {
+      // Server rejected — restore snapshot.
+      setState("fontTable", id, snapshot);
+      const msg = `removeFont: server error — ${result.error.message}`;
+      console.error(msg);
+      announceError(msg);
+    }
+  }
+
+  /**
+   * Set the active font on a text node.  Undoable via the interceptor/HistoryManager.
+   *
+   * Symmetric validation: rejects if the node is missing, non-text, or the target
+   * FontEntry is absent from the font table (mirrors SetNodeFont::validate in the
+   * server's `kind.text_style.font_entry` path and
+   * `crates/core/src/commands/font_commands.rs`).
+   *
+   * Uses the standard `interceptor.set` path so undo/redo work identically to
+   * `setTextStyle`.  The change is committed to the server via `pendingServerOps`
+   * when the interceptor flushes.
+   */
+  function setNodeFont(uuid: string, entryId: string): void {
+    const node = state.nodes[uuid];
+    if (!node || node.kind.type !== "text") {
+      // No-op for missing or non-text nodes — expected when called speculatively.
+      console.warn("setNodeFont: node not found or not a text node", { uuid });
+      return;
+    }
+
+    // Symmetric validation: the target font entry must exist in the font table.
+    if (!state.fontTable[entryId]) {
+      announceError(`setNodeFont: unknown font entry "${entryId}"`);
+      return;
+    }
+
+    // Capture previousKind BEFORE mutation for undo snapshot.
+    // JSON clone: Solid proxy not structuredClone-safe
+    let previousKind: typeof node.kind;
+    try {
+      previousKind = deepClone(node.kind);
+    } catch (err: unknown) {
+      console.error("setNodeFont: deepClone failed", err);
+      return;
+    }
+    // JSON clone: Solid proxy not structuredClone-safe
+    let clonedTextStyle: TextStyle;
+    try {
+      clonedTextStyle = JSON.parse(JSON.stringify(previousKind.text_style)) as TextStyle;
+    } catch (err: unknown) {
+      console.error("setNodeFont: JSON clone failed", err);
+      return;
+    }
+
+    const updatedTextStyle: TextStyle = { ...clonedTextStyle, font_entry: entryId };
+    const newKind = { ...previousKind, text_style: updatedTextStyle };
+
+    interceptor.set(uuid, "kind", newKind);
+    // RF-026: Queue server op — sent when interceptor commits (coalesced).
+    pendingServerOps.push({
+      setField: {
+        nodeUuid: uuid,
+        path: "kind.text_style.font_entry",
+        value: JSON.stringify(entryId),
+      },
+    });
+  }
+
   // ── Page Mutations ──────────────────────────────────────────────────
 
   function createPage(name: string): void {
@@ -2963,6 +3229,9 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     renameToken,
     resolveToken: resolveTokenLocal,
     getFontEntry,
+    addFont,
+    removeFont,
+    setNodeFont,
     urqlClient: client,
     createPage,
     deletePage,

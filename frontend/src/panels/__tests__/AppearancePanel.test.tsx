@@ -73,6 +73,9 @@ function createMockStore(
     renameToken: vi.fn(),
     resolveToken: () => null,
     getFontEntry: () => undefined,
+    addFont: vi.fn(() => Promise.resolve("")),
+    removeFont: vi.fn(() => Promise.resolve()),
+    setNodeFont: vi.fn(),
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }

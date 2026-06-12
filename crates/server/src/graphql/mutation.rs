@@ -1699,12 +1699,16 @@ impl MutationRoot {
     /// already handles a missing-bytes Custom entry by warning+skipping (Task
     /// 10/11), so even in a hypothetical crash window the behaviour is
     /// well-defined.
+    /// Returns the serialized `FontEntry` as a JSON scalar.  The frontend
+    /// `addFont` store function parses this via `parseFontEntry` to populate
+    /// `state.fontTable` without a separate re-fetch.  The broadcast (below)
+    /// delivers the same JSON to *other* connected clients.
     async fn add_font(
         &self,
         ctx: &Context<'_>,
         bytes_base64: String,
         provenance: String,
-    ) -> Result<String> {
+    ) -> Result<async_graphql::Json<serde_json::Value>> {
         let state = ctx.data::<ServerState>()?;
         let session_id = resolve_session(ctx, state)?;
         let session = require_live_session(state, session_id)?;
@@ -1751,7 +1755,7 @@ impl MutationRoot {
         // held so apply-order == seq-order == broadcast-enqueue-order.
         // next_seq() and broadcast.send() are synchronous (no .await), so
         // holding the write lock across them does not block the runtime.
-        let (entry_id_str, source_is_custom) = {
+        let (entry_json, source_is_custom) = {
             let mut doc_guard = session.store.write().await;
 
             // Snapshot for rollback on validation or apply failure.
@@ -1823,7 +1827,7 @@ impl MutationRoot {
                 // parity rule; Task 15 apply-remote.ts depends on these exact strings).
                 op_type: sigil_state::BROADCAST_OP_ADD_FONT.to_string(),
                 path: sigil_state::BROADCAST_PATH_FONT_TABLE.to_string(),
-                value: Some(broadcast_json),
+                value: Some(broadcast_json.clone()),
             };
 
             let mut transaction = multi_op_transaction(None, vec![op_payload]);
@@ -1839,7 +1843,9 @@ impl MutationRoot {
                 .broadcast
                 .send(SessionEvent::DocumentEvent(mutation_event));
 
-            (entry_id.to_string(), is_custom)
+            // Return both the full FontEntry JSON (for the GraphQL response) and
+            // whether font bytes need to be stored (for the custom-font path below).
+            (broadcast_json, is_custom)
         };
         // Store lock is now dropped.
 
@@ -1874,7 +1880,7 @@ impl MutationRoot {
             bytes_guard.insert(entry_id, font_bytes);
         }
 
-        Ok(entry_id_str)
+        Ok(async_graphql::Json(entry_json))
     }
 
     /// Remove a font entry from the document's font table.
@@ -3838,7 +3844,8 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    /// `addFont` with an installable font: returns an id, adds the entry to
+    /// `addFont` with an installable font: returns the full FontEntry JSON object
+    /// (with "id" and "family" fields), adds the entry to
     /// the font table, populates font_bytes (Custom source), and broadcasts
     /// `op_type == "add_font"` with a value JSON containing `"id"` and `"family"`.
     #[tokio::test]
@@ -3865,10 +3872,21 @@ mod tests {
             res.errors
         );
 
-        let returned_id = res.data.into_json().unwrap()["addFont"]
+        // addFont now returns the full FontEntry JSON object (not just the id string).
+        // Assert: the returned object has "id" and "family" fields.
+        let returned_json = res.data.into_json().unwrap();
+        let entry_obj = &returned_json["addFont"];
+        let returned_id = entry_obj["id"]
             .as_str()
-            .expect("addFont returns a string id")
+            .expect("addFont response must have an 'id' field")
             .to_string();
+        let returned_family = entry_obj["family"]
+            .as_str()
+            .expect("addFont response must have a 'family' field");
+        assert!(
+            !returned_family.is_empty(),
+            "returned family must be non-empty"
+        );
         let returned_uuid: uuid::Uuid = returned_id.parse().expect("returned id is a UUID");
 
         // 1. Font table entry present in the document.
@@ -3941,9 +3959,11 @@ mod tests {
             res.errors
         );
 
-        let returned_id = res.data.into_json().unwrap()["addFont"]
+        // addFont now returns a FontEntry JSON object — extract "id".
+        let returned_json = res.data.into_json().unwrap();
+        let returned_id = returned_json["addFont"]["id"]
             .as_str()
-            .expect("returned id")
+            .expect("returned FontEntry must have 'id'")
             .to_string();
         let returned_uuid: uuid::Uuid = returned_id.parse().expect("uuid");
 
@@ -4046,9 +4066,10 @@ mod tests {
             "addFont should succeed: {:?}",
             add_res.errors
         );
-        let font_id = add_res.data.into_json().unwrap()["addFont"]
+        // addFont now returns a FontEntry JSON object — extract the "id" field.
+        let font_id = add_res.data.into_json().unwrap()["addFont"]["id"]
             .as_str()
-            .expect("font id")
+            .expect("addFont FontEntry must have 'id'")
             .to_string();
 
         // Subscribe before removeFont so we receive the remove broadcast.
@@ -4122,7 +4143,8 @@ mod tests {
                 r#"mutation {{ addFont(bytesBase64: "{b64}", provenance: "user_supplied") }}"#
             ))
             .await;
-        let font_id = add_res.data.into_json().unwrap()["addFont"]
+        // addFont now returns a FontEntry JSON object — extract the "id" field.
+        let font_id = add_res.data.into_json().unwrap()["addFont"]["id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -4181,7 +4203,8 @@ mod tests {
             ))
             .await;
         assert!(add_res.errors.is_empty(), "addFont: {:?}", add_res.errors);
-        let font_id = add_res.data.into_json().unwrap()["addFont"]
+        // addFont now returns a FontEntry JSON object — extract the "id" field.
+        let font_id = add_res.data.into_json().unwrap()["addFont"]["id"]
             .as_str()
             .unwrap()
             .to_string();
@@ -4309,7 +4332,8 @@ mod tests {
             ))
             .await;
         assert!(add_res.errors.is_empty(), "addFont: {:?}", add_res.errors);
-        let font_id = add_res.data.into_json().unwrap()["addFont"]
+        // addFont now returns a FontEntry JSON object — extract the "id" field.
+        let font_id = add_res.data.into_json().unwrap()["addFont"]["id"]
             .as_str()
             .unwrap()
             .to_string();

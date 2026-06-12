@@ -61,6 +61,9 @@ function createMockStore(overrides?: Partial<DocumentStoreAPI>): DocumentStoreAP
     renameToken: () => {},
     resolveToken: () => null,
     getFontEntry: () => undefined,
+    addFont: () => Promise.resolve(""),
+    removeFont: () => Promise.resolve(),
+    setNodeFont: () => {},
     destroy: () => {},
     ...overrides,
   } as DocumentStoreAPI;

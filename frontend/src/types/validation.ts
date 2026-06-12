@@ -33,3 +33,12 @@ export const MAX_NODE_TREE_DEPTH = 64;
  * "Validation Must Be Symmetric Across All Transports".
  */
 export const MAX_NODES_PER_DELETE_BATCH = 1_000;
+
+/**
+ * Maximum embedded font size in bytes.
+ *
+ * Mirrors `sigil_core::validate::MAX_EMBEDDED_FONT_BYTES = 32 * 1024 * 1024`.
+ * Enforced at the `addFont` store boundary before the base64-encode + mutation
+ * per CLAUDE.md §11 "Validation Must Be Symmetric Across All Transports".
+ */
+export const MAX_EMBEDDED_FONT_BYTES = 32 * 1024 * 1024;
