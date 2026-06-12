@@ -78,7 +78,10 @@ describe("addFont (isolated logic tests)", () => {
     errorSpy.mockRestore();
   });
 
-  it("should reject bytes over MAX_EMBEDDED_FONT_BYTES before making the mutation", async () => {
+  // test_max_embedded_font_bytes_enforced: exercises the store-boundary size
+  // cap (rejects an over-limit byte array before any network call), satisfying
+  // the §11 Constant Enforcement Tests convention (not a tautology).
+  it("test_max_embedded_font_bytes_enforced: rejects bytes over the cap before mutation", async () => {
     // Build an oversize byte array (MAX + 1 byte).
     const oversizeBytes = new Uint8Array(MAX_EMBEDDED_FONT_BYTES + 1);
     const mockMutation = vi.fn();
@@ -182,8 +185,6 @@ describe("removeFont (isolated logic tests)", () => {
   afterEach(() => {
     warnSpy.mockRestore();
     errorSpy.mockRestore();
-    void warnSpy;
-    void errorSpy;
   });
 
   it("should block removal of DEFAULT_FONT_ENTRY_ID", async () => {

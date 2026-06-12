@@ -411,6 +411,16 @@ export type EmbedDecision =
   | "reference_preview_print";
 
 /**
+ * Where a font's bytes originate, used when adding a font.
+ *
+ * Mirrors `FontProvenance` in `crates/core/src/font_parse.rs` (its `FromStr`
+ * accepts exactly these snake_case strings). Typing the `addFont` provenance
+ * argument as this union enforces transport symmetry at compile time (CLAUDE.md
+ * §11 "Validation Must Be Symmetric Across All Transports").
+ */
+export type FontProvenance = "user_supplied" | "system_directory";
+
+/**
  * A single variable-font axis (e.g., Weight `wght`, Width `wdth`).
  *
  * Mirrors `FontAxis` in `crates/core/src/font.rs`.

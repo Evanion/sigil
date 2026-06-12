@@ -19,7 +19,7 @@ import type {
   TokenValue,
   FontEntry,
 } from "../types/document";
-import { DEFAULT_FONT_ENTRY_ID } from "../types/document";
+import { DEFAULT_FONT_ENTRY_ID, type FontProvenance } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY, TOKENS_QUERY, FONTS_QUERY } from "../graphql/queries";
 import { APPLY_OPERATIONS_MUTATION, ADD_FONT_MUTATION, REMOVE_FONT_MUTATION } from "../graphql/mutations";
@@ -189,7 +189,7 @@ export interface DocumentStoreAPI {
    * @returns          A `Promise` resolving to the new entry's stable UUID.
    *                   Rejects on validation failure, oversize payload, or server error.
    */
-  addFont(bytes: Uint8Array, provenance: string): Promise<string>;
+  addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<string>;
 
   /**
    * Remove a font from the document's font library.
@@ -2661,7 +2661,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
    *
    * Resource-import model: NOT on the undo stack (controller-approved).
    */
-  async function addFont(bytes: Uint8Array, provenance: string): Promise<string> {
+  async function addFont(bytes: Uint8Array, provenance: FontProvenance): Promise<string> {
     // Symmetric pre-check: reject oversize payloads before base64-encoding.
     // Mirrors `crates/core/src/validate.rs MAX_EMBEDDED_FONT_BYTES`.
     if (bytes.length > MAX_EMBEDDED_FONT_BYTES) {
