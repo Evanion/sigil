@@ -1238,18 +1238,21 @@ mod tests {
 
     #[test]
     fn test_font_metrics_accessors() {
+        // Accessors return the exact values passed to the constructor; compare
+        // with a tight epsilon per the codebase's float-compare idiom.
+        const EPS: f32 = 1e-3;
         let m = FontMetrics::new(
             2048, 1600.0, -400.0, 100.0, 1400.0, 900.0, -12.5, 1100.0, [1; 10], true,
         )
         .unwrap();
         assert_eq!(m.units_per_em(), 2048);
-        assert_eq!(m.ascent(), 1600.0_f32);
-        assert_eq!(m.descent(), -400.0_f32);
-        assert_eq!(m.line_gap(), 100.0_f32);
-        assert_eq!(m.cap_height(), 1400.0_f32);
-        assert_eq!(m.x_height(), 900.0_f32);
-        assert_eq!(m.italic_angle(), -12.5_f32);
-        assert_eq!(m.avg_advance(), 1100.0_f32);
+        assert!((m.ascent() - 1600.0_f32).abs() < EPS);
+        assert!((m.descent() - (-400.0_f32)).abs() < EPS);
+        assert!((m.line_gap() - 100.0_f32).abs() < EPS);
+        assert!((m.cap_height() - 1400.0_f32).abs() < EPS);
+        assert!((m.x_height() - 900.0_f32).abs() < EPS);
+        assert!((m.italic_angle() - (-12.5_f32)).abs() < EPS);
+        assert!((m.avg_advance() - 1100.0_f32).abs() < EPS);
         assert_eq!(m.panose(), &[1u8; 10]);
         assert!(m.is_serif());
     }

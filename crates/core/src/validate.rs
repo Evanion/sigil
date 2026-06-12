@@ -1928,15 +1928,17 @@ mod tests {
     #[test]
     fn test_max_font_bytes_base64_len_formula() {
         // The constant must be strictly greater than MAX_EMBEDDED_FONT_BYTES
-        // (base64 is larger than raw bytes) and consistently derivable from it.
-        assert!(
+        // (base64 is larger than raw bytes). Both operands are compile-time
+        // constants, so assert the relationship at compile time — a runtime
+        // `assert!` over two constants is an `assertions_on_constants` lint.
+        const _: () = assert!(
             MAX_FONT_BYTES_BASE64_LEN > MAX_EMBEDDED_FONT_BYTES,
             "base64 limit must be larger than raw-byte limit"
         );
         // Verify the formula: a payload exactly at MAX_EMBEDDED_FONT_BYTES
         // encodes to at most MAX_FONT_BYTES_BASE64_LEN base64 chars.
         // base64::encoded_len returns the padded length.
-        let expected_b64_len = (MAX_EMBEDDED_FONT_BYTES + 2) / 3 * 4;
+        let expected_b64_len = MAX_EMBEDDED_FONT_BYTES.div_ceil(3) * 4;
         assert!(
             expected_b64_len <= MAX_FONT_BYTES_BASE64_LEN,
             "MAX_FONT_BYTES_BASE64_LEN ({MAX_FONT_BYTES_BASE64_LEN}) must be >= \

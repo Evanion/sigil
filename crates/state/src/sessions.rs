@@ -870,7 +870,9 @@ mod registry_tests {
                 let tx = me.transaction.expect("transaction present");
                 assert_eq!(tx.seq, 1, "first publish gets seq 1");
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
 
         // Second publish gets the next seq.
@@ -888,7 +890,9 @@ mod registry_tests {
             SessionEvent::DocumentEvent(me) => {
                 assert_eq!(me.transaction.expect("tx").seq, 2);
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 

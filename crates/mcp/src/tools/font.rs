@@ -447,9 +447,9 @@ mod tests {
 
     // ── add_font tests ─────────────────────────────────────────────────────
 
-    /// `add_font` with an installable font: entry appears in font_table,
-    /// font_bytes populated (Custom source), broadcast carries op_type
-    /// "add_font", path "font_table", value has "id" and "family".
+    /// `add_font` with an installable font: entry appears in `font_table`,
+    /// `font_bytes` populated (Custom source), broadcast carries `op_type`
+    /// `"add_font"`, path `"font_table"`, value has "id" and "family".
     /// This verifies byte-identical broadcast shape to 13a GraphQL.
     #[tokio::test]
     async fn test_add_font_installable_adds_entry_broadcasts_and_stores_bytes() {
@@ -508,12 +508,14 @@ mod tests {
                     "broadcast value must carry family name"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
-    /// `add_font` with a restricted font: entry added as SystemReference,
-    /// font_bytes NOT populated, broadcast still carries the entry.
+    /// `add_font` with a restricted font: entry added as `SystemReference`,
+    /// `font_bytes` NOT populated, broadcast still carries the entry.
     #[tokio::test]
     async fn test_add_font_restricted_does_not_store_bytes() {
         let sessions = Arc::new(Sessions::new(64));
@@ -677,7 +679,7 @@ mod tests {
 
     // ── remove_font tests ──────────────────────────────────────────────────
 
-    /// `remove_font` removes the entry from font_table and font_bytes, and
+    /// `remove_font` removes the entry from `font_table` and `font_bytes`, and
     /// broadcasts `op_type == "remove_font"` with value `{"id": "..."}`.
     #[tokio::test]
     async fn test_remove_font_removes_entry_and_broadcasts() {
@@ -737,7 +739,9 @@ mod tests {
                     "broadcast value must carry the removed entry id"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
@@ -790,7 +794,7 @@ mod tests {
 
     // ── set_node_font tests ────────────────────────────────────────────────
 
-    /// `set_node_font_impl` updates a text node's font_entry and produces the
+    /// `set_node_font_impl` updates a text node's `font_entry` and produces the
     /// correct broadcast payload. The broadcast shape is byte-identical to the
     /// GraphQL `kind.text_style.font_entry` path.
     #[tokio::test]
@@ -872,7 +876,9 @@ mod tests {
                     "broadcast value must be the font entry UUID string"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
@@ -898,7 +904,7 @@ mod tests {
         assert!(matches!(err, McpToolError::NodeNotFound(_)));
     }
 
-    /// `set_node_font_impl` rejects a valid text node when the font_entry UUID
+    /// `set_node_font_impl` rejects a valid text node when the `font_entry` UUID
     /// does not exist in the font table.
     #[test]
     fn test_set_node_font_rejects_nonexistent_font_entry() {
@@ -921,7 +927,7 @@ mod tests {
     }
 
     /// `set_node_font_impl` rejects a non-text node (e.g., a frame) because
-    /// `SetNodeFont::validate` requires NodeKind::Text.
+    /// `SetNodeFont::validate` requires `NodeKind::Text`.
     #[test]
     fn test_set_node_font_rejects_non_text_node() {
         use crate::tools::nodes::create_node_impl;

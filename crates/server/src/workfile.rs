@@ -2067,11 +2067,11 @@ mod tests {
     /// bytes, no ENOENT.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn test_atomic_write_bytes_concurrent_writers_no_partial() {
-        let dir = tempfile::tempdir().expect("create temp dir");
-        let target = dir.path().join(format!("{}.ttf", Uuid::new_v4()));
-
         const N: u8 = 8;
         const PAYLOAD_SIZE: usize = 4096;
+
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let target = dir.path().join(format!("{}.ttf", Uuid::new_v4()));
 
         // Build N distinct payloads: payload i is a 4096-byte vec of all i's.
         let payloads: Vec<Vec<u8>> = (0..N).map(|i| vec![i; PAYLOAD_SIZE]).collect();
@@ -2474,8 +2474,11 @@ mod tests {
             .expect("read fonts dir");
         while let Some(e) = entries.next_entry().await.expect("next entry") {
             let name = e.file_name().to_string_lossy().into_owned();
+            let is_ttf = std::path::Path::new(&name)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("ttf"));
             assert!(
-                !name.ends_with(".ttf"),
+                !is_ttf,
                 "no .ttf files should remain after all-fonts-removed save, found: {name}"
             );
         }
@@ -2483,9 +2486,9 @@ mod tests {
 
     // ── Part A: load_font_assets tests ────────────────────────────────────────
 
-    /// A workfile with a `Custom` FontEntry whose bytes are persisted in
+    /// A workfile with a `Custom` `FontEntry` whose bytes are persisted in
     /// `fonts/<uuid>.ttf` must round-trip: after `prepare_save` + `write` + `load`,
-    /// `loaded.font_bytes` contains exactly the original bytes, and the FontEntry
+    /// `loaded.font_bytes` contains exactly the original bytes, and the `FontEntry`
     /// is still in the document's font table.
     #[tokio::test]
     async fn test_load_workfile_round_trips_embedded_font_bytes() {

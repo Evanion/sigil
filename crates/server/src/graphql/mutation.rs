@@ -3908,9 +3908,9 @@ mod tests {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
 
-    /// `addFont` with an installable font: returns the full FontEntry JSON object
+    /// `addFont` with an installable font: returns the full `FontEntry` JSON object
     /// (with "id" and "family" fields), adds the entry to
-    /// the font table, populates font_bytes (Custom source), and broadcasts
+    /// the font table, populates `font_bytes` (Custom source), and broadcasts
     /// `op_type == "add_font"` with a value JSON containing `"id"` and `"family"`.
     #[tokio::test]
     async fn test_add_font_installable_adds_entry_and_broadcasts() {
@@ -3998,12 +3998,14 @@ mod tests {
                     "broadcast value must carry the family name"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
-    /// `addFont` with a restricted font: entry added (SystemReference source),
-    /// font_bytes NOT populated (no bytes to store for references), broadcast ok.
+    /// `addFont` with a restricted font: entry added (`SystemReference` source),
+    /// `font_bytes` NOT populated (no bytes to store for references), broadcast ok.
     #[tokio::test]
     async fn test_add_font_restricted_does_not_store_bytes() {
         let state = ServerState::new();
@@ -4195,7 +4197,7 @@ mod tests {
         );
     }
 
-    /// `removeFont` removes an entry from font_table and font_bytes, and
+    /// `removeFont` removes an entry from `font_table` and `font_bytes`, and
     /// broadcasts `op_type == "remove_font"` with value `{"id": "..."}`.
     #[tokio::test]
     async fn test_remove_font_removes_entry_and_broadcasts() {
@@ -4234,11 +4236,10 @@ mod tests {
             "removeFont should succeed: {:?}",
             remove_res.errors
         );
-        assert_eq!(
+        assert!(
             remove_res.data.into_json().unwrap()["removeFont"]
                 .as_bool()
                 .unwrap(),
-            true,
             "removeFont returns true on success"
         );
 
@@ -4274,7 +4275,9 @@ mod tests {
                     "remove_font broadcast must carry the removed entry's id"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
@@ -4337,7 +4340,7 @@ mod tests {
     }
 
     /// `setField` with `path = "kind.text_style.font_entry"` updates the
-    /// Text node's font_entry and broadcasts the UUID at that path.
+    /// Text node's `font_entry` and broadcasts the UUID at that path.
     #[tokio::test]
     async fn test_set_node_font_via_set_field_updates_font_entry_and_broadcasts() {
         let state = ServerState::new();
@@ -4428,12 +4431,14 @@ mod tests {
                     "broadcast value must be the font entry UUID string"
                 );
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
     /// `setField` with `path = "kind.text_style.font_entry"` rejects a valid
-    /// text node when the font_entry UUID does not exist in the font table.
+    /// text node when the `font_entry` UUID does not exist in the font table.
     #[tokio::test]
     async fn test_set_node_font_rejects_nonexistent_font_entry() {
         let state = ServerState::new();

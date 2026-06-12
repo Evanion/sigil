@@ -324,7 +324,7 @@ mod tests {
     /// Full validate → apply cycle for an installable font.
     ///
     /// Verifies: (1) validate passes, (2) apply adds the entry, (3) the entry
-    /// has `Embed` decision and a `Custom` source keyed to the entry_id.
+    /// has `Embed` decision and a `Custom` source keyed to the `entry_id`.
     #[test]
     fn test_add_font_entry_validate_and_apply() {
         let mut doc = Document::new("Test".to_string());
@@ -629,7 +629,7 @@ mod tests {
 
     // ── SetNodeFont tests ──────────────────────────────────────────────────────
 
-    /// Full validate → apply cycle: sets a Text node's font_entry to a known
+    /// Full validate → apply cycle: sets a Text node's `font_entry` to a known
     /// entry in the font table, then asserts the field was updated.
     #[test]
     fn test_set_node_font_validate_and_apply() {
