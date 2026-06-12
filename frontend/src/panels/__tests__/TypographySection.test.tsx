@@ -623,10 +623,9 @@ describe("TypographySection", () => {
     expect(flushHistory).toHaveBeenCalled();
   });
 
-  it("should render the font family field as disabled (read-only pending Task 19 font picker)", () => {
-    // The font family input is disabled in Task 17 because editing font_entry requires
-    // the font picker UI from Task 19 (store.setNodeFont). Until then, the input
-    // displays the resolved family name but cannot be edited.
+  it("should render the Add font button with accessible name (Task 19)", () => {
+    // Task 19: the font-family area now shows a read-only display + an "Add font…" button.
+    // The button is a keyboard-accessible Kobalte Button (not a span/div).
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
     render(() => (
       <TransProvider instance={i18nInstance}>
@@ -635,9 +634,11 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    // The font family ValueInput should be rendered disabled (aria-disabled="true").
-    const fontFamily = screen.getByRole("combobox", { name: "Font family" });
-    expect(fontFamily.getAttribute("aria-disabled")).toBe("true");
+    // The button must be a real <button> role with an accessible name.
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    expect(addFontBtn).toBeTruthy();
+    // Must be keyboard-reachable (not tabIndex=-1).
+    expect(addFontBtn.getAttribute("tabindex")).not.toBe("-1");
   });
 
   it("should call flushHistory when the text color ValueInput commits via Enter", () => {
@@ -829,6 +830,85 @@ describe("TypographySection", () => {
           expect(val.blur_radius).toBeLessThanOrEqual(1000);
         }
       }
+    }
+  });
+
+  // ── Add font from file (Task 19) ──────────────────────────────────────
+
+  it("should render a single persistent role=status region that is not re-mounted on file select", async () => {
+    const addFont = vi.fn(() => Promise.resolve("new-entry-id"));
+    const setNodeFont = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.addFont = addFont;
+    store.setNodeFont = setNodeFont;
+
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    // Single role=status region (the panel's announcement region).
+    // getAllByRole will include any from ValueInput sub-components too, so we
+    // verify at least one exists and it is the same element before and after.
+    const statusRegionsBefore = document.querySelectorAll('[role="status"]');
+    expect(statusRegionsBefore.length).toBeGreaterThan(0);
+    const panelStatusBefore = statusRegionsBefore[statusRegionsBefore.length - 1];
+
+    // Simulate file selection via the hidden file input.
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    if (fileInput) {
+      const mockFile = new File([new Uint8Array([0, 1, 2])], "Inter.ttf", {
+        type: "font/ttf",
+      });
+      Object.defineProperty(fileInput, "files", {
+        value: { 0: mockFile, length: 1, item: (i: number) => (i === 0 ? mockFile : null) },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    // Status region must be the SAME node — not re-mounted.
+    const statusRegionsAfter = document.querySelectorAll('[role="status"]');
+    const panelStatusAfter = statusRegionsAfter[statusRegionsAfter.length - 1];
+    expect(panelStatusBefore).toBe(panelStatusAfter);
+  });
+
+  it("should have a hidden file input with an accessible name", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    // Must have an accessible name (aria-label) for AT.
+    expect(fileInput?.getAttribute("aria-label")).toBeTruthy();
+    // Must be excluded from Tab order (programmatically triggered by button).
+    expect(fileInput?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("should not have aria-hidden wrapping a focusable element in the add-font area", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    // The "Add font…" button must not be wrapped in aria-hidden.
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    let el: HTMLElement | null = addFontBtn.parentElement;
+    while (el && el !== document.body) {
+      expect(el.getAttribute("aria-hidden")).not.toBe("true");
+      el = el.parentElement;
     }
   });
 });
