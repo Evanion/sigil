@@ -29,6 +29,10 @@
   "typography": {
     "title": "Typographie",
     "fontFamily": "Famille de polices",
+    "addFont": "Ajouter une police…",
+    "addFontLabel": "Ajouter une police depuis un fichier",
+    "fontAdded": "{{family}} ajoutée",
+    "fontAddError": "Échec de l'ajout de la police : {{error}}",
     "fontWeight": "Graisse",
     "fontSize": "Taille de police",
     "italic": "Italique",

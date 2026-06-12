@@ -192,7 +192,9 @@ describe("applyRemoteTransaction — font operations", () => {
         );
 
         expect(state.fontTable["font-uuid-1"]).toBeDefined();
-        expect((state.fontTable["font-uuid-1"] as import("../../types/document").FontEntry).family).toBe("Inter");
+        expect(
+          (state.fontTable["font-uuid-1"] as import("../../types/document").FontEntry).family,
+        ).toBe("Inter");
         dispose();
       });
     });
@@ -205,7 +207,9 @@ describe("applyRemoteTransaction — font operations", () => {
           nodes: {},
           pages: [],
           tokens: {},
-          fontTable: { "font-uuid-1": original as unknown as import("../../types/document").FontEntry },
+          fontTable: {
+            "font-uuid-1": original as unknown as import("../../types/document").FontEntry,
+          },
         });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
@@ -217,7 +221,9 @@ describe("applyRemoteTransaction — font operations", () => {
           fetchPages,
         );
 
-        expect((state.fontTable["font-uuid-1"] as import("../../types/document").FontEntry).family).toBe("NewFamily");
+        expect(
+          (state.fontTable["font-uuid-1"] as import("../../types/document").FontEntry).family,
+        ).toBe("NewFamily");
         dispose();
       });
     });
@@ -594,7 +600,10 @@ describe("applyRemoteTransaction — font operations", () => {
         // rect node kind is unchanged
         expect((state.nodes["rect-node-1"] as StoreDocumentNode).kind.type).toBe("rectangle");
         // No set_field should have modified it
-        const kind = (state.nodes["rect-node-1"] as StoreDocumentNode).kind as unknown as Record<string, unknown>;
+        const kind = (state.nodes["rect-node-1"] as StoreDocumentNode).kind as unknown as Record<
+          string,
+          unknown
+        >;
         expect(kind["text_style"]).toBeUndefined();
         dispose();
       });

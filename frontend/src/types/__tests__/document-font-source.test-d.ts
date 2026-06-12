@@ -17,9 +17,7 @@ import type { EmbedDecision, FontSource } from "../document";
 describe("FontSource types", () => {
   it("FontSource discriminant has four variants", () => {
     type Sources = FontSource["source"];
-    expectTypeOf<Sources>().toEqualTypeOf<
-      "bundled" | "library" | "custom" | "system_reference"
-    >();
+    expectTypeOf<Sources>().toEqualTypeOf<"bundled" | "library" | "custom" | "system_reference">();
   });
 
   // Compile-time exhaustiveness sentinel for FontSource dispatch sites.

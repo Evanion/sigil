@@ -34,10 +34,7 @@ import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 import { buildRenderOrder, type RenderOrderResult } from "../canvas/render-order";
 import { defaultCorners } from "../store/default-corners";
-import {
-  fontLoadVersion,
-  installFontLoadingOrchestrator,
-} from "../canvas/font-loading";
+import { fontLoadVersion, installFontLoadingOrchestrator } from "../canvas/font-loading";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
 // the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
@@ -184,10 +181,7 @@ export const Canvas: Component = () => {
     // The store exposes `urqlClient` for fontBytes queries; guard for mock-store
     // environments (Storybook, tests) where urqlClient is undefined.
     if (store.urqlClient) {
-      installFontLoadingOrchestrator(
-        () => store.state.fontTable,
-        store.urqlClient,
-      );
+      installFontLoadingOrchestrator(() => store.state.fontTable, store.urqlClient);
     }
 
     // -- Tool setup -----------------------------------------------------------

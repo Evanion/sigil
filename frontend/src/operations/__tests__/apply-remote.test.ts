@@ -108,7 +108,12 @@ describe("applyRemoteTransaction", () => {
   describe("legacy fallback", () => {
     it("should call fetchPages when operations array is empty", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
+        const [, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+          tokens: {},
+          fontTable: {},
+        });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -885,7 +890,12 @@ describe("applyRemoteTransaction", () => {
 
     it("should handle NaN seq gracefully", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
+        const [, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+          tokens: {},
+          fontTable: {},
+        });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(
@@ -939,7 +949,12 @@ describe("applyRemoteTransaction", () => {
   describe("seq parsing", () => {
     it("should return parsed seq number from transaction", () => {
       createRoot((dispose) => {
-        const [, setState] = createStore<StoreState>({ nodes: {}, pages: [], tokens: {}, fontTable: {} });
+        const [, setState] = createStore<StoreState>({
+          nodes: {},
+          pages: [],
+          tokens: {},
+          fontTable: {},
+        });
         const fetchPages = vi.fn().mockResolvedValue(undefined);
 
         const seq = applyRemoteTransaction(

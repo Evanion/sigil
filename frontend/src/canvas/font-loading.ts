@@ -171,13 +171,11 @@ export function installFontLoadingOrchestrator(
     // Kick off the async work in a fire-and-catch wrapper.
     // Per "No Fire-and-Forget Mutations": the promise is captured and any
     // rejection is caught and logged — we don't suppress errors.
-    loadEntriesAsync(newEntries, urqlClient, () => destroyed).catch(
-      (err: unknown) => {
-        console.error("[font-loading] unexpected error in font load batch", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      },
-    );
+    loadEntriesAsync(newEntries, urqlClient, () => destroyed).catch((err: unknown) => {
+      console.error("[font-loading] unexpected error in font load batch", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   });
 }
 
@@ -212,9 +210,7 @@ async function loadEntriesAsync(
   const customEntries = entries.filter((e) => e.source.source === "custom");
   const fetchPromises = customEntries.map(async (entry) => {
     try {
-      const result = await urqlClient
-        .query(gql(FONT_BYTES_QUERY), { id: entry.id })
-        .toPromise();
+      const result = await urqlClient.query(gql(FONT_BYTES_QUERY), { id: entry.id }).toPromise();
 
       if (result.error) {
         console.warn("[font-loading] fontBytes query error", {

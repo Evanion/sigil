@@ -24,9 +24,7 @@ function makeTextStyle(overrides: Partial<TextStyle> = {}): TextStyle {
 }
 
 /** Build a minimal font table for tests that need font resolution. */
-function makeFontTable(
-  entries: Array<{ id: string; family: string }>,
-): Record<string, FontEntry> {
+function makeFontTable(entries: Array<{ id: string; family: string }>): Record<string, FontEntry> {
   const table: Record<string, FontEntry> = {};
   for (const e of entries) {
     table[e.id] = {

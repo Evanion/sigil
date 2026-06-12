@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { measureTextLines, buildFontString, resolveFontFamily, FALLBACK_FONT_FAMILY } from "../text-measure";
+import {
+  measureTextLines,
+  buildFontString,
+  resolveFontFamily,
+  FALLBACK_FONT_FAMILY,
+} from "../text-measure";
 import type { TextStyle, FontEntry } from "../../types/document";
 import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 

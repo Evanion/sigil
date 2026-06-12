@@ -22,7 +22,11 @@ import type {
 import { DEFAULT_FONT_ENTRY_ID, type FontProvenance } from "../types/document";
 import type { Viewport } from "../canvas/viewport";
 import { PAGES_QUERY, TOKENS_QUERY, FONTS_QUERY } from "../graphql/queries";
-import { APPLY_OPERATIONS_MUTATION, ADD_FONT_MUTATION, REMOVE_FONT_MUTATION } from "../graphql/mutations";
+import {
+  APPLY_OPERATIONS_MUTATION,
+  ADD_FONT_MUTATION,
+  REMOVE_FONT_MUTATION,
+} from "../graphql/mutations";
 import type { Operation, Transaction, ReparentValue, ReorderValue } from "../operations/types";
 import { TRANSACTION_APPLIED_SUBSCRIPTION } from "../graphql/subscriptions";
 import { applyRemoteTransaction, type RemoteTransactionPayload } from "../operations/apply-remote";
@@ -52,7 +56,11 @@ import { parseFontEntry } from "./font-input";
 import { VALID_TOKEN_TYPES, isValidTokenValue, validateTokenName } from "../panels/token-helpers";
 import { isValidExpressionLength } from "./style-value-validate";
 import { MAX_EXPRESSION_LENGTH } from "./expression-eval";
-import { MAX_NODE_TREE_DEPTH, MAX_NODES_PER_DELETE_BATCH, MAX_EMBEDDED_FONT_BYTES } from "../types/validation";
+import {
+  MAX_NODE_TREE_DEPTH,
+  MAX_NODES_PER_DELETE_BATCH,
+  MAX_EMBEDDED_FONT_BYTES,
+} from "../types/validation";
 import {
   getSessionId,
   getGraphqlHttpUrl,
@@ -2775,9 +2783,7 @@ export function createDocumentStoreSolid(): DocumentStoreAPI {
     // Send to server.
     let result: Awaited<ReturnType<typeof client.mutation>>;
     try {
-      result = await client
-        .mutation(gql(REMOVE_FONT_MUTATION), { id })
-        .toPromise();
+      result = await client.mutation(gql(REMOVE_FONT_MUTATION), { id }).toPromise();
     } catch (err: unknown) {
       // Network error — restore snapshot.
       setState("fontTable", id, snapshot);

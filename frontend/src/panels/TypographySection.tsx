@@ -576,11 +576,7 @@ export const TypographySection: Component = () => {
         />
 
         {/* "Add font…" button — keyboard-accessible via Kobalte Button wrapper */}
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() => fileInputRef?.click()}
-        >
+        <Button variant="secondary" size="sm" onClick={() => fileInputRef?.click()}>
           {t("panels:typography.addFont")}
         </Button>
       </div>

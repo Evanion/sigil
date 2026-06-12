@@ -120,9 +120,9 @@ describe("handleAddFontFile", () => {
 
     // handleAddFontFile MUST resolve, never reject — the caller cannot safely
     // attach an error handler in every case.
-    await expect(handleAddFontFile(makeFile("X.ttf"), "node-uuid", store, t)).resolves.toMatchObject(
-      { ok: false },
-    );
+    await expect(
+      handleAddFontFile(makeFile("X.ttf"), "node-uuid", store, t),
+    ).resolves.toMatchObject({ ok: false });
   });
 
   it("should NOT call setNodeFont when nodeUuid is null (no text node selected)", async () => {

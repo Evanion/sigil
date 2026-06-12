@@ -29,6 +29,10 @@
   "typography": {
     "title": "Tipografía",
     "fontFamily": "Familia tipográfica",
+    "addFont": "Añadir fuente…",
+    "addFontLabel": "Añadir fuente desde archivo",
+    "fontAdded": "{{family}} añadida",
+    "fontAddError": "No se pudo añadir la fuente: {{error}}",
     "fontWeight": "Peso de fuente",
     "fontSize": "Tamaño de fuente",
     "italic": "Cursiva",

@@ -40,10 +40,7 @@ function loadFixture(): Fixture {
   // Resolve relative to this test file, walking up to the workspace root.
   // __dirname is not available in ESM; use import.meta.url + fileURLToPath.
   const here = dirname(fileURLToPath(import.meta.url));
-  const fixturePath = resolve(
-    here,
-    "../../../../tests/fixtures/parity/font_entry_encoding.json",
-  );
+  const fixturePath = resolve(here, "../../../../tests/fixtures/parity/font_entry_encoding.json");
   const raw = readFileSync(fixturePath, "utf8");
   const parsed: unknown = JSON.parse(raw);
   if (
@@ -105,9 +102,7 @@ function assertFontEntry(value: unknown, variantName: string): asserts value is 
   }
   if (sourceDiscriminant === "custom") {
     if (typeof source["asset_uuid"] !== "string") {
-      throw new Error(
-        `[${variantName}] source.asset_uuid must be a string for "custom" source`,
-      );
+      throw new Error(`[${variantName}] source.asset_uuid must be a string for "custom" source`);
     }
   }
 
@@ -186,10 +181,7 @@ function assertFontEntry(value: unknown, variantName: string): asserts value is 
       }
     }
     for (const field of ["min", "default", "max"] as const) {
-      if (
-        typeof axisObj[field] !== "number" ||
-        !Number.isFinite(axisObj[field] as number)
-      ) {
+      if (typeof axisObj[field] !== "number" || !Number.isFinite(axisObj[field] as number)) {
         throw new Error(`[${variantName}] axes[${i}].${field} must be a finite number`);
       }
     }

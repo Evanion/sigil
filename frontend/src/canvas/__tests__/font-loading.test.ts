@@ -134,7 +134,10 @@ function buildFontFaceMock(
 beforeEach(() => {
   constructedFaces = [];
   mockFonts = createMockFonts();
-  vi.stubGlobal("FontFace", buildFontFaceMock(() => constructedFaces));
+  vi.stubGlobal(
+    "FontFace",
+    buildFontFaceMock(() => constructedFaces),
+  );
   Object.defineProperty(document, "fonts", {
     value: mockFonts,
     writable: true,
@@ -151,11 +154,7 @@ afterEach(() => {
 // Fixtures
 // ---------------------------------------------------------------------------
 
-function makeEntry(
-  id: string,
-  family: string,
-  source: FontSource,
-): FontEntry {
+function makeEntry(id: string, family: string, source: FontSource): FontEntry {
   return {
     id,
     family,
@@ -253,7 +252,7 @@ describe("b64ToUint8Array", () => {
 
 describe("installFontLoadingOrchestrator", () => {
   it("should fetch fontBytes, call loadFonts, and increment fontLoadVersion for a Custom entry", async () => {
-    const rawBytes = new Uint8Array([0xDE, 0xAD, 0xBE]);
+    const rawBytes = new Uint8Array([0xde, 0xad, 0xbe]);
     // Encode to base64 as the server would return
     const b64 = btoa(String.fromCharCode(...rawBytes));
 
@@ -377,8 +376,9 @@ describe("installFontLoadingOrchestrator", () => {
     const fontId2 = "id-stable-2";
     const b64 = btoa(String.fromCharCode(1, 2, 3));
 
-    const queryMock = vi.fn().mockImplementation(
-      (_doc: unknown, variables: Record<string, unknown>) => {
+    const queryMock = vi
+      .fn()
+      .mockImplementation((_doc: unknown, variables: Record<string, unknown>) => {
         const id = variables["id"] as string;
         return {
           toPromise: () =>
@@ -386,8 +386,7 @@ describe("installFontLoadingOrchestrator", () => {
               data: { fontBytes: id === fontId1 || id === fontId2 ? b64 : null },
             }),
         };
-      },
-    );
+      });
     const client = { query: queryMock };
 
     // Use a Solid signal so that setTable() causes the effect to re-run.
@@ -459,8 +458,7 @@ describe("installFontLoadingOrchestrator", () => {
 
     const slowClient = {
       query: vi.fn().mockImplementation(() => ({
-        toPromise: () =>
-          slowQueryPromise.then(() => ({ data: { fontBytes: b64 } })),
+        toPromise: () => slowQueryPromise.then(() => ({ data: { fontBytes: b64 } })),
       })),
     };
 
@@ -491,8 +489,7 @@ describe("installFontLoadingOrchestrator", () => {
     const fontId = "error-id";
     const client = {
       query: vi.fn().mockImplementation(() => ({
-        toPromise: () =>
-          Promise.resolve({ error: { message: "network error" } }),
+        toPromise: () => Promise.resolve({ error: { message: "network error" } }),
       })),
     };
 
@@ -529,7 +526,9 @@ describe("installFontLoadingOrchestrator", () => {
   it("should load a system_reference entry without fetching fontBytes", async () => {
     const fontId = "sys-ref-id";
     // system_reference — no fontBytes fetch should occur
-    const querySpy = vi.fn().mockReturnValue({ toPromise: () => Promise.resolve({ data: { fontBytes: null } }) });
+    const querySpy = vi
+      .fn()
+      .mockReturnValue({ toPromise: () => Promise.resolve({ data: { fontBytes: null } }) });
     const client = { query: querySpy };
 
     // Make the system font available
@@ -570,7 +569,7 @@ describe("installFontLoadingOrchestrator", () => {
     //   - no unhandled promise rejection is thrown
 
     const fontId = "throws-id";
-    const b64 = btoa(String.fromCharCode(0xDE, 0xAD));
+    const b64 = btoa(String.fromCharCode(0xde, 0xad));
     const client = makeMockClient(new Map([[fontId, { data: { fontBytes: b64 } }]]));
 
     const fontTable: Record<string, FontEntry> = {

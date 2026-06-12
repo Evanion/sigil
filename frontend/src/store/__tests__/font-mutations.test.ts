@@ -87,9 +87,12 @@ describe("addFont (isolated logic tests)", () => {
     const mockMutation = vi.fn();
     const mockAnnounce = vi.fn();
 
-    const result = await simulateAddFont(oversizeBytes, "user_supplied", mockMutation, mockAnnounce).catch(
-      (e: unknown) => e,
-    );
+    const result = await simulateAddFont(
+      oversizeBytes,
+      "user_supplied",
+      mockMutation,
+      mockAnnounce,
+    ).catch((e: unknown) => e);
 
     expect(result).toBeInstanceOf(Error);
     expect((result as Error).message).toMatch(/MAX_EMBEDDED_FONT_BYTES|exceeds max/);
@@ -107,7 +110,13 @@ describe("addFont (isolated logic tests)", () => {
       data: { addFont: makeFontEntry(entryId, "Inter") },
     });
 
-    const result = await simulateAddFont(exactBytes, "user_supplied", mockMutation, vi.fn(), fontTableUpdates);
+    const result = await simulateAddFont(
+      exactBytes,
+      "user_supplied",
+      mockMutation,
+      vi.fn(),
+      fontTableUpdates,
+    );
 
     expect(result).toBe(entryId);
     expect(mockMutation).toHaveBeenCalledOnce();
@@ -124,7 +133,13 @@ describe("addFont (isolated logic tests)", () => {
       data: { addFont: makeFontEntry(entryId, "Roboto") },
     });
 
-    const result = await simulateAddFont(bytes, "user_supplied", mockMutation, vi.fn(), fontTableUpdates);
+    const result = await simulateAddFont(
+      bytes,
+      "user_supplied",
+      mockMutation,
+      vi.fn(),
+      fontTableUpdates,
+    );
 
     expect(result).toBe(entryId);
     expect(fontTableUpdates).toHaveLength(1);
@@ -140,9 +155,13 @@ describe("addFont (isolated logic tests)", () => {
       data: null,
     });
 
-    const result = await simulateAddFont(bytes, "user_supplied", mockMutation, mockAnnounce, fontTableUpdates).catch(
-      (e: unknown) => e,
-    );
+    const result = await simulateAddFont(
+      bytes,
+      "user_supplied",
+      mockMutation,
+      mockAnnounce,
+      fontTableUpdates,
+    ).catch((e: unknown) => e);
 
     expect(result).toBeInstanceOf(Error);
     expect(mockAnnounce).toHaveBeenCalledOnce();
@@ -160,9 +179,13 @@ describe("addFont (isolated logic tests)", () => {
       data: { addFont: { id: "cccccccc-cccc-cccc-cccc-cccccccccccc" } },
     });
 
-    const result = await simulateAddFont(bytes, "user_supplied", mockMutation, mockAnnounce, fontTableUpdates).catch(
-      (e: unknown) => e,
-    );
+    const result = await simulateAddFont(
+      bytes,
+      "user_supplied",
+      mockMutation,
+      mockAnnounce,
+      fontTableUpdates,
+    ).catch((e: unknown) => e);
 
     expect(result).toBeInstanceOf(Error);
     expect(mockAnnounce).toHaveBeenCalledOnce();
@@ -195,7 +218,14 @@ describe("removeFont (isolated logic tests)", () => {
     const mockAnnounce = vi.fn();
     const deletedIds: string[] = [];
 
-    await simulateRemoveFont(DEFAULT_FONT_ENTRY_ID, fontTable, [], mockMutation, mockAnnounce, deletedIds);
+    await simulateRemoveFont(
+      DEFAULT_FONT_ENTRY_ID,
+      fontTable,
+      [],
+      mockMutation,
+      mockAnnounce,
+      deletedIds,
+    );
 
     expect(mockMutation).not.toHaveBeenCalled();
     expect(mockAnnounce).toHaveBeenCalledOnce();
@@ -335,7 +365,14 @@ describe("setNodeFont (isolated logic + undo/redo tests)", () => {
     const pendingOps: Record<string, unknown>[] = [];
     const interceptorSets: Array<{ uuid: string; field: string; value: unknown }> = [];
 
-    simulateSetNodeFont("missing-uuid", DEFAULT_FONT_ENTRY_ID, nodes, fontTable, pendingOps, interceptorSets);
+    simulateSetNodeFont(
+      "missing-uuid",
+      DEFAULT_FONT_ENTRY_ID,
+      nodes,
+      fontTable,
+      pendingOps,
+      interceptorSets,
+    );
 
     expect(interceptorSets).toHaveLength(0);
     expect(pendingOps).toHaveLength(0);
@@ -389,7 +426,14 @@ describe("setNodeFont (isolated logic + undo/redo tests)", () => {
     const pendingOps: Record<string, unknown>[] = [];
     const interceptorSets: Array<{ uuid: string; field: string; value: unknown }> = [];
 
-    simulateSetNodeFont(nodeUuid, DEFAULT_FONT_ENTRY_ID, nodes, fontTable, pendingOps, interceptorSets);
+    simulateSetNodeFont(
+      nodeUuid,
+      DEFAULT_FONT_ENTRY_ID,
+      nodes,
+      fontTable,
+      pendingOps,
+      interceptorSets,
+    );
 
     expect(interceptorSets).toHaveLength(0);
     expect(pendingOps).toHaveLength(0);

@@ -187,7 +187,10 @@ beforeEach(() => {
   // Install the constructable FontFace mock.
   // Arrow functions can't be used with `new` — use buildFontFaceMock which
   // returns a regular function.
-  vi.stubGlobal("FontFace", buildFontFaceMock(() => constructedFaces));
+  vi.stubGlobal(
+    "FontFace",
+    buildFontFaceMock(() => constructedFaces),
+  );
 
   // Mock document.fonts
   Object.defineProperty(document, "fonts", {
@@ -515,8 +518,8 @@ describe("loadFonts (CSS-unsafe family name)", () => {
   });
 
   it("should return error for a family containing a double-quote character", async () => {
-    const entry = makeEntry('id-41', 'Bad"Font', { source: "custom", asset_uuid: "uuid-41" });
-    const bytesById = new Map([['id-41', new Uint8Array([1])]]);
+    const entry = makeEntry("id-41", 'Bad"Font', { source: "custom", asset_uuid: "uuid-41" });
+    const bytesById = new Map([["id-41", new Uint8Array([1])]]);
 
     const results = await loadFonts([entry], bytesById);
 
