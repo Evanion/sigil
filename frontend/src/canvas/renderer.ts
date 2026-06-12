@@ -14,6 +14,7 @@ import type {
   ConicGradientDef,
   DocumentNode,
   Fill,
+  FontEntry,
   GradientDef,
   Token,
   Transform,
@@ -25,7 +26,12 @@ import type { MarqueeRect } from "../tools/select-tool";
 import type { Viewport } from "./viewport";
 import type { SnapGuide } from "./snap-engine";
 import { computeCompoundBounds } from "./multi-select";
-import { buildFontString, measureTextLines, DEFAULT_FONT_SIZE_PX } from "./text-measure";
+import {
+  buildFontString,
+  measureTextLines,
+  resolveFontFamily,
+  DEFAULT_FONT_SIZE_PX,
+} from "./text-measure";
 import { resolveStopColorCSS } from "../components/gradient-editor/gradient-utils";
 import { buildCornerPath } from "./corner-path";
 import { type RenderOrderNode } from "./render-order";
@@ -317,6 +323,7 @@ function drawNode(
   node: DocumentNode,
   transform: Transform,
   tokens: Record<string, Token>,
+  fontTable: Record<string, FontEntry>,
 ): Path2D | null {
   const { x, y, width, height } = transform;
 
@@ -410,7 +417,7 @@ function drawNode(
     }
     case "text": {
       const ts = node.kind.text_style;
-      const fontStr = buildFontString(ts);
+      const fontStr = buildFontString(ts, (id) => resolveFontFamily(fontTable, id));
       ctx.font = fontStr;
 
       // Text color: resolve token refs, falling back to opaque black.
@@ -817,6 +824,7 @@ export function render(
   snapGuides: readonly SnapGuide[] = [],
   marqueeRect: MarqueeRect | null = null,
   tokens: Record<string, Token> = {},
+  fontTable: Record<string, FontEntry> = {},
 ): void {
   // Clear the entire canvas in screen space.
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -871,7 +879,7 @@ export function render(
       }
 
       const effectiveTransform = getEffectiveTransform(node, previewMap);
-      const cornerPath = drawNode(ctx, node, effectiveTransform, tokens);
+      const cornerPath = drawNode(ctx, node, effectiveTransform, tokens, fontTable);
 
       // If this is a frame, push a clip for its subtree. Reuse the Path2D
       // that drawNode already built (RF-004) — no third allocation.

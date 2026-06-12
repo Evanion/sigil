@@ -34,6 +34,7 @@ import type { ToolStore } from "../store/document-store-types";
 import type { DocumentNode, NodeKind, Transform } from "../types/document";
 import { buildRenderOrder, type RenderOrderResult } from "../canvas/render-order";
 import { defaultCorners } from "../store/default-corners";
+import { fontLoadVersion, installFontLoadingOrchestrator } from "../canvas/font-loading";
 // RF-033: Alignment shortcuts removed — they conflict with browser defaults
 // (Ctrl+Shift+T, Ctrl+Shift+C, Ctrl+Shift+B). Alignment is accessible via
 // the AlignPanel buttons. Non-conflicting shortcuts can be added in a follow-up.
@@ -168,6 +169,21 @@ export const Canvas: Component = () => {
     const ctx = acquireWideGamut2D(canvas);
     if (!ctx) return;
 
+    // -- Font-loading orchestrator --------------------------------------------
+    //
+    // Watches state.fontTable for new entries and registers FontFace objects in
+    // document.fonts via loadFonts().  When a batch of fonts finishes loading,
+    // `fontLoadVersion` is incremented — the render effect below reads it as a
+    // dependency so the canvas re-renders with the newly-available families.
+    //
+    // Must be installed here (inside onMount, inside the component's reactive
+    // owner) so createEffect and onCleanup have a valid reactive owner.
+    // The store exposes `urqlClient` for fontBytes queries; guard for mock-store
+    // environments (Storybook, tests) where urqlClient is undefined.
+    if (store.urqlClient) {
+      installFontLoadingOrchestrator(() => store.state.fontTable, store.urqlClient);
+    }
+
     // -- Tool setup -----------------------------------------------------------
 
     const storeAdapter = createStoreAdapter(store, nodesMap);
@@ -245,7 +261,7 @@ export const Canvas: Component = () => {
       const node = store.state.nodes[uuid];
       if (!node || node.kind.type !== "text") return;
 
-      activeOverlay = createTextOverlay(node, store.viewport(), canvas);
+      activeOverlay = createTextOverlay(node, store.viewport(), canvas, store.state.fontTable);
       editingUuid = uuid;
 
       // RF-026: Announce text edit mode to screen readers
@@ -690,6 +706,30 @@ export const Canvas: Component = () => {
       // Read tokens for token-ref resolution in the renderer
       const tokens = store.state.tokens;
 
+      // Read font table for font-entry resolution in the renderer.
+      // state.fontTable is a Solid store field. Reading the parent proxy alone
+      // only tracks wholesale replacement (the `reconcile` on initial load).
+      // Touching the key set here ALSO subscribes the effect to incremental
+      // adds/removes — `apply-remote` add_font/remove_font and `store.addFont`
+      // (Task 17b) use `setState("fontTable", id, entry)`, which fires the
+      // per-key atom, not the parent. Without this read, a font that loads after
+      // first paint would never trigger a re-render. (Per-key value overwrites
+      // are additionally covered by the resolver's `fontTable[id]` read during
+      // render.)
+      const fontTable = store.state.fontTable;
+      void Object.keys(fontTable).length;
+
+      // Read fontLoadVersion so the render effect re-runs when a FontFace
+      // finishes loading (document.fonts gains a new family).
+      //
+      // `document.fonts` availability is external to Solid — `fontLoadVersion`
+      // bridges it into the reactive graph.  Without this read, an embedded font
+      // that resolves after first paint would not trigger a re-render, and
+      // `ctx.font` would continue using the fallback family until the next
+      // unrelated re-render.  Per CLAUDE.md §5 "Plain class instances are not
+      // reactive in Solid.js": the signal is the required bridge.
+      void fontLoadVersion();
+
       // RF-039: Wrap renderCanvas in try-catch so assertFiniteTransform or other
       // errors in the render path do not crash the entire reactive effect.
       try {
@@ -705,6 +745,7 @@ export const Canvas: Component = () => {
           guides,
           marquee,
           tokens,
+          fontTable,
         );
       } catch (err: unknown) {
         console.error("Canvas render error:", err);

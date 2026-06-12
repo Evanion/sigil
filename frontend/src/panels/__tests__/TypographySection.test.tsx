@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
-import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
+import { makeTestFontEntry } from "../../test-utils/font-entry";
+import { render, screen, cleanup, fireEvent, waitFor } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
 import type { i18n } from "i18next";
@@ -13,6 +14,7 @@ import {
 import { DocumentProvider } from "../../store/document-context";
 import { createTestI18n } from "../../test-utils/i18n";
 import type { DocumentStoreAPI, ToolType } from "../../store/document-store-solid";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 
 let i18nInstance: i18n;
 
@@ -35,6 +37,7 @@ function createMockStore(
       pages: [],
       nodes,
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
@@ -82,6 +85,10 @@ function createMockStore(
     deleteToken: vi.fn(),
     renameToken: vi.fn(),
     resolveToken: () => null,
+    getFontEntry: () => undefined,
+    addFont: vi.fn(() => Promise.resolve(makeTestFontEntry())),
+    removeFont: vi.fn(() => Promise.resolve()),
+    setNodeFont: vi.fn(),
     destroy: vi.fn(),
   } as DocumentStoreAPI;
 }
@@ -90,7 +97,7 @@ function createMockStore(
 
 function makeTextNode(
   overrides: Partial<{
-    font_family: string;
+    font_entry: string;
     font_size: number;
     font_weight: number;
     font_style: string;
@@ -123,7 +130,7 @@ function makeTextNode(
       type: "text",
       content: "Hello",
       text_style: {
-        font_family: overrides.font_family ?? "Inter",
+        font_entry: overrides.font_entry ?? DEFAULT_FONT_ENTRY_ID,
         font_size: { type: "literal", value: overrides.font_size ?? 16 },
         font_weight: overrides.font_weight ?? 400,
         font_style: overrides.font_style ?? "normal",
@@ -617,10 +624,10 @@ describe("TypographySection", () => {
     expect(flushHistory).toHaveBeenCalled();
   });
 
-  it("should call flushHistory when the font family ValueInput commits via Enter", () => {
-    const flushHistory = vi.fn();
+  it("should render the Add font button with accessible name (Task 19)", () => {
+    // Task 19: the font-family area now shows a read-only display + an "Add font…" button.
+    // The button is a keyboard-accessible Kobalte Button (not a span/div).
     const store = createMockStore("text-1", { "text-1": makeTextNode() });
-    store.flushHistory = flushHistory;
     render(() => (
       <TransProvider instance={i18nInstance}>
         <DocumentProvider store={store}>
@@ -628,10 +635,11 @@ describe("TypographySection", () => {
         </DocumentProvider>
       </TransProvider>
     ));
-    const fontFamily = screen.getByRole("combobox", { name: "Font family" });
-    const fontFamilyTextbox = fontFamily.querySelector('[role="textbox"]') as HTMLElement;
-    fireEvent.keyDown(fontFamilyTextbox, { key: "Enter" });
-    expect(flushHistory).toHaveBeenCalled();
+    // The button must be a real <button> role with an accessible name.
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    expect(addFontBtn).toBeTruthy();
+    // Must be keyboard-reachable (not tabIndex=-1).
+    expect(addFontBtn.getAttribute("tabindex")).not.toBe("-1");
   });
 
   it("should call flushHistory when the text color ValueInput commits via Enter", () => {
@@ -823,6 +831,152 @@ describe("TypographySection", () => {
           expect(val.blur_radius).toBeLessThanOrEqual(1000);
         }
       }
+    }
+  });
+
+  // ── Add font from file (Task 19) ──────────────────────────────────────
+
+  it("should render a single persistent role=status region that is not re-mounted on file select", async () => {
+    const addFont = vi.fn(() =>
+      Promise.resolve(makeTestFontEntry({ id: "new-entry-id", family: "Inter" })),
+    );
+    const setNodeFont = vi.fn();
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.addFont = addFont;
+    store.setNodeFont = setNodeFont;
+
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    // Single role=status region (the panel's announcement region).
+    // getAllByRole will include any from ValueInput sub-components too, so we
+    // verify at least one exists and it is the same element before and after.
+    const statusRegionsBefore = document.querySelectorAll('[role="status"]');
+    expect(statusRegionsBefore.length).toBeGreaterThan(0);
+    const panelStatusBefore = statusRegionsBefore[statusRegionsBefore.length - 1];
+
+    // Simulate file selection via the hidden file input.
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    if (fileInput) {
+      const mockFile = new File([new Uint8Array([0, 1, 2])], "Inter.ttf", {
+        type: "font/ttf",
+      });
+      Object.defineProperty(fileInput, "files", {
+        value: { 0: mockFile, length: 1, item: (i: number) => (i === 0 ? mockFile : null) },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    // End-to-end wiring (frontend-defensive "Reactive Pipelines Must Be Verified
+    // End-to-End"): the file-input change must reach store.addFont, and on success
+    // apply the new entry to the selected node via setNodeFont.
+    await waitFor(() => expect(addFont).toHaveBeenCalledOnce());
+    expect(setNodeFont).toHaveBeenCalledWith("text-1", "new-entry-id");
+
+    // Status region must be the SAME node — not re-mounted.
+    const statusRegionsAfter = document.querySelectorAll('[role="status"]');
+    const panelStatusAfter = statusRegionsAfter[statusRegionsAfter.length - 1];
+    expect(panelStatusBefore).toBe(panelStatusAfter);
+  });
+
+  it("should have a hidden file input with an accessible name", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    // Must have an accessible name (aria-label) for AT.
+    expect(fileInput?.getAttribute("aria-label")).toBeTruthy();
+    // Must be excluded from Tab order (programmatically triggered by button).
+    expect(fileInput?.getAttribute("tabindex")).toBe("-1");
+  });
+
+  it("should restore focus to the Add font button after the file input change fires (RF-012)", async () => {
+    const addFont = vi.fn(() =>
+      Promise.resolve(makeTestFontEntry({ id: "rf012-entry", family: "Inter" })),
+    );
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    store.addFont = addFont;
+    store.setNodeFont = vi.fn();
+
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+
+    const mockFile = new File([new Uint8Array([0, 1, 2])], "Inter.ttf", { type: "font/ttf" });
+    if (fileInput) {
+      Object.defineProperty(fileInput, "files", {
+        value: { 0: mockFile, length: 1, item: (i: number) => (i === 0 ? mockFile : null) },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    // Focus must return to the visible button (the tabindex=-1 input must not
+    // hold focus after the dialog closes). WCAG 2.4.3.
+    expect(document.activeElement).toBe(addFontBtn);
+  });
+
+  it("should restore focus to the Add font button when the file dialog is cancelled (no file) (RF-012)", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement | null;
+    expect(fileInput).toBeTruthy();
+    if (fileInput) {
+      // No files selected (cancelled dialog) — change still fires the handler.
+      Object.defineProperty(fileInput, "files", {
+        value: { length: 0, item: () => null },
+        configurable: true,
+      });
+      fireEvent.change(fileInput);
+    }
+
+    expect(document.activeElement).toBe(addFontBtn);
+  });
+
+  it("should not have aria-hidden wrapping a focusable element in the add-font area", () => {
+    const store = createMockStore("text-1", { "text-1": makeTextNode() });
+    render(() => (
+      <TransProvider instance={i18nInstance}>
+        <DocumentProvider store={store}>
+          <TypographySection />
+        </DocumentProvider>
+      </TransProvider>
+    ));
+    // The "Add font…" button must not be wrapped in aria-hidden.
+    const addFontBtn = screen.getByRole("button", { name: "Add font…" });
+    let el: HTMLElement | null = addFontBtn.parentElement;
+    while (el && el !== document.body) {
+      expect(el.getAttribute("aria-hidden")).not.toBe("true");
+      el = el.parentElement;
     }
   });
 });

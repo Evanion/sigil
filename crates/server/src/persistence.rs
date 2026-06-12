@@ -98,7 +98,12 @@ mod tests {
         .await
         .unwrap();
 
-        let prepared = workfile::prepare_save(&Document::new("Migrated".to_string())).unwrap();
+        // Task 11 threads the session font byte store here; empty until then.
+        let prepared = workfile::prepare_save(
+            &Document::new("Migrated".to_string()),
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         let flag: MigrationFlag = Arc::new(Mutex::new(Some(1)));
 
         write_prepared_with_migration_flag(prepared, &workfile_path, &flag).await;

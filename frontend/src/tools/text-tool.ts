@@ -12,6 +12,7 @@
 import type { Tool, ToolEvent } from "./tool-manager";
 import type { ToolStore } from "../store/document-store-types";
 import type { NodeKind, Transform, TextStyle } from "../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../types/document";
 import type { PreviewRect } from "./shape-tool";
 
 /** Minimum drag dimension (in world units) to treat as a fixed-width drag. */
@@ -30,7 +31,7 @@ const DEFAULT_HEIGHT = 24;
  */
 function defaultTextStyle(): TextStyle {
   return {
-    font_family: "Inter",
+    font_entry: DEFAULT_FONT_ENTRY_ID,
     font_size: { type: "literal", value: 16 },
     font_weight: 400,
     font_style: "normal",

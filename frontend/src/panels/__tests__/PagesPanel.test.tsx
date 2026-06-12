@@ -4,6 +4,7 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
+import { makeTestFontEntry } from "../../test-utils/font-entry";
 import { render, screen, cleanup, fireEvent } from "@solidjs/testing-library";
 import { createSignal } from "solid-js";
 import { TransProvider } from "@mbarzda/solid-i18next";
@@ -65,6 +66,7 @@ function createMockStore(
       pages,
       nodes: {},
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId: vi.fn(),
@@ -111,6 +113,10 @@ function createMockStore(
     deleteToken: vi.fn(),
     renameToken: vi.fn(),
     resolveToken: () => null,
+    getFontEntry: () => undefined,
+    addFont: vi.fn(() => Promise.resolve(makeTestFontEntry())),
+    removeFont: vi.fn(() => Promise.resolve()),
+    setNodeFont: vi.fn(),
     destroy: vi.fn(),
     ...overrides,
   } as DocumentStoreAPI;

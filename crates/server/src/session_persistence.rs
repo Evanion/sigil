@@ -291,19 +291,26 @@ async fn persist_loop(
     }
 }
 
-/// One save: read the session store (async), serialize while holding the read
-/// lock, drop the lock, then write atomically (no lock across `.await`).
+/// One save: read the session store and font bytes (async), serialize while
+/// holding both read locks, drop both locks, then write atomically (no lock
+/// across `.await`).
+///
+/// Lock-ordering convention (matches `DocumentSession` doc-comment): `store`
+/// is acquired BEFORE `font_bytes` to prevent deadlock with any other site that
+/// holds both locks.
 async fn do_save_session(session: &Arc<DocumentSession>, migration_flag: &MigrationFlag) {
     let prepared = {
-        let guard = session.store.read().await;
-        match workfile::prepare_save(&guard.0) {
+        // Acquire store first (lock-ordering: store before font_bytes).
+        let store_guard = session.store.read().await;
+        let font_guard = session.font_bytes.read().await;
+        match workfile::prepare_save(&store_guard.0, &*font_guard) {
             Ok(p) => p,
             Err(e) => {
                 tracing::error!("failed to serialize session {} for save: {e}", session.id);
                 return;
             }
         }
-        // read guard dropped here — released before any await below.
+        // Both read guards dropped here — released before any await below.
     };
     write_prepared_with_migration_flag(prepared, &session.workfile_path, migration_flag).await;
 }
@@ -490,8 +497,8 @@ mod tests {
         );
         assert_eq!(
             sigil_core::CURRENT_SCHEMA_VERSION,
-            2,
-            "this assertion pins the expected migrated-to version (v2) for RF-004"
+            3,
+            "this assertion pins the expected migrated-to version (v3) for RF-004"
         );
     }
 

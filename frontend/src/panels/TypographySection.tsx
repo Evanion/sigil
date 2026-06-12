@@ -46,8 +46,8 @@ import { NumberInput } from "../components/number-input/NumberInput";
 import { Select } from "../components/select/Select";
 import { ToggleButton } from "../components/toggle-button/ToggleButton";
 import { ColorSwatch } from "../components/color-picker";
+import { Button } from "../components/button/Button";
 import ValueInput from "../components/value-input/ValueInput";
-import { SystemFontProvider } from "../components/value-input/font-provider";
 import { showToast } from "../components/toast/Toast";
 import {
   AlignLeft,
@@ -58,17 +58,15 @@ import {
   Underline,
   Strikethrough,
 } from "lucide-solid";
-import { validateCssIdentifier } from "../validation/css-identifiers";
+import { resolveFontFamily } from "../canvas/text-measure";
 import {
   formatColorStyleValue,
   formatNumberStyleValue,
   parseColorInput,
   parseNumberInput,
 } from "./panel-value-helpers";
+import { handleAddFontFile } from "./typography-helpers";
 import "./TypographySection.css";
-
-/** Single shared instance — SystemFontProvider is stateless. */
-const systemFontProvider = new SystemFontProvider();
 
 // ── Validation constants ─────────────────────────────────────────────
 
@@ -160,7 +158,10 @@ export const TypographySection: Component = () => {
   const fontFamily = createMemo((): string => {
     const kind = textKind();
     if (!kind) return "";
-    return kind.text_style.font_family;
+    // Resolve font_entry → family name via the document's font table.
+    // The font table is reactive (state.fontTable is a Solid store field),
+    // so this memo re-runs whenever the table changes.
+    return resolveFontFamily(store.state.fontTable, kind.text_style.font_entry);
   });
 
   /** Font size as a display string for ValueInput. */
@@ -256,39 +257,69 @@ export const TypographySection: Component = () => {
       label: `${t(`panels:fontWeight.${value}`)} (${value})`,
     }));
 
+  // ── File-input ref for "Add font…" trigger ───────────────────────
+  // The visually-hidden <input type="file"> is programmatically clicked by
+  // the Button trigger below — the standard pattern that keeps a real keyboard-
+  // focusable <button> as the affordance (CLAUDE.md §5, a11y-rules.md).
+  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
+  let fileInputRef: HTMLInputElement | undefined;
+
+  // RF-012: ref to the "Add font…" button so focus returns to it after the
+  // native file dialog closes (the hidden input is tabindex=-1 and must not
+  // hold focus). WCAG 2.4.3 Focus Order.
+  // eslint-disable-next-line no-unassigned-vars -- Solid's ref directive assigns this variable
+  let addFontButtonRef: HTMLButtonElement | undefined;
+
   // ── Handlers ──────────────────────────────────────────────────────
 
-  function handleFontFamilyChange(value: string): void {
-    const uuid = selectedUuid();
-    if (!uuid || !textKind()) return;
-    // RF-007: Surface a visible message when the user attempts to bind a
-    // token or write an expression in the font_family field. The core
-    // `TextStylePatch["font_family"]` type is still a plain `string`, not
-    // a `StyleValue<string>`, so token refs cannot be persisted here —
-    // silently rejecting them left the user with a DOM revert and no
-    // diagnostic. TODO(spec-13c): Promote TextStylePatch.font_family to
-    // StyleValue<string> to enable token binding for font families.
-    if (value.includes("{") || value.includes("}")) {
-      showToast({
-        title: t("panels:typography.fontFamilyNoTokenBinding"),
-        variant: "info",
-      });
-      return;
-    }
-    // RF-006: Reject font families containing CSS-significant characters.
-    if (!validateCssIdentifier(value)) {
-      showToast({
-        title: t("panels:typography.fontFamilyInvalid"),
-        variant: "error",
-      });
-      return;
-    }
-    store.setTextStyle(uuid, { field: "font_family", value });
-  }
+  /**
+   * Handle the file selected via the hidden <input type="file">.
+   * Calls handleAddFontFile (extracted helper — CLAUDE.md §5) which awaits
+   * the store mutation and returns a status message.  The status region text
+   * is swapped on each call — never re-mounted (a11y-rules.md §aria-live).
+   */
+  function handleFileInputChange(e: Event): void {
+    const input = e.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    // Reset early so re-selecting the same file re-fires the change event.
+    input.value = "";
 
-  function handleFontFamilyCommit(_value: string): void {
-    // RF-004: onChange already applied the value during the gesture.
-    store.flushHistory();
+    // RF-012: return focus to the visible "Add font…" button after the native
+    // file dialog closes — including the no-file (cancelled) early-return.
+    addFontButtonRef?.focus();
+
+    if (!file) return;
+
+    const uuid = selectedUuid();
+
+    // No fire-and-forget: we attach an error handler and update the status
+    // region on both success and failure (CLAUDE.md §11). RF-003: the outcome
+    // is ALSO routed to the visible Toast channel — the sr-only role=status
+    // region remains the screen-reader channel (it is not re-mounted).
+    handleAddFontFile(file, uuid, store, t).then(
+      (result) => {
+        announce(result.statusMessage);
+        if (result.ok) {
+          // RF-002/RF-003: a reference (non-embeddable) result uses a
+          // non-alarming "warning" variant; an embeddable one uses "success".
+          const isReferenced = result.embeddable !== undefined && result.embeddable !== "embed";
+          showToast({
+            title: result.statusMessage,
+            variant: isReferenced ? "warning" : "success",
+          });
+        } else {
+          showToast({ title: result.statusMessage, variant: "error" });
+        }
+      },
+      (err: unknown) => {
+        // Should not reach here — handleAddFontFile catches all errors and
+        // resolves with an error AddFontResult — but guard defensively.
+        const msg = err instanceof Error ? err.message : String(err);
+        const statusMessage = t("panels:typography.fontAddError", { error: msg });
+        announce(statusMessage);
+        showToast({ title: statusMessage, variant: "error" });
+      },
+    );
   }
 
   function handleFontSizeChange(raw: string): void {
@@ -529,28 +560,59 @@ export const TypographySection: Component = () => {
         {t("panels:typography.title")}
       </h3>
 
-      {/* ── Font family + weight ───────────────────────────────────── */}
-      <div class="sigil-typography-section__font-row">
-        {/*
-          TODO(spec-13c): Promote TextStylePatch.font_family to
-          StyleValue<string> so font families can bind to tokens. Until
-          that data-model change lands, we intentionally omit token
-          autocomplete (no `tokens` prop, no `font_family` accepted type)
-          and render a plain string input with system font suggestions.
-          Accepting `font_family` here would produce a token dropdown
-          that silently drops selections in handleFontFamilyChange.
-        */}
-        <ValueInput
-          value={fontFamily()}
-          onChange={handleFontFamilyChange}
-          onCommit={handleFontFamilyCommit}
-          tokens={{}}
-          acceptedTypes={["string"]}
-          fontProvider={systemFontProvider}
-          aria-label={t("panels:typography.fontFamily")}
-          placeholder={t("panels:typography.fontFamily")}
-          disabled={disabled()}
+      {/* ── Font family display + "Add font…" button ────────────────── */}
+      {/*
+        The resolved family name is displayed read-only.  The full font
+        picker (Fonts-2) will replace this with an interactive selector.
+        Per Task 19, the affordance here is "Add font from file" which
+        imports a TTF/OTF and applies it to the selected text node.
+
+        Accessibility posture:
+        - The trigger is a real Kobalte <Button> (keyboard-focusable by
+          default, Enter/Space activate it).
+        - The <input type="file"> is visually hidden via CSS.  The button
+          programmatically calls .click() on it — the standard pattern per
+          a11y-rules.md §"aria-hidden Must Not Wrap Focusable Descendants".
+          The input has an aria-label for AT; it is NOT wrapped in
+          aria-hidden because the button itself is the primary affordance.
+        - The file input is visually outside the DOM flow (sr-only class)
+          so it never receives Tab focus; the button is the only interactive
+          element here.
+      */}
+      <div class="sigil-typography-section__add-font-row">
+        {/* Read-only family name display */}
+        <span
+          class="sigil-typography-section__font-family-display"
+          data-testid="font-family-display"
+          title={fontFamily() || t("panels:typography.fontFamily")}
+        >
+          {fontFamily() || t("panels:typography.fontFamily")}
+        </span>
+
+        {/* Visually-hidden file input — triggered programmatically by the button */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".ttf,.otf"
+          class="sigil-typography-section__file-input"
+          aria-label={t("panels:typography.addFontLabel")}
+          tabIndex={-1}
+          onChange={handleFileInputChange}
         />
+
+        {/* "Add font…" button — keyboard-accessible via Kobalte Button wrapper */}
+        <Button
+          ref={addFontButtonRef}
+          variant="secondary"
+          size="sm"
+          onClick={() => fileInputRef?.click()}
+        >
+          {t("panels:typography.addFont")}
+        </Button>
+      </div>
+
+      {/* ── Font weight row ────────────────────────────────────────────── */}
+      <div class="sigil-typography-section__font-row">
         <Select
           options={fontWeightOptions()}
           value={String(fontWeight())}

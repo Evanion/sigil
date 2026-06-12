@@ -33,6 +33,38 @@
   flex-shrink: 0;
 }
 
+/* ── Add font row ────────────────────────────────────────────────────── */
+
+.sigil-typography-section__add-font-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.sigil-typography-section__font-family-display {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-size-0, 11px);
+  color: var(--text-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Visually-hidden file input — still receives programmatic .click() from the
+   button; the <label> provides an accessible name for AT. */
+.sigil-typography-section__file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ── Size + style row ────────────────────────────────────────────────── */
 
 .sigil-typography-section__size-row {

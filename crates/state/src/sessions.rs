@@ -112,6 +112,16 @@ pub struct DocumentSession {
     /// Per-session document state. Wrapped in [`SendDocument`] so the
     /// `unsafe Send/Sync` impls are narrowly scoped to the `Document` type.
     pub store: RwLock<SendDocument>,
+    /// Per-session embedded font bytes, keyed by asset UUID.
+    ///
+    /// Populated on workfile load (server's `load_workfile_into_state`) and
+    /// on `AddFontEntry` (Task 13). Read by the persistence save path
+    /// (`session_persistence::do_save_session`) to embed font bytes on save.
+    ///
+    /// **Lock-ordering convention:** when both `store` and `font_bytes` must be
+    /// acquired, ALWAYS acquire `store` BEFORE `font_bytes` to prevent deadlock.
+    /// Every site that holds both locks must follow this ordering without exception.
+    pub font_bytes: RwLock<HashMap<Uuid, Vec<u8>>>,
     /// Per-session broadcast channel. Subscribers receive [`SessionEvent`]s
     /// for mutations originating in this session.
     pub broadcast: broadcast::Sender<SessionEvent>,
@@ -304,6 +314,7 @@ impl Sessions {
             id,
             workfile_path: canonical.clone(),
             store: RwLock::new(SendDocument(document)),
+            font_bytes: RwLock::new(HashMap::new()),
             broadcast: tx,
             state: std::sync::Mutex::new(SessionState::Live),
             seq_counter: AtomicU64::new(1),
@@ -354,6 +365,7 @@ impl Sessions {
             id,
             workfile_path: synthetic_path.clone(),
             store: RwLock::new(SendDocument(document)),
+            font_bytes: RwLock::new(HashMap::new()),
             broadcast: tx,
             state: std::sync::Mutex::new(SessionState::Live),
             seq_counter: AtomicU64::new(1),
@@ -858,7 +870,9 @@ mod registry_tests {
                 let tx = me.transaction.expect("transaction present");
                 assert_eq!(tx.seq, 1, "first publish gets seq 1");
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
 
         // Second publish gets the next seq.
@@ -876,7 +890,9 @@ mod registry_tests {
             SessionEvent::DocumentEvent(me) => {
                 assert_eq!(me.transaction.expect("tx").seq, 2);
             }
-            other => panic!("expected DocumentEvent, got {other:?}"),
+            other @ SessionEvent::SessionFatal { .. } => {
+                panic!("expected DocumentEvent, got {other:?}")
+            }
         }
     }
 
@@ -892,5 +908,36 @@ mod registry_tests {
         assert_eq!(info.title, "My Title");
         assert_eq!(info.opened_at, "2026-05-27T12:00:00Z");
         assert_eq!(info.state, SessionState::Live);
+    }
+
+    /// A freshly-opened session must start with an empty `font_bytes` map.
+    ///
+    /// The server populates it after `open_session_with` succeeds; the empty
+    /// default here guarantees a safe starting state before population.
+    #[tokio::test]
+    async fn test_fresh_session_font_bytes_is_empty() {
+        let tmp = TempDir::new().expect("tempdir");
+        let path = make_workfile(&tmp, "fonts");
+        let sessions = Sessions::new(64);
+        let id = sessions.open(&path, stub_loader).expect("open");
+        let session = sessions.get(id).expect("session");
+        let font_bytes = session.font_bytes.read().await;
+        assert!(
+            font_bytes.is_empty(),
+            "font_bytes must be empty on a freshly-opened session"
+        );
+    }
+
+    /// `register_in_memory` sessions also start with an empty `font_bytes` map.
+    #[tokio::test]
+    async fn test_in_memory_session_font_bytes_is_empty() {
+        let sessions = Sessions::new(64);
+        let id = sessions.register_in_memory(Document::new("mem".to_string()));
+        let session = sessions.get(id).expect("session");
+        let font_bytes = session.font_bytes.read().await;
+        assert!(
+            font_bytes.is_empty(),
+            "font_bytes must be empty on a freshly-registered in-memory session"
+        );
     }
 }

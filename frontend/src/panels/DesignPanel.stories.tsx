@@ -5,6 +5,7 @@
  * data and renders the three sub-tabs: Layout, Appearance, Effects.
  */
 import type { Meta, StoryObj } from "storybook-solidjs-vite";
+import { makeTestFontEntry } from "../test-utils/font-entry";
 import { createSignal } from "solid-js";
 import { DesignPanel } from "./DesignPanel";
 import { DocumentProvider } from "../store/document-context";
@@ -25,6 +26,7 @@ function createMockStore(
       pages: [],
       nodes,
       tokens: {},
+      fontTable: {},
     },
     selectedNodeId,
     setSelectedNodeId,
@@ -74,6 +76,10 @@ function createMockStore(
     deleteToken: () => {},
     renameToken: () => {},
     resolveToken: () => null,
+    getFontEntry: () => undefined,
+    addFont: () => Promise.resolve(makeTestFontEntry()),
+    removeFont: () => Promise.resolve(),
+    setNodeFont: () => {},
     destroy: () => {},
   } as DocumentStoreAPI;
 }

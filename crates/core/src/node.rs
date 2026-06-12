@@ -181,7 +181,8 @@ impl Default for GridPlacement {
 /// Text styling properties.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TextStyle {
-    pub font_family: String,
+    /// Stable UUID that identifies a font entry in the document's [`crate::font::FontTable`].
+    pub font_entry: crate::font::FontEntryId,
     pub font_size: StyleValue<f64>,
     pub font_weight: u16,
     pub font_style: FontStyle,
@@ -196,7 +197,7 @@ pub struct TextStyle {
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            font_family: "Inter".to_string(),
+            font_entry: crate::font::DEFAULT_FONT_ENTRY_ID,
             font_size: StyleValue::Literal { value: 16.0 },
             font_weight: 400,
             font_style: FontStyle::Normal,
@@ -2835,25 +2836,6 @@ mod tests {
             NodeKind::Text {
                 content,
                 text_style: TextStyle::default(),
-                sizing: TextSizing::AutoWidth,
-            },
-            "Text".to_string(),
-        );
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_text_node_rejects_too_long_font_family() {
-        let font_family = "x".repeat(crate::validate::MAX_FONT_FAMILY_LEN + 1);
-        let result = Node::new(
-            NodeId::new(0, 0),
-            Uuid::nil(),
-            NodeKind::Text {
-                content: "Hello".to_string(),
-                text_style: TextStyle {
-                    font_family,
-                    ..TextStyle::default()
-                },
                 sizing: TextSizing::AutoWidth,
             },
             "Text".to_string(),

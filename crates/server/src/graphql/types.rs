@@ -314,6 +314,10 @@ pub enum DocumentEventType {
     TokenUpdated,
     /// A design token was deleted.
     TokenDeleted,
+    /// A new font entry was added to the document's font table.
+    FontAdded,
+    /// A font entry was removed from the document's font table.
+    FontRemoved,
 }
 
 /// A real-time event emitted when the document changes.
@@ -354,6 +358,8 @@ pub fn event_type_from_kind(kind: MutationEventKind) -> DocumentEventType {
         MutationEventKind::TokenCreated => DocumentEventType::TokenCreated,
         MutationEventKind::TokenUpdated => DocumentEventType::TokenUpdated,
         MutationEventKind::TokenDeleted => DocumentEventType::TokenDeleted,
+        MutationEventKind::FontAdded => DocumentEventType::FontAdded,
+        MutationEventKind::FontRemoved => DocumentEventType::FontRemoved,
     }
 }
 
@@ -708,6 +714,11 @@ mod tests {
             (
                 MutationEventKind::TokenDeleted,
                 DocumentEventType::TokenDeleted,
+            ),
+            (MutationEventKind::FontAdded, DocumentEventType::FontAdded),
+            (
+                MutationEventKind::FontRemoved,
+                DocumentEventType::FontRemoved,
             ),
         ];
 

@@ -1,6 +1,7 @@
 pub mod broadcast;
 pub mod components;
 pub mod document;
+pub mod font;
 pub mod nodes;
 pub mod pages;
 pub mod sessions;

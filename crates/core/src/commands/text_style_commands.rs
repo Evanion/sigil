@@ -6,16 +6,17 @@ use crate::error::CoreError;
 use crate::id::NodeId;
 use crate::node::{Color, FontStyle, NodeKind, StyleValue, TextAlign, TextDecoration, TextShadow};
 use crate::validate::{
-    FONT_FAMILY_FORBIDDEN_CHARS, MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT,
-    MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT, validate_finite,
-    validate_style_value_expression, validate_token_name,
+    MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_TEXT_SHADOW_BLUR, MIN_FONT_SIZE, MIN_FONT_WEIGHT,
+    validate_finite, validate_style_value_expression, validate_token_name,
 };
 
 /// Which field of `TextStyle` to update.
+///
+/// Note: font selection is not represented here. Font changes go through
+/// `SetNodeFont` (Task 9), which references a `FontEntryId` in the document's
+/// `FontTable`.
 #[derive(Debug, Clone)]
 pub enum TextStyleField {
-    /// The font family name (e.g., `"Inter"`, `"Roboto"`).
-    FontFamily(String),
     /// The font size in pixels.
     FontSize(StyleValue<f64>),
     /// The CSS font weight (1–1000).
@@ -91,31 +92,6 @@ fn validate_shadow(shadow: &TextShadow) -> Result<(), CoreError> {
         },
         StyleValue::TokenRef { name } => validate_token_name(name)?,
         StyleValue::Expression { expr } => validate_style_value_expression(expr)?,
-    }
-    Ok(())
-}
-
-fn validate_font_family(family: &str) -> Result<(), CoreError> {
-    if family.is_empty() {
-        return Err(CoreError::ValidationError(
-            "font_family must not be empty".to_string(),
-        ));
-    }
-    if family.len() > MAX_FONT_FAMILY_LEN {
-        return Err(CoreError::ValidationError(format!(
-            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-            family.len()
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| c.is_control()) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains control character at byte position {pos}"
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains forbidden character at byte position {pos}"
-        )));
     }
     Ok(())
 }
@@ -213,7 +189,6 @@ impl FieldOperation for SetTextStyleField {
             )));
         }
         match &self.field {
-            TextStyleField::FontFamily(family) => validate_font_family(family)?,
             TextStyleField::FontSize(sv) => validate_font_size_field(sv)?,
             TextStyleField::FontWeight(w) => validate_font_weight_field(*w)?,
             TextStyleField::LineHeight(sv) => validate_line_height_field(sv)?,
@@ -237,7 +212,6 @@ impl FieldOperation for SetTextStyleField {
         match &mut node.kind {
             NodeKind::Text { text_style, .. } => {
                 match &self.field {
-                    TextStyleField::FontFamily(v) => text_style.font_family.clone_from(v),
                     TextStyleField::FontSize(v) => text_style.font_size = v.clone(),
                     TextStyleField::FontWeight(v) => text_style.font_weight = *v,
                     TextStyleField::FontStyle(v) => text_style.font_style = *v,
@@ -481,53 +455,6 @@ mod tests {
         };
         op.validate(&doc).expect("MAX_FONT_WEIGHT is valid");
         op.apply(&mut doc).expect("apply at MAX_FONT_WEIGHT");
-    }
-
-    // ── FontFamily ────────────────────────────────────────────────────────────
-
-    #[test]
-    fn test_set_text_style_field_font_family_validate_and_apply() {
-        let (mut doc, node_id) = setup_doc_with_text();
-        let op = SetTextStyleField {
-            node_id,
-            field: TextStyleField::FontFamily("Roboto".to_string()),
-        };
-        op.validate(&doc).expect("validate");
-        op.apply(&mut doc).expect("apply");
-
-        let updated = doc.arena.get(node_id).expect("get node");
-        if let NodeKind::Text { text_style, .. } = &updated.kind {
-            assert_eq!(text_style.font_family, "Roboto");
-        } else {
-            panic!("expected Text node kind");
-        }
-    }
-
-    #[test]
-    fn test_set_text_style_field_font_family_rejects_empty() {
-        let (doc, node_id) = setup_doc_with_text();
-        let op = SetTextStyleField {
-            node_id,
-            field: TextStyleField::FontFamily(String::new()),
-        };
-        assert!(
-            op.validate(&doc).is_err(),
-            "empty font_family must be rejected"
-        );
-    }
-
-    #[test]
-    fn test_set_text_style_field_font_family_rejects_too_long() {
-        let (doc, node_id) = setup_doc_with_text();
-        let long_name = "x".repeat(MAX_FONT_FAMILY_LEN + 1);
-        let op = SetTextStyleField {
-            node_id,
-            field: TextStyleField::FontFamily(long_name),
-        };
-        assert!(
-            op.validate(&doc).is_err(),
-            "font_family exceeding MAX_FONT_FAMILY_LEN must be rejected"
-        );
     }
 
     // ── LineHeight ────────────────────────────────────────────────────────────
@@ -977,30 +904,6 @@ mod tests {
         assert!(
             op_at.validate(&doc).is_ok(),
             "font_weight at MAX_FONT_WEIGHT must be accepted"
-        );
-    }
-
-    #[test]
-    fn test_max_font_family_len_enforced() {
-        let (doc, node_id) = setup_doc_with_text();
-        let long_name = "x".repeat(MAX_FONT_FAMILY_LEN + 1);
-        let op = SetTextStyleField {
-            node_id,
-            field: TextStyleField::FontFamily(long_name),
-        };
-        assert!(
-            op.validate(&doc).is_err(),
-            "font_family exceeding MAX_FONT_FAMILY_LEN must be rejected"
-        );
-
-        let at_limit = "x".repeat(MAX_FONT_FAMILY_LEN);
-        let op_at = SetTextStyleField {
-            node_id,
-            field: TextStyleField::FontFamily(at_limit),
-        };
-        assert!(
-            op_at.validate(&doc).is_ok(),
-            "font_family at MAX_FONT_FAMILY_LEN must be accepted"
         );
     }
 }

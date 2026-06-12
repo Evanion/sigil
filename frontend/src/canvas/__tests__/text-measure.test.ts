@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { measureTextLines, buildFontString } from "../text-measure";
-import type { TextStyle } from "../../types/document";
+import {
+  measureTextLines,
+  buildFontString,
+  resolveFontFamily,
+  FALLBACK_FONT_FAMILY,
+} from "../text-measure";
+import type { TextStyle, FontEntry } from "../../types/document";
+import { DEFAULT_FONT_ENTRY_ID } from "../../types/document";
 
 // ---------------------------------------------------------------------------
 // Minimal CanvasRenderingContext2D mock
@@ -25,7 +31,7 @@ function createMockCtx(charWidth = 8): CanvasRenderingContext2D {
 
 function makeStyle(overrides: Partial<TextStyle> = {}): TextStyle {
   return {
-    font_family: "Arial",
+    font_entry: DEFAULT_FONT_ENTRY_ID,
     font_size: { type: "literal", value: 16 },
     font_weight: 400,
     font_style: "normal",
@@ -35,6 +41,34 @@ function makeStyle(overrides: Partial<TextStyle> = {}): TextStyle {
     text_decoration: "none",
     text_color: { type: "literal", value: { space: "srgb", r: 0, g: 0, b: 0, a: 1 } },
     ...overrides,
+  };
+}
+
+/**
+ * Build a minimal FontEntry for test tables.
+ */
+function makeFontEntry(id: string, family: string): FontEntry {
+  return {
+    id,
+    family,
+    postscript_name: family.replace(/\s+/g, "-"),
+    source: { source: "bundled" },
+    metrics: {
+      units_per_em: 2048,
+      ascent: 1984,
+      descent: -432,
+      line_gap: 0,
+      cap_height: 1456,
+      x_height: 1082,
+      italic_angle: 0,
+      avg_advance: 1000,
+      panose: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] as const,
+      is_serif: false,
+    },
+    fs_type: 0,
+    embeddable: "reference_system",
+    is_variable: false,
+    axes: [],
   };
 }
 
@@ -172,38 +206,112 @@ describe("buildFontString", () => {
       font_weight: 400,
       font_style: "normal",
       font_size: { type: "literal", value: 16 },
-      font_family: "Arial",
+      font_entry: "arial-entry-id",
     });
-    expect(buildFontString(style)).toBe("400 16px Arial");
+    const resolver = (id: string) => (id === "arial-entry-id" ? "Arial" : FALLBACK_FONT_FAMILY);
+    // RF-010: family is double-quoted in ctx.font.
+    expect(buildFontString(style, resolver)).toBe('400 16px "Arial"');
+  });
+
+  it("should double-quote a multi-word family so it resolves (RF-010)", () => {
+    const style = makeStyle({
+      font_weight: 400,
+      font_style: "normal",
+      font_size: { type: "literal", value: 16 },
+      font_entry: "open-sans-entry-id",
+    });
+    const resolver = (id: string) =>
+      id === "open-sans-entry-id" ? "Open Sans" : FALLBACK_FONT_FAMILY;
+    expect(buildFontString(style, resolver)).toBe('400 16px "Open Sans"');
   });
 
   it("should prepend italic when font_style is italic", () => {
     const style = makeStyle({
       font_style: "italic",
       font_size: { type: "literal", value: 14 },
-      font_family: "Georgia",
+      font_entry: "georgia-entry-id",
     });
-    expect(buildFontString(style)).toBe("italic 400 14px Georgia");
+    const resolver = (id: string) => (id === "georgia-entry-id" ? "Georgia" : FALLBACK_FONT_FAMILY);
+    expect(buildFontString(style, resolver)).toBe('italic 400 14px "Georgia"');
   });
 
   it("should use default font size 16 for token_ref font_size", () => {
     const style = makeStyle({ font_size: { type: "token_ref", name: "font.body" } });
-    expect(buildFontString(style)).toContain("16px");
+    expect(buildFontString(style, () => "Arial")).toContain("16px");
   });
 
   it("should handle bold weight", () => {
     const style = makeStyle({
       font_weight: 700,
       font_size: { type: "literal", value: 18 },
-      font_family: "Roboto",
+      font_entry: "roboto-entry-id",
     });
-    expect(buildFontString(style)).toBe("700 18px Roboto");
+    const resolver = (id: string) => (id === "roboto-entry-id" ? "Roboto" : FALLBACK_FONT_FAMILY);
+    expect(buildFontString(style, resolver)).toBe('700 18px "Roboto"');
   });
 
   it("should produce a string with no NaN values", () => {
     const style = makeStyle({ font_size: { type: "literal", value: NaN } });
     // Should fall back to default (16) for non-finite values
-    const result = buildFontString(style);
+    const result = buildFontString(style, () => "Arial");
     expect(result).not.toContain("NaN");
+  });
+
+  it("should use fallback family when resolver returns a CSS-invalid value", () => {
+    const style = makeStyle({ font_entry: "bad-entry-id" });
+    const resolver = (_id: string) => "Bad'Family;"; // contains CSS-significant chars
+    const result = buildFontString(style, resolver);
+    // CSS-invalid family is replaced with 'sans-serif'
+    expect(result).toContain("sans-serif");
+    expect(result).not.toContain("Bad");
+  });
+
+  it("should use FALLBACK_FONT_FAMILY when no resolver is provided", () => {
+    const style = makeStyle({ font_entry: DEFAULT_FONT_ENTRY_ID });
+    const result = buildFontString(style); // no resolver — default returns FALLBACK_FONT_FAMILY
+    expect(result).toContain(FALLBACK_FONT_FAMILY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveFontFamily
+// ---------------------------------------------------------------------------
+
+describe("resolveFontFamily", () => {
+  it("should return the family for a present font entry id", () => {
+    const fontTable: Record<string, FontEntry> = {
+      "some-id": makeFontEntry("some-id", "Roboto"),
+    };
+    expect(resolveFontFamily(fontTable, "some-id")).toBe("Roboto");
+  });
+
+  it("should return FALLBACK_FONT_FAMILY for an absent font entry id and emit a console.warn", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fontTable: Record<string, FontEntry> = {};
+    const result = resolveFontFamily(fontTable, "missing-id-" + String(Math.random()));
+    expect(result).toBe(FALLBACK_FONT_FAMILY);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "resolveFontFamily: font entry not found in table",
+      expect.objectContaining({ fontEntryId: expect.any(String) as string }),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("should return FALLBACK_FONT_FAMILY for a font entry with CSS-significant characters in family", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const invalidId = "invalid-css-id-" + String(Math.random());
+    const fontTable: Record<string, FontEntry> = {
+      [invalidId]: makeFontEntry(invalidId, "Bad'Family;"),
+    };
+    const result = resolveFontFamily(fontTable, invalidId);
+    expect(result).toBe(FALLBACK_FONT_FAMILY);
+    warnSpy.mockRestore();
+  });
+
+  it("should return a CSS-safe family for a valid font entry", () => {
+    const fontTable: Record<string, FontEntry> = {
+      [DEFAULT_FONT_ENTRY_ID]: makeFontEntry(DEFAULT_FONT_ENTRY_ID, "Inter"),
+    };
+    expect(resolveFontFamily(fontTable, DEFAULT_FONT_ENTRY_ID)).toBe("Inter");
   });
 });

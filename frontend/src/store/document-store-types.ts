@@ -41,7 +41,8 @@ export interface PageStoreAPI {
  * `setTextStyle` so that each field's value type is statically checked.
  */
 export type TextStylePatch =
-  | { field: "font_family"; value: string }
+  // Note: font_entry is NOT in TextStylePatch — per-node font is set via
+  // store.setNodeFont (Task 18), not via the text-style patch mechanism.
   | { field: "font_size"; value: StyleValue<number> }
   | { field: "font_weight"; value: number }
   | { field: "font_style"; value: FontStyle }

@@ -1,4 +1,5 @@
 use async_graphql::{Context, ID, Object, Result};
+use base64::Engine as _;
 
 use crate::state::ServerState;
 
@@ -98,6 +99,70 @@ impl QueryRoot {
         Ok(tokens)
     }
 
+    /// Get all font entries in the document font table.
+    ///
+    /// Returns every `FontEntry` (including the bundled default) as a JSON
+    /// scalar array.  The frontend parses each element with the `FontEntry`
+    /// TypeScript type.  Using a JSON scalar keeps the resolver simple and
+    /// consistent with the `add_font` broadcast value shape (spec-fonts-1
+    /// Task 15a).
+    async fn fonts(
+        &self,
+        ctx: &Context<'_>,
+    ) -> Result<async_graphql::Json<Vec<serde_json::Value>>> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id = crate::graphql::mutation::resolve_session(ctx, state)?;
+        let session = crate::graphql::mutation::require_live_session(state, session_id)?;
+        let guard = session.store.read().await;
+        let doc = &guard.0;
+        // Collect all font entries (including the bundled default) under the lock.
+        // Each entry is serialized to serde_json::Value so the caller receives
+        // the same JSON shape as the `add_font` broadcast.
+        let entries: Vec<serde_json::Value> = doc
+            .font_table()
+            .iter()
+            .map(|entry| {
+                serde_json::to_value(entry).map_err(|e| {
+                    tracing::error!("fonts query: failed to serialize FontEntry: {e}");
+                    async_graphql::Error::new("failed to serialize font entry")
+                })
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(async_graphql::Json(entries))
+    }
+
+    /// Get the raw font bytes for a Custom-source font entry.
+    ///
+    /// Returns the bytes as a base64-encoded string so GraphQL (which has no
+    /// binary scalar) can transport them.  Returns `None` when the id refers to
+    /// a non-Custom entry (`system_reference`, `bundled`, `library`) or when the
+    /// id is not present in the session's `font_bytes` map — both are non-error
+    /// conditions: the caller should fall back to metric-preserving fallback
+    /// loading rather than treating the absence as a failure.
+    ///
+    /// Invalid UUIDs are rejected with a typed error so callers receive a clear
+    /// diagnostic rather than a silent `None`.
+    async fn font_bytes(&self, ctx: &Context<'_>, id: String) -> Result<Option<String>> {
+        let state = ctx.data::<ServerState>()?;
+        let session_id = crate::graphql::mutation::resolve_session(ctx, state)?;
+        let session = crate::graphql::mutation::require_live_session(state, session_id)?;
+
+        // Validate UUID before taking any lock — returns a typed error, not None,
+        // so callers can distinguish "bad input" from "no bytes stored".
+        let parsed_id: uuid::Uuid = id
+            .parse()
+            .map_err(|_| async_graphql::Error::new(format!("invalid UUID: {id}")))?;
+
+        // Acquire the font_bytes read lock.  No `.await` after this point while
+        // the guard is held (lock discipline — no I/O under lock).
+        let bytes_guard = session.font_bytes.read().await;
+        let result = bytes_guard
+            .get(&parsed_id)
+            .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes));
+
+        Ok(result)
+    }
+
     /// Get a single node by UUID.
     ///
     /// RF-012: delegates to the shared `node_to_gql` function in types.rs.
@@ -179,5 +244,132 @@ mod tests {
         assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
         let data = resp.data.into_json().expect("data json");
         assert_eq!(data["document"]["pageCount"], 1);
+    }
+
+    /// Verify that the `fonts` query returns at least the bundled default entry
+    /// and that a manually-added entry is included in the response with the
+    /// correct `id` and `family` fields.
+    #[tokio::test]
+    async fn test_fonts_query_returns_font_entries() {
+        let (state, session) = new_state_with_session();
+
+        // Add a custom font entry to the session's document store.
+        let custom_id = uuid::Uuid::new_v4();
+        {
+            let mut guard = session.store.write().await;
+            let metrics = sigil_core::FontMetrics::new(
+                1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0u8; 10], false,
+            )
+            .expect("create test FontMetrics");
+            let entry = sigil_core::FontEntry::new(
+                custom_id,
+                "Test Family".to_string(),
+                "TestFamily-Regular".to_string(),
+                sigil_core::FontSource::SystemReference,
+                metrics,
+                0,
+                sigil_core::EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("create test FontEntry");
+            guard.0.font_table_mut().add(entry).expect("add font entry");
+        }
+
+        let schema = build_schema(state);
+        let resp = schema.execute("{ fonts }").await;
+        assert!(resp.errors.is_empty(), "errors: {:?}", resp.errors);
+
+        let data = resp.data.into_json().expect("data json");
+        let fonts = data["fonts"].as_array().expect("fonts is array");
+
+        // The document starts with the bundled default entry (Inter), plus the
+        // custom one we added — so there must be at least two entries.
+        assert!(
+            fonts.len() >= 2,
+            "expected at least 2 font entries, got {}",
+            fonts.len()
+        );
+
+        // Verify the custom entry is present with the correct id and family.
+        let found = fonts
+            .iter()
+            .any(|f| f["id"] == custom_id.to_string() && f["family"] == "Test Family");
+        assert!(
+            found,
+            "custom font entry not found in response; got: {fonts:?}"
+        );
+    }
+
+    /// `fontBytes(id)` round-trip: seeding raw bytes into the session's
+    /// `font_bytes` map, querying via GraphQL, and verifying the base64-decoded
+    /// result matches the original bytes byte-for-byte.
+    ///
+    /// Also verifies that a valid UUID not present in `font_bytes` returns `None`
+    /// (non-error) and that an invalid UUID string returns a typed error.
+    #[tokio::test]
+    async fn test_font_bytes_query_round_trip() {
+        use base64::Engine as _;
+
+        let (state, session) = new_state_with_session();
+
+        // Seed raw bytes for a known UUID directly into font_bytes.
+        let font_id = uuid::Uuid::new_v4();
+        let raw_bytes: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0xFF];
+        {
+            let mut guard = session.font_bytes.write().await;
+            guard.insert(font_id, raw_bytes.clone());
+        }
+
+        let schema = build_schema(state);
+
+        // (a) fontBytes for a present id — should return the base64 of the bytes.
+        let query = format!(r#"{{ fontBytes(id: "{font_id}") }}"#);
+        let resp = schema.execute(query).await;
+        assert!(
+            resp.errors.is_empty(),
+            "fontBytes query returned errors: {:?}",
+            resp.errors
+        );
+        let data = resp.data.into_json().expect("data json");
+        let b64_returned = data["fontBytes"]
+            .as_str()
+            .expect("fontBytes should be a string");
+
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64_returned)
+            .expect("returned value must be valid base64");
+        assert_eq!(
+            decoded, raw_bytes,
+            "decoded bytes must match the original bytes"
+        );
+
+        // (b) fontBytes for a valid UUID not present in font_bytes — should return null (None).
+        let absent_id = uuid::Uuid::new_v4();
+        let query2 = format!(r#"{{ fontBytes(id: "{absent_id}") }}"#);
+        let resp2 = schema.execute(query2).await;
+        assert!(
+            resp2.errors.is_empty(),
+            "absent-id fontBytes must not return errors: {:?}",
+            resp2.errors
+        );
+        let data2 = resp2.data.into_json().expect("data2 json");
+        assert!(
+            data2["fontBytes"].is_null(),
+            "absent id must return null, got: {:?}",
+            data2["fontBytes"]
+        );
+
+        // (c) fontBytes with an invalid UUID string — should return a typed error.
+        let resp3 = schema.execute(r#"{ fontBytes(id: "not-a-uuid") }"#).await;
+        assert!(
+            !resp3.errors.is_empty(),
+            "invalid UUID must produce an error"
+        );
+        let err_msg = resp3.errors[0].message.to_lowercase();
+        assert!(
+            err_msg.contains("invalid uuid"),
+            "error message should mention invalid UUID, got: {err_msg}"
+        );
     }
 }

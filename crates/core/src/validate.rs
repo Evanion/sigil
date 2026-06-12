@@ -45,7 +45,7 @@ pub const MAX_FILE_SIZE: usize = 50 * 1024 * 1024;
 pub const DEFAULT_MAX_NODES: usize = 100_000;
 
 /// Current schema version for serialization.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// Maximum alias chain depth for token resolution.
 pub const MAX_ALIAS_CHAIN_DEPTH: usize = 16;
@@ -53,7 +53,8 @@ pub const MAX_ALIAS_CHAIN_DEPTH: usize = 16;
 /// Maximum gradient stops per gradient definition.
 pub const MAX_GRADIENT_STOPS: usize = 256;
 
-/// Maximum length of a font family name.
+/// Maximum byte length of a `FontEntry.family` or `FontEntry.postscript_name`
+/// string (enforced via `validate_font_family_name` in `FontEntry::new`).
 pub const MAX_FONT_FAMILY_LEN: usize = 256;
 
 /// Maximum length of a page name.
@@ -529,11 +530,132 @@ pub fn validate_grid_track(track: &crate::node::GridTrack) -> Result<(), CoreErr
 /// Characters forbidden in font family names (CSS-significant or injection-prone).
 pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\'];
 
+/// Maximum number of font entries in a `FontTable` per document.
+pub const MAX_FONTS_PER_DOCUMENT: usize = 256;
+
+/// Maximum byte length of an embedded font payload (32 MiB).
+///
+/// Applies to any inline font data accepted via API, MCP tool, or deserialization.
+/// Rejects over-limit payloads before buffering to prevent memory exhaustion.
+pub const MAX_EMBEDDED_FONT_BYTES: usize = 32 * 1024 * 1024;
+
+/// Maximum total byte length of ALL embedded (Custom) font payloads held
+/// resident for a single session (256 MiB).
+///
+/// # Rationale
+///
+/// The per-font cap (`MAX_EMBEDDED_FONT_BYTES` = 32 MiB) and the per-document
+/// font-count cap (`MAX_FONTS_PER_DOCUMENT` = 256) multiply to ~8 GiB of
+/// resident embedded-font bytes — a memory-exhaustion vector in the
+/// resource-constrained container target (CLAUDE.md "Performance Requirements:
+/// The app runs in containers with limited resources"). This aggregate cap
+/// bounds the sum of all `session.font_bytes` payloads so a session cannot be
+/// driven to multi-GiB resident memory by repeatedly adding 32 MiB fonts.
+///
+/// `256 MiB` is chosen as 8 × the per-font cap: large enough to admit a
+/// realistic design system (dozens of embedded weights/styles) while keeping
+/// worst-case resident font memory an order of magnitude below the naïve
+/// 8 GiB product. It is necessarily `>= MAX_EMBEDDED_FONT_BYTES` so a single
+/// at-limit font always fits.
+///
+/// # Enforcement
+///
+/// This cap is enforced as a running sum at the byte-store boundary — the
+/// GraphQL `add_font` mutation and the MCP `add_font` flow, which own
+/// `session.font_bytes`. The core `AddFontEntry` operation cannot see the byte
+/// store (core is I/O-free and holds no session state), so the aggregate check
+/// lives in the transport handlers. See
+/// `test_max_total_embedded_font_bytes_enforced` in those crates.
+pub const MAX_TOTAL_EMBEDDED_FONT_BYTES: usize = 256 * 1024 * 1024;
+
+const _: () = assert!(
+    MAX_TOTAL_EMBEDDED_FONT_BYTES >= MAX_EMBEDDED_FONT_BYTES,
+    "aggregate embedded-font cap must admit at least one at-limit font",
+);
+
+/// Maximum length of a base64-encoded embedded font payload.
+///
+/// Base64 encoding inflates raw bytes by a factor of 4/3 (every 3 bytes become
+/// 4 base64 characters), plus up to 2 padding characters. This bound lets
+/// transport handlers reject an oversized `bytes_base64` string BEFORE decoding
+/// it — a 270 MiB base64 string would otherwise be fully buffered and decoded
+/// into memory before `check_embedded_font_size` fires.
+///
+/// Formula: `ceil(MAX_EMBEDDED_FONT_BYTES / 3) * 4 + 4` (the `+4` gives a
+/// small margin for padding and is conservative). Defined as a `const` derived
+/// from `MAX_EMBEDDED_FONT_BYTES` so the two constants stay in sync.
+pub const MAX_FONT_BYTES_BASE64_LEN: usize = (MAX_EMBEDDED_FONT_BYTES / 3 + 1) * 4 + 4;
+
+/// Maximum byte length of a PostScript name (e.g., "Inter-Regular").
+///
+/// PostScript names feed PDF/SVG font references and may also be interpolated
+/// into `ctx.font` strings in the canvas renderer (CLAUDE.md §11
+/// "CSS-Rendered String Fields Must Reject CSS-Significant Characters").
+/// The cap is distinct from `MAX_FONT_FAMILY_LEN` so the two limits can
+/// diverge independently in a future spec without silent masking.
+pub const MAX_POSTSCRIPT_NAME_LEN: usize = 256;
+
+/// Validates a font family or PostScript name.
+///
+/// Rules (used for `FontEntry.family` and `FontEntry.postscript_name`):
+/// - Non-empty.
+/// - Length ≤ `MAX_FONT_FAMILY_LEN`.
+/// - No C0 control characters (U+0000–U+001F).
+/// - No CSS-significant characters from `FONT_FAMILY_FORBIDDEN_CHARS`.
+///
+/// Both `family` and `postscript_name` feed `ctx.font` in the canvas
+/// renderer, so both must pass this check (CLAUDE.md §11 "CSS-Rendered String
+/// Fields Must Reject CSS-Significant Characters").
+///
+/// # Errors
+/// Returns `CoreError::ValidationError` if any rule is violated.
+pub(crate) fn validate_font_family_name(name: &str) -> Result<(), CoreError> {
+    if name.is_empty() {
+        return Err(CoreError::ValidationError(
+            "font family name must not be empty".to_string(),
+        ));
+    }
+    if name.len() > MAX_FONT_FAMILY_LEN {
+        return Err(CoreError::ValidationError(format!(
+            "font family name exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
+            name.len()
+        )));
+    }
+    if let Some(pos) = name.find(|c: char| c.is_control()) {
+        return Err(CoreError::ValidationError(format!(
+            "font family name contains control character at byte position {pos}"
+        )));
+    }
+    if let Some(pos) = name.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
+        return Err(CoreError::ValidationError(format!(
+            "font family name contains forbidden character at byte position {pos}"
+        )));
+    }
+    Ok(())
+}
+
+/// Rejects embedded font payloads larger than `MAX_EMBEDDED_FONT_BYTES`.
+///
+/// Call this before allocating a buffer for inline font data to prevent
+/// memory exhaustion from adversarially large payloads.
+///
+/// # Errors
+///
+/// Returns `CoreError::ValidationError` if `len > MAX_EMBEDDED_FONT_BYTES`.
+pub fn check_embedded_font_size(len: usize) -> Result<(), CoreError> {
+    if len > MAX_EMBEDDED_FONT_BYTES {
+        return Err(CoreError::ValidationError(format!(
+            "embedded font is {len} bytes, exceeds max {MAX_EMBEDDED_FONT_BYTES}"
+        )));
+    }
+    Ok(())
+}
+
 /// Validates a `TextStyle` struct.
 ///
 /// Checks:
-/// - `font_family`: non-empty, length <= `MAX_FONT_FAMILY_LEN`, no control chars,
-///   no CSS-significant chars (`'`, `"`, `;`, `{`, `}`, `\`).
+/// - `font_entry`: not validated here — entry-existence requires `&Document`
+///   context and is validated at the command layer in `SetNodeFont`.
 /// - `font_size` (if literal): finite, in `[MIN_FONT_SIZE, MAX_FONT_SIZE]`.
 /// - `font_weight`: in `[MIN_FONT_WEIGHT, MAX_FONT_WEIGHT]`.
 /// - `line_height` (if literal): finite, > 0.
@@ -543,7 +665,6 @@ pub const FONT_FAMILY_FORBIDDEN_CHARS: &[char] = &['\'', '"', ';', '{', '}', '\\
 /// # Errors
 /// Returns `CoreError::ValidationError` if any field fails validation.
 pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError> {
-    validate_text_style_font_family(&ts.font_family)?;
     validate_text_style_font_size(&ts.font_size)?;
 
     if ts.font_weight < MIN_FONT_WEIGHT || ts.font_weight > MAX_FONT_WEIGHT {
@@ -558,31 +679,6 @@ pub fn validate_text_style(ts: &crate::node::TextStyle) -> Result<(), CoreError>
     validate_text_style_text_color(&ts.text_color)?;
     validate_text_style_text_shadow(ts.text_shadow.as_ref())?;
 
-    Ok(())
-}
-
-fn validate_text_style_font_family(family: &str) -> Result<(), CoreError> {
-    if family.is_empty() {
-        return Err(CoreError::ValidationError(
-            "font_family must not be empty".to_string(),
-        ));
-    }
-    if family.len() > MAX_FONT_FAMILY_LEN {
-        return Err(CoreError::ValidationError(format!(
-            "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-            family.len()
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| c.is_control()) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains control character at byte position {pos}"
-        )));
-    }
-    if let Some(pos) = family.find(|c: char| FONT_FAMILY_FORBIDDEN_CHARS.contains(&c)) {
-        return Err(CoreError::ValidationError(format!(
-            "font_family contains forbidden character at byte position {pos}"
-        )));
-    }
     Ok(())
 }
 
@@ -1801,5 +1897,104 @@ mod tests {
     #[test]
     fn test_max_node_tree_depth_value() {
         assert_eq!(MAX_NODE_TREE_DEPTH, 64);
+    }
+
+    // ── MAX_EMBEDDED_FONT_BYTES enforcement ───────────────────────────────
+
+    #[test]
+    fn test_max_embedded_font_bytes_enforced() {
+        // At the limit: accepted.
+        assert!(
+            check_embedded_font_size(MAX_EMBEDDED_FONT_BYTES).is_ok(),
+            "payload exactly at MAX_EMBEDDED_FONT_BYTES must be accepted"
+        );
+        // One byte over: rejected.
+        assert!(
+            check_embedded_font_size(MAX_EMBEDDED_FONT_BYTES + 1).is_err(),
+            "payload one byte over MAX_EMBEDDED_FONT_BYTES must be rejected"
+        );
+    }
+
+    // ── MAX_FONT_BYTES_BASE64_LEN formula relationship ───────────────────
+    //
+    // This is NOT an `_enforced` test: `MAX_FONT_BYTES_BASE64_LEN` is a
+    // pre-decode bound enforced in the transport crates (server `add_font`
+    // mutation, MCP `add_font` flow), not in core. Those crates carry the
+    // real `test_max_font_bytes_base64_len_enforced` tests that exercise the
+    // length guard against an over-limit string. This test verifies only the
+    // mathematical relationship between the constant and `MAX_EMBEDDED_FONT_BYTES`
+    // so the two stay in sync — it deliberately does not claim enforcement.
+
+    #[test]
+    fn test_max_font_bytes_base64_len_formula() {
+        // The constant must be strictly greater than MAX_EMBEDDED_FONT_BYTES
+        // (base64 is larger than raw bytes). Both operands are compile-time
+        // constants, so assert the relationship at compile time — a runtime
+        // `assert!` over two constants is an `assertions_on_constants` lint.
+        const _: () = assert!(
+            MAX_FONT_BYTES_BASE64_LEN > MAX_EMBEDDED_FONT_BYTES,
+            "base64 limit must be larger than raw-byte limit"
+        );
+        // Verify the formula: a payload exactly at MAX_EMBEDDED_FONT_BYTES
+        // encodes to at most MAX_FONT_BYTES_BASE64_LEN base64 chars.
+        // base64::encoded_len returns the padded length.
+        let expected_b64_len = MAX_EMBEDDED_FONT_BYTES.div_ceil(3) * 4;
+        assert!(
+            expected_b64_len <= MAX_FONT_BYTES_BASE64_LEN,
+            "MAX_FONT_BYTES_BASE64_LEN ({MAX_FONT_BYTES_BASE64_LEN}) must be >= \
+             base64-encoded length of MAX_EMBEDDED_FONT_BYTES ({expected_b64_len})"
+        );
+    }
+
+    // ── MAX_FONTS_PER_DOCUMENT enforcement ────────────────────────────────
+    //
+    // Mirrors the pattern from `test_max_text_shadow_blur_enforced`:
+    // build a real `FontTable`, fill it to the limit, then assert the
+    // next `add` returns `Err` (CLAUDE.md §11 "Constant Enforcement Tests").
+
+    #[test]
+    fn test_max_fonts_per_document_enforced() {
+        use crate::font::{EmbedDecision, FontEntry, FontMetrics, FontSource, FontTable};
+
+        /// Builds a minimal valid `FontMetrics` for testing.
+        fn make_metrics() -> FontMetrics {
+            FontMetrics::new(
+                1000, 800.0, -200.0, 0.0, 700.0, 500.0, 0.0, 500.0, [0; 10], false,
+            )
+            .expect("test FontMetrics must be valid")
+        }
+
+        /// Builds a valid `FontEntry` with the given id index.
+        fn make_entry(idx: u128) -> FontEntry {
+            FontEntry::new(
+                uuid::Uuid::from_u128(idx),
+                "Inter".into(),
+                "Inter-Regular".into(),
+                FontSource::SystemReference,
+                make_metrics(),
+                0,
+                EmbedDecision::ReferenceSystem,
+                false,
+                vec![],
+            )
+            .expect("test FontEntry must be valid")
+        }
+
+        let mut table = FontTable::new();
+
+        // Add MAX_FONTS_PER_DOCUMENT entries — all must succeed.
+        for i in 0..MAX_FONTS_PER_DOCUMENT {
+            assert!(
+                table.add(make_entry(i as u128 + 1)).is_ok(),
+                "entry {i} should be accepted under the cap"
+            );
+        }
+
+        // The next add must fail: capacity is exhausted.
+        let overflow = make_entry(MAX_FONTS_PER_DOCUMENT as u128 + 1);
+        assert!(
+            table.add(overflow).is_err(),
+            "add beyond MAX_FONTS_PER_DOCUMENT must be rejected"
+        );
     }
 }

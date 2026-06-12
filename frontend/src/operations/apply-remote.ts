@@ -23,7 +23,10 @@ import type {
   Token,
   TokenValue,
   TokenType,
+  FontEntry,
 } from "../types/document";
+import { parseFontEntry } from "../store/font-input";
+import { unloadFont } from "../canvas/font-face-loader";
 import { VALID_TOKEN_TYPES, isValidTokenValue } from "../panels/token-helpers";
 import {
   isValidStyleValue,
@@ -120,6 +123,8 @@ export interface StoreState {
   nodes: Record<string, StoreDocumentNode>;
   pages: MutablePage[];
   tokens: Record<string, Token>;
+  /** Font table keyed by FontEntry.id — populated by fetchFonts() on load. */
+  fontTable: Record<string, FontEntry>;
 }
 
 // ── Placeholder for new nodes ─────────────────────────────────────────
@@ -221,6 +226,12 @@ function applyRemoteOperation(
       break;
     case "rename_token":
       applyRenameToken(op.value, setState);
+      break;
+    case "add_font":
+      applyAddFont(op.value, setState);
+      break;
+    case "remove_font":
+      applyRemoveFont(op.value, setState);
       break;
     default:
       console.warn(`Unknown remote operation type: ${op.type}`);
@@ -541,9 +552,10 @@ function applyFieldSet(
         const subField = path.slice("kind.text_style.".length);
         // RF-017: validate StyleValue-typed text style fields before accepting.
         // font_size, line_height, letter_spacing are StyleValue<number>;
-        // text_color is StyleValue<Color>. Other fields (font_family,
-        // font_weight, font_style, text_align, text_decoration, text_shadow)
-        // are plain values and pass through without StyleValue validation.
+        // text_color is StyleValue<Color>.
+        // font_entry is a UUID string (reference into fontTable).
+        // Other fields (font_weight, font_style, text_align, text_decoration,
+        // text_shadow) are plain values and pass through without extra validation.
         if (
           subField === "font_size" ||
           subField === "line_height" ||
@@ -559,6 +571,17 @@ function applyFieldSet(
           if (!isValidStyleValue(value, isValidColor)) {
             console.warn(
               `Remote set_field kind.text_style.text_color: invalid StyleValue<Color> shape, skipping`,
+            );
+            return;
+          }
+        } else if (subField === "font_entry") {
+          // font_entry is a UUID string referencing a FontEntry in fontTable.
+          // A non-string or empty value would silently set text_style.font_entry
+          // to a non-UUID, breaking font resolution in the canvas renderer.
+          if (typeof value !== "string" || value.length === 0) {
+            console.warn(
+              "Remote set_field kind.text_style.font_entry: expected uuid string, skipping",
+              { value },
             );
             return;
           }
@@ -1226,6 +1249,62 @@ function applyDeleteToken(value: unknown, setState: SetStoreFunction<StoreState>
       Reflect.deleteProperty(s.tokens, tokenName);
     }),
   );
+}
+
+// ── Internal: add_font ────────────────────────────────────────────────
+
+/**
+ * Apply a remote add_font broadcast.
+ *
+ * The server sends the full FontEntry JSON as the `value` payload.
+ * Validation is delegated to `parseFontEntry` (font-input.ts), which is the
+ * single source-of-truth for per-entry validation shared with
+ * `parseFontsResponse` in document-store-solid.tsx.
+ *
+ * Per CLAUDE.md "Internal Mutation Entry Points Must Diagnose Their Own
+ * No-Ops": malformed payloads emit a structured `console.warn` before
+ * returning so silent no-ops are observable in dev tools and logs.
+ */
+function applyAddFont(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  const entry = parseFontEntry(value);
+  if (!entry) {
+    console.warn("Remote add_font: invalid FontEntry payload, skipping", { value });
+    return;
+  }
+  setState("fontTable", entry.id, entry);
+}
+
+// ── Internal: remove_font ─────────────────────────────────────────────
+
+/**
+ * Apply a remote remove_font broadcast.
+ *
+ * The server sends `{ id: "<uuid>" }` as the `value` payload.
+ *
+ * Per CLAUDE.md "Internal Mutation Entry Points Must Diagnose Their Own
+ * No-Ops": malformed payloads emit a structured `console.warn` before
+ * returning so silent no-ops are observable in dev tools and logs.
+ */
+function applyRemoveFont(value: unknown, setState: SetStoreFunction<StoreState>): void {
+  if (typeof value !== "object" || value === null) {
+    console.warn("Remote remove_font: expected object payload, skipping", { value });
+    return;
+  }
+  const raw = value as Record<string, unknown>;
+  const id = raw["id"];
+  if (typeof id !== "string" || id.length === 0) {
+    console.warn("Remote remove_font: missing or empty id field, skipping", { value });
+    return;
+  }
+  const fontId = id;
+  setState(
+    produce((s) => {
+      Reflect.deleteProperty(s.fontTable, fontId);
+    }),
+  );
+  // RF-006: unload the FontFace from document.fonts so a remote removal does
+  // not leak the face or let it shadow a later same-family font.
+  unloadFont(fontId);
 }
 
 // ── Internal: rename_token ───────────────────────────────────────────

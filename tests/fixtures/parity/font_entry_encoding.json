@@ -1,0 +1,143 @@
+{
+  "description": "Cross-language parity vectors for FontEntry serialization. Verifies that Rust FontEntry and TypeScript FontEntry produce identical JSON encodings for each FontSource variant and for variable-font entries. Updated when new variants or fields are added. See fonts-1 Task 14 and CLAUDE.md 'Parallel Implementations Must Have Parity Tests'.",
+  "variants": [
+    {
+      "name": "bundled",
+      "value": {
+        "id": "00000def-a000-dead-f047-beefcafe0001",
+        "family": "Inter",
+        "postscript_name": "Inter-Regular",
+        "source": { "source": "bundled" },
+        "metrics": {
+          "units_per_em": 2048,
+          "ascent": 1984.0,
+          "descent": -494.0,
+          "line_gap": 0.0,
+          "cap_height": 1456.0,
+          "x_height": 1118.0,
+          "italic_angle": 0.0,
+          "avg_advance": 1024.0,
+          "panose": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "is_serif": false
+        },
+        "fs_type": 0,
+        "embeddable": "reference_system",
+        "is_variable": false,
+        "axes": []
+      }
+    },
+    {
+      "name": "library",
+      "value": {
+        "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+        "family": "Roboto",
+        "postscript_name": "Roboto-Regular",
+        "source": { "source": "library", "catalog_id": "roboto-v32" },
+        "metrics": {
+          "units_per_em": 2048,
+          "ascent": 1900.0,
+          "descent": -500.0,
+          "line_gap": 0.0,
+          "cap_height": 1456.0,
+          "x_height": 1082.0,
+          "italic_angle": 0.0,
+          "avg_advance": 1030.0,
+          "panose": [2, 4, 5, 4, 4, 4, 4, 2, 2, 4],
+          "is_serif": false
+        },
+        "fs_type": 0,
+        "embeddable": "embed",
+        "is_variable": false,
+        "axes": []
+      }
+    },
+    {
+      "name": "custom",
+      "value": {
+        "id": "c0ffee00-dead-beef-cafe-112233445566",
+        "family": "MyFont",
+        "postscript_name": "MyFont-Regular",
+        "source": { "source": "custom", "asset_uuid": "f47ac10b-58cc-4372-a567-0e02b2c3d479" },
+        "metrics": {
+          "units_per_em": 1000,
+          "ascent": 800.0,
+          "descent": -200.0,
+          "line_gap": 0.0,
+          "cap_height": 700.0,
+          "x_height": 500.0,
+          "italic_angle": 0.0,
+          "avg_advance": 500.0,
+          "panose": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "is_serif": false
+        },
+        "fs_type": 2,
+        "embeddable": "embed",
+        "is_variable": false,
+        "axes": []
+      }
+    },
+    {
+      "name": "system_reference",
+      "value": {
+        "id": "deadbeef-cafe-babe-f00d-aabbccddeeff",
+        "family": "Georgia",
+        "postscript_name": "Georgia",
+        "source": { "source": "system_reference" },
+        "metrics": {
+          "units_per_em": 2048,
+          "ascent": 1878.0,
+          "descent": -449.0,
+          "line_gap": 0.0,
+          "cap_height": 1434.0,
+          "x_height": 1062.0,
+          "italic_angle": 0.0,
+          "avg_advance": 1040.0,
+          "panose": [2, 4, 5, 2, 6, 4, 4, 2, 2, 4],
+          "is_serif": true
+        },
+        "fs_type": 4,
+        "embeddable": "reference_system",
+        "is_variable": false,
+        "axes": []
+      }
+    },
+    {
+      "name": "variable_font",
+      "value": {
+        "id": "11223344-5566-7788-99aa-bbccddeeff00",
+        "family": "Inter Variable",
+        "postscript_name": "InterVariable-Roman",
+        "source": { "source": "bundled" },
+        "metrics": {
+          "units_per_em": 2048,
+          "ascent": 1984.0,
+          "descent": -494.0,
+          "line_gap": 0.0,
+          "cap_height": 1456.0,
+          "x_height": 1118.0,
+          "italic_angle": 0.0,
+          "avg_advance": 1024.0,
+          "panose": [2, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+          "is_serif": false
+        },
+        "fs_type": 0,
+        "embeddable": "embed",
+        "is_variable": true,
+        "axes": [
+          {
+            "tag": [119, 103, 104, 116],
+            "min": 100.0,
+            "default": 400.0,
+            "max": 900.0
+          },
+          {
+            "tag": [115, 108, 110, 116],
+            "min": -15.0,
+            "default": 0.0,
+            "max": 15.0
+          }
+        ]
+      }
+    }
+  ]
+}

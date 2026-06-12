@@ -514,6 +514,42 @@ pub struct SetCornersInput {
     pub session_id: Option<String>,
 }
 
+// ── Font tool input types ─────────────────────────────────────────────
+
+/// Input for the `add_font` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct AddFontInput {
+    /// Raw font file bytes encoded as standard base64 (RFC 4648).
+    pub bytes_base64: String,
+    /// Where the font originated. One of: `"user_supplied"`, `"system_directory"`.
+    pub provenance: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Input for the `remove_font` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct RemoveFontInput {
+    /// UUID of the font table entry to remove.
+    pub id: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+/// Input for the `set_node_font` tool.
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+pub struct SetNodeFontInput {
+    /// UUID of the Text node to update.
+    pub node: String,
+    /// UUID of the font table entry to assign to the node.
+    pub font_entry: String,
+    /// Optional session id. See [`CreatePageInput::session_id`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
 // ── Text tool input types ─────────────────────────────────────────────
 
 /// Input for setting the text content of a text node.
@@ -547,11 +583,12 @@ pub struct SetTextStyleInput {
 ///
 /// Float fields are validated at the tool-handler layer — NaN and infinity are
 /// rejected before the values reach the core engine.
+///
+/// Note: font selection is not included here. To change which font a text
+/// node uses, the `set_node_font` MCP tool (Fonts-1 Task 13, backed by the
+/// `SetNodeFont` core command from Task 9) will be the entry point.
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 pub struct PartialTextStyle {
-    /// Font family name (e.g. "Inter", "Roboto").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub font_family: Option<String>,
     /// Font size in pixels. Can be a literal or a token reference.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_size: Option<StyleValueInput<f64>>,
@@ -704,6 +741,15 @@ pub struct TokenListResult {
 pub struct ComponentListResult {
     /// All component definitions in the document, sorted by name.
     pub components: Vec<ComponentInfo>,
+}
+
+/// Result of the `add_font` tool — carries the new entry id and family name.
+#[derive(Debug, Serialize, schemars::JsonSchema)]
+pub struct AddFontResult {
+    /// UUID of the newly-added font table entry.
+    pub id: String,
+    /// Font family name extracted from the font file.
+    pub family: String,
 }
 
 /// Result of a successful mutation.

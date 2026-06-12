@@ -9,9 +9,10 @@ serde_json = { workspace = true }
 # IMPORTANT: Do NOT change to `uuid = { workspace = true }` — the workspace uuid
 # includes the `v4` feature which pulls in `getrandom`, breaking WASM compilation.
 # Core must use `default-features = false` with only `serde`.
-uuid = { version = "1.23.0", default-features = false, features = ["serde"] }
+uuid = { version = "1.23.0", default-features = false, features = ["serde", "v5"] }
 thiserror = { workspace = true }
 i_overlay = { version = "4", default-features = false }
+ttf-parser = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }

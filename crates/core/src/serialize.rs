@@ -1,11 +1,13 @@
 // crates/core/src/serialize.rs
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::error::CoreError;
 use crate::id::NodeId;
-use crate::migrations::migrate_to_v2;
+use crate::migrations::{migrate_to_v2, migrate_to_v3};
 use crate::node::Node;
 use crate::prototype::{Transition, TransitionAnimation, TransitionTrigger};
 use crate::validate::CURRENT_SCHEMA_VERSION;
@@ -90,17 +92,24 @@ pub fn deserialize_page(json: &str) -> Result<SerializedPage, CoreError> {
     deserialize_page_with_version(json).map(|(page, _)| page)
 }
 
-/// Deserializes a page from JSON, returning both the parsed page and the
-/// on-disk schema version observed before any migration was applied.
+/// Deserializes a page from JSON, returning the parsed page, the on-disk schema
+/// version observed before any migration was applied, and a map of
+/// `(FontEntryId → family)` pairs collected during v2→v3 migration.
 ///
-/// This is used by the persistence layer to detect when a workfile required
-/// migration on load — e.g. to back up the original v1 files before the first
-/// migrated save and to mark the document dirty so the v2 form is persisted.
+/// This is the authoritative deserialization entry point used by the server's
+/// `load_workfile`. After loading all pages, the server accumulates the
+/// per-page `fonts` maps and uses them to populate the document's `FontTable`
+/// with `SystemReference` entries for all migrated families.
+///
+/// For a workfile that is already at `CURRENT_SCHEMA_VERSION`, no migration
+/// runs and the returned `fonts` map is empty.
 ///
 /// # Errors
 /// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
-/// - `CoreError::SerializationError` if the JSON is malformed.
-pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
+/// - `CoreError::SerializationError` if the JSON is malformed or migration fails.
+pub fn deserialize_page_with_version_and_fonts(
+    json: &str,
+) -> Result<(SerializedPage, u32, BTreeMap<Uuid, String>), CoreError> {
     if json.len() > crate::validate::MAX_FILE_SIZE {
         return Err(CoreError::InputTooLarge(format!(
             "file size {} bytes exceeds maximum of {} bytes",
@@ -132,11 +141,19 @@ pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32)
 
     // Apply schema migrations in version order.
     // Each migrate_to_vN function is idempotent on already-migrated input.
-    let migrated = if version < 2 {
+    let after_v2 = if version < 2 {
         migrate_to_v2(raw)
             .map_err(|e| CoreError::SerializationError(format!("v1→v2 migration failed: {e}")))?
     } else {
         raw
+    };
+
+    let mut fonts: BTreeMap<Uuid, String> = BTreeMap::new();
+    let migrated = if version < 3 {
+        migrate_to_v3(after_v2, &mut fonts)
+            .map_err(|e| CoreError::SerializationError(format!("v2→v3 migration failed: {e}")))?
+    } else {
+        after_v2
     };
 
     let page: SerializedPage = serde_json::from_value(migrated)
@@ -150,7 +167,25 @@ pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32)
         validate_serialized_transition(transition)?;
     }
 
-    Ok((page, version))
+    Ok((page, version, fonts))
+}
+
+/// Deserializes a page from JSON, returning both the parsed page and the
+/// on-disk schema version observed before any migration was applied.
+///
+/// This is a thin wrapper around [`deserialize_page_with_version_and_fonts`]
+/// that discards the font-family map for callers that do not need it (e.g.
+/// tests, the CLI, and any non-server path that loads pages).
+///
+/// The server's `load_workfile` should call
+/// [`deserialize_page_with_version_and_fonts`] directly so it can accumulate
+/// the migrated families and populate the document font table.
+///
+/// # Errors
+/// - `CoreError::UnsupportedSchemaVersion` if the file version is too new.
+/// - `CoreError::SerializationError` if the JSON is malformed.
+pub fn deserialize_page_with_version(json: &str) -> Result<(SerializedPage, u32), CoreError> {
+    deserialize_page_with_version_and_fonts(json).map(|(page, version, _fonts)| (page, version))
 }
 
 /// Converts arena nodes into serialized nodes, resolving `NodeId`s to UUIDs.
@@ -344,11 +379,10 @@ fn sort_json_keys(value: &serde_json::Value) -> serde_json::Value {
 /// Validates a deserialized page against collection size limits.
 fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
     use crate::validate::{
-        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN,
-        MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
-        MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT,
-        validate_asset_ref, validate_collection_size, validate_floats_in_value, validate_node_name,
-        validate_page_name,
+        MAX_CHILDREN_PER_NODE, MAX_EFFECTS_PER_STYLE, MAX_FILLS_PER_STYLE, MAX_GRADIENT_STOPS,
+        MAX_GRID_TRACKS, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE, MAX_SUBPATHS_PER_PATH,
+        MAX_TEXT_CONTENT_LEN, MAX_TRANSITIONS_PER_DOCUMENT, validate_asset_ref,
+        validate_collection_size, validate_floats_in_value, validate_node_name, validate_page_name,
     };
 
     // Validate page name
@@ -378,20 +412,6 @@ fn validate_deserialized_page(page: &SerializedPage) -> Result<(), CoreError> {
 
         // Validate gradient stops counts in fills
         validate_gradient_stops_in_value(&node.style, MAX_GRADIENT_STOPS)?;
-
-        // Validate font_family length in text_style
-        if let Some(font_family) = node
-            .kind
-            .get("text_style")
-            .and_then(|ts| ts.get("font_family"))
-            .and_then(|v| v.as_str())
-            && font_family.len() > MAX_FONT_FAMILY_LEN
-        {
-            return Err(CoreError::ValidationError(format!(
-                "font_family exceeds max length of {MAX_FONT_FAMILY_LEN} (got {})",
-                font_family.len()
-            )));
-        }
 
         // Validate text content length
         if let Some(content) = node.kind.get("content").and_then(|v| v.as_str())
@@ -800,12 +820,93 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_with_version_returns_current_for_v2_page() {
+    fn test_deserialize_with_version_returns_current_for_current_page() {
+        // A page already at CURRENT_SCHEMA_VERSION round-trips without migration
+        // and reports the current version back.
         let json = format!(
-            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "V2", "nodes": [], "transitions": []}}"#
+            r#"{{"schema_version": {CURRENT_SCHEMA_VERSION}, "id": "00000000-0000-0000-0000-000000000001", "name": "Current", "nodes": [], "transitions": []}}"#
         );
         let (_, version) = deserialize_page_with_version(&json).expect("deserialize");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
+    }
+
+    /// v2→v3 migration: a text node whose `kind.text_style.font_family` is
+    /// `"Roboto"` must have `font_entry` set to
+    /// `Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b"Roboto")` and `font_family`
+    /// removed after migration.
+    ///
+    /// This test exercises the full migration chain at the core level (no server
+    /// dependency) and proves that the migrated `font_entry` field name and UUID
+    /// string format round-trip correctly through `SerializedNode`.
+    #[test]
+    fn test_v2_text_node_font_family_migrates_to_font_entry() {
+        use crate::migrations::FONT_MIGRATION_NAMESPACE;
+
+        let v2_json = r#"{
+            "schema_version": 2,
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Page",
+            "nodes": [{
+                "id": "00000000-0000-0000-0000-000000000002",
+                "kind": {
+                    "type": "text",
+                    "content": "Hello",
+                    "sizing": "auto_width",
+                    "text_style": {
+                        "font_family": "Roboto",
+                        "font_size": {"type": "literal", "value": 16.0},
+                        "font_weight": 400,
+                        "font_style": "normal",
+                        "line_height": {"type": "literal", "value": 1.5},
+                        "letter_spacing": {"type": "literal", "value": 0.0},
+                        "text_align": "left",
+                        "text_decoration": "none",
+                        "text_color": {"type": "literal", "value": {"space": "srgb", "r": 0.0, "g": 0.0, "b": 0.0, "a": 1.0}},
+                        "text_shadow": null
+                    }
+                },
+                "name": "Label",
+                "parent": null,
+                "children": [],
+                "transform": {"x": 0.0, "y": 0.0, "width": 120.0, "height": 24.0, "rotation": 0.0, "scale_x": 1.0, "scale_y": 1.0},
+                "style": {"fills": [], "strokes": [], "opacity": {"type": "literal", "value": 1.0}, "blend_mode": "normal", "effects": []},
+                "constraints": {"horizontal": "start", "vertical": "start"},
+                "visible": true,
+                "locked": false
+            }],
+            "transitions": []
+        }"#;
+
+        let page = deserialize_page(v2_json).expect("v2 page with font_family must deserialize");
+        assert_eq!(
+            page.schema_version, CURRENT_SCHEMA_VERSION,
+            "migrated page must report CURRENT_SCHEMA_VERSION"
+        );
+        assert_eq!(page.nodes.len(), 1);
+
+        // The `kind` is stored as a raw `serde_json::Value` in `SerializedNode`.
+        // After migration, `font_family` must be gone and `font_entry` must be
+        // the deterministic v5 UUID derived from b"Roboto".
+        let kind = &page.nodes[0].kind;
+        let expected_uuid = Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b"Roboto");
+
+        assert!(
+            kind.get("text_style")
+                .and_then(|ts| ts.get("font_family"))
+                .is_none(),
+            "font_family must be removed after v2→v3 migration, got kind: {kind}"
+        );
+
+        let font_entry_str = kind
+            .get("text_style")
+            .and_then(|ts| ts.get("font_entry"))
+            .and_then(|v| v.as_str())
+            .expect("font_entry must be present after migration as a UUID string");
+        assert_eq!(
+            font_entry_str,
+            expected_uuid.to_string(),
+            "migrated font_entry UUID must match Uuid::new_v5(&FONT_MIGRATION_NAMESPACE, b\"Roboto\")"
+        );
     }
 
     #[test]

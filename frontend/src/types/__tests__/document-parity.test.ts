@@ -9,6 +9,7 @@ import type {
   StyleValueExpression,
   Color,
 } from "../document";
+import { DEFAULT_FONT_ENTRY_ID } from "../document";
 
 // Parity test for Spec 13c Phase A.
 //
@@ -123,5 +124,29 @@ describe("StyleValue parity with Rust fixture", () => {
         expect(typeof sv.value.space).toBe("string");
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DEFAULT_FONT_ENTRY_ID parity test
+//
+// The Rust constant `DEFAULT_FONT_ENTRY_ID` in `crates/core/src/font.rs` is
+// pinned to the same string by `test_default_font_entry_id_string` in font.rs.
+// This test pins the TypeScript side. Together they assert Rust↔TS agreement.
+// ---------------------------------------------------------------------------
+
+describe("DEFAULT_FONT_ENTRY_ID parity with Rust constant", () => {
+  it("matches the Rust DEFAULT_FONT_ENTRY_ID string representation", () => {
+    // Cross-reference: crates/core/src/font.rs :: test_default_font_entry_id_string
+    // Both tests assert the same literal; any change to the Rust constant will
+    // break the Rust test, and any change to the TS constant will break this test.
+    expect(DEFAULT_FONT_ENTRY_ID).toBe("0defa000-dead-f047-beef-cafe00000001");
+  });
+
+  it("is a valid lowercase hyphenated UUID string", () => {
+    // UUID format: 8-4-4-4-12 hex chars
+    expect(DEFAULT_FONT_ENTRY_ID).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
   });
 });

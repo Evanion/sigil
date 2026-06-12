@@ -11,6 +11,8 @@ pub mod component;
 pub mod corners_input;
 pub mod document;
 pub mod error;
+pub mod font;
+pub mod font_parse;
 pub mod id;
 pub mod migrations;
 pub mod node;
@@ -67,9 +69,17 @@ pub use document::{Document, DocumentMetadata, LayoutEngine, Page, Transition};
 
 // ── Re-exports: Serialization ──────────────────────────────────────────
 pub use serialize::{
-    SerializedNode, SerializedPage, SerializedTransition, deserialize_page, nodes_to_serialized,
-    page_to_serialized, serialize_page,
+    SerializedNode, SerializedPage, SerializedTransition, deserialize_page,
+    deserialize_page_with_version_and_fonts, nodes_to_serialized, page_to_serialized,
+    serialize_page,
 };
+
+// ── Re-exports: Font ─────────────────────────────────────────────────
+pub use font::{
+    DEFAULT_FONT_ENTRY_ID, EmbedDecision, FontAxis, FontEntry, FontEntryId, FontMetrics,
+    FontSource, FontTable, build_system_reference_entry,
+};
+pub use font_parse::FontProvenance;
 
 // ── Re-exports: Command ──────────────────────────────────────────────
 pub use command::{FieldOperation, SideEffect};
@@ -86,20 +96,21 @@ pub use validate::{
     BEZIER_APPROXIMATION_SEGMENTS, CURRENT_SCHEMA_VERSION, DEFAULT_MAX_NODES,
     MAX_ALIAS_CHAIN_DEPTH, MAX_ASSET_REF_LEN, MAX_BATCH_SIZE, MAX_BOOLEAN_OP_POINTS,
     MAX_CHILDREN_PER_NODE, MAX_COLOR_CHANNEL, MAX_COMPONENTS_PER_DOCUMENT, MAX_CORNER_RADIUS,
-    MAX_CORNER_SMOOTHING, MAX_EFFECTS_PER_STYLE, MAX_EXPRESSION_AST_DEPTH, MAX_FILE_SIZE,
-    MAX_FILLS_PER_STYLE, MAX_FONT_FAMILY_LEN, MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_FUNCTION_ARGS,
-    MAX_GRADIENT_STOPS, MAX_GRID_TRACKS, MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN,
-    MAX_OVERRIDES_PER_INSTANCE, MAX_PAGE_NAME_LEN, MAX_PAGES_PER_DOCUMENT,
+    MAX_CORNER_SMOOTHING, MAX_EFFECTS_PER_STYLE, MAX_EMBEDDED_FONT_BYTES, MAX_EXPRESSION_AST_DEPTH,
+    MAX_FILE_SIZE, MAX_FILLS_PER_STYLE, MAX_FONT_BYTES_BASE64_LEN, MAX_FONT_FAMILY_LEN,
+    MAX_FONT_SIZE, MAX_FONT_WEIGHT, MAX_FONTS_PER_DOCUMENT, MAX_FUNCTION_ARGS, MAX_GRADIENT_STOPS,
+    MAX_GRID_TRACKS, MAX_JSON_NESTING_DEPTH, MAX_NODE_NAME_LEN, MAX_OVERRIDES_PER_INSTANCE,
+    MAX_PAGE_NAME_LEN, MAX_PAGES_PER_DOCUMENT, MAX_POSTSCRIPT_NAME_LEN,
     MAX_PROPERTIES_PER_COMPONENT, MAX_SEGMENTS_PER_SUBPATH, MAX_STROKES_PER_STYLE,
     MAX_SUBPATHS_PER_PATH, MAX_TEXT_CONTENT_LEN, MAX_TEXT_SHADOW_BLUR, MAX_TOKEN_DESCRIPTION_LEN,
     MAX_TOKEN_EXPRESSION_LENGTH, MAX_TOKEN_FONT_FAMILIES, MAX_TOKEN_NAME_LEN,
-    MAX_TOKENS_PER_CONTEXT, MAX_TRANSITION_DURATION, MAX_TRANSITIONS_PER_DOCUMENT,
-    MAX_VARIANTS_PER_COMPONENT, MIN_COLOR_CHANNEL, MIN_CORNER_SMOOTHING, MIN_FONT_SIZE,
-    MIN_FONT_WEIGHT, MIN_GROUP_MEMBERS, validate_asset_ref, validate_collection_size,
-    validate_color_channel, validate_color_channel_finite, validate_conic_gradient,
-    validate_corners, validate_finite, validate_floats_in_value, validate_grid_track,
-    validate_node_name, validate_page_name, validate_style_value_expression, validate_text_content,
-    validate_token_name,
+    MAX_TOKENS_PER_CONTEXT, MAX_TOTAL_EMBEDDED_FONT_BYTES, MAX_TRANSITION_DURATION,
+    MAX_TRANSITIONS_PER_DOCUMENT, MAX_VARIANTS_PER_COMPONENT, MIN_COLOR_CHANNEL,
+    MIN_CORNER_SMOOTHING, MIN_FONT_SIZE, MIN_FONT_WEIGHT, MIN_GROUP_MEMBERS, validate_asset_ref,
+    validate_collection_size, validate_color_channel, validate_color_channel_finite,
+    validate_conic_gradient, validate_corners, validate_finite, validate_floats_in_value,
+    validate_grid_track, validate_node_name, validate_page_name, validate_style_value_expression,
+    validate_text_content, validate_token_name,
 };
 
 #[must_use]

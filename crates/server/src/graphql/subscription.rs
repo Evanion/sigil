@@ -305,6 +305,11 @@ mod tests {
                 MutationEventKind::TokenDeleted,
                 DocumentEventType::TokenDeleted,
             ),
+            (MutationEventKind::FontAdded, DocumentEventType::FontAdded),
+            (
+                MutationEventKind::FontRemoved,
+                DocumentEventType::FontRemoved,
+            ),
         ];
 
         for (kind, expected_type) in test_cases {

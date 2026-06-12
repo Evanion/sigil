@@ -1,0 +1,20 @@
+# RC-2 WebGL2 2D Shape Rendering Techniques — Research
+
+**Date:** 2026-06-11 · Feeds the RC-2 spec. Production techniques for a custom WebGL2 vector renderer (no Skia). Closest precedent: **Figma** (own tile pipeline, MSAA, shader-implemented blend modes, dithered gradients — NOT the advanced-blend extension); fill path mirrors **PixiJS** (earcut).
+
+| Topic | Decision | Notes |
+|---|---|---|
+| **Fills** | **earcut triangulation**, with input cleaned via core `i_overlay` boolean ops first (removes self-intersections — earcut's only weakness); stencil-then-cover as a fallback flag for pathological paths. | Triangulate near the corner-geometry code (reuse one geometry pipeline). earcut handles holes; `i_overlay` removes self-intersection. |
+| **Anti-aliasing** | **WebGL2 MSAA 4×** (multisampled renderbuffer FBO + `blitFramebuffer` resolve) as the global default; analytic **SDF AA** in-shader for analytic primitives (rounded-rect corners, strokes). | `MAX_SAMPLES` clamp; 4× is the 2D sweet spot. MSAA target is the P3 FBO we own. |
+| **Blend modes** | **Separable** (normal, multiply, screen, darken, lighten) via fixed-function `blendFunc`/`blendEquation` (premultiplied alpha). **All non-separable** (overlay, color-dodge, color-burn, hard-light, soft-light, difference, exclusion) + **4 HSL** (hue, saturation, color, luminosity) via **render-to-texture + shader backdrop blending** (W3C Compositing formulas; implement `Lum`/`ClipColor`/`SetLum`/`SetSat` once, select mode by int uniform). | **Do NOT depend on `WEBGL_blend_equation_advanced_coherent`** — it's draft, Chrome disables the underlying GL ext via driver-bug-list, and WebGPU didn't ship it. Optional fast-path only if a spike proves it present; shader path is the contract. Figma does blend in its own shaders. |
+| **Gradients** | Shader-analytic linear/radial/conic via a `gradientKind` uniform; **stops baked into a 256×1 RGBA LUT texture** in **linear-P3**, hardware-filtered + dithered to kill banding. | Uniform arrays don't scale (GLSL ~64 uniform min); LUT is the standard. Conic: `t=(atan2(p.y-cy,p.x-cx)+π)/2π` + start-angle. |
+| **Clipping** | **Stencil buffer** (increment on push / decrement on pop) for nested arbitrary clip shapes (intersection semantics); **scissor** as a rect-only fast-path + dirty bound; `discard`/SDF for trivial single rounded-rect clips. | Reuse the fill triangulation to write the stencil mask. Couples with MSAA. |
+| **Display-P3** | Own a **P3 drawing buffer**; pick **linear Display-P3** as the single working space; convert every source color to it at the boundary (sRGB → linearize → sRGB→P3 primaries matrix; display_p3 → linearize); do ALL composite/gradient/AA/blend math in linear P3; apply P3 transfer function last before write. Convert on GPU/at upload, not via browser. | Spec 18 sRGB-vs-P3 model lands here. `drawingBufferColorSpace` setter silently ignores unsupported values — must verify it took. |
+| **Images** | Textured quads, linear filtering, `unpackColorSpace='display-p3'` for uploads. | — |
+
+## Two on-hardware spikes before finalizing RC-2 (run on WKWebView/ANGLE-Metal, WebView2/ANGLE-D3D11, WebKitGTK)
+1. **`WEBGL_blend_equation_advanced_coherent` presence/correctness** — strong prior it's absent/unreliable; shader-backdrop path is the contract regardless. (Probe `gl.getSupportedExtensions()`.)
+2. **P3 fragment output / wide-gamut correctness** — confirm `drawingBufferColorSpace='display-p3'` takes and an out-of-sRGB swatch displays saturated, not clamped. (Overlaps RC-1's P3 readback probe.)
+
+## Sources
+PixiJS Graphics (earcut) + issues #6800/#10084; Mapbox earcut README; Ekioh stencil-then-cover; WebGL2 MSAA (realtimerendering, WebGL2Samples fbo_multisample); Khronos WEBGL_blend_equation_advanced_coherent (draft, revision history); jamieowen/glsl-blend; W3C Compositing & Blending (Sara Soueidan); Infinite Canvas Lesson 17 (gradient LUT); Phaser 4 dithering; OpenGL stencil clipping notes + forkingpaths.dev; WICG CanvasColorSpaceProposal + MDN drawingBufferColorSpace/unpackColorSpace + ccameron P3 example; Made by Evan (Figma), Figma WebGPU/WASM blog posts.

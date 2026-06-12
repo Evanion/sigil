@@ -130,6 +130,18 @@ The canvas is an imperative rendering island — Solid does not manage it:
 
 Controls that fire at high frequency during a gesture (gradient stop drag, color picker drag, slider scrub) MUST NOT create a history entry per event. Pattern: capture snapshot on pointerdown, apply intermediate values without history during drag, commit single entry on pointerup. Wiring drag directly to a history-recording mutation is a Critical bug — see CLAUDE.md §11 "Continuous-Value Controls Must Coalesce History Entries".
 
+## Pre-Push Checklist
+
+Before pushing ANY commit, verify the following locally. These match the gating CI jobs exactly — a miss here means CI fails on first push and blocks the pipeline.
+
+1. `pnpm --prefix frontend lint` — no ESLint errors
+2. `pnpm --prefix frontend format:check` — no Prettier violations (CI's "Frontend → Format check" job; `pnpm --prefix frontend format` to fix)
+3. `pnpm --prefix frontend test` — all tests pass
+4. `pnpm --prefix frontend build` — type-checks and builds (`tsc --noEmit` runs here)
+5. If you added or changed any locale key: `node frontend/scripts/check-locale-parity.mjs` AND `node frontend/scripts/check-locale-usage.mjs --no-orphans` (CI's "Locale Parity" and "Locale Usage" jobs)
+
+Do not rely on CI to catch formatting or locale-parity issues. The full local gate must be green before push.
+
 ## Before You Start
 
 **MANDATORY — do this FIRST, before writing any code:**

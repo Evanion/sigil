@@ -226,14 +226,6 @@ fn collect_style_fields(
 ) -> Result<Vec<(TextStyleField, &'static str, serde_json::Value)>, McpToolError> {
     let mut fields: Vec<(TextStyleField, &'static str, serde_json::Value)> = Vec::new();
 
-    if let Some(ref family) = style.font_family {
-        fields.push((
-            TextStyleField::FontFamily(family.clone()),
-            "kind.text_style.font_family",
-            serde_json::json!(family),
-        ));
-    }
-
     if let Some(ref font_size) = style.font_size {
         let sv = convert_style_value_f64("font_size", font_size)?;
         fields.push((
@@ -350,7 +342,6 @@ fn capture_old_field(
     };
 
     let old = match field {
-        TextStyleField::FontFamily(_) => TextStyleField::FontFamily(text_style.font_family.clone()),
         TextStyleField::FontSize(_) => TextStyleField::FontSize(text_style.font_size.clone()),
         TextStyleField::FontWeight(_) => TextStyleField::FontWeight(text_style.font_weight),
         TextStyleField::FontStyle(_) => TextStyleField::FontStyle(text_style.font_style),
@@ -492,7 +483,7 @@ mod tests {
     #[test]
     fn test_collect_style_fields_accepts_single_field() {
         let style = PartialTextStyle {
-            font_family: Some("Inter".to_string()),
+            font_weight: Some(700),
             ..Default::default()
         };
         let result = collect_style_fields(&style);
@@ -503,9 +494,9 @@ mod tests {
     #[test]
     fn test_collect_style_fields_accepts_multiple_fields() {
         let style = PartialTextStyle {
-            font_family: Some("Inter".to_string()),
             font_weight: Some(700),
             text_align: Some("center".to_string()),
+            letter_spacing: Some(StyleValueInput::Literal { value: 0.5 }),
             ..Default::default()
         };
         let result = collect_style_fields(&style);
@@ -835,31 +826,6 @@ mod tests {
         let result = set_text_content_impl(&mut doc, "not-a-uuid", "text");
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), McpToolError::InvalidUuid(_)));
-    }
-
-    #[test]
-    fn test_set_text_style_impl_updates_font_family() {
-        let (mut doc, uuid) = make_doc_with_text_node();
-        let style = PartialTextStyle {
-            font_family: Some("Roboto".to_string()),
-            ..Default::default()
-        };
-        let result = set_text_style_impl(&mut doc, &uuid, &style);
-        assert!(result.is_ok(), "expected ok, got: {result:?}");
-        let (mutation, broadcast_ops) = result.unwrap();
-        assert!(mutation.success);
-        assert_eq!(broadcast_ops.len(), 1);
-        assert_eq!(broadcast_ops[0].path, "kind.text_style.font_family");
-
-        // Verify the font family was actually set.
-        let node_uuid: uuid::Uuid = uuid.parse().unwrap();
-        let node_id = doc.arena.id_by_uuid(&node_uuid).unwrap();
-        let node = doc.arena.get(node_id).unwrap();
-        if let sigil_core::NodeKind::Text { text_style, .. } = &node.kind {
-            assert_eq!(text_style.font_family, "Roboto");
-        } else {
-            panic!("expected text node");
-        }
     }
 
     #[test]

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use crate::arena::Arena;
 use crate::error::CoreError;
+use crate::font::FontTable;
 use crate::id::{ComponentId, NodeId, PageId};
 pub use crate::prototype::Transition;
 use crate::validate::CURRENT_SCHEMA_VERSION;
@@ -71,6 +72,7 @@ pub struct Document {
     pub transitions: Vec<Transition>,
     pub token_context: TokenContext,
     pub layout_engine: LayoutEngine,
+    font_table: FontTable,
 }
 
 impl Document {
@@ -85,6 +87,7 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
+            font_table: FontTable::with_bundled_default(),
         }
     }
 
@@ -99,7 +102,19 @@ impl Document {
             transitions: Vec::new(),
             token_context: TokenContext::default(),
             layout_engine: LayoutEngine,
+            font_table: FontTable::with_bundled_default(),
         }
+    }
+
+    /// Returns a reference to the document's font table.
+    #[must_use]
+    pub fn font_table(&self) -> &FontTable {
+        &self.font_table
+    }
+
+    /// Returns a mutable reference to the document's font table.
+    pub fn font_table_mut(&mut self) -> &mut FontTable {
+        &mut self.font_table
     }
 
     /// Adds a page to the document.
@@ -574,6 +589,52 @@ mod tests {
         let result = doc.add_component(def);
         assert!(
             matches!(result, Err(CoreError::ValidationError(msg)) if msg.contains("already exists"))
+        );
+    }
+
+    // ── Font table ────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_document_new_has_font_table_with_default_inter_entry() {
+        use crate::font::{DEFAULT_FONT_ENTRY_ID, FontSource};
+
+        let doc = Document::new("Test".into());
+        let table = doc.font_table();
+        assert_eq!(
+            table.len(),
+            1,
+            "fresh document must have exactly 1 font entry"
+        );
+        let entry = table
+            .get(DEFAULT_FONT_ENTRY_ID)
+            .expect("DEFAULT_FONT_ENTRY_ID must be present in a fresh document");
+        assert_eq!(entry.family(), "Inter", "default font family must be Inter");
+        assert_eq!(
+            entry.source(),
+            &FontSource::Bundled,
+            "default font source must be Bundled"
+        );
+    }
+
+    #[test]
+    fn test_document_with_capacity_has_font_table_with_default_inter_entry() {
+        use crate::font::{DEFAULT_FONT_ENTRY_ID, FontSource};
+
+        let doc = Document::with_capacity("Test".into(), 50);
+        let table = doc.font_table();
+        assert_eq!(
+            table.len(),
+            1,
+            "with_capacity document must have exactly 1 font entry"
+        );
+        let entry = table
+            .get(DEFAULT_FONT_ENTRY_ID)
+            .expect("DEFAULT_FONT_ENTRY_ID must be present in a with_capacity document");
+        assert_eq!(entry.family(), "Inter", "default font family must be Inter");
+        assert_eq!(
+            entry.source(),
+            &FontSource::Bundled,
+            "default font source must be Bundled"
         );
     }
 
